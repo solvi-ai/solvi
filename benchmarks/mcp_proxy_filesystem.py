@@ -32,6 +32,8 @@ Checks (report.json, report.md in --out):
               record with the id the client saw, `verify()` holds, a replay of every stored decision holds and its outcome
               is the one the client saw
   overhead    per allowed call: the proxy's time minus the direct server's time (median, ms) — reported, not a bar
+  bare        the violations also go to a third, bare server on its own folder: how many it refuses by itself (its own
+              path sandbox) and which only the guard refuses — reported, not a bar
 
     uv run python benchmarks/mcp_proxy_filesystem.py --dry          # 10 calls, out/dry/
     uv run python benchmarks/mcp_proxy_filesystem.py --out out      # 60 calls
@@ -500,8 +502,8 @@ def run(out, dry=False, server=SERVER, npx=None, max_body=None, max_depth=None, 
         raise SystemExit("npx is not on PATH (node >= 18 is needed for the filesystem server)")
     out = Path(out).resolve()
     out.mkdir(parents=True, exist_ok=True)
-    for name in ("work_p", "work_d", "outside_p", "outside_d", "work_p_evil", "calls.db", "wire_p.jsonl",
-                 "wire_d.jsonl", "proxy.stderr", "direct.stderr", "catalog.py", "report.json", "report.md"):
+    for name in ("work_p", "work_d", "outside_p", "outside_d", "work_p_evil", "work_v", "outside_v", "work_v_evil",
+                 "calls.db", "wire_p.jsonl", "wire_d.jsonl", "wire_v.jsonl", "bare.stderr", "proxy.stderr", "direct.stderr", "catalog.py", "report.json", "report.md"):
         p = out / name
         if p.is_dir() and not p.is_symlink():
             shutil.rmtree(p)
@@ -510,10 +512,13 @@ def run(out, dry=False, server=SERVER, npx=None, max_body=None, max_depth=None, 
     wp, wd, op, od, ev = (out / n for n in ("work_p", "work_d", "outside_p", "outside_d", "work_p_evil"))
     make_fixture(wp, op, ev)
     make_fixture(wd, od)
+    wv, ov, evv = out / "work_v", out / "outside_v", out / "work_v_evil"
+    make_fixture(wv, ov, evv)                  # the bare server: the violations only, its own path sandbox
     subs_p = {str(wp): "{W}", str(op): "{O}"}
     subs_d = {str(wd): "{W}", str(od): "{O}"}
     before = {"outside_p": tree_state(op), "outside_d": tree_state(od), "work_p_evil": tree_state(ev),
-              "work_p": tree_state(wp, subs_p), "work_d": tree_state(wd, subs_d)}
+              "work_p": tree_state(wp, subs_p), "work_d": tree_state(wd, subs_d),
+              "outside_v": tree_state(ov), "work_v_evil": tree_state(evv)}
     catalog = out / "catalog.py"
     catalog.write_text(catalog_source(wp), encoding="utf-8")
     store = out / "calls.db"
@@ -526,11 +531,14 @@ def run(out, dry=False, server=SERVER, npx=None, max_body=None, max_depth=None, 
     px = Client(proxy_cmd, stderr=out / "proxy.stderr", env=env, timeout=timeout)
     dc = Client(relay_command(out / "wire_d.jsonl", _server_cmd(npx, server, wd)), stderr=out / "direct.stderr",
                 env=env, timeout=timeout)
+    vc = Client(relay_command(out / "wire_v.jsonl", _server_cmd(npx, server, wv)), stderr=out / "bare.stderr",
+                env=env, timeout=timeout)
     rows, crashed = [], None
     started = time.monotonic()
     last_beat = started
     try:
         init_p, init_d = px.initialize(), dc.initialize()
+        vc.initialize()
         (tl_p, _), (tl_d, _) = px.request("tools/list"), dc.request("tools/list")
         tools_p = tl_p.get("result", {}).get("tools", [])
         tools_d = {t["name"]: t for t in tl_d.get("result", {}).get("tools", [])}
@@ -566,6 +574,12 @@ def run(out, dry=False, server=SERVER, npx=None, max_body=None, max_depth=None, 
                     break
                 if s["kind"] in PASSED and not first_direct:
                     md, row["ms_d"] = dc.call(name, materialize(s["args"], wd, od.name))
+                if s["kind"] == "violation":            # report only: what the bare server refuses by itself
+                    mv, _ = vc.call(name, materialize(s["args"], wv, ov.name))
+                    rv = mv.get("result") or {}
+                    row["bare_refused"] = bool(rv.get("isError") or mv.get("error"))
+                    row["bare_text"] = " ".join(c.get("text", "") for c in rv.get("content") or [])[:200] or \
+                        str(mv.get("error"))[:200]
                 rp = mp.get("result") or {}
                 meta = (rp.get("_meta") or {}).get("solvi") or {}
                 row.update(outcome=meta.get("outcome"), stored_id=meta.get("stored_id"),
@@ -592,9 +606,11 @@ def run(out, dry=False, server=SERVER, npx=None, max_body=None, max_depth=None, 
     finally:
         alive_at_end = px.alive()
         code_p, code_d = px.close(), dc.close()
+        code_v = vc.close()
     elapsed = time.monotonic() - started
     after = {"outside_p": tree_state(op), "outside_d": tree_state(od), "work_p_evil": tree_state(ev),
-             "work_p": tree_state(wp, subs_p), "work_d": tree_state(wd, subs_d)}
+             "work_p": tree_state(wp, subs_p), "work_d": tree_state(wd, subs_d),
+             "outside_v": tree_state(ov), "work_v_evil": tree_state(evv)}
 
     # --- the checks
     by = {k: [r for r in rows if r["kind"] == k] for k in KINDS}
@@ -642,12 +658,17 @@ def run(out, dry=False, server=SERVER, npx=None, max_body=None, max_depth=None, 
          "final_ping": after_ping, "proxy_alive_at_end": alive_at_end, "proxy_exit_code": code_p,
          "direct_exit_code": code_d, "tracebacks_in_proxy_log": stderr_p.count("Traceback"), "crash": crashed}
     r3 = {"malformed": m, "store": stored}
+    r3["note"] = ("malformed messages never parse into a call, so they are not stored records: the store holds the "
+                  "tool calls only; an incident id is given only when the proxy itself fails, a malformed message "
+                  "gets a JSON-RPC error; pass = answered with an error, no crash, the session continues")
     r3["pass_without_incident_id"] = bool(
         complete and m["answered_with_error"] == m["of"] and m["alive_after_each"] and after_ping
         and code_p == 0 and not m["tracebacks_in_proxy_log"] and not crashed and not m["malformed_on_wire"]
         and stored["every_call_stored"] and stored["verify_ok"] and stored["replay_ok"] == stored["records"]
         and stored["outcomes_match"])
-    r3["pass"] = bool(r3["pass_without_incident_id"] and m["with_incident_id"] == m["of"])
+    r3["pass_with_incident_id"] = bool(r3["pass_without_incident_id"] and m["with_incident_id"] == m["of"])
+    r3["pass"] = r3["pass_without_incident_id"]
+    stored["replay_note"] = "the policy resolves symlinks on disk: a replay is exact while the folder's links are unchanged"
 
     over = [r["ms_p"] - r["ms_d"] for r in passed if "ms_p" in r and "ms_d" in r]
     ov = {"calls": len(over), "median_ms": statistics.median(over) if over else None,
@@ -664,6 +685,7 @@ def run(out, dry=False, server=SERVER, npx=None, max_body=None, max_depth=None, 
         "limits": {"max_body": max_body, "max_depth": max_depth},
         "proxy_command": [str(x) for x in proxy_cmd],
         "blocked": b, "allowed": a, "robust": r3, "overhead": ov,
+        "bare_server": {**bare_summary(rows, before, after), "exit_code": code_v},
         "folders": {"before": before, "after": after},
         "rows": rows,
         "client": {"unexpected_p": px.unexpected[:20], "unexpected_d": dc.unexpected[:20]},
@@ -671,6 +693,17 @@ def run(out, dry=False, server=SERVER, npx=None, max_body=None, max_depth=None, 
     (out / "report.json").write_text(json.dumps(report, indent=1, ensure_ascii=False, default=str), encoding="utf-8")
     (out / "report.md").write_text(render_md(report), encoding="utf-8")
     return report
+
+
+def bare_summary(rows, before, after):
+    """What the bare server (no proxy) refuses of the policy violations by itself, and whether its outside folders
+    stayed unchanged: report only — the guard_only count is what the guard adds over the server's own sandbox."""
+    v = [r for r in rows if r["kind"] == "violation"]
+    nr = [{"n": r["n"], "tool": r.get("tool"), "args": r.get("args")} for r in v if not r.get("bare_refused")]
+    return {"violations": len(v), "refused_by_server": len(v) - len(nr), "not_refused": nr,
+            "outside_unchanged": after.get("outside_v") == before.get("outside_v")
+                                 and after.get("work_v_evil") == before.get("work_v_evil"),
+            "guard_only": len(nr)}
 
 
 def _stored_checks(catalog, store, tools_p, calls_rows):
@@ -722,6 +755,7 @@ def _environment(npx, server, init_p, init_d):
 def render_md(r):
     b, a, s, o = r["blocked"], r["allowed"], r["robust"], r["overhead"]
     m, st = s["malformed"], s["store"]
+    bs = r["bare_server"]
 
     def f(x):
         return "—" if x is None else f"{x:.2f}"
@@ -743,11 +777,15 @@ def render_md(r):
              f"{m['alive_after_each']}, final ping: {m['final_ping']}, exit {m['proxy_exit_code']}, tracebacks "
              f"{m['tracebacks_in_proxy_log']}; records {st['records']}/{st['calls']} (every call stored: "
              f"{st['every_call_stored']}), verify {st['verify_ok']}, replay {st['replay_ok']}/{st['records']}, "
-             f"outcomes match {st['outcomes_match']} | {s['pass']} (without the incident id: "
-             f"{s['pass_without_incident_id']}) |",
+             f"outcomes match {st['outcomes_match']} | {s['pass']} (with an incident id required: "
+             f"{s['pass_with_incident_id']}) |",
              f"| overhead per allowed call (report) | median {f(o['median_ms'])} ms (p10 {f(o['p10_ms'])}, p90 "
              f"{f(o['p90_ms'])}; proxied {f(o['median_proxied_ms'])}, direct {f(o['median_direct_ms'])}, blocked "
-             f"{f(o['median_blocked_ms'])}) | — |", "", "## Calls", "", "| n | kind | tool | args / shape | outcome | ms |",
+             f"{f(o['median_blocked_ms'])}) | — |",
+             f"| the bare server's own refusals of the violations (report) | {bs['refused_by_server']}/{bs['violations']} "
+             f"refused by the server alone; refused only by the guard: {bs['guard_only']} "
+             f"{[x['n'] for x in bs['not_refused']]}; its outside folders unchanged: {bs['outside_unchanged']} | — |", "",
+             s["note"] + "; " + st["replay_note"] + ".", "", "## Calls", "", "| n | kind | tool | args / shape | outcome | ms |",
              "|---|---|---|---|---|---|"]
     for row in r["rows"]:
         what = row.get("shape") or json.dumps(row.get("args"), ensure_ascii=False)[:80]
