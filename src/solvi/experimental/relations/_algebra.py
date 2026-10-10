@@ -1,5 +1,9 @@
 """Relations over a state as packed-bit matrices, the relation algebra on boolean matrices, programs as tuples (show,
-size, evaluate) and the readout of a relation as a state bit (see the package docstring)."""
+size, evaluate) and the readout of a relation as a state bit (see the package docstring).
+
+Operators: UNARY are all the unary operators the algebra knows; OPS is the default search. CNT1 (the nodes with at
+least one successor, as a diagonal) is opt-in: it evaluates, enumerates (ops=...) and compiles like CNT2 / CNT3, but it
+is not in OPS, so the default search space is the one the battery was measured on."""
 from __future__ import annotations
 
 from typing import Iterable, Sequence

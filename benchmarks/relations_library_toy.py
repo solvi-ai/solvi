@@ -31,9 +31,13 @@ changed): paths — every level, 2,556 cumulative at the top rule (1,679 with th
 10,813–10,819 cumulative at the top rule (6,122–6,125 with the minimal one), so the kinship ladder MISSES the bar
 (second cousin 10,257 and second cousin once removed 10,817 > 10,000); flat finds neither top rule; 0 false accepts;
 25 s. The difference is mostly the universal relation U, a terminal of the package's enumerator that the minimal one
-did not have (without it, measured once outside the package: 2,174 and 7,889).
+did not have. With U left out of both arms' terminals (`--no-universal`, find_rules(include_universal=False) — an
+opt-in, measured as an option; the bar is the same): paths 2,174 and kinship 7,887–7,890 cumulative at the top rule,
+every level found, flat still finds neither top rule, 0 false accepts — the kinship ladder meets the bar. The slow
+tests: paths with its bar, kinship with U an expected failure (strict), kinship without U with the bar.
 
-    python benchmarks/relations_library_toy.py          # the table, under a minute
+    python benchmarks/relations_library_toy.py                  # the table, under a minute
+    python benchmarks/relations_library_toy.py --no-universal   # the same without U among the terminals
 """
 from __future__ import annotations
 
@@ -216,14 +220,15 @@ def kin_worlds(seed):
 
 
 # ───────────────────────────────────────────── the arms
-def _one(ladder, worlds, base, seed, flat_budget, lib_budget):
+def _one(ladder, worlds, base, seed, flat_budget, lib_budget, include_universal=True):
     train, held, check = worlds(seed)
     targets = {k: f for k, (_, f) in ladder.items()}
     test = HeldOut(held, targets)
     out = {}
     for arm, grow, budget in (("library", True, lib_budget), ("flat", False, flat_budget)):
         t0 = time.time()
-        r = find_rules(train, targets, base=base, size=SIZE, budget=budget, library=(), test=test, grow=grow)
+        r = find_rules(train, targets, base=base, size=SIZE, budget=budget, library=(), test=test, grow=grow,
+                       include_universal=include_universal)
         false = 0
         for name, e in r.found.items():
             if any(not np.array_equal(run_program(e.program, w, library=r.library), targets[name](w)) for w in check):
@@ -237,8 +242,8 @@ def _one(ladder, worlds, base, seed, flat_budget, lib_budget):
     return out
 
 
-def _ladder(name, ladder, worlds, base, seeds, flat_budget, lib_budget):
-    per = {s: _one(ladder, worlds, base, s, flat_budget, lib_budget) for s in seeds}
+def _ladder(name, ladder, worlds, base, seeds, flat_budget, lib_budget, include_universal=True):
+    per = {s: _one(ladder, worlds, base, s, flat_budget, lib_budget, include_universal) for s in seeds}
     names = list(ladder)
     top = max(names, key=lambda k: ladder[k][0])
     arms = {}
@@ -261,21 +266,23 @@ def _ladder(name, ladder, worlds, base, seeds, flat_budget, lib_budget):
         }
     return {"ladder": name, "seeds": list(seeds), "levels": {k: ladder[k][0] for k in names},
             "composites": [k for k in names if ladder[k][0] >= 2], "top": top, "flat_budget": flat_budget,
-            "lib_budget": lib_budget, "arms": arms, "per_seed": per}
+            "lib_budget": lib_budget, "include_universal": include_universal, "arms": arms, "per_seed": per}
 
 
-def run(seeds=SEEDS, flat_budget=FLAT_BUDGET, lib_budget=LIB_BUDGET):
-    """Both ladders, both arms, every seed → a dict (see the module docstring)."""
-    return {"paths": _ladder("paths", PATHS, path_worlds, PATH_BASE, seeds, flat_budget, lib_budget),
-            "kinship": _ladder("kinship", KIN, kin_worlds, ["E"], seeds, flat_budget, lib_budget)}
+def run(seeds=SEEDS, flat_budget=FLAT_BUDGET, lib_budget=LIB_BUDGET, ladders=("paths", "kinship"),
+        include_universal=True):
+    """The ladders, both arms, every seed → a dict (see the module docstring). include_universal=False: U is not a
+    terminal of either arm's search."""
+    spec = {"paths": (PATHS, path_worlds, PATH_BASE), "kinship": (KIN, kin_worlds, ["E"])}
+    return {name: _ladder(name, *spec[name], seeds, flat_budget, lib_budget, include_universal) for name in ladders}
 
 
 def _table(r):
     lines = []
-    for lad in ("paths", "kinship"):
+    for lad in r:
         x = r[lad]
         lib, flat = x["arms"]["library"], x["arms"]["flat"]
-        lines.append(f"\n{lad}: seeds {x['seeds']}, flat budget {x['flat_budget']:,} programs; library found all "
+        lines.append(f"\n{lad} (U a terminal: {x['include_universal']}): seeds {x['seeds']}, flat budget {x['flat_budget']:,} programs; library found all "
                      f"levels in {lib['found_all']:.0%} of seeds, false accepts library {lib['false_accepts']} / flat "
                      f"{flat['false_accepts']}, held-out rejections {lib['rejected']} / {flat['rejected']}, seconds "
                      f"{lib['seconds']:.1f} / {flat['seconds']:.1f}")
@@ -292,7 +299,7 @@ def _table(r):
 
 if __name__ == "__main__":
     t0 = time.time()
-    res = run()
+    res = run(include_universal="--no-universal" not in sys.argv)
     print(_table(res))
     print(f"\n{time.time() - t0:.1f} s")
     if "--json" in sys.argv:

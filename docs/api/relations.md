@@ -11,7 +11,14 @@ accepted programs, compilation into plain set code or index arrays with a differ
 test=HeldOut(other_worlds, targets))` enumerates small programs over relations, admits only what passes the held-out
 test, and builds the next rules on the admitted ones (`Library` entries as new terminals); `run(program, world,
 library=)` runs a found rule on any world. The search is this package's enumerator and the programs are its tuples;
-`library=` takes `relations.library.Library` entries or the package's `Library`.
+`library=` takes a `Library` (the collection of accepted programs) or a sequence of `Entry` (one accepted program:
+program, name, examples, test), and admitted rules are `Entry` objects. `include_universal=False` leaves the universal
+relation U out of the enumerator's terminals (opt-in; the default keeps it).
+
+Operators: unary `T` (converse), `NOT` (bounded complement), `PLUS` (transitive closure), `CNT2` / `CNT3` (the nodes
+with at least 2 / 3 successors, as a diagonal) and `CNT1` (at least one successor) — `CNT1` is opt-in: known to the
+algebra, the enumerator and both compile backends, but not in the default `OPS` (pass it in `ops=`; `find_rules` uses
+it through `counts=(1,)`); binary `OR`, `AND`, `MINUS`, `XOR`, `COMP`, `C2`, `C3`.
 
 ::: solvi.experimental.relations
 

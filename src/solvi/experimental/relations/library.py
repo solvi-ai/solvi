@@ -26,34 +26,25 @@ them by name, so the caller's order is not a curriculum); what it finds by itsel
 current library, and the programs. No gradient learner ships with solvi (its core has no torch): the `proposer=` slot is
 documented and tested with a stand-in. The search is the package's relation-algebra enumerator (`Enumerator`, with
 the operators `ops1` / `ops2` / `counts` name; the identity I and the universal relation U are always terminals) and the
-programs are the package's tuples (`show`, `size`, `evaluate`); `library=` takes `Library` entries of this module or
-the package's `Library` of accepted programs."""
+programs are the package's tuples (`show`, `size`, `evaluate`). `library=` takes the package's `Library` or a sequence
+of its `Entry` (program, name, examples, test); admitted rules are `Entry` objects whose `test` is the held-out record.
+`include_universal=False` leaves the universal relation U out of the terminals (an opt-in: a search whose rules never
+need every pair spends fewer programs per level)."""
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Callable, Iterable, Mapping, Protocol, Sequence
 
 import numpy as np
 
 from . import _algebra as _A
-from ._enumerate import Enumerator, _digest
-from ._enumerate import Library as _Programs
+from . import _enumerate as _En
+from ._enumerate import Entry, Enumerator, _digest
 
 OPS1 = ("T", "PLUS", "CNT")         # "CNT": at least k successors, one operator CNT<k> per k in `counts` (1 to 3)
 OPS2 = ("COMP", "AND", "OR", "MINUS")
 show, size = _A.show, _A.size
 _POP = np.array([bin(i).count("1") for i in range(256)], dtype=np.int64)
-
-
-@dataclass(frozen=True, eq=False)
-class Library:
-    """One accepted program, usable as a terminal ("L", name) by later programs: the program (an AST over base
-    relations and earlier entries), its name (the target it was accepted for), the examples it was found on, and the
-    held-out test's record (passed, support, hits, precision, recall, net, errors, by)."""
-    program: tuple
-    name: str
-    examples: tuple = ()
-    test_record: dict = field(default_factory=dict)
 
 
 def _lib_map(library) -> dict[str, tuple]:
@@ -65,10 +56,10 @@ def _lib_map(library) -> dict[str, tuple]:
     return out
 
 
-def _programs(library) -> _Programs:
+def _programs(library) -> "_En.Library":
     """The entries as the package's Library (what the enumerator and the evaluator take), in an order where every
     entry comes after the entries it uses."""
-    todo, out = list(library or ()), _Programs()
+    todo, out = list(library or ()), _En.Library()
     while todo:
         rest = [e for e in todo if not all(r in out for r in _names(e.program, "L"))]
         if len(rest) == len(todo):
@@ -165,10 +156,10 @@ def expand(program, library=()) -> tuple:
 
 
 def _base_of(program, lib) -> list[str]:
-    return sorted(_names(expand(program, [Library(p, n) for n, p in lib.items()]), "R"))
+    return sorted(_names(expand(program, [Entry(p, n) for n, p in lib.items()]), "R"))
 
 
-def run(program, world: Mapping[str, np.ndarray], library: Sequence[Library] = ()) -> np.ndarray:
+def run(program, world: Mapping[str, np.ndarray], library: Sequence[Entry] = ()) -> np.ndarray:
     """The program's relation on one world: an (n, n) boolean matrix."""
     lib = _lib_map(library)
     for name in _names(program, "L"):
@@ -212,7 +203,7 @@ class HeldOut:
             self._batches[k] = _batch(self.examples, names)
         return self._batches[k]
 
-    def __call__(self, name: str, program, library: Sequence[Library] = ()) -> dict:
+    def __call__(self, name: str, program, library: Sequence[Entry] = ()) -> dict:
         if name not in self.targets:
             raise KeyError(f"no held-out target {name!r}")
         if name not in self._truth:
@@ -252,7 +243,7 @@ class RuleProposer(Protocol):
     programs (ASTs); each is checked on the examples and by the held-out test like any enumerated program."""
     name: str
 
-    def propose(self, name: str, examples: Sequence, target: list, library: Sequence[Library]) -> Iterable[tuple]: ...
+    def propose(self, name: str, examples: Sequence, target: list, library: Sequence[Entry]) -> Iterable[tuple]: ...
 
 
 # ───────────────────────────────────────────── find_rules
@@ -275,7 +266,8 @@ class TargetRecord:
 
 @dataclass
 class Rules:
-    """The result: library (the given entries, then the admitted ones in order), found (name → its entry), order (the
+    """The result: library (the given entries, then the admitted ones in order: a list of Entry, which `library=` and
+    `run` take), found (name → its Entry, `test` = the held-out record), order (the
     names admitted, in order), records (name → TargetRecord), programs (enumerated in total), rounds."""
     library: list
     found: dict
@@ -286,22 +278,23 @@ class Rules:
 
 
 def find_rules(examples: Sequence[Mapping[str, np.ndarray]], targets: Mapping[str, Any], *, base: Sequence[str],
-               size: int = 6, budget: int = 50_000, library: Sequence[Library] = (),
+               size: int = 6, budget: int = 50_000, library: "_En.Library | Sequence[Entry]" = (),
                test: Callable[..., dict], proposer: RuleProposer | None = None, grow: bool = True,
                tolerance: float = 0.0, ops1: Sequence[str] = OPS1, ops2: Sequence[str] = OPS2,
-               counts: Sequence[int] = (1,), search_on: int | None = None) -> Rules:
+               counts: Sequence[int] = (1,), search_on: int | None = None, include_universal: bool = True) -> Rules:
     """Find a program for each target, building composites on earlier finds.
 
     Rounds: enumerate programs of size ≤ `size` from `base` (relation names in every example), the identity and the
     library (bottom-up, observational equivalence on the examples); a program whose relation equals a target's on every
     example (or misses at most `tolerance` × its true pairs) goes to `test(name, program, library)` — a HeldOut, or any
-    function returning a record with "passed"; the first that passes is admitted (a `Library` entry) and, with `grow`,
+    function returning a record with "passed"; the first that passes is admitted (an `Entry`) and, with `grow`,
     the next round starts with it as a terminal. A round that admits nothing ends the search; then `proposer` (if any)
     proposes for the open targets, its programs checked the same way. `budget` caps the enumerated programs over all
     rounds. `search_on=k`: enumerate on the first k examples only (cheaper keys), and re-check a match on all the
     examples before the test (observational equivalence on a subset merges programs that differ elsewhere: a failed
     re-check is counted, `recheck_failed`, and the search goes on). `grow=False`: one flat pass, finds are recorded but
-    never used as terminals (the control). Deterministic;
+    never used as terminals (the control). `include_universal=False`: U is not a terminal (both arms; the default
+    keeps it, as the package's enumerator does). Deterministic;
     targets are taken in name order, so the caller's order is no curriculum."""
     examples = list(examples)
     base = list(base)
@@ -331,7 +324,7 @@ def find_rules(examples: Sequence[Mapping[str, np.ndarray]], targets: Mapping[st
     if clash:
         raise ValueError(f"targets {clash} are already library entries")
     records = {name: TargetRecord(name) for name in order_t}
-    found: dict[str, Library] = {}
+    found: dict[str, Entry] = {}
     order: list[str] = []
     open_ = set(order_t)
     spent = 0
@@ -352,7 +345,7 @@ def find_rules(examples: Sequence[Mapping[str, np.ndarray]], targets: Mapping[st
         if not rec.get("passed"):
             records[name].rejected += 1
             return False
-        e = Library(program=prog, name=name, examples=ex_t, test_record=rec)
+        e = Entry(program=prog, name=name, examples=ex_t, test=rec)
         lib.append(e)
         found[name] = e
         order.append(name)
@@ -364,7 +357,8 @@ def find_rules(examples: Sequence[Mapping[str, np.ndarray]], targets: Mapping[st
     while open_:
         if spent < budget:
             rounds += 1
-            en = Enumerator(sbatch, size, _programs(lib if grow else library), ops=ops, max_evals=budget - spent)
+            en = Enumerator(sbatch, size, _programs(lib if grow else library), ops=ops, max_evals=budget - spent,
+                            include_universal=include_universal)
             admitted = False
             for p in en:
                 packed = _pack(p.value)
@@ -396,5 +390,5 @@ def find_rules(examples: Sequence[Mapping[str, np.ndarray]], targets: Mapping[st
     return Rules(library=lib, found=found, order=order, records=records, programs=spent, rounds=rounds)
 
 
-__all__ = ["HeldOut", "Library", "OPS1", "OPS2", "RuleProposer", "Rules", "TargetRecord", "expand", "find_rules", "run",
+__all__ = ["HeldOut", "OPS1", "OPS2", "RuleProposer", "Rules", "TargetRecord", "expand", "find_rules", "run",
            "show", "size"]

@@ -380,8 +380,9 @@ level — a path tree's "denied if an ancestor directory is named secret and the
 2,556 enumerated programs, kinship on forests to depth 6 (second cousin once removed) within 10,817 — where the same
 search without the library found neither top rule in 100,000, with 0 false accepts on larger fresh worlds. The kinship
 ladder misses the toy's bar of a tenth of that budget (1.08×): the universal relation U, a terminal of the package's
-enumerator, enlarges every level (without it, measured once outside the package, 7,889; with an earlier minimal
-enumerator, 6,125). A library also has a cost: every entry is a terminal, so a rule it does not help gets dearer
+enumerator, enlarges every level: with `include_universal=False` (U left out of the terminals of both arms) the
+ladder costs 7,889 and meets the bar, the path tree 2,174 (with an earlier minimal enumerator, 6,125). Leave U out when
+no rule you look for needs "every pair". A library also has a cost: every entry is a terminal, so a rule it does not help gets dearer
 (sibling took 6,545 programs in its own round after grandparent and great-grandparent were admitted, 951 without the
 library). The intermediate concepts were given as
 targets: the search found which one was within reach and the programs, not the concepts. **Hold out other families,

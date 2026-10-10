@@ -52,8 +52,9 @@ Composites with a library of held-out-tested rules (`solvi.experimental.relation
 the held-out test on other worlds, and enumerates again with the admitted rules as new terminals, so a rule three
 levels deep is a small program over earlier finds; the targets are given (an unordered set), the search finds which is
 within reach and the programs. A learned proposer has a slot (`proposer=`) as a fallback when the budget runs out; none
-ships. A world there is a mapping name → (n, n) boolean matrix; `relations.library.Library` is one admitted entry
-(program, name, examples, test_record), and `library=` also takes this package's `Library`.
+ships. A world there is a mapping name → (n, n) boolean matrix; `library=` takes a `Library` or a sequence of `Entry`,
+and each admitted rule is an `Entry` whose `test` is the held-out record. `include_universal=False` (find_rules,
+`Enumerator`) leaves U out of the terminals — opt-in, for searches whose rules never need every pair.
 
 Compiled rules. `compile_ast(ast)` writes plain Python over sets of pairs (an index per relation; composition a join;
 closure joins of the new pairs to a fixed point; counts per pair) that imports nothing; `compile_program` executes it.

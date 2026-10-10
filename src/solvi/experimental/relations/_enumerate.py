@@ -109,7 +109,8 @@ class Enumerator:
     all but CNT1: T, NOT, PLUS, CNT2, CNT3, OR, AND, MINUS, XOR, COMP, C2, C3; CNT1 — at least one successor — is
     opt-in). max_behaviours / max_evals / seconds: caps;
     max_bytes (default 1.5 GB): the store of behaviours (B·n² bits each, packed, plus a 16-byte key) is capped to fit —
-    with many or large examples search on a subset and re-check on all (synthesize(check=...)).
+    with many or large examples search on a subset and re-check on all (synthesize(check=...)). include_universal=False
+    leaves U out of the terminals (opt-in; the default keeps it).
 
     Equivalence is on the examples only: two programs that agree on every example are one class, represented by the
     first (smallest) found, even if they differ elsewhere — so a find must be checked on held-out examples of other
@@ -119,7 +120,7 @@ class Enumerator:
 
     def __init__(self, base, size: int = 5, library=(), *, ops: Sequence[str] = OPS, names: Sequence[str] | None = None,
                  max_behaviours: int | None = None, max_evals: int | None = None, seconds: float | None = None,
-                 max_bytes: int | None = 1_500_000_000, chunk: int = 2048):
+                 max_bytes: int | None = 1_500_000_000, chunk: int = 2048, include_universal: bool = True):
         self.batch = base if isinstance(base, _Batch) else _Batch(base, names)
         # each kept behaviour stores B·n² bits (packed) and a 16-byte key: cap the count so the store fits max_bytes
         self.bytes_per_behaviour = (self.batch.B * self.batch.n * self.batch.n + 7) // 8 + 16 + 120
@@ -134,6 +135,7 @@ class Enumerator:
         self.binary = [o for o in BINARY if o in ops]
         self.max_behaviours, self.max_evals, self.seconds = max_behaviours, max_evals, seconds
         self.chunk = max(1, int(chunk))
+        self.include_universal = bool(include_universal)
         self.evals = self.behaviours = 0
         self.by_size: dict[int, int] = {}
         self.stopped: str | None = None
@@ -195,7 +197,8 @@ class Enumerator:
     def _run(self):
         self._t0 = time.monotonic()
         b, M = self.batch, self.batch.M
-        terms = [("R", nm) for nm in b.names] + [("I",), ("U",)] + [("L", e.name) for e in self.library]
+        universal = [("U",)] if self.include_universal else []
+        terms = [("R", nm) for nm in b.names] + [("I",)] + universal + [("L", e.name) for e in self.library]
         vals = np.stack([_eval(t, b, self.library) for t in terms])
         yield from self._offer(terms, vals, 1)
         self._finish(1)

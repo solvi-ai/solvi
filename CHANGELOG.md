@@ -94,7 +94,7 @@ calibration files and served by `solvi serve`), so a build from it is not mistak
   boolean matrix; unary predicates as diagonals) bottom-up with observational equivalence (a hash of the packed relation
   over all examples), hands a program that matches a target on the examples to the held-out test (`HeldOut`: exact, or
   support / precision / recall / net for noisy labels; a target with no true pair there never passes), admits what
-  passes as a `Library(program, name, examples, test_record)` entry and enumerates again with it as a terminal; a
+  passes as an `Entry(program, name, examples, test)` (`test` = the held-out record) and enumerates again with it as a terminal; a
   program that only fits the examples is counted as rejected, never admitted. `budget` caps the enumerated programs over
   all rounds; `grow=False` is the flat control; `tolerance=` admits near-matches on noisy examples to the test;
   `proposer=` is a fallback slot for a learned proposer (none ships), its programs checked the same way; `search_on=k`
@@ -107,7 +107,10 @@ calibration files and served by `solvi serve`), so a build from it is not mistak
   `pytest -m slow`): a path tree's "denied if an ancestor directory is named secret and the depth is at least 3"
   (three levels) found with 2,556 enumerated programs in all, kinship on forests to depth 6 with 10,817, where flat
   search found neither top rule in 100,000; 0 false accepts on larger fresh worlds. The kinship ladder misses the bar
-  of a tenth of the flat budget (1.08×; with an earlier minimal enumerator without U it cost 6,125). The flat budget
+  of a tenth of the flat budget (1.08×; with an earlier minimal enumerator without U it cost 6,125); the bar was kept
+  and that slow test is an expected failure. `include_universal=False` (find_rules, `Enumerator`; opt-in, the default
+  keeps U and the battery's search space) leaves U out of the terminals: then paths 2,174 and kinship 7,889, which
+  meets the bar — a measured option, tested apart. `library=` takes the package's `Library` or a sequence of `Entry`. The flat budget
   was 60,000 in the first run (the kinship ladder then cost the library 1.02 × a tenth of it) and was raised after it.
 - **`solvi.experimental.laws`: ranking candidates where each check is expensive.** `RankedProposer(inner, scorer,
   buffer)` reorders another proposer's candidates (never adds, drops or changes one), so a probe budget spends the likely
