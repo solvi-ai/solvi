@@ -48,6 +48,8 @@ def test_the_enumerator_passes_the_battery_gate():
     found = [x for x in r["rules"] if x["found"]]
     print(json.dumps({k: v for k, v in r.items() if k != "rules"}), [(x["id"], x["program"]) for x in found])
     assert len(found) >= 22
+    missed = [x for x in r["rules"] if not x["found"]]                 # the default search space is unchanged:
+    assert missed and all((x["evals"], x["behaviours"]) == (383_475, 196_471) for x in missed)   # U and no CNT1
     assert all(x["generalized"] for x in found)
     assert all(x["size"] <= 7 for x in found)
     peak_gb = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024 ** 2

@@ -67,8 +67,8 @@ def test_the_ast_runs_on_any_world_and_prints():
 
 def test_find_rules_runs_on_the_package_enumerator_and_takes_its_library():
     """One enumerator and one program format in the package: find_rules searches with the relation-algebra
-    enumerator (the minimal stand-in is gone), and `library=` takes the package's Library of accepted programs as well
-    as relations.library.Library entries."""
+    enumerator (the minimal stand-in is gone); one Library in the package — the collection — and one Entry per
+    accepted program: `library=` takes a Library or a sequence of Entry, and the admitted rules are Entry objects."""
     import importlib
 
     import solvi.experimental.relations as R
@@ -79,14 +79,34 @@ def test_find_rules_runs_on_the_package_enumerator_and_takes_its_library():
     lib.add(("MINUS", ("COMP", ("T", ("R", "E")), ("R", "E")), ("I",)), "sibling")
     test = L.HeldOut(HELD, {"uncle": uncle})
     r = L.find_rules(TRAIN, {"uncle": uncle}, base=["E"], size=3, budget=2_000, library=lib, test=test)
-    assert L.show(r.found["uncle"].program) == "(sibling ∘ E)" and r.found["uncle"].test_record["passed"]
+    assert L.show(r.found["uncle"].program) == "(sibling ∘ E)" and r.found["uncle"].test["passed"]
+    assert isinstance(r.found["uncle"], R.Entry) and all(isinstance(e, R.Entry) for e in r.library)
     w = HELD[0]
     assert np.array_equal(L.run(r.found["uncle"].program, w, library=r.library), uncle(w))
+    assert "Library" not in L.__all__ and getattr(L, "Library", R.Library) is R.Library     # no second Library
+    as_seq = L.find_rules(TRAIN, {"uncle": uncle}, base=["E"], size=3, budget=2_000, library=list(lib), test=test)
+    assert L.show(as_seq.found["uncle"].program) == "(sibling ∘ E)"
+
+
+def test_the_universal_relation_can_be_left_out_of_the_terminals():
+    """U (every real pair) is a terminal of the enumerator by default; include_universal=False leaves it out — an
+    opt-in that shrinks every level of a search whose rules never need it."""
+    import solvi.experimental.relations as R
+    test = L.HeldOut(HELD, TARGETS)
+    with_u = L.find_rules(TRAIN, TARGETS, base=["E"], size=6, budget=20_000, library=(), test=test)
+    no_u = L.find_rules(TRAIN, TARGETS, base=["E"], size=6, budget=20_000, library=(), test=test,
+                        include_universal=False)
+    assert set(no_u.found) == set(with_u.found) == set(TARGETS)
+    assert all(no_u.records[k].programs < with_u.records[k].programs for k in TARGETS)
+    ex = [R.Relations.from_dense(["E"], w["E"][None]) for w in TRAIN[:3]]
+    assert ("U",) in {p.ast for p in R.Enumerator(ex, 1)}
+    assert ("U",) not in {p.ast for p in R.Enumerator(ex, 1, include_universal=False)}
 
 
 def test_the_library_entry_has_the_agreed_fields_and_runs_as_a_terminal():
-    e = L.Library(program=("COMP", ("R", "E"), ("R", "E")), name="grand", examples=(), test_record={"passed": True})
-    assert (e.program, e.name, e.examples, e.test_record["passed"]) == (("COMP", ("R", "E"), ("R", "E")), "grand", (), True)
+    from solvi.experimental.relations import Entry
+    e = Entry(program=("COMP", ("R", "E"), ("R", "E")), name="grand", examples=(), test={"passed": True})
+    assert (e.program, e.name, e.examples, e.test["passed"]) == (("COMP", ("R", "E"), ("R", "E")), "grand", (), True)
     w = HELD[0]
     assert np.array_equal(L.run(("COMP", ("L", "grand"), ("R", "E")), w, library=[e]), mm(grand(w), w["E"]))
     with pytest.raises(KeyError):
@@ -101,7 +121,7 @@ def test_find_rules_admits_found_rules_and_builds_composites_on_them():
     unc = r.found["uncle"].program
     assert L.size(unc) <= 3 and ("L", "sibling") in _leaves(unc)                   # a small program over the library
     for name, e in r.found.items():
-        assert e.test_record["passed"] and e.test_record["errors"] == 0
+        assert e.test["passed"] and e.test["errors"] == 0
         for w in worlds(9, 3, 60, 80):                                             # runs on larger unseen worlds
             assert np.array_equal(L.run(e.program, w, library=r.library), TARGETS[name](w)), name
     assert r.records["uncle"].programs > r.records["grand"].programs              # cumulative cost, in order found
@@ -117,7 +137,7 @@ def test_without_the_library_the_composite_costs_more_or_is_not_found():
     lib = L.find_rules(TRAIN, tg, base=["E"], size=10, budget=50_000, library=(), test=test)
     flat = L.find_rules(TRAIN, tg, base=["E"], size=10, budget=50_000, library=(), test=test, grow=False)
     assert flat.library and all(L.size(e.program) == L.size(L.expand(e.program, flat.library)) for e in flat.library)
-    assert "cousin" in lib.found and lib.found["cousin"].test_record["passed"] and "cousin" not in flat.found
+    assert "cousin" in lib.found and lib.found["cousin"].test["passed"] and "cousin" not in flat.found
     rec = lib.records["cousin"]
     assert rec.size <= 4 and rec.round_programs < rec.programs                     # its own round vs all rounds so far
     assert sum(r.round_programs for r in lib.records.values()) <= lib.programs
@@ -191,7 +211,7 @@ def test_the_proposer_slot_is_a_fallback_whose_proposals_are_checked():
     p = _Oracle({"uncle": [bad, good]})
     r = L.find_rules(TRAIN, {"uncle": uncle}, base=["E"], size=3, budget=500, library=(), test=test, proposer=p)
     assert p.calls == 1 and "uncle" in r.found and r.found["uncle"].program == good
-    assert r.found["uncle"].test_record["by"] == "oracle"
+    assert r.found["uncle"].test["by"] == "oracle"
     p2 = _Oracle({"uncle": [bad]})
     r2 = L.find_rules(TRAIN, {"uncle": uncle}, base=["E"], size=3, budget=500, library=(), test=test, proposer=p2)
     assert "uncle" not in r2.found
