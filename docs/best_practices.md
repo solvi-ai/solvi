@@ -133,6 +133,19 @@ bank requests with new intents the LLM was right on 75% and its guarantee vouche
 was learned; its unverified answers, fed to all four channels at once, raised the share answered alone after the shift
 from 53% to 71% and the error among those from 16% to 20% (promise 5%), with more of the LLM's own mistakes copied.
 
+**A person's labels on what you escalated are the hard cases — weight them, or they tighten the threshold.** On a
+bank-request stream of 2,000 (20 of 77 topics unseen from request 1,000) a person labelled every escalated request and 5% of the
+answers given alone; every 200 requests the guarantee was recalibrated on the human set plus those labels, the open-set gate
+re-estimated with the labelled outside requests and the classifier refitted with a new topic as an option once it had 10 labels.
+The promise held (0.47% / 2.64% wrong among the answers given alone before / after the shift), but the share answered alone
+moved from 44.2% to 45.1%: before the shift it fell from 68.8% to 63.6% (the escalated requests are the ones the fast system
+gets wrong more often, so the threshold rose from 0.75 to 0.83), after it the known topics gained 11 points (31.9% → 42.9%)
+while the new topics, present in the head with 10–20 labels each, never passed the threshold calibrated on the old ones (7
+answers, all wrong). Weight such labels by the probability they were sampled with (an audit label at 5% counts 20× an
+escalation label), or calibrate on a representative audit alone, and give new options a threshold of their own with a
+minimum support. A confirmation on a held-out 30% of the labels decided nothing here: a candidate answers 3–4 of the
+held-out requests alone, which neither certifies nor refutes a 5% promise.
+
 **Fix a head's ridge strength when its answers go through a guarantee.** `fit` chooses λ by leave-one-out accuracy; a
 refit on more labels can choose a much smaller one, and the head's ranking of its own answers gets worse even when the
 added labels are right: on product matching, a head refitted on 808 instead of 300 pairs picked λ 0.1 and the error
