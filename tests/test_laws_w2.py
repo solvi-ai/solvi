@@ -286,22 +286,22 @@ def test_abstain_as_the_set_default_and_the_loop_still_learns_most_specific_firs
         LawSet(door(), disagree="vote")
 
 
-def test_skillset_match_abstains_when_certified_skills_of_one_goal_disagree():
+def test_skillset_match_stays_most_specific_first_different_sequences_are_not_a_disagreement():
+    """Two certified skills of one goal are both verified plans: a different sequence says nothing about the world,
+    so a skill set never abstains (it would only on conflicting predicted end states, which skills do not carry)."""
     g = door()
-    ks = SkillSet(g, certificate=None, disagree="abstain")
+    with pytest.raises(TypeError):
+        SkillSet(g, certificate=None, disagree="abstain")
+    ks = SkillSet(g, certificate=None)
     a = ks.add(Skill(("red",), ("left",), "exit"))
     b = ks.add(Skill(("big",), ("right",), "exit"))
-    ks.add(Skill(("big", "wet"), ("right",), "exit"))       # same sequence as its wider skill: no conflict
-    for s in STATES:
-        m = ks.match(s, "exit")
-        first = ks.match(s, "exit", disagree="first")
-        if s["red"] and s["big"]:
-            assert m is None and first is not None
-        else:
-            assert m is first
-    assert ks.abstained == 2 and ks.report()["abstained"] == 2
-    assert ks.match({"red": True, "big": False, "wet": False}, "exit") is a
+    c = ks.add(Skill(("big", "wet"), ("right",), "exit"))
+    with pytest.raises(TypeError):
+        ks.match({"red": True, "big": True, "wet": False}, "exit", disagree="abstain")
+    assert ks.match({"red": True, "big": True, "wet": False}, "exit") is a     # ties: the earlier skill
+    assert ks.match({"red": True, "big": True, "wet": True}, "exit") is c      # the most specific
     assert ks.match({"red": False, "big": True, "wet": False}, "exit") is b
+    assert not hasattr(ks, "abstained") and "abstained" not in ks.report()
 
 
 # ───────────────────────────────────────────── the search cost of a skill learner
