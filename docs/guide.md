@@ -4951,7 +4951,9 @@ trusted and never replayed — its output is recorded and checked. A failing pro
 run (a `blocked` issue, no output), recorded too.
 
 **The record.** With `storage=`, every `run` appends one record of kind `"specialist"`: `specialist`, `version`,
-`question`, `source_sha256` and `source_chars` (the source itself is not stored — pass it to `replay`), `proposer`,
+`question`, `source_sha256` and `source_chars` (the source itself is not stored — pass it to `replay` — unless
+`store_source=True`, which keeps the text in the record so `replay(stored_id)` is self-contained, at the cost of the
+text's size in every record and the text in the store), `proposer`,
 `proposal` (for a blocked run the raw proposal and `proposal_error`), the check's `issues`, `kept`, `verified` and
 `meta`, `renderer`, `output_sha256`, `output_bytes`, `trace_head` (the head of the run's own chain) and `fingerprints`
 when the specialist reports them (`fingerprints()` → e.g. the model's and the renderer's). It is in the same hash chain

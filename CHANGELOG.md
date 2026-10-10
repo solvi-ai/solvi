@@ -93,7 +93,8 @@ calibration files and served by `solvi serve`), so a build from it is not mistak
   storage=None)`: with a TraceStorage (or a path) every `run` is one record of kind `"specialist"` in the store's hash
   chain — the chain the decisions use, so `verify()` catches an edited run — holding the source's hash and length, the
   proposer, the proposal, the check's issues / kept / verified / meta, the renderer, the output's hash and size, the head
-  of the run's own chain and the specialist's `fingerprints()` when it reports them; `Run.stored_id` names it and
+  of the run's own chain and the specialist's `fingerprints()` when it reports them (`store_source=True` also keeps the
+  source text, so a stored run replays by its id alone); `Run.stored_id` names it and
   `Run.to_dict()` keeps its shape. `specialist.replay(record_or_id, source=None, storage=None)` re-checks and re-renders
   from a stored record (identical issues and bytes, or what differs); `replay_runs(storage, specialist, sources)` replays
   every stored run of a specialist. `solvi report --overview` counts the runs per specialist.

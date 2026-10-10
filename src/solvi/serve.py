@@ -1001,7 +1001,7 @@ def _serve_guard(a, _fail, load_object):
               "command line")
     if a.system or a.decider:
         _fail("serve --guard: a proxy serves the upstream server's tools; drop the System / --decider")
-    from .agents import Guard
+    from .solutions.guard import Guard
     guard = load_object(a.guard)
     if not isinstance(guard, Guard):
         _fail(f"--guard {a.guard}: not a solvi.Guard")

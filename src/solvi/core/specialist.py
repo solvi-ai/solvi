@@ -24,7 +24,7 @@ One contract for every specialist (charts first; slides, tables, speech later):
     replay_runs(store, ChartSpecialist(), texts)         # every stored run of that specialist → [] when all replay
 
 The stored record ("specialist" kind): specialist, version, question, source_sha256 and source_chars (the source itself
-is not stored: pass it to replay), proposer, proposal (the spec; for a blocked run the raw proposal and
+is not stored unless `store_source=True`: pass it to replay), proposer, proposal (the spec; for a blocked run the raw proposal and
 proposal_error), issues, kept, verified, meta, renderer, output_sha256, output_bytes, trace_head (the head of the run's
 own chain) and — when the specialist reports them (`fingerprints()`) — fingerprints. `Run.to_dict()` keeps its shape;
 `Run.stored_id` names the record. The in-memory Trace stays the run's own summary: the record holds the same data,
@@ -204,14 +204,16 @@ class Specialist:
     """The contract (see the module docs). Subclasses set `name`, `version`, `spec_type` and implement `check` and
     `render`; `proposer` is the default proposer for `run`; `storage` (a TraceStorage or a path) keeps every run as a
     record of kind "specialist" (see the module docs). A subclass may report fingerprints of what made a run (a model,
-    a renderer) by `fingerprints()`."""
+    a renderer) by `fingerprints()`. store_source=True keeps the source text in each stored record ("source"), so
+    `replay(stored_id)` needs no text passed — the record then grows by the source's size, and the store holds the text
+    (mind what it may contain); the default keeps only its hash and length."""
 
     name = "specialist"
     version = "1"
     spec_type: type[BaseModel] = BaseModel
 
-    def __init__(self, proposer=None, storage=None):
-        self.proposer = proposer
+    def __init__(self, proposer=None, storage=None, *, store_source=False):
+        self.proposer, self.store_source = proposer, bool(store_source)
         if storage is not None:
             from .store import open_storage
             storage = open_storage(storage)
@@ -259,6 +261,8 @@ class Specialist:
                 "meta": chk.get("meta") or {}, "renderer": ren.get("renderer"),
                 "output_sha256": ren.get("output_sha256"), "output_bytes": ren.get("output_bytes"),
                 "trace_head": t.head}
+        if self.store_source:
+            body["source"] = run.source
         fps = self.fingerprints()
         if fps is not None:
             body["fingerprints"] = _plain(fps)
@@ -367,8 +371,10 @@ class Specialist:
         problems = []
         if "hash" in d and d.get("hash") != record_hash(d):
             problems.append("the stored record was edited after it was stored (its hash does not match)")
+        source = d.get("source") if source is None else source
         if source is None:
-            return Replay(False, problems + ["no source: pass the text the run read (the store keeps its hash only)"])
+            return Replay(False, problems + ["no source: pass the text the run read (the store keeps its hash only; "
+                                             "Specialist(..., store_source=True) keeps the text)"])
         if d.get("source_sha256") != sha256(source.encode()):       # nothing to re-check against another text
             return Replay(False, problems + ["the source is not the one the run read (its sha256 differs)"])
         if d.get("specialist") != self.name:
@@ -390,7 +396,8 @@ class Specialist:
 def replay_runs(storage, specialist, sources) -> list:
     """Replay every stored run of `specialist` (its records of kind "specialist" with its name) → the ones that do not
     replay: [{"id", "seq", "problems"}] ([] — all replay). sources: the texts the runs read — a list of texts or {sha256:
-    text}; a run whose source is not among them is listed ("no source given ...")."""
+    text}; a record that kept its source (store_source=True) uses it when the texts do not hold it; a run whose source
+    is not among them is listed ("no source given ...")."""
     if not hasattr(storage, "iter"):
         from .store import open_storage
         storage = open_storage(storage)
@@ -400,7 +407,7 @@ def replay_runs(storage, specialist, sources) -> list:
         d = s.data
         if d.get("specialist") != specialist.name:
             continue
-        src = texts.get(str(d.get("source_sha256")))
+        src = texts.get(str(d.get("source_sha256")), d.get("source"))
         if src is None:
             bad.append({"id": s.id, "seq": s.seq, "problems": [f"no source given with sha256 {d.get('source_sha256')}"]})
             continue

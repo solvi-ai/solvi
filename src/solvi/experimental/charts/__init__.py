@@ -34,8 +34,8 @@ class ChartSpecialist(Specialist):
     version = "1"
     spec_type = ChartSpec
 
-    def __init__(self, proposer=None, *, decimal=None, storage=None):
-        super().__init__(proposer or RuleProposer(), storage=storage)
+    def __init__(self, proposer=None, *, decimal=None, storage=None, store_source=False):
+        super().__init__(proposer or RuleProposer(), storage=storage, store_source=store_source)
         self.checker = ChartChecker(decimal=decimal)
 
     def check(self, spec, source) -> Checked:
