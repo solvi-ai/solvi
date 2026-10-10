@@ -23,9 +23,49 @@ def test_violations_name_the_wrong_type_and_the_echo():
     assert Contract(returns=float).violations(3, {}) == []                    # an int is a float
     [e] = Contract().violations("  Hello  world ", {"text": "hello world"})
     assert e.code == "echo" and "text" in e.message
-    assert Contract().violations(12, {"text": "12"})[0].code == "echo"        # the same number as text
+    assert Contract(echo=True).violations(12, {"text": "12"})[0].code == "echo"   # the same number as text
     assert Contract(echo=False).violations("hello world", {"text": "hello world"}) == []
     assert Contract().violations(None, {"text": None}) == []                  # an abstention is not checked
+
+
+def test_echo_by_default_follows_the_answer_kind():
+    from enum import Enum
+
+    class Team(Enum):
+        billing = "billing"
+    inputs = {"field": "billing", "n": 3, "text": "hello world"}
+    c = Contract()
+    assert c.echo is None                                                     # automatic
+    # free text: checked
+    assert c.violations("Hello world", inputs)[0].code == "echo"
+    assert c.violations("hello world", inputs, echo_type=Answer.span("text"))[0].code == "echo"
+    assert Contract(returns=str).violations("hello world", inputs)[0].code == "echo"
+    # a declared choice / yes-no / enumeration / number may equal an input field
+    assert c.violations("billing", inputs, echo_type=Answer.choice(["billing", "shipping"])) == []
+    assert c.violations("yes", {"flag": "yes"}, echo_type=Answer.yes_no()) == []
+    assert c.violations(Team.billing, inputs) == []
+    assert c.violations(3, inputs) == [] and c.violations(3.0, inputs, echo_type=Answer.estimate()) == []
+    assert Contract(returns=int).violations(3, inputs) == []
+    # an explicit echo= always overrides
+    assert Contract(echo=True).violations("billing", inputs,
+                                          echo_type=Answer.choice(["billing", "shipping"]))[0].code == "echo"
+    assert Contract(echo=True).violations(3, inputs)[0].code == "echo"
+    assert Contract(echo=False).violations("hello world", inputs) == []
+    assert Contract(echo=["text"]).violations("billing", inputs, echo_type=Answer.choice(["billing"])) == []
+    assert Contract(echo=["field"]).violations("billing", inputs, echo_type=Answer.choice(["billing"]))[0].code == "echo"
+    assert Contract().fingerprint() != Contract(echo=True).fingerprint()
+
+
+def test_in_a_system_the_default_echo_spares_a_choice_but_not_a_span():
+    cat = Catalog()
+
+    @cat.rule("label")
+    def label(hint) -> str:
+        return hint
+    cat.contract("label")
+    s = System(cat, [Question("label", "The label?", Answer.choice(["a", "b"]))])
+    assert s.ask({"hint": "a"})["label"].answer == "a"                       # equals its input field: fine
+    assert word_system({}).ask({"text": "hello"})["first_word"].guard == "contract"   # a span that is its input
 
 
 def test_the_answer_type_of_the_question_is_the_default_type():
