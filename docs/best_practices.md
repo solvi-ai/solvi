@@ -241,6 +241,25 @@ the first exploration.
 as a short script did; on incidents a runbook resolved far more than the model. What solvi adds to a model-driven agent
 is that every step is checked, recorded and replayable, not that the model beats the rules.
 
+## Specialists (a model proposes, code checks)
+
+**Expect a second reader to buy exactness and cost half the coverage; let the arithmetic vouch where it can.** On receipts
+(SROIE and CORD v2 test sets, 1,923 gold fields) an open OCR model alone read 88% of the fields right; accepting a field only
+when a second OCR engine read the same digits in the same place and the receipt's sums held raised that to 96.4% with no
+accepted total failing its arithmetic, but 64% of the fields went to "needs review" or "conflict": the second engine confirmed
+39–60% of the first one's fields, and a sum can only vouch for a field that takes part in one (most item lines carry no unit
+price). Reading the second engine on the first one's word boxes (41% coverage on calibration) and dropping it for money fields
+with a passing sum (41%) moved coverage by a few points, not to the 70% we wanted. Budget for the review queue before promising
+coverage, and put the budget where the fields have no equation neighbours (names, dates).
+
+**Normalise numbers the same way on both sides before judging a transcript, and look at what the two readers agreed on.**
+Two speech models of different families (faster-whisper small, a Kaldi model) aligned in time gave 0 false words on 400
+non-speech clips and caught 299 of 300 injected corruptions, yet among the numbers they agreed on only 90% (Russian) and 86%
+(English) matched the reference text: 21 of the 22 misses were clock times ("10:00") and ratios ("3:2") that our rule
+normaliser tokenised one way in the reference and another in the hypothesis; one per language was a real mishearing. A
+threshold rule that demands 99% on a dev set with such misses picks a corner (English: 13% coverage at p ≥ 0.99). Fix the
+tokeniser first; agreement of two readers is the check that works.
+
 ## Tools (the agent guard)
 
 **Ground the arguments that matter in the user's words** (`ground=`, `ground_from=("user",)`), and in a long session
