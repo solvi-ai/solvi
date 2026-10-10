@@ -318,6 +318,28 @@ test an LLM proposer ended 0.95 points below enumeration, and in the same study 
 claims about the path policy wrongly 18 times out of 40. Both findings in miniature, with their bars:
 [laws_toy.py](../benchmarks/laws_toy.py) (`pytest -m slow tests/test_laws_toy.py`).
 
+## Learning in a world described by code: plan on the code
+
+**Where the world is code, plan on the code and compile only what the code verified.** A simulator, a file system or a
+service with a specification answers every "what happens if" exactly, so System 2 can search a copy of it
+(`solvi.experimental.skills`: `ExactModel(env)` forks the environment, `plan` searches the forks, `verify` re-simulates
+a plan on a fresh fork) and the real environment is never stepped by the planner. A plan becomes knowledge only after
+that re-simulation, never because a model said it works: in the gridworld toy, sequences compiled without it reached no
+goal. **A skill is used alone only while its outcomes keep the certificate** (`Certificate`): before it is certified,
+System 2 re-verifies it on the exact model at every use, so every use has an outcome — a certificate fed only by the
+decisions the system made alone can certify what it never tested. Budget the need: a fresh certificate takes 50 clean
+outcomes at 5% and δ 0.1 (25 at 10%, 12 at 20%), so a skill used once per episode needs about fifty episodes before it
+acts alone; pool the certificate by goal or over the set (the promise is then the pool's) or accept a looser promise
+on short streams. In the toy (20 fresh layouts × 5 seeds) the set certified at 20% between the ninth and the thirteenth episode
+and System 1's share reached 0.81 in the last five with every goal still reached; per skill nothing certified within
+20 episodes.
+**Cases do not transfer, rules do:** replaying the sequence that worked from the same start state gave System 1 nothing
+on fresh layouts; a skill's condition keeps only the atoms its verified starts shared, so it reaches states no case
+has seen. On a game simulator with written mechanics, learned rules carried across worlds (no written rules given) gave +77%
+achievements and System 1 84% of the decisions after about twenty worlds (part of it is survival: the agent lived
+longer). Script:
+[skills_toy.py](../benchmarks/skills_toy.py) (`pytest -m slow tests/test_skills_toy.py`).
+
 ## Storage and audit
 
 **One store, any number of writers — but check which backend.** SQLite and PostgreSQL take several processes;

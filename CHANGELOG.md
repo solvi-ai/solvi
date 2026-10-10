@@ -43,6 +43,26 @@ calibration files and served by `solvi serve`), so a build from it is not mistak
   filesystem server with a path policy, refusals 6 → 0 in one session (random probes: 48 → 29).
   `benchmarks/laws_toy.py` reproduces both in miniature (a gridworld and a path policy, five seeds each;
   `pytest -m slow`). A `slow` pytest marker: such tests run only with `-m slow`.
+- **`solvi.experimental.skills`: learning in a world described by code (experimental).** Where the world is code (a
+  simulator, a file system, a service with a specification), System 2 plans on an exact model of it: `ExactModel(env)`
+  forks the environment (a deep copy, or `clone(env, state)`), `plan(model, state, goal, horizon=, budget=)` searches
+  the forks (breadth-first with a visited set; uniform cost with `cost=`; None on the horizon or the budget) and
+  `verify(model, state, plan)` re-simulates a plan on a fresh fork — the real environment is never stepped by the
+  planner, and the learner checks its hash around every call. Verified plans are compiled into System 1 skills
+  (`SkillSet`: the atoms of a laws `Grammar` true at the plan's start, widened only to the atoms a second verified start
+  shares, never over a recorded failure; the most specific certified skill matches), and a skill acts alone only while
+  its outcomes keep a `Certificate` — an anytime-valid e-process (certified at 1/δ after `need` clean outcomes: 50 at
+  5% and δ 0.1; once certified it stays so; an e-detector on its alone outcomes retires it; per skill, per goal or
+  pooled over the set). Before certification System 2 re-verifies the skill at every use, so every use has an outcome.
+  `SkillLearner(env, grammar, goals)` runs the loop with a record per decision (who decided, the skill, the outcome) and
+  per episode (System 1's share, goals, planner calls, simulated steps); `as_s2(learner)` makes the planner System 2 of
+  `solvi.Agent(env, knowledge=km, s2=...)`; `SkillSet.to_knowledge(store, scope)` writes "skill" items (source
+  "outcome", the plan, its start key, the verifying simulation's hash and the outcomes as evidence; retired skills
+  retired). `benchmarks/skills_toy.py` (a deterministic gridworld, 20 fresh layouts × 5 seeds, `pytest -m slow`):
+  System 1's share 0 → 0.81 from the first to the last five episodes with every goal reached (as planning every goal),
+  1.5% of System 1's decisions in failed runs under a 20% promise pooled over the skills; replayed cases never
+  transferred, plans compiled without verification reached no goal. At 5% nothing certified within the toy's 20
+  episodes.
 - **Sensitive fields: declared on the catalog, refused by `solvi check`.** `Catalog(sensitive={"age", "sex"})`,
   `lint(obj, sensitive=...)` and `solvi check module:system --sensitive age,sex` (the names add up) name given facts no
   part may read. A part that reads one (a fn, extract, check, rule, `then` function, alternative producer or
