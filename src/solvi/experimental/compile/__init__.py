@@ -98,49 +98,7 @@ class Clause:
     section: str = ""
 
 
-_HEADING = re.compile(r"^(#{1,6})\s+(.*\S)\s*$")
-_ITEM = re.compile(r"^\s*(?:[-*+]|\d+[.)])\s+(.*)$")
-_SEP = re.compile(r"^:?-{2,}:?$")
-
-
-def split_clauses(text: str) -> list[tuple[str, str]]:
-    """A text → [(section, clause text)]: each paragraph, list item and table row is a clause (a table row is written
-    as `header: cell; ...`); headings name the section and are not clauses themselves."""
-    out, buf, path, header = [], [], [], None
-
-    def flush():
-        if buf:
-            out.append((" / ".join(t for _, t in path), " ".join(buf).strip()))
-            buf.clear()
-    for line in text.splitlines():
-        s = line.strip()
-        h = _HEADING.match(s)
-        if h:
-            flush()
-            header = None
-            level = len(h.group(1))
-            path[:] = [p for p in path if p[0] < level] + [(level, h.group(2))]
-            continue
-        if s.startswith("|"):
-            flush()
-            cells = [c.strip() for c in s.strip("|").split("|")]
-            if all(_SEP.match(c) for c in cells if c):
-                continue
-            if header is None:
-                header = cells
-                continue
-            out.append((" / ".join(t for _, t in path), "; ".join(f"{a}: {b}" for a, b in zip(header, cells) if b)))
-            continue
-        header = None
-        if not s:
-            flush()
-        elif _ITEM.match(line):
-            flush()
-            buf.append(_ITEM.match(line).group(1).strip())
-        else:
-            buf.append(s)
-    flush()
-    return [(sec, t) for sec, t in out if t]
+from ...check import split_clauses  # noqa: E402,F401 — the splitter is stable (solvi check --spec uses it)
 
 
 class Spec:

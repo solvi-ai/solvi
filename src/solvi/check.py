@@ -7,6 +7,7 @@
     solvi check myapp.decisions:system [--strict] [--json]     # exit 0: no errors; 1: errors; 2: usage errors
     solvi check myapp.decisions:system --sensitive age,sex      # parts that read these (or what is computed from them)
     solvi check myapp.decisions:system --text POLICY.md         # then every part's cite= is looked for in the text
+    solvi check myapp.decisions:system --spec POLICY.md [--require-cites]   # and its clause= against Spec(text)'s clauses
 
     from solvi.check import citations
     citations(system, policy_text, spec=None, require=False)   # → Report: the citations of the parts (see citations)
@@ -82,6 +83,7 @@ from __future__ import annotations
 import ast
 import inspect
 import itertools
+import re
 import textwrap
 from dataclasses import asdict, dataclass, field, replace
 
@@ -719,6 +721,56 @@ def _short_path(p):
 
 
 # --- citations
+_CL_HEADING = re.compile(r"^(#{1,6})\s+(.*\S)\s*$")
+_CL_ITEM = re.compile(r"^\s*(?:[-*+]|\d+[.)])\s+(.*)$")
+_CL_SEP = re.compile(r"^:?-{2,}:?$")
+
+
+def split_clauses(text: str) -> list[tuple[str, str]]:
+    """A text → [(section, clause text)]: each paragraph, list item and table row is a clause (a table row is written
+    as `header: cell; ...`); headings name the section and are not clauses themselves."""
+    out, buf, path, header = [], [], [], None
+
+    def flush():
+        if buf:
+            out.append((" / ".join(t for _, t in path), " ".join(buf).strip()))
+            buf.clear()
+    for line in text.splitlines():
+        s = line.strip()
+        h = _CL_HEADING.match(s)
+        if h:
+            flush()
+            header = None
+            level = len(h.group(1))
+            path[:] = [p for p in path if p[0] < level] + [(level, h.group(2))]
+            continue
+        if s.startswith("|"):
+            flush()
+            cells = [c.strip() for c in s.strip("|").split("|")]
+            if all(_CL_SEP.match(c) for c in cells if c):
+                continue
+            if header is None:
+                header = cells
+                continue
+            out.append((" / ".join(t for _, t in path), "; ".join(f"{a}: {b}" for a, b in zip(header, cells) if b)))
+            continue
+        header = None
+        if not s:
+            flush()
+        elif _CL_ITEM.match(line):
+            flush()
+            buf.append(_CL_ITEM.match(line).group(1).strip())
+        else:
+            buf.append(s)
+    flush()
+    return [(sec, t) for sec, t in out if t]
+
+
+def spec_clauses(text):
+    """A specification's text → {"c1": clause text, ...}: the clauses solvi.experimental.compile.Spec(text) numbers."""
+    return {f"c{i}": t for i, (_, t) in enumerate(split_clauses(text), 1)}
+
+
 def _cited_parts(cat):
     """Every part a catalog runs, with where it is reported → [(where, label, part)]: parts (each alternative producer on
     its own) and rules."""
@@ -757,7 +809,8 @@ def citations(obj, text, *, spec=None, require=False):
     """The citations of a catalog's parts (`cite=` / `clause=` on the decorators: Part.cites) against the text they
     quote → Report. Every quote must be in `text`, found as solvi.core.catalog.find_quote finds it with the part's
     quote mode ("normalized" by default: Unicode form, dashes, spaces, curly quotes; the source's own substring is what
-    counts) — else the error `cite_not_found`. With `spec` (a solvi.experimental.compile.Spec) a clause id must be one
+    counts) — else the error `cite_not_found`. With `spec` (a solvi.experimental.compile.Spec, or {clause id: text} —
+    spec_clauses(text) numbers a text's clauses as Spec does) a clause id must be one
     of its clauses (`clause_unknown`) and the quote must lie in that clause's text (`cite_outside_clause`; a table row,
     which the Spec writes as `header: cell; ...`, is also compared by its cells). A clause id with a ":" — a person's
     correction, `clause="person:k07"` — is no clause of the specification: its quote is looked for in `text` only.
@@ -779,10 +832,11 @@ def citations(obj, text, *, spec=None, require=False):
                 continue
             if spec is None or clause is None or ":" in clause:
                 continue
-            if clause not in spec.clauses:
+            clauses = spec.clauses if hasattr(spec, "clauses") else spec
+            if clause not in clauses:
                 rep.add("error", "clause_unknown", where, f"{label} names clause {clause!r}, which the specification "
                                                           "does not have")
-            elif quote is not None and not _in_clause(quote, spec.clauses[clause].text, mode):
+            elif quote is not None and not _in_clause(quote, getattr(clauses[clause], "text", clauses[clause]), mode):
                 rep.add("error", "cite_outside_clause", where, f"{label} cites {quote!r} as clause {clause!r}, but "
                                                                f"{clause} does not say it")
     return rep
@@ -798,20 +852,27 @@ def cmd_check(a):
         _fail(f"check {a.target}: not a solvi System, Catalog or Guard")
     sensitive = [x.strip() for x in (a.sensitive or "").split(",") if x.strip()] or None
     rep = lint(obj, strict=a.strict, max_combos=a.max_combos, sensitive=sensitive)
-    if a.text:
+    if a.require_cites and not (a.text or a.spec):
+        _fail("check --require-cites: give the text the parts cite (--text FILE or --spec FILE)")
+    if a.text or a.spec:
         from pathlib import Path
-        try:
-            policy = Path(a.text).read_text(encoding="utf-8")
-        except OSError as e:
-            _fail(f"check --text {a.text}: {e}")
+
+        def read(path, flag):
+            try:
+                return Path(path).read_text(encoding="utf-8")
+            except OSError as e:
+                _fail(f"check {flag} {path}: {e}")
+        spec_text = read(a.spec, "--spec") if a.spec else None
+        spec = spec_clauses(spec_text) if spec_text is not None else None
+        policy = read(a.text, "--text") if a.text else spec_text
         tools, tool_system = getattr(obj, "tools", None), getattr(obj, "system", None)
         if tools is not None and callable(tool_system) and not hasattr(obj, "questions"):     # a solvi.Guard
             for name, t in tools.items():
                 if t.model is not None:
-                    rep.findings += [replace(f, where=f"{name}: {f.where}")
-                                     for f in citations(tool_system(name), policy).findings]
+                    rep.findings += [replace(f, where=f"{name}: {f.where}") for f in
+                                     citations(tool_system(name), policy, spec=spec, require=a.require_cites).findings]
         else:
-            rep.findings += citations(obj, policy).findings
+            rep.findings += citations(obj, policy, spec=spec, require=a.require_cites).findings
     if a.json:
         from .core.schema import dumps
         print(dumps(rep.to_dict(), ensure_ascii=False, indent=2))
@@ -845,9 +906,14 @@ def add_parser(sub):
     c.add_argument("--json", action="store_true", help="print JSON")
     c.add_argument("--text", metavar="FILE", help="the text the parts cite (a policy): after the lint, every part's "
                                                  "cite= must be found in it (solvi.check.citations)")
+    c.add_argument("--spec", metavar="FILE", help="the specification the parts cite, split into clauses c1, c2, ... "
+                                                 "(solvi.experimental.compile.Spec): each clause= must exist and hold its "
+                                                 "quote; also the text, unless --text is given")
+    c.add_argument("--require-cites", action="store_true", help="with --text / --spec: a part without cite= is the "
+                                                                 "warning no_cite")
     c.add_argument("--sensitive", metavar="NAMES", help="comma-separated given facts no part may read (age,sex): a part "
                                                        "that reads one, or a fact computed from one, is an error")
     return c
 
 
-__all__ = ["add_parser", "citations", "cmd_check", "Finding", "lint", "Report", "sensitive_names", "silent_defaults"]
+__all__ = ["add_parser", "citations", "spec_clauses", "split_clauses", "cmd_check", "Finding", "lint", "Report", "sensitive_names", "silent_defaults"]

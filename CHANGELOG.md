@@ -38,7 +38,9 @@ calibration files and served by `solvi serve`), so a build from it is not mistak
   `solvi.experimental.compile.Spec`, a clause it does not have is `clause_unknown` and a quote outside the named
   clause `cite_outside_clause`; `require=True` makes an uncited part the warning `no_cite`; a correction cited as
   `clause="person:k07"` is checked against the text only. `solvi check module:system --text POLICY.md` runs it after
-  the lint. The causes of `solvi.core.store.diff.diff` carry `"cites"` ([{"clause", "quote"}]) when their part has
+  the lint; `--spec FILE` splits a specification into clauses `c1`, `c2`, ... as `Spec(text)` does (also the text,
+  unless `--text` is given; `solvi.check.spec_clauses`, and `split_clauses` now lives in `solvi.check` — still
+  importable from `solvi.experimental.compile`), `--require-cites` adds the `no_cite` warnings. The causes of `solvi.core.store.diff.diff` carry `"cites"` ([{"clause", "quote"}]) when their part has
   citations; `solvi.experimental.compile.decision_diff` also takes plain Systems (hand-written catalogs), whose
   causes get their `clauses` from the citations; the changes pipeline's `Static(text=..., spec=...)` refuses a
   candidate whose citations fail.

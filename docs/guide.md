@@ -169,7 +169,9 @@ id (or a list as long). They are kept as `Part.cites` and checked against the te
 text, spec=None, require=False)` — or `solvi check module:system --text POLICY.md`: a quote not in the text is the
 error `cite_not_found` (matched as quotes are, across Unicode forms, dashes and curly quotes), with a `Spec` a clause
 that does not exist or does not hold the quote is an error, `require=True` warns on an uncited part; a correction can
-be cited as `clause="person:k07"`. The causes of `solvi diff` carry the citations: clause → rule → decision.
+be cited as `clause="person:k07"`. `--spec POLICY.md` splits the text into clauses `c1`, `c2`, ... as
+`solvi.experimental.compile.Spec` does (and is the text, unless `--text` names another file); `--require-cites` warns on
+an uncited part. The causes of `solvi diff` carry the citations: clause → rule → decision.
 
 ```python
 @cat.fn(clause="c16", cite='new rule `guarantor`: other_debtors is "guarantor" → −1')
