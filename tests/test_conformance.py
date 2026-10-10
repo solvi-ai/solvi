@@ -503,3 +503,21 @@ def test_the_extension_points_load_on_first_use():
     run = subprocess.run([sys.executable, "-W", "error", "-c", code], capture_output=True, text=True)
     assert run.returncode == 0, run.stderr[-2000:]
 
+
+
+# ------------------------------------------------------------------------------------------------ Specialist
+def test_check_specialist_on_the_charts_specialist_and_on_a_random_render():
+    import random
+    import warnings
+    from test_charts import PRESS, QUARTERS, WASTE
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        from solvi.experimental.charts import ChartSpecialist, RuleProposer
+    got = cf.check_specialist(ChartSpecialist(), [PRESS, QUARTERS, WASTE], proposer=RuleProposer())
+    assert got["sources"] == 3 and got["replayed"] == 3 and got["blocked"] == 3
+
+    class Noisy(ChartSpecialist):
+        def render(self, checked):
+            return super().render(checked) + f"<!-- {random.random()} -->"
+    with pytest.raises(cf.ConformanceError, match="identical bytes"):
+        cf.check_specialist(Noisy(), [PRESS])
