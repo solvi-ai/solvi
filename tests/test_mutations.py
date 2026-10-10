@@ -80,3 +80,18 @@ def test_a_mutator_of_your_own_and_an_accepted_of_your_own():
     assert rep.n == 6 and rep.caught == 0             # a title without numbers is not checked: the new one is accepted
     nothing = mutate(sp, recs, {"title": retitle}, n=6, seed=0, accepted=lambda run: {})
     assert nothing.caught == 6                        # nothing accepted: every mutation counts as caught
+
+
+def test_the_fuzzing_function_of_the_same_name_still_works():
+    """solvi.testing.mutations(state, n, seed) gives mutated input states (fuzzing); importing the submodule rebinds
+    the package's name to it, which stays callable, and fuzz does not depend on the name."""
+    import solvi.testing as t
+    from solvi import Answer, Catalog, Question, System
+    states = t.mutations({"amount": 5}, 4, 0)
+    assert len(states) == 4 and all(isinstance(w, str) for w, _ in states)
+    cat = Catalog()
+
+    @cat.rule("size")
+    def size(amount):
+        return "big" if isinstance(amount, (int, float)) and amount > 3 else "small"
+    assert t.fuzz(System(cat, [Question("size", "?", Answer.choice(["small", "big"]))]), {"amount": 5}, 10) == []

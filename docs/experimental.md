@@ -72,9 +72,10 @@ hook schema). Since 0.7.1.
 
 The propose → check → render specialist pattern. Since 0.7.
 
-- **Missing:** a measured specialist (charts has no accuracy number yet).
+- **Missing:** a specialist that ships, with a script in benchmarks/: two model types were measured under the contract in 2026-10, with solvi.testing.mutations as the corruption test — receipt OCR (84% of corruptions caught) and speech to text (99.7% caught) — and neither ships (36% of receipt fields accepted; 90% / 86% of accepted spoken numbers exact); charts has no accuracy number yet.
 - **Script:** none yet. **Deadline:** 1.2.
-- API: [solvi.experimental.specialist](api/specialist.md).
+- API: [solvi.experimental.specialist](api/specialist.md); the corruption test:
+  [solvi.testing.mutations](testing.md#mutation-tests-for-specialists).
 
 ## `charts`
 

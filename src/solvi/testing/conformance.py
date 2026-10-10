@@ -25,6 +25,9 @@ what it checked. solvi's own test suite runs every check on every built-in (test
     check_environment(make, seeds=(0, 1))       Environment: the same seed and actions give the same outcomes
     check_action_model(make, transitions, ...)  ActionModel: Predictions, determinism, the fingerprint moves with what it
                                                 learned, never contradicts an outcome it observed; held-out comparison
+    check_specialist(specialist, sources, ...)  Specialist (solvi.experimental.specialist): two runs give identical
+                                                bytes, a run replays from its record, the record round-trips through
+                                                JSON, an invalid proposal is blocked with no output
 """
 from __future__ import annotations
 
@@ -484,5 +487,36 @@ def check_action_model(make, transitions, *, held_out=None):
     return out
 
 
-__all__ = ["check_action_model", "check_decider", "check_environment", "check_extractor", "check_head",
+# ------------------------------------------------------------------------------------------------ Specialist
+INVALID_PROPOSAL = "{ not a proposal"
+
+
+def check_specialist(specialist, sources, *, proposer=None):
+    """specialist: a solvi.experimental.specialist.Specialist; sources: texts it runs on; proposer: the proposer to
+    run with (default: the specialist's own). For each source: two runs give identical output bytes; the record
+    (`run.to_dict()`) round-trips through JSON and replays (`specialist.replay(record, source)`: the same checks, the
+    same bytes); an invalid proposal is blocked — a BLOCKED issue and no output. → what was checked."""
+    from ..experimental.specialist import BLOCKED
+    sources = list(sources)
+    _ok(sources, "check_specialist needs at least one source")
+    replayed = blocked = 0
+    for src in sources:
+        a = specialist.run(src, proposer=proposer)
+        b = specialist.run(src, proposer=proposer)
+        _ok(a.output == b.output, f"two runs of one source give identical bytes ({specialist.name}: the outputs differ)")
+        rec = a.to_dict()
+        back = json.loads(json.dumps(rec, ensure_ascii=False))
+        _ok(back == rec, "run.to_dict() round-trips through JSON")
+        r = specialist.replay(back, src)
+        _ok(bool(r), f"a run replays from its record: {r.problems[:3]}")
+        replayed += 1
+        bad = specialist.run(src, proposal=INVALID_PROPOSAL)
+        _ok(bad.output is None and any(i.severity == BLOCKED for i in bad.issues),
+            "an invalid proposal is blocked: a BLOCKED issue and no output")
+        _ok(bool(specialist.replay(bad.to_dict(), src)), "a blocked run replays from its record")
+        blocked += 1
+    return {"sources": len(sources), "runs": 2 * len(sources), "replayed": replayed, "blocked": blocked}
+
+
+__all__ = ["check_action_model", "check_decider", "check_environment", "check_extractor", "check_head", "check_specialist",
            "check_monitor", "check_slow_path", "check_storage", "check_strategist", "ConformanceError"]

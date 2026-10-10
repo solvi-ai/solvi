@@ -46,6 +46,16 @@ calibration files and served by `solvi serve`), so a build from it is not mistak
   whose `expected["only"]` is set and whose diff changes other decisions ("changes N decision(s) other than the
   allowed ones: [...]", the first ten ids) and records `extraneous` in its measurement.
 
+- **Mutation tests for specialists: `solvi.testing.mutations`.** `mutate(specialist, records, mutators, *, n=300,
+  seed=0, accepted=None)` corrupts recorded proposals (`(id, source, proposal)`), runs the specialist on each with
+  `proposal=`, and reports `n`, `caught`, `rate`, `per_kind` and `rows`. Built-in mutators over the proposal's JSON
+  tree, for any pydantic spec: `change_digit(paths=)`, `drop(paths=)`, `swap(paths=)` (regexes over JSON pointers).
+  A digit change or a swap is caught when the run has no output or the mutated value is not accepted at its place; a
+  drop when the check reports an issue the unmutated run did not (an omission is visible only through a relation).
+  Deterministic for a seed; skipped draws counted. `solvi.testing.conformance.check_specialist(specialist, sources, *,
+  proposer=None)`: identical bytes, replay, JSON records, blocked invalid proposals. `solvi.testing.mutations` called
+  as a function is still the fuzzing helper (`mutations(state, n, seed)`).
+
 ### Changed
 
 - **Replay binds every field of a result to its trace, not only the answer and its status.** With the System,

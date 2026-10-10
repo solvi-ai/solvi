@@ -21,6 +21,7 @@ internal and have no page.
 | [`solvi.show`](show.md) | printing a response |
 | [`solvi.check`](check.md) | `solvi check`: catalog lint |
 | [`solvi.testing`](testing.md) | decision regression tests from `cases.json` |
+| [`solvi.testing.mutations`](testing.md) | mutation tests for specialists: how many corrupted proposals a specialist's check catches |
 | [`solvi.testing.conformance`](conformance.md) | conformance checks for your implementations of the extension points of `solvi.core` (stores, slow paths, strategists, heads, deciders, extractors, monitors, environments) |
 | [`solvi.testing.honesty`](honesty.md) | the honesty suite |
 | [`solvi.solutions`](solutions.md) | the ready-made systems, one module each (above) |

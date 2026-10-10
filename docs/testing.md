@@ -74,3 +74,37 @@ when:
 - an answer is given with a confidence that is not a number in [0, 1] (NaN, inf).
 
 `solvi.testing.mutations(state, n, seed)` and `solvi.testing.fuzz(system, state, n, seed)` are deterministic for a seed.
+(`solvi.testing.mutations` is also the module of the next section; called, it is this function.)
+
+## Mutation tests for specialists
+
+A specialist (`solvi.experimental.specialist`: a model proposes a typed spec, code checks it against the source, code
+renders) is only as good as its check. `solvi.testing.mutations.mutate` measures the check: it corrupts recorded
+proposals as if the proposer had misread its source, runs the specialist again on the same source with each corrupted
+proposal, and counts how many corruptions the check catches.
+
+```python
+from solvi.testing.mutations import change_digit, drop, mutate, swap
+
+records = [(rid, source, run.proposal) for rid, source, run in my_runs]      # the proposals as recorded
+rep = mutate(specialist, records, {
+    "digit": change_digit(paths=r"^/series/\d+/points/\d+/value$"),     # one digit of a value
+    "swap": swap(paths=r"^/series/\d+/points/\d+/value$"),              # two values of one series exchanged
+    "drop": drop(paths=r"^/series/\d+/points/\d+$"),                    # a point left out
+}, n=300, seed=0)
+print(rep)                    # mutations: caught of n (rate), skipped draws, per kind; rep.rows
+```
+
+A mutator is `(proposal_dict, rng) → (mutated_dict, path, value)` or `None` (no target in that proposal: the draw is
+skipped and counted); paths are JSON pointers into the proposal's JSON form. A digit change or a swap is caught when
+the run has no output or the mutated value is not accepted at its place (`accepted(run)`: by default the leaves of the
+verified spec). An omission has no place of its own to be refused at — it is caught only through a relation the check
+holds (a total that no longer adds up, shares that no longer make a whole), so `drop` counts a mutation caught when the
+run reports an issue the unmutated run did not. Draws are deterministic: records sorted by id, kinds in order, one
+`random.Random(seed)`. On the charts specialist (`tests/test_mutations.py`) a changed digit is caught every time (the
+quote no longer states the number), and a dropped bar of a chart without a total is never caught: nothing relates the
+bars.
+
+`solvi.testing.conformance.check_specialist(specialist, sources)` checks the contract itself: two runs give identical
+bytes, a run replays from its record, the record round-trips through JSON, an invalid proposal is blocked with no
+output.
