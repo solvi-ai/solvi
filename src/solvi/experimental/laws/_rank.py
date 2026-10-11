@@ -528,16 +528,48 @@ class PriorRanker:
         return [float(v) for v in ((X - self.mean) / self.scale) @ self.weights]
 
 
-class HandoverRanker:
-    """The prior until the buffer has rows, then the joint statistic: scores by `prior` while the candidates' action has
-    fewer than `min_rows` logged rows (without the group `exclude`; with several actions, the fewest counts), by
-    `joint` (default JointRanker()) from then on. `last`: "prior" or "joint", whichever scored the last call;
-    `scored`: a Counter of both."""
+def _rank01(scores: Sequence[float]) -> np.ndarray:
+    """Scores → their rank among themselves mapped to [0, 1] (lowest 0, highest 1; equal scores share their mean rank;
+    all equal → 0)."""
+    x = np.asarray(scores, dtype=float)
+    n = len(x)
+    if n < 2:
+        return np.zeros(n)
+    order = np.argsort(x, kind="stable")
+    ranks = np.empty(n)
+    i = 0
+    while i < n:
+        j = i
+        while j + 1 < n and x[order[j + 1]] == x[order[i]]:
+            j += 1
+        ranks[order[i:j + 1]] = (i + j) / 2
+        i = j + 1
+    return ranks / (n - 1)
 
-    def __init__(self, prior, joint=None, min_rows: int = 20):
+
+class HandoverRanker:
+    """From the prior to the joint statistic as the logged rows arrive. A prior is a prior, the row statistic is evidence,
+    and evidence takes over gradually.
+
+    mode="blend" (the default): score = the joint statistic's Jaccard (in [0, 1]) + w(rows) · the prior's score mapped
+    to [0, 1] by its rank among the candidates (so the two scales do not fight), w(rows) = n0 / (n0 + rows) — 1 with no
+    rows (the prior's order), ½ at n0 rows, → 0 as rows grow; equal blends → fewer atoms first, then the inner order (as
+    JointRanker's ties). A prior with `learned` False (PriorRanker's fallback) leaves the joint statistic alone (the
+    blind order with no rows). mode="switch": the prior while the action has fewer than `min_rows` logged rows, the
+    joint statistic from then on. `rows`: the logged rows of the candidates' action without the group `exclude` (several
+    actions → the fewest). `last`: "blend", "prior" or "joint" — what scored the last call; `scored`: a Counter."""
+
+    MODES = ("blend", "switch")
+
+    def __init__(self, prior, joint=None, *, mode: str = "blend", n0: float = 20.0, min_rows: int = 20):
+        if mode not in self.MODES:
+            raise ValueError(f"mode must be one of {self.MODES}")
         if int(min_rows) < 0:
             raise ValueError("min_rows must be ≥ 0")
-        self.prior, self.joint, self.min_rows = prior, joint if joint is not None else JointRanker(), int(min_rows)
+        if not float(n0) > 0:
+            raise ValueError("n0 must be > 0")
+        self.prior, self.joint = prior, joint if joint is not None else JointRanker()
+        self.mode, self.n0, self.min_rows = mode, float(n0), int(min_rows)
         self.last: str | None = None
         self.scored: Counter = Counter()
 
@@ -546,15 +578,35 @@ class HandoverRanker:
         actions = {_key(c.action): c.action for c in candidates}
         return min((buffer.allowed(a, exclude).bit_count() for a in actions.values()), default=0)
 
+    def weight(self, rows: int) -> float:
+        """The prior's weight in the blend: n0 / (n0 + rows)."""
+        return self.n0 / (self.n0 + rows)
+
     def score(self, candidates: Sequence[Candidate], lawset: LawSet | None, buffer: Buffer, exclude=None) -> list[float]:
-        """A score per candidate from the prior or the joint statistic (see the class)."""
+        """A score per candidate (see the class)."""
         if not candidates:
             return []
-        who = "joint" if self.rows(candidates, buffer, exclude) >= self.min_rows else "prior"
+        n = self.rows(candidates, buffer, exclude)
+        if self.mode == "switch":
+            who = "joint" if n >= self.min_rows else "prior"
+            scorer = self.joint if who == "joint" else self.prior
+            out = scorer.score(candidates, lawset, buffer, exclude=exclude)
+        elif getattr(self.prior, "learned", True) is False:
+            who = "joint"
+            out = self.joint.score(candidates, lawset, buffer, exclude=exclude)
+        else:
+            who = "blend"
+            jac = np.asarray(self.joint.jaccard(candidates, lawset, buffer, exclude), dtype=float)
+            pri = _rank01(self.prior.score(candidates, lawset, buffer, exclude=exclude))
+            longest = max(len(tuple(c.condition)) for c in candidates)
+            # the tie-break by fewer atoms stays below any gap between two different Jaccards (≥ 1 / rows²) and any
+            # gap between two prior ranks (w / (candidates − 1))
+            eps = 1.0 / ((n + 1) ** 2 * (longest + 1) * (len(candidates) + 1))
+            size = np.array([len(tuple(c.condition)) for c in candidates], dtype=float)
+            out = [float(v) for v in jac + self.weight(n) * pri - eps * size]
         self.last = who
         self.scored[who] += 1
-        scorer = self.joint if who == "joint" else self.prior
-        return scorer.score(candidates, lawset, buffer, exclude=exclude)
+        return out
 
 
 def checks_to(order: Sequence[Candidate], condition) -> int | None:

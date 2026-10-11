@@ -1,8 +1,9 @@
 """Ranking candidate laws by the joint statistic of the whole condition (`JointRanker`, no training) against the blind
 order, the raw per-atom control (`FeatureRanker`), the trained bag of atoms (`BagOfAtomsRanker`), a negative control
 (the same scorer against an effect mask whose rows are shuffled), the prior order that reads no rows (`PriorRanker`, its
-control fitted on shuffled labels) and the hand-over from the prior to the joint statistic at 20 rows
-(`HandoverRanker`), on synthetic tasks drawn from three grammars:
+control fitted on shuffled labels) and the hand-over from the prior to the joint statistic (`HandoverRanker`: the
+blend, whose prior weight is 20 / (20 + rows), and the fixed switch at 20 rows), on synthetic tasks drawn from four
+grammars:
 
     python benchmarks/laws_rank_joint.py                  # A, B, C, D at seed 0, as JSON (a few minutes on a laptop CPU)
     python benchmarks/laws_rank_joint.py --settings A --tasks 20 --train 50
@@ -24,8 +25,8 @@ set, checked), and `checks_to` the true condition — its 1-based position among
 and the prior are trained on `--train` tasks of the same setting (the same condition sizes). Reported per setting and order: mean,
 median, the share found first, and the distinct candidates per task. `--curve`: the same tasks with each buffer cut to
 its first 0 / 5 / 20 / 100 / 300 logged rows (the bag of atoms as trained) — a statistic over rows needs rows; with
-none every row scorer gives the blind order, the prior does not read rows, and the hand-over is the prior below 20 rows
-and the joint statistic from 20 on. Deterministic for a seed."""
+none every row scorer gives the blind order, the prior does not read rows, the blend starts at the prior's order and
+moves to the joint statistic's, and the switch is the prior below 20 rows and the joint statistic from 20 on. Deterministic for a seed."""
 from __future__ import annotations
 
 import argparse
@@ -44,7 +45,7 @@ with warnings.catch_warnings():
                                          HandoverRanker, JointRanker, PriorRanker, RankedProposer, atom_features,
                                          atom_kind, checks_to, synthetic_task)
 
-ORDERS = ("blind", "feature", "bag", "joint", "joint_shuffled", "prior", "handover", "prior_shuffled")
+ORDERS = ("blind", "feature", "bag", "joint", "joint_shuffled", "prior", "handover", "switch", "prior_shuffled")
 CUTS = (0, 5, 20, 100, 300)
 
 
@@ -155,7 +156,8 @@ def run(name: str, seed: int = 0, tasks: int = 60, train: int = 150, rows: int =
     prior = PriorRanker(seed=seed).fit(g, sample, tasks=train, rows=rows, noise=noise, sizes=sizes)
     scorers = {"feature": FeatureRanker("jaccard"), "bag": train_bag(g, sample, noise, sizes, train, seed, rows),
                "joint": JointRanker(), "joint_shuffled": ShuffledMask(seed), "prior": prior,
-               "handover": HandoverRanker(prior, JointRanker(), min_rows=20),
+               "handover": HandoverRanker(prior, JointRanker()),
+               "switch": HandoverRanker(prior, JointRanker(), mode="switch", min_rows=20),
                "prior_shuffled": PriorRanker(seed=seed, shuffle_labels=True, fallback=False).fit(
                    g, sample, tasks=train, rows=rows, noise=noise, sizes=sizes)}
     rng = random.Random(10_000 + seed)
