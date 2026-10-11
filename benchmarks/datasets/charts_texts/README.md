@@ -54,7 +54,7 @@ stated as such), before any proposer was run on these texts. For each text:
   for "COVID-19"); for a value: `value` with the sign the text means ("decreased 29.1 percent" → −29.1; "less than
   0.1 percent" is labelled 0.1 with the bound in `of`), `unit` (a base unit from the `units` table) and `of` (what it
   is a value of). A generator checks that every run of digits in a text lies inside a labelled number.
-- **how a drawn point is judged** (X3-2): `label_keywords` — groups separated by `;`, alternatives by `|`; a drawn
+- **how a drawn point is judged** (bar-2): `label_keywords` — groups separated by `;`, alternatives by `|`; a drawn
   point's label agrees when every group has an alternative in the point's label, its series name or the chart's title
   (case-insensitive), and none of `label_excludes` is there; e.g. `"urban ; 2022|from"` for the urban obesity rate of
   March 2022–March 2023 (a label must say which of the four rates it is). The unit agrees when the chart's unit (as

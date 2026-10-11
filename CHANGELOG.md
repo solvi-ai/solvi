@@ -377,7 +377,7 @@ calibration files and served by `solvi serve`), so a build from it is not mistak
   `solvi.testing.conformance.check_specialist` gains the check "replays from its record without calling the proposer"
   (a tripwire proposer during every replay, and the same bytes) and `deterministic=False` to skip the two-run check for
   a model proposer. On the charts stand's 50 texts with the LLM proposer (gpt-oss-120b, answers from the proxy's cache,
-  no new calls) every stored run replays byte for byte from its record, 50 of 50. The 0/50 of PREREG X3 was the
+  no new calls) every stored run replays byte for byte from its record, 50 of 50. The 0/50 of the pre-registered run was the
   benchmark's: its "second run" used the rule proposer for every arm; `benchmarks/charts_real_texts.py` now checks
   replay from the record (and a second run only for the rule arm) and has `--replay RUNS_JSONL`.
 

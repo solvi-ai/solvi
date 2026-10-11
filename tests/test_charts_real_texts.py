@@ -1,6 +1,6 @@
 """benchmarks/charts_real_texts.py (the pre-registered charts-on-real-texts stand): the script's own logic on the gallery texts of tests/test_charts.py —
-the re-verification of rendered values against a text (X3-1), the matching of drawn points against a hand reading
-(X3-2), the refusal-reason tally (X3-3), the proposal reduced to its verified points (X3-4) and the logged loader.
+the re-verification of rendered values against a text (bar-1), the matching of drawn points against a hand reading
+(bar-2), the refusal-reason tally (bar-3), the proposal reduced to its verified points (bar-4) and the logged loader.
 The measured set (benchmarks/datasets/charts_texts) is not read here."""
 import importlib.util
 import json
@@ -48,7 +48,7 @@ def test_the_dry_set_is_the_three_gallery_texts_with_labels_for_each():
         assert lab["chart"]["series"]
 
 
-# ------------------------------------------------------------------------------------------------ X3-1
+# ----------------------------------------------------------------------------------------------- bar-1
 @pytest.mark.parametrize("written, value", [
     ("$4.2 billion", "4200000000"), ("1,200 tonnes", "1200"), ("42%", "42"), ("12 percent", "12"),
     ("$1.9 million", "1900000"), ("eight", "8"), ("Seven", "7"), ("–$27.61 trillion", "27610000000000"),
@@ -106,7 +106,7 @@ def test_a_run_without_output_has_nothing_to_reverify():
                                                           "svg_numbers_ok": 0, "problems": []}
 
 
-# ------------------------------------------------------------------------------------------------ X3-2
+# ----------------------------------------------------------------------------------------------- bar-2
 @pytest.mark.parametrize("kw, no, hay, ok", [
     ("Europe", "", "Europe", True), ("Europe", "", "europe accounted", True), ("Europe", "", "Asia-Pacific", False),
     ("urban ; 2022|from", "", "urban rate from", True), ("urban ; 2022|from", "", "urban rate", False),
@@ -168,7 +168,7 @@ def test_locate_finds_whole_numbers_at_their_occurrence():
         X.locate(text, [{"as_written": "3%", "occurrence": 2}])
 
 
-# ------------------------------------------------------------------------------------------------ X3-3
+# ----------------------------------------------------------------------------------------------- bar-3
 def test_refusal_reasons():
     assert X.refusal_reason(rule(PRESS)) is None
     assert X.refusal_reason(rule("No numbers here at all.")) == "no_values_proposed"
@@ -185,7 +185,7 @@ def test_the_tally_counts_drawn_runs_and_each_refusal_reason():
     assert t == {"drawn": 2, "refused": 2, "reasons": {"no_values_proposed": 2}}
 
 
-# ------------------------------------------------------------------------------------------------ X3-4
+# ----------------------------------------------------------------------------------------------- bar-4
 def test_verified_only_keeps_the_points_that_verified_and_the_total_if_it_did():
     run = fixed(QUARTERS, {"kind": "line", "title": "q", "unit": "USD", "scale": "million",
                            "series": [{"points": [{"label": "Q1 2025", "value": "1.2", "quote": {"text": "$1.2 million"}},

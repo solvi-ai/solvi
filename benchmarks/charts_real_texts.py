@@ -3,29 +3,29 @@ news releases (benchmarks/datasets/charts_texts), against a hand reading of ever
 saw the texts.
 
     python benchmarks/charts_real_texts.py --dry                 # the 3 gallery texts of tests/test_charts.py
-    python benchmarks/charts_real_texts.py --run --out out/x3    # the measured run on the 50 texts (one run)
+    python benchmarks/charts_real_texts.py --run --out out/charts  # the measured run on the 50 texts (one run)
 
 For each text `chart(text)` with the rule-based proposer (the LLM proposer only as a report arm: --llm MODEL, through
 the shared proxy), then:
 
-  X3-1  every rendered value re-verified against the text by this script's own reader: each verified value is the
+  bar-1  every rendered value re-verified against the text by this script's own reader: each verified value is the
         number written at its place (the text there is what the checker says, and its quantity is the value × scale),
         and every number in the SVG's text (labels, values, title, description; the footer's count excluded) states a
         quantity the text states or is written in the text as is;
-  X3-2  each drawn point against the hand reading (labels.json): the label carries the reading's keywords, the unit
+  bar-2  each drawn point against the hand reading (labels.json): the label carries the reading's keywords, the unit
         and scale give the reading's quantity; the sign is reported apart;
-  X3-3  drawn or refused, each refusal with its reason (invalid proposal, no value proposed, or the commonest reason a
+  bar-3  drawn or refused, each refusal with its reason (invalid proposal, no value proposed, or the commonest reason a
         proposed value was dropped);
-  X3-4  solvi.testing.corrupt on the runs' recorded proposals — change_digit and swap of point values, drop of a point —
+  bar-4  solvi.testing.corrupt on the runs' recorded proposals — change_digit and swap of point values, drop of a point —
         and, reported beside it, on the proposals reduced to their verified points;
-  X3-5  each run's record replays from itself (re-parsed, re-checked, re-rendered without calling the proposer:
+  bar-5  each run's record replays from itself (re-parsed, re-checked, re-rendered without calling the proposer:
         identical issues and bytes), with the rule proposer a second run gives identical bytes (a model proposer is
         not re-called: a remote LLM at temperature 0 does not repeat itself), and
         solvi.testing.conformance.check_specialist passes on the texts.
 
-    python benchmarks/charts_real_texts.py --replay out/x3_llm/runs.jsonl    # X3-5's replay alone, from stored runs
+    python benchmarks/charts_real_texts.py --replay out/charts_llm/runs.jsonl    # bar-5's replay alone, from stored runs
 
-Until 1.1 the second run of X3-5 used the rule proposer for every arm, so the LLM arm's "same bytes" compared a rule
+Until 1.1 the second run of bar-5 used the rule proposer for every arm, so the LLM arm's "same bytes" compared a rule
 chart with the model's (0/50); the replay of its records was 50/50.
 
 Results are saved per text as they come (out/runs.jsonl; a rerun with the same --out resumes), then out/report.json and
@@ -60,7 +60,7 @@ from solvi.testing.corrupt import change_digit, corrupt, drop, swap  # noqa: E40
 
 VALUE = r"^/series/\d+/points/\d+/value$"
 POINT = r"^/series/\d+/points/\d+$"
-PROXY = "http://127.0.0.1:8765/x3/{arm}/v1"
+PROXY = "http://127.0.0.1:8765/charts/{arm}/v1"
 
 # ------------------------------------------------------------------------------------------ units of the hand reading
 # base unit -> {chart unit (canonical): chart units per base unit}; labels.json carries its own copy (used when present)
@@ -172,7 +172,7 @@ def load_texts(path, mode, log=None):
     return [json.loads(line) for line in raw.decode().splitlines() if line.strip()]
 
 
-# ------------------------------------------------------------------------------------------ X3-1: this script's reader
+# ------------------------------------------------------------------------------------------ bar-1: this script's reader
 _WORDS = {w: i for i, w in enumerate("zero one two three four five six seven eight nine ten eleven twelve thirteen "
                                      "fourteen fifteen sixteen seventeen eighteen nineteen twenty".split())}
 _WORDS.update({"thirty": 30, "forty": 40, "fifty": 50, "sixty": 60, "seventy": 70, "eighty": 80, "ninety": 90,
@@ -259,7 +259,7 @@ def _points(verified):
 
 
 def reverify(run, text):
-    """X3-1 for one run → {"values", "values_ok", "svg_numbers", "svg_numbers_ok", "problems"}."""
+    """bar-1 for one run → {"values", "values_ok", "svg_numbers", "svg_numbers_ok", "problems"}."""
     res = {"values": 0, "values_ok": 0, "svg_numbers": 0, "svg_numbers_ok": 0, "problems": []}
     v = run.checked.verified if run.checked is not None else None
     if run.output is None or v is None:
@@ -289,7 +289,7 @@ def reverify(run, text):
     return res
 
 
-# ------------------------------------------------------------------------------------------ X3-2: the hand reading
+# ------------------------------------------------------------------------------------------ bar-2: the hand reading
 def label_agrees(keywords, excludes, haystack):
     """keywords "a|b ; c": every group has an alternative in the haystack (case-insensitive); excludes "x|y": none."""
     h = (haystack or "").lower()
@@ -304,7 +304,7 @@ def _sign(x):
 
 
 def match_points(run, label, units=None):
-    """X3-2 for one run → a row per drawn point: label, value, place, the labelled number it stands on, label_ok,
+    """bar-2 for one run → a row per drawn point: label, value, place, the labelled number it stands on, label_ok,
     unit_ok, sign_ok and a reason when it disagrees."""
     units = units or UNITS
     v = run.checked.verified if run.checked is not None else None
@@ -341,7 +341,7 @@ def match_points(run, label, units=None):
     return rows
 
 
-# ------------------------------------------------------------------------------------------ X3-3: refusals
+# ------------------------------------------------------------------------------------------ bar-3: refusals
 def refusal_reason(run):
     """None for a drawn chart; else the blocking reason (invalid_proposal, proposer_failed), "no_values_proposed", or
     the commonest reason the proposed values were dropped (ties: the first in the report)."""
@@ -368,7 +368,7 @@ def tally(runs):
     return {"drawn": drawn, "refused": len(runs) - drawn, "reasons": dict(sorted(reasons.items()))}
 
 
-# ------------------------------------------------------------------------------------------ X3-4: corruption
+# ------------------------------------------------------------------------------------------ bar-4: corruption
 def _proposal_and_issues(x):
     if isinstance(x, dict):                                   # a stored record (run.to_dict())
         return x.get("proposal"), x.get("issues") or []
@@ -410,7 +410,7 @@ def verified_only(x):
 
 
 def corruption(runs, texts, n=300, seed=0):
-    """X3-4: {"recorded" | "verified_only": {kind: {"n", "caught", "skipped", "rate", "rows"}}} — each kind run on its
+    """bar-4: {"recorded" | "verified_only": {kind: {"n", "caught", "skipped", "rate", "rows"}}} — each kind run on its
     own with `n` mutations and the same seed. runs: {id: Run or record}; texts: {id: text}."""
     sp = ChartSpecialist()
     kinds = {"change_digit": change_digit(paths=VALUE), "swap": swap(paths=VALUE), "drop": drop(paths=POINT)}
@@ -439,7 +439,7 @@ def corruption(runs, texts, n=300, seed=0):
     return out
 
 
-# ------------------------------------------------------------------------------------------ X3-5: replay
+# ------------------------------------------------------------------------------------------ bar-5: replay
 def _not_called(source, question=None):
     raise RuntimeError("replay called the proposer")
 
@@ -507,7 +507,7 @@ def run_all(texts, labels, out, *, proposer=None, n_corrupt=300, seed=0, arm="ru
     recs = {tid: done[tid] for tid in texts}
     good = {tid: r["record"] for tid, r in recs.items() if "record" in r}
     report = summarise(recs, texts, labels)
-    report["x3_4"] = {arm_: {k: {kk: vv for kk, vv in v.items() if kk != "rows"} for k, v in kinds.items()}
+    report["bar_4"] = {arm_: {k: {kk: vv for kk, vv in v.items() if kk != "rows"} for k, v in kinds.items()}
                       for arm_, kinds in corruption(good, texts, n=n_corrupt, seed=seed).items()}
     rp = replay_checks(good, texts, rerun=RuleProposer() if arm == "rules" else None)
     try:
@@ -515,7 +515,7 @@ def run_all(texts, labels, out, *, proposer=None, n_corrupt=300, seed=0, arm="ru
         cs_res = {"passed": True, **cs}
     except ConformanceError as e:
         cs_res = {"passed": False, "error": str(e)}
-    report["x3_5"] = {"replayed_ok": sum(r["replay_ok"] for r in rp.values()),
+    report["bar_5"] = {"replayed_ok": sum(r["replay_ok"] for r in rp.values()),
                       "same_bytes": sum(r["same_bytes"] for r in rp.values()), "texts": len(texts),
                       "rerun_same": (sum(r["rerun_same"] for r in rp.values()) if arm == "rules" else None),
                       "failures": {k: r for k, r in rp.items() if not (r["replay_ok"] and r["same_bytes"]
@@ -536,18 +536,18 @@ def summarise(recs, texts, labels):
     errors = {tid: rec["error"] for tid, rec in recs.items() if "error" in rec}
     agree = [r for r in rows if r["label_ok"] and r["unit_ok"]]
     return {
-        "x3_1": {"texts_drawn": sum(1 for r in recs.values() if r.get("ok")),
+        "bar_1": {"texts_drawn": sum(1 for r in recs.values() if r.get("ok")),
                  "texts_all_reverified": sum(1 for rec in recs.values() if rec.get("ok") and not rec["reverify"]["problems"]),
                  "values": sum(r["values"] for r in rv), "values_ok": sum(r["values_ok"] for r in rv),
                  "svg_numbers": sum(r["svg_numbers"] for r in rv), "svg_numbers_ok": sum(r["svg_numbers_ok"] for r in rv),
                  "problems": {tid: rec["reverify"]["problems"] for tid, rec in recs.items()
                               if rec.get("reverify", {}).get("problems")}},
-        "x3_2": {"points": len(rows), "agree": len(agree), "label_ok": sum(r["label_ok"] for r in rows),
+        "bar_2": {"points": len(rows), "agree": len(agree), "label_ok": sum(r["label_ok"] for r in rows),
                  "unit_ok": sum(r["unit_ok"] for r in rows), "sign_ok": sum(r["sign_ok"] for r in rows),
                  "rate": len(agree) / len(rows) if rows else None,
                  "disagreements": [r for r in rows if not (r["label_ok"] and r["unit_ok"])],
                  "sign_disagreements": [r for r in rows if not r["sign_ok"] and r["of"] is not None]},
-        "x3_3": {"texts": len(texts), "drawn": sum(1 for r in recs.values() if r.get("ok")),
+        "bar_3": {"texts": len(texts), "drawn": sum(1 for r in recs.values() if r.get("ok")),
                  "refused": sum(1 for r in recs.values() if not r.get("ok")), "reasons": dict(sorted(reasons.items())),
                  "errors": errors,
                  "refused_texts": {tid: rec.get("refusal") or rec.get("error") for tid, rec in recs.items() if not rec.get("ok")}},
@@ -556,21 +556,21 @@ def summarise(recs, texts, labels):
 
 def bars(rep):
     """The numbers each pre-registered bar of the stand is read on (the verdict is the coordinator's)."""
-    x1, x2, x3, x4, x5 = rep["x3_1"], rep["x3_2"], rep["x3_3"], rep["x3_4"]["recorded"], rep["x3_5"]
+    x1, x2, x3, x4, x5 = rep["bar_1"], rep["bar_2"], rep["bar_3"], rep["bar_4"]["recorded"], rep["bar_5"]
     return {
-        "X3-1": {"bar": "0 numbers on the charts not in the text; every rendered value re-verified (texts drawn)",
+        "bar-1": {"bar": "0 numbers on the charts not in the text; every rendered value re-verified (texts drawn)",
                  "measured": f"{x1['texts_all_reverified']}/{x1['texts_drawn']} drawn texts clean; values "
                              f"{x1['values_ok']}/{x1['values']}; chart numbers {x1['svg_numbers_ok']}/{x1['svg_numbers']}",
                  "met": x1["values_ok"] == x1["values"] and x1["svg_numbers_ok"] == x1["svg_numbers"]},
-        "X3-2": {"bar": ">= 95% of drawn points agree in label and unit", "measured": x2["rate"],
+        "bar-2": {"bar": ">= 95% of drawn points agree in label and unit", "measured": x2["rate"],
                  "met": x2["rate"] is not None and x2["rate"] >= 0.95},
-        "X3-3": {"bar": "a chart drawn for >= 50% of the texts", "measured": x3["drawn"] / x3["texts"],
+        "bar-3": {"bar": "a chart drawn for >= 50% of the texts", "measured": x3["drawn"] / x3["texts"],
                  "met": x3["drawn"] / x3["texts"] >= 0.5},
-        "X3-4": {"bar": "change_digit caught 100%; swap >= 95%; drop reported",
+        "bar-4": {"bar": "change_digit caught 100%; swap >= 95%; drop reported",
                  "measured": {k: (v["caught"], v["n"]) for k, v in x4.items()},
                  "met": (x4["change_digit"]["n"] > 0 and x4["change_digit"]["caught"] == x4["change_digit"]["n"]
                          and x4["swap"]["n"] > 0 and x4["swap"]["caught"] >= 0.95 * x4["swap"]["n"])},
-        "X3-5": {"bar": "replay 50/50 identical bytes; check_specialist passes",
+        "bar-5": {"bar": "replay 50/50 identical bytes; check_specialist passes",
                  "measured": f"replayed {x5['replayed_ok']}/{x5['texts']}, same bytes {x5['same_bytes']}/{x5['texts']}"
                              + (f", a second rule run the same {x5['rerun_same']}/{x5['texts']}"
                                 if x5.get("rerun_same") is not None else "")
@@ -582,28 +582,28 @@ def bars(rep):
 
 def markdown(rep):
     c, b = rep["config"], rep["verdict_inputs"]
-    lines = [f"# X3 — verified charts on real texts ({c['arm']}, {c['texts']} texts)", "",
+    lines = [f"# Verified charts on real texts ({c['arm']}, {c['texts']} texts)", "",
              f"Proposer: `{c['proposer']}`; corruption: n = {c['n_corrupt']} per kind, seed {c['seed']}.", "",
              "| bar | measured | met |", "|---|---|---|"]
     for k, v in b.items():
         m = v["measured"]
         m = f"{m:.1%}" if isinstance(m, float) else m
         lines.append(f"| {k}: {v['bar']} | {m} | {'yes' if v['met'] else 'no'} |")
-    x2, x3, x4 = rep["x3_2"], rep["x3_3"], rep["x3_4"]
-    lines += ["", "## X3-2 points", "",
+    x2, x3, x4 = rep["bar_2"], rep["bar_3"], rep["bar_4"]
+    lines += ["", "## bar-2 points", "",
               f"{x2['points']} drawn points: label agrees {x2['label_ok']}, unit agrees {x2['unit_ok']}, both {x2['agree']}; "
               f"sign agrees {x2['sign_ok']} (reported apart).", ""]
     for r in x2["disagreements"]:
         lines.append(f"- {r['id']} {r['label']!r} = {r['value']} ({r['as_written']!r}): {r['reason']}")
-    lines += ["", "## X3-3 refusals", "", f"drawn {x3['drawn']}/{x3['texts']}; reasons: {x3['reasons']}", ""]
+    lines += ["", "## bar-3 refusals", "", f"drawn {x3['drawn']}/{x3['texts']}; reasons: {x3['reasons']}", ""]
     for tid, why in x3["refused_texts"].items():
         lines.append(f"- {tid}: {why}")
-    lines += ["", "## X3-4 corruption", "", "| arm | change_digit | swap | drop |", "|---|---|---|---|"]
+    lines += ["", "## bar-4 corruption", "", "| arm | change_digit | swap | drop |", "|---|---|---|---|"]
     for arm, kinds in x4.items():
         lines.append(f"| {arm} | " + " | ".join(f"{v['caught']}/{v['n']}" + (f" ({v['skipped']} skipped)" if v["skipped"] else "")
                                                 for v in kinds.values()) + " |")
-    if rep["x3_1"]["problems"]:
-        lines += ["", "## X3-1 problems", ""] + [f"- {k}: {v}" for k, v in rep["x3_1"]["problems"].items()]
+    if rep["bar_1"]["problems"]:
+        lines += ["", "## bar-1 problems", ""] + [f"- {k}: {v}" for k, v in rep["bar_1"]["problems"].items()]
     return "\n".join(lines) + "\n"
 
 
@@ -624,7 +624,7 @@ def main(argv=None):
     ap.add_argument("--n-corrupt", type=int, default=300)
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--llm", default=None, help="report arm: an LLM proposer (model id) through the shared proxy")
-    ap.add_argument("--replay", default=None, help="X3-5's replay alone, from a runs.jsonl a run wrote (no proposer)")
+    ap.add_argument("--replay", default=None, help="bar-5's replay alone, from a runs.jsonl a run wrote (no proposer)")
     a = ap.parse_args(argv)
     if a.replay:
         texts = {r["id"]: r["text"] for r in load_texts(a.texts, mode="replay")}
@@ -645,13 +645,13 @@ def main(argv=None):
         proposer = LLMProposer(PROXY.format(arm=arm), a.llm, timeout=120.0)
     if a.dry:
         texts, labels, units = dict(GALLERY), GALLERY_LABELS, UNITS
-        out = Path(a.out or ROOT / "out" / f"x3_dry_{arm}")
+        out = Path(a.out or ROOT / "out" / f"charts_dry_{arm}")
     else:
         lab = json.loads(Path(a.labels).read_text())
         texts = {r["id"]: r["text"] for r in load_texts(a.texts, mode=f"measured:{arm}")}
         labels, units = lab["texts"], lab.get("units") or UNITS
         _check_labels(texts, labels)
-        out = Path(a.out or ROOT / "out" / f"x3_{arm}")
+        out = Path(a.out or ROOT / "out" / f"charts_{arm}")
     rep = run_all(texts, labels, out, proposer=proposer, n_corrupt=a.n_corrupt, seed=a.seed, arm=arm, units=units)
     print((out / "report.md").read_text())
     return rep
