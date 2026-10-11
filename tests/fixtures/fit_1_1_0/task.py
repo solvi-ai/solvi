@@ -33,12 +33,17 @@ STATES = [{"note": "train to the client, travel"}, {"note": "meals with the team
           {"note": "software licence and meals"}]
 
 
-def fitted_part():
-    """The part on a fresh model, fitted on EXAMPLES and taught one correction."""
+def fitted_part(fit=False):
+    """The part on a fresh model with the adaptation 1.1.0 wrote (adaptations.json, read back as a user's file is —
+    the fit's numbers are the file's, not this machine's); fit=True refits on EXAMPLES and teaches one correction
+    (make.py, which then writes the file)."""
     model = DecideModel(Words(), {"format": "solvi_decide v2", "act": False})
     part = model.decision("category", "What kind of expense is it?", "note", OPTIONS)
-    part.fit(EXAMPLES)
-    part.teach("a receipt for a licence", "software")
+    if fit:
+        part.fit(EXAMPLES)
+        part.teach("a receipt for a licence", "software")
+    else:
+        model.load_adaptations(os.path.join(HERE, "adaptations.json"))
     return part
 
 
