@@ -327,7 +327,7 @@ class PriorRanker:
     `fit` draws `tasks` synthetic tasks (`synthetic_task`, the same signature as BagOfAtomsRanker.fit; `sizes=(lo, hi)`
     draws condition sizes uniform in lo..hi as a setting does) and fits the weights by a softmax over each task's
     candidates (`grammar.conditions` of the atoms true in the mismatched state) with the true condition as the target:
-    Newton's method from zero weights on standardised features (L2 `l2`, at most `steps` steps), the rates of each half of the tasks read
+    Newton's method from zero weights on standardized features (L2 `l2`, at most `steps` steps), the rates of each half of the tasks read
     from the other half (so a task's own condition never feeds its features), the final rates from all tasks. Seeded
     and deterministic. `shuffle_labels=True` is the control: each task's target replaced by one of its candidates drawn
     at random (seeded) — a prior that learns nothing should do no better than the blind order. Unfitted: every score
