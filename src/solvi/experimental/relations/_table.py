@@ -18,12 +18,13 @@ Derivation. CYK over the chain: every span holds the relations it composes to an
 bracketing that meets an empty cell gives nothing. agree="all": answered when every bracketing that gives a relation
 gives the same one; "majority": the relation of strictly the most bracketings. No relation → "underivable"; more than
 one under "all" (or a tie) → "disagree"; only the identity → "identity". The answer's reason is the set of cells used by
-the bracketings that give it."""
+the bracketings that give it; an "underivable" refusal names the absent cells that block it (`Derivation.missing`), and
+`why_not` reads them over every path of a story — a refusal becomes a learning target: the cell to learn."""
 from __future__ import annotations
 
 import math
 from collections import Counter, defaultdict
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Callable, Iterable, Iterator, Mapping, Sequence
 
 Admit = Callable[[tuple, str, int, int, int], bool]
@@ -50,12 +51,16 @@ class Cell:
 class Derivation:
     """What derive() returns. relation: the answer or None; reason: "derived" | "underivable" | "disagree" |
     "identity"; candidates: relation → number of bracketings giving it; cells: the cells used by the answer's
-    bracketings (empty for a refusal; explain(chain, relation) shows a candidate's)."""
+    bracketings (empty for a refusal; explain(chain, relation) shows a candidate's); missing: for an "underivable"
+    refusal, the absent cells (left, right) that block it — on the shortest span no bracketing composes, the pairs of
+    its two composed parts that have no cell, most blocked chains first (derive_paths) — the rule to learn, by name
+    (`why_not` reads it over a story's paths); () otherwise."""
     chain: tuple
     relation: str | None
     reason: str
     candidates: dict = field(default_factory=dict)
     cells: tuple = ()
+    missing: tuple = ()
 
     @property
     def answered(self) -> bool:
@@ -203,6 +208,28 @@ class CompositionTable:
 
     # ───────────────────────────── derivation
     def _cyk(self, chain):
+        span, back = self._spans(chain)
+        return span[(0, len(chain))], back
+
+    def _missing(self, chain, span) -> list:
+        """The absent cells on the shortest span that composes to nothing while both parts of a split compose."""
+        n = len(chain)
+        for length in range(2, n + 1):
+            out = set()
+            for i in range(0, n - length + 1):
+                j = i + length
+                if span[(i, j)]:
+                    continue
+                for m in range(i + 1, j):
+                    for r1 in span[(i, m)]:
+                        for r2 in span[(m, j)]:
+                            if (r1, r2) not in self._cells and self.identity not in (r1, r2):
+                                out.add((r1, r2))
+            if out:
+                return sorted(out)
+        return []
+
+    def _spans(self, chain):
         n = len(chain)
         span = {(i, i + 1): Counter({r: 1}) for i, r in enumerate(chain)}
         back = defaultdict(list)                      # (i, j, r) → [(m, r1, r2, cell key or None)]
@@ -225,7 +252,7 @@ class CompositionTable:
                             acc[r] += c1 * c2
                             back[(i, j, r)].append((m, r1, r2, key))
                 span[(i, j)] = acc
-        return span[(0, n)], back
+        return span, back
 
     def _used(self, back, n, relation) -> tuple:
         seen, out, stack = set(), set(), [(0, n, relation)]
@@ -262,8 +289,11 @@ class CompositionTable:
         chain = tuple(chain)
         if not chain:
             raise ValueError("an empty chain")
-        total, back = self._cyk(chain)
-        return self._decide(chain, total, lambda r: self._used(back, len(chain), r))
+        span, back = self._spans(chain)
+        d = self._decide(chain, span[(0, len(chain))], lambda r: self._used(back, len(chain), r))
+        if d.reason == "underivable":
+            d = replace(d, missing=tuple(self._missing(chain, span)))
+        return d
 
     def derive_paths(self, chains: Iterable[Sequence[str]]) -> Derivation:
         """One query reached by several chains (e.g. every shortest path between two people): the bracketings of every
@@ -271,11 +301,14 @@ class CompositionTable:
         chains = [tuple(c) for c in chains]
         if not chains:
             return Derivation((), None, "underivable")
-        total, backs = Counter(), []
+        total, backs, blocked = Counter(), [], Counter()
         for c in chains:
-            t, b = self._cyk(c)
+            span, b = self._spans(c)
+            t = span[(0, len(c))]
             total.update(t)
             backs.append((c, t, b))
+            if not t:
+                blocked.update(self._missing(c, span))
 
         def used(r):
             keys = {}
@@ -284,7 +317,10 @@ class CompositionTable:
                     for cell in self._used(b, len(c), r):
                         keys[(cell.left, cell.right)] = cell
             return tuple(keys[k] for k in sorted(keys))
-        return self._decide(tuple(chains), total, used)
+        d = self._decide(tuple(chains), total, used)
+        if d.reason == "underivable":
+            d = replace(d, missing=tuple(k for k, _ in sorted(blocked.items(), key=lambda kv: (-kv[1], kv[0]))))
+        return d
 
     def explain(self, chain: Sequence[str], relation: str | None = None) -> tuple:
         """The cells the bracketings that give `relation` use (default: the derived answer; () when refused)."""
