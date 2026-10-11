@@ -8,8 +8,7 @@ Run it before you publish a release of solvi, a new decider checkpoint, or a cat
 
 A change the system makes to itself is checked the same way, and without a switch: `solvi.experimental.changes` runs
 `RefusalRegression` on every change whose target can answer — the share refused on a held should-abstain set before
-and after — and refuses a change that answers what was refused before (refusal is the first casualty of self-change:
-a chain of model merges has been reported to keep its skills and lose much of its refusal).
+and after — and refuses a change that answers what was refused before (refusal is the first casualty of self-change).
 
 ## What is in it
 

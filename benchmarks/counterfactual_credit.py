@@ -60,7 +60,7 @@ BARS = {"validity": "validity = 100% of the explanations returned", "minimality"
 DRY_N, BEST_N = 20, 10
 
 
-# ---------------------------------------------------------------- the stand
+# ---------------------------------------------------------------- the benchmark
 def build_v2(sensitive=()):
     """The hand-written credit catalog v2 of benchmarks/changes_credit.py, as that script builds it."""
     return cc.build(2, sensitive=set(sensitive))

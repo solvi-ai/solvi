@@ -29,20 +29,27 @@ STATUS: dict[str, dict] = {
              "decision on real use, a benchmark script in the repo, and wiring as the adapter rung of an update "
              "(solvi.experimental.changes); measured gains over fit come with overconfidence", "script": None},
     "compile": {"since": "0.9", "what": "a written specification compiled by an LLM into catalog parts, accepted when "
-                "two drafts agree and the specification's tests pass (with its sandbox)", "missing": "acceptance on "
-                "larger specifications and a benchmark script in benchmarks/", "script": None},
+                "two drafts agree and the specification's tests pass (with its sandbox)", "missing": "measured once on 15 classes of small pure functions over typed slots (a search over a bank of 137 operations, |H| up to 6.5·10⁸ programs of depth 2, N = 314–452 fresh examples; a small hosted LLM writer at N = 60, two drafts): no accepted function was wrong on 200 hidden examples per class (21 accepted), the search found 6 of 15 classes and the writer 15 of 15 — but neither proposer produced a false candidate, so whether the sized certificate refuses what a five-example certificate accepts was not shown on that setup; it is shown only on a planted constant in a smoke test; its necessity on a live stream of drafts is not shown; still missing: acceptance on larger specifications and a benchmark script in benchmarks/", "script": None},
     "hooks": {"since": "0.7.1", "what": "`solvi hook`: a coding agent's pre-edit rule checks and skill picker",
               "missing": "false deny and ask rates on real coding-agent sessions, with a script", "script": None},
     "charts": {"since": "0.7", "what": "verified charts: every number quoted from the text, a deterministic SVG",
-               "missing": "accuracy on real texts with the rule-based and the LLM proposer", "script": None},
+               "missing": "Measured on 50 paragraphs of US federal news releases against a hand reading written before any "
+               "proposer ran (`benchmarks/charts_real_texts.py`, one run): the rule-based proposer drew a chart for "
+               "50 of 50 texts with every rendered value re-verified against the text (350 of 350 chart numbers), "
+               "but only 33.3% of the drawn points agreed with the hand reading in label and unit (the bar was 95%: "
+               "labels 39, units 82 of 99 points); the LLM proposer (gpt-oss-120b) drew a chart for 56% of the texts"
+               " and agreed on 94.2% of the points, with 5 of 485 chart numbers not in the text (a sign the proposer"
+               " added); a changed digit and swapped values were caught 300 of 300 times by both, a dropped point 74"
+               " (rules) and 109 (LLM) of 300; every run replays byte for byte (50 of 50). Still missing: a proposer"
+               " whose labels and units match a reader's on real texts",
+               "script": "benchmarks/charts_real_texts.py"},
     "changes": {"since": "1.1", "what": "one change pipeline for four sources (a document version, verified "
                 "experience, a person's correction, a search proposal): pluggable stages, a journal of kind \"change\", "
                 "promote into the knowledge store / compiled versions / a labelled update, versions and rollback", "missing": "on a "
                 "credit policy the pipeline carried a document version (144 of 144 changed decisions traced to their "
                 "clause), admitted 12 of 12 exact exceptions, held every widening one for a person and refused 8 of 8 "
                 "exceptions that touched other decisions, 0 extraneous changes, 14 versions replayed; on a bank-request "
-                "stream with a person's labels every one of 22 candidates passed every stage (`nogate` = `gate`), so "
-                "the stages added nothing there — the module is journal, impact analysis, approval levels and "
+                "stream with a person's labels every one of 22 candidates passed every stage — the run with the gates equals the run without them — so the stages added nothing there — the module is journal, impact analysis, approval levels and "
                 "rollback; still missing: the narrows / widens classifier over rule conditions, a regression-scenario "
                 "stage, and a script for the bank-request stream (the credit numbers: benchmarks/changes_credit.py)",
                 "script": "benchmarks/changes_credit.py"},
@@ -52,18 +59,16 @@ STATUS: dict[str, dict] = {
              "systems, export into the knowledge store; acceptance sized by the candidates tested, admission by "
              "discriminating probes, abstention where laws disagree, a search-cost record",
              "missing": "on a game simulator with written mechanics "
-             "the laws closed 94% of the gap between a learned map and the "
-             "written mechanics, but random candidates under the same test came within 1.1 points, so the mismatch is "
+             "the laws closed 94% of the gap between a learned map and the written mechanics (20 fresh worlds, 4,731 transitions, one run; 0.892 → 0.988, ceiling 0.994), but random candidates under the same test came within 1.1 points — the measurement's pre-registered bar for that control (random candidates at most +2 points over the base) was missed by +8.4 — so the mismatch is "
              "a compact proposal heuristic and the test does the work; on a real MCP filesystem server with a path "
-             "policy, probes planned from mismatches took refusals from 6 to 0 in one session (random probes: 48 to "
-             "29); still missing: a grammar too large to enumerate, retirement of weak laws nothing contradicts, "
-             "wiring into a System's decisions, and a script for the two stands (the toys: benchmarks/laws_toy.py); a "
+             "policy, probes planned from mismatches took refusals from 6 to 0 in one session (200 calls per session, one run; random probes: 48 to 29); still missing: a grammar too large to enumerate, retirement of weak laws nothing contradicts, "
+             "wiring into a System's decisions, and a script for the two measurements (the toys: benchmarks/laws_toy.py); a "
              "ranker of candidates for expensive checks (RankedProposer, a bag-of-atoms model trained on tasks drawn "
              "from the grammar) cut the checks to the true condition from 69.7 in the blind order to 2.1 on synthetic "
              "tasks of one grammar, in distribution only; ranking by the joint statistic of the whole condition over the "
              "logged rows (JointRanker, no training; with no rows it is the blind order — the statistic needs rows) "
              "needed 1.00 / 17 / 1.01 checks (medians 1 / 1 / 1) on three synthetic settings of the library's own "
-             "grammars (five seeds × 60 tasks) against 85 / 2,182 / 126 in the blind order and 2.1 / 591 / 7.7 for "
+             "grammars (five seeds × 60 tasks) against 85 / 2,182 / 126 in the blind order (85 a different draw of tasks from the 69.7 above: five seeds against one) and 2.1 / 591 / 7.7 for "
              "the trained bag of atoms, a shuffled-rows control worse than the blind order (112 / 2,434 / 166), the "
              "gain on the deep setting showing from about 20 logged rows and full by 300, the same law accepted "
              "under every order in 894 of 900 tasks; measured once on a live file "
@@ -91,8 +96,7 @@ STATUS: dict[str, dict] = {
                   "top-down synthesis of chain programs through residuals of the target (synthesize_residual, "
                   "synthesize(method=\"residual-first\")); why a relation was not derived (why_not: the missing cell "
                   "or fact, ranked, as an agenda goal)",
-                  "missing": "on a pre-registered battery of 28 random rules "
-                  "over three relations the enumerator found 22 within "
+                  "missing": "on a pre-registered battery of 28 random rules over three relations (the rule file was written in the author's earlier research line before any search ran and is not shipped — `relations_battery.py --rules` takes it; the bars were fixed from that line's reference run, so this is a port-fidelity check, one deterministic run) the enumerator found 22 within "
                   "seven nodes, every find exact on larger graphs of other families, and compiled rules on a forest "
                   "of 100,000 nodes were equal pair for pair; the index-array backend within 0.7–1.3× of hand code "
                   "over a parent array (output conversion excluded); the plain set-code backend 2–3× slower than "
@@ -107,8 +111,7 @@ STATUS: dict[str, dict] = {
                   "relational atoms) faster than the library's own row-by-row interpreter on 100,000 rows (single "
                   "runs) — a speedup over the interpreter, not over hand-written code; on two toys (a path tree with "
                   "\"denied under a directory named secret at depth 3 or more\", three levels; kinship on forests, "
-                  "depth 1 to 6; five seeds each) the library found every level within 2,556 and 10,817 enumerated "
-                  "programs in all, where the same search without it found neither top rule in 100,000, with 0 false "
+                  "depth 1 to 6; five seeds each) the library found every level within 2,556 and 10,817 enumerated programs in all (10,817 the mean over seeds; 10,813–10,819 by seed), where the same search without it found neither top rule in 100,000, with 0 false "
                   "accepts on larger fresh worlds, but the kinship ladder missed its bar of a tenth of that budget "
                   "(1.08 times: the universal relation of the enumerator enlarges every level), and met it at 7,889 "
                   "with the universal relation left out of the terminals (include_universal=False, an opt-in measured "
@@ -122,8 +125,7 @@ STATUS: dict[str, dict] = {
                   "level was not found within the cap of 1,000,000 programs, so the budget ratio is at most 0.0042 "
                   "and its true value unknown; per level the library is not free (90 vs 71 and 2,951 vs 1,898 "
                   "programs on two of the shared levels; cheaper only on one); two controls — a rule no program of "
-                  "the grammar can express, and one that needs a 56-node program — were never admitted (0 of 20 "
-                  "runs); on the kinship ladder (nine rungs up to second cousin once removed) the library found all "
+                  "the grammar can express, and one that needs a 56-node program — were never admitted (0 of 10 runs: five seeds, with and without the library); on the kinship ladder (nine rungs up to second cousin once removed) the library found all "
                   "nine within 3,370–3,378 programs; without it eight of nine — the ninth needs a program of at least "
                   "17 nodes where the no-library search exhausted size 15 at ≈ 500,000 programs; 0 false accepts on "
                   "held-out forests of the same generator at a larger size; relational atoms (an ancestor directory "

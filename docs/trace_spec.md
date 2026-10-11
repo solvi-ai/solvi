@@ -173,8 +173,8 @@ output gives another spec now" otherwise), checks it against the source and rend
 recorded one. A recorded invalid output must still be invalid. Only a record with no proposer output at all calls the
 proposer — `Replay.from_record` is then False and `Replay.note` says so; such a replay is byte-identical only if the
 proposer repeats itself. [tests/test_specialist_replay_record.py: a nondeterministic proposer's stored runs replay byte
-for byte without a call; `check_specialist` fails a specialist whose replay calls the proposer] On the charts stand's
-50 texts with an LLM proposer every stored run replays byte for byte from its record (50 of 50).
+for byte without a call; `check_specialist` fails a specialist whose replay calls the proposer] On the charts
+benchmark's 50 texts with an LLM proposer every stored run replays byte for byte from its record (50 of 50).
 
 ## 6. Provenance kinds and statuses
 

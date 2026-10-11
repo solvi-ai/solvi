@@ -40,9 +40,12 @@ def test_no_author_only_default_paths_in_scripts():
 # reader. Allowed: math (L0 L1 L2, L2 regularization), model names (MiniLM-L6), lowercase format strings ('l14g typed
 # v2') and the alt text of an image that shows such a label. Pre-registration codes and their bar labels (an X, a digit,
 # an optional dash and digit) are matched too; a working-branch name is a w, a digit and a letter (w0, w1 are variables).
+# Also the private workspace's folders (stuff/, lanes/), its process role (coordinator), pre-registration file names
+# (PREREG...), short task codes (T1, KS, EV2) and working-branch names of the 1.1 cycle (charts11, cf11, ...).
 CODE = re.compile(r"\bL[0-9]{1,2}[a-z]?\b|\bAL[0-9]+\b|\biter[0-9]{2}\b|\brel11[ab]?\b|\bw[0-9][a-z]\b"
-                  r"|\bX[0-9]\b|\bX[0-9]-[0-9]\b|albert|kelly")
-CODE_OK = re.compile(r"MiniLM-L[0-9]+|\bL[0-2]\b")
+                  r"|\bX[0-9]\b|\bX[0-9]-[0-9]\b|albert|kelly"
+                  r"|PREREG|stuff/|lanes/|coordinator|\bT[0-9]\b|\b(?:charts|cf|mcp|exp|fix|sem)1[01]\b|\bKS\b|\bEV2\b")
+CODE_OK = re.compile(r"MiniLM-L[0-9]+|\bL[0-2]\b|\bT0\b")     # T0: a start time in a script
 CODE_SKIP = {"docs/images/ALT.md"}
 
 

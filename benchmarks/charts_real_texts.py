@@ -1,4 +1,4 @@
-"""Verified charts on real texts, a pre-registered stand — `solvi.experimental.charts` on 50 paragraphs of US federal
+"""Verified charts on real texts, a pre-registered measurement — `solvi.experimental.charts` on 50 paragraphs of US federal
 news releases (benchmarks/datasets/charts_texts), against a hand reading of every number written before any proposer
 saw the texts.
 
@@ -555,7 +555,7 @@ def summarise(recs, texts, labels):
 
 
 def bars(rep):
-    """The numbers each pre-registered bar of the stand is read on (the verdict is the coordinator's)."""
+    """The numbers each pre-registered bar of the measurement is read on."""
     x1, x2, x3, x4, x5 = rep["bar_1"], rep["bar_2"], rep["bar_3"], rep["bar_4"]["recorded"], rep["bar_5"]
     return {
         "bar-1": {"bar": "0 numbers on the charts not in the text; every rendered value re-verified (texts drawn)",
@@ -617,7 +617,7 @@ def _check_labels(texts, labels):
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--dry", action="store_true", help="the 3 gallery texts of tests/test_charts.py (development)")
-    ap.add_argument("--run", action="store_true", help="the measured run on the 50 texts (after the coordinator's word)")
+    ap.add_argument("--run", action="store_true", help="the measured run on the 50 texts (one run)")
     ap.add_argument("--texts", default=str(DATA / "texts.jsonl"))
     ap.add_argument("--labels", default=str(DATA / "labels.json"))
     ap.add_argument("--out", default=None)

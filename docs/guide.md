@@ -5092,7 +5092,7 @@ boxes = align([Reading("TOTAL", (149, 461, 185, 479))], [Reading("TOTAL", (150, 
 ```
 
 Nothing in it decides acceptance: the check accepts from `agreed` and turns `conflicts` into a conflict or a review;
-the thresholds are the task's. On two stands this was the mechanism behind the measured gains: speech (two models'
+the thresholds are the task's. On two measurements this was the mechanism behind the measured gains: speech (two models'
 words aligned in time) gave 0 false words on 400 non-speech clips and caught 299 of 300 corruptions, receipts (two OCR
 engines' words aligned by box) went from 88% to 96.4% exact among accepted fields.
 

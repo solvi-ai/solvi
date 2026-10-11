@@ -32,7 +32,7 @@ What "caught" means:
     the verified spec has at the same place is equal and at least one is there. Numbers are compared by value
     ("4.20" is 4.2);
   - "relation" (drop): an omission leaves nothing at its own place to refuse — it is visible only through a relation
-    the check holds (a total that no longer adds up, shares that no longer make a whole), as the receipts stand found
+    the check holds (a total that no longer adds up, shares that no longer make a whole), as the receipts measurement found
     (27 of 76 omissions caught). So a drop is caught when the run reports an issue (code and severity, counted) that
     the unmutated run did not. (Comparing the output bytes would count every omission: the output shows one element
     fewer.)

@@ -646,8 +646,7 @@ def _example_id(x, i):
 
 
 class RefusalRegression:
-    """Refusal is the first casualty of self-change (a chain of model merges has been reported to keep its skills and
-    lose much of its refusal; not reproduced here), so every change whose target can answer — an answerer, a threshold, a head, a gate — is checked
+    """Refusal is the first casualty of self-change, so every change whose target can answer — an answerer, a threshold, a head, a gate — is checked
     on a held should-abstain set: outside or unknown inputs the system must refuse or hand over.
 
     The set: the pipeline's `refusals=` (a list of inputs, or `refusals(change, ctx)` → inputs), the `refusals` kept by

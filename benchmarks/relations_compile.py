@@ -16,7 +16,7 @@ LawSet.to_module), each accepted only after a differential check against the int
    pairs.
 3. laws(rows=100_000) — a law set learned by the law loop on a grid with written mechanics (atoms that carry their
    code), compiled with LawSet.to_module and checked by check_compiled on 100,000 fresh rows (the bar: 0 differences);
-   the time of the compiled module and of LawSet.predict on the same rows is reported. A second stand: a path policy
+   the time of the compiled module and of LawSet.predict on the same rows is reported. A second setup: a path policy
    with a relational atom found by RelAlgProposer ("a directory named secret on the path"), compiled through its
    set code, on 20,000 fresh rows.
 
