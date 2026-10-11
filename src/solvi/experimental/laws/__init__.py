@@ -73,7 +73,7 @@ score = the joint Jaccard + n0 / (n0 + rows) × the prior's rank among the candi
 with no rows, the joint statistic's as rows grow; a prior with learned=False leaves the joint statistic alone;
 `mode="switch"` is the fixed switch at `min_rows`; `last` says what scored (`RankedProposer.scored_by` too). The prior
 learns what the task family favours: on a planted grammar whose sampler draws three features 30 times as often it needed
-10.3 checks at 0 rows against 43.1 blind (tests/test_laws_rank_prior.py); on a skewed family of deep conditions (the
+10.3 checks at 0 rows against 43.1 blind (mean over 40 tasks, one run; tests/test_laws_rank_prior.py); on a skewed family of deep conditions (the
 second setting's grammar with a chosen skew: three features drawn 8 times and one comparison type 4 times as often;
 5,112 candidates per task; five seeds, 300 tasks) 208 against 1,245 blind, and the blend 184 / 98.6 / 8.9 at 20 / 100 /
 300 rows against 1,019 / 361 / 16.8 for the joint statistic (the fixed switch at 20 rows: the joint statistic's); on

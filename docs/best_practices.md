@@ -131,7 +131,7 @@ adapter's confidence was optimistic on unseen screens: 14.3% against 10%).
 independent: a random split calibrates on sources the model was fitted on, and the promise is optimistic on new ones.
 `solvi.build(..., groups="screen")` (a key of the state, a function, or one group per example) keeps every group on one
 side, so the guarantee is read on unseen groups; on a synthetic set where the model remembers its training screens the
-random split promised ≤ 10% answered alone and wrong and gave 22–26% on new screens, the grouped split 5–9%.
+random split promised ≤ 10% answered alone and wrong and gave about 25 % on new screens, the grouped split under 10 % (the generator of `tests/test_auto.py`, five seeds: 24–26 % against 3–9 %).
 
 **Let a second system's verified answers recalibrate a guarantee — and nothing else, unless you measured it.** When
 an LLM handles what a fast system escalates, its answers that passed the checks and its own guarantee can be stored
@@ -492,7 +492,7 @@ recorded states of the stream (what the skill will meet) and the world's own per
 shown yet); check every goal a variable can take (a use is asked for a goal, so a stone-gathering footprint without the
 pickaxe atom must meet a state without the pickaxe). The verification is a sample, so keep the certificate on: it
 catches what the sample missed. On the small grid of the tests (`tests/test_skills_footprint.py`: a tree next to the
-player in a direction drawn per layout, 30 layouts, the certificate at 20% pooled over the set) one turned skill «move
+player in a direction drawn per layout, 30 layouts, verify_n=8, the certificate at 20% pooled over the set) one turned skill «move
 D, do» replaced the constant ones (3 skills against 5) and System 1 decided 30% of the steps of the last ten layouts
 against 0 with the condition rule alone; in the same grid with «do» refused in one direction the turned candidate was
 refuted on the copy every time and no alone run failed. Measured once in an open world (the simulator benchmark of 1.1, 10
@@ -598,8 +598,7 @@ tasks=, rows=, sizes=)`; or `fit_tasks(grammar, tasks)` on mismatches whose law 
 `HandoverRanker(prior, JointRanker())` lets the evidence take over gradually: score = the joint Jaccard + 20 / (20 +
 rows) × the prior's rank among the candidates in [0, 1] — the prior's order with no rows, the joint statistic's as rows
 grow (`mode="switch"` is a fixed switch at `min_rows`; `last` / `RankedProposer.scored_by` say what scored). **A prior only knows what the task family favours:** on a planted grammar whose sampler
-draws three features 30 times as often, the prior needed 10.3 checks at 0 rows against 43.1 blind (a prior fitted on
-shuffled labels: 206 — worse than blind; `tests/test_laws_rank_prior.py`); on a skewed family of deep conditions (three
+draws three features 30 times as often, the prior needed 10.3 checks at 0 rows against 43.1 blind (a prior fitted on shuffled labels: 206 — worse than blind; mean over 40 tasks, one run, `tests/test_laws_rank_prior.py`); on a skewed family of deep conditions (three
 features drawn 8 times and one comparison type 4 times as often; 5,112 candidates per task; five seeds, 300 tasks, training and test tasks
 from the same sampler) 208 against 1,245 blind; on the three settings above, where the conditions are drawn uniformly,
 0.91 / 0.83 of the blind checks on the deep and the correlated setting, and 0.93 on the first, where it fell back to the
@@ -650,8 +649,7 @@ When a case is a graph and its labels are sets of relations on a few query pairs
 When the rules work on a relation graph and the input is text whose relation phrases are regular (the benchmark family
 of kinship stories: «[X]'s son [Y]», «[Y] is the son of [X]», «[X] took her son [Y]»), read the graph with code
 (`relations.TextFrontend`) rather than a model, and let a sentence no pattern reads give no edge: a missed edge costs a
-refusal downstream (no path, or the table refuses), and an edge read wrongly costs a wrong answer — on the benchmark's
-test split every wrong answer rested on an edge the labels contradict. Keep the global check (`GraphCheck`, the default)
+refusal downstream (no path, or the table refuses), and an edge read wrongly costs a wrong answer — on the benchmark's test split 9 of the 13 wrong answers rest on a reversed label and 4 on a pair the labels do not mark, none on a path of labelled edges alone. Keep the global check (`GraphCheck`, the default)
 as a safety net that names what it drops — an edge whose relation contradicts a person's gender, two relations on one
 ordered pair, or a second father / mother / husband / wife; every edge involved is dropped, the check never picks a
 winner — and do not expect it to raise precision: on the test split it dropped 70 stated edges (50 of them false by the
@@ -665,8 +663,7 @@ its facts → `pair_fact` → `forward_chain`). Measured once on CLUTRR (Sinha e
 on the labelled graph): the graph read from the text gave precision among the answered 0.960 (314 of 327; Wilson 95 %
 0.933–0.977; 0.984 / 0.951 / 0.964 at chain lengths 2–3 / 4–7 / 8–10) at coverage 0.285 (0.526 at length 2, 0.185 at
 length 10), against 1.000 at 0.949 from the benchmark's own relation graph; edges precision 0.957 / recall 0.744 against
-labels that mark only the chain's edges (of 229 false stated edges, 173 are reversed in the labels and 47 lie on
-unlabelled pairs); all 13 wrong answers rest on such edges (9 on a reversed label, 4 on an unlabelled pair); 752 of the
+labels that mark only the chain's edges (of 229 false stated edges, 173 are reversed in the labels, 47 lie on unlabelled pairs and 9 are other); of the 13 wrong answers 9 rest on a reversed label and 4 on an unlabelled pair, none on labelled edges alone; 752 of the
 819 refusals had no path in the read graph; 0.09 ms a story on CPU; the bars were pre-registered before the run — the
 precision and coverage bars met, the check's bar (precision higher with the check than without on chains of 4 and more)
 not met. Two limits of this number: the five patterns were written, in the author's earlier research line, while
