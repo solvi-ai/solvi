@@ -144,6 +144,27 @@
   (7 rounds, 531 s on CPU): the same numbers.
 
 
+### Added
+
+- **`solvi.experimental.laws.PriorRanker` and `HandoverRanker`: an order for candidate conditions before the buffer has
+  rows.** `JointRanker` is a statistic over logged rows: with none every score is equal and the order is the blind one.
+  `PriorRanker` scores a condition by its own features — its number of atoms (one-hot), and the sums over its atoms of
+  each atom's prior usefulness (how often the atom is in the true condition when it is true in the mismatched state), its
+  feature's and its kind's (the comparison type read off the name: `atom_kind`), and over its pairs of features their
+  co-occurrence in true conditions beyond their own rates — a linear softmax over each synthetic task's candidates
+  fitted by Newton's method; seeded and deterministic; it reads no rows. `fit(grammar, sample, tasks=, rows=, noise=)`
+  has `BagOfAtomsRanker.fit`'s signature plus `sizes=(lo, hi)`; `fit_tasks(grammar, tasks)` fits on given tasks;
+  `shuffle_labels=True` is the control (each task's target a random candidate). `HandoverRanker(prior, joint=None,
+  min_rows=20)` scores by the prior below `min_rows` logged rows of the candidates' action (without the group `exclude`)
+  and by `JointRanker` from there on; `last` and the Counter `scored` say which one scored. `RankedProposer` takes
+  either; its new `scored_by` names the scorer of the last call. On a planted grammar whose condition sampler draws three
+  features 30 times as often: 10.3 checks to the true condition at 0 rows against 43.1 blind, the shuffled-label prior
+  206 (`tests/test_laws_rank_prior.py`). On the three settings of `benchmarks/laws_rank_joint.py`, whose conditions are
+  drawn uniformly from the grammar, at 0 rows 98 / 2,034 / 123 against 96 / 2,174 / 129 blind (one seed; a Bayes-optimal
+  prior from the exact sampler 95 / 1,943 / 109): a uniform grammar leaves a prior little to learn — fit it on tasks
+  like yours. Five-seed measurement pending. The benchmark's `--curve` now covers every setting and the prior, the
+  hand-over and the shuffled-label prior.
+
 ## 1.1.0 — 2026-10-11 — learning from code and outcomes
 
 ### Breaking changes
