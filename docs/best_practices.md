@@ -605,25 +605,31 @@ When a case is a graph and its labels are sets of relations on a few query pairs
 When the rules work on a relation graph and the input is text whose relation phrases are regular (the benchmark family
 of kinship stories: «[X]'s son [Y]», «[Y] is the son of [X]», «[X] took her son [Y]»), read the graph with code
 (`relations.TextFrontend`) rather than a model, and let a sentence no pattern reads give no edge: a missed edge costs a
-refusal downstream (no path, or the table refuses), a guessed edge costs a wrong answer. Keep the global check on
-(`GraphCheck`, the default): an edge whose relation contradicts a person's gender, two relations on one ordered pair, or
-a second father / mother / husband / wife is a contradiction, and every edge involved is dropped and named — the check
-never picks a winner. Give the declared genders when you have them (`genders=`): the owner of «his / her» is the nearest
-name of the pronoun's gender, and the inverse edge is chosen by the owner's gender; without them the genders are
-inferred from the relation words and an edge whose owner's gender stays unknown gets no inverse. Hand the graph to the
-rules as it is (`TextGraph.paths(x, y)` → `CompositionTable.derive_paths`; `TextGraph.story()` → `GuardedRules`, or its
-facts → `pair_fact` → `forward_chain`). Measured on CLUTRR (Sinha et al., 2019), the clean split's training file only —
-1,816 held-out stories (a fifth of the file by a hash of the id, chains of 2 and 3 relations), the composition table
-fitted on the other four fifths: the graph read from the text gave precision among the answered 0.970 (795 of 820;
-Wilson 95 % 0.955–0.979) at coverage 0.452 (0.525 at length 2, 0.388 at length 3), against 0.998 at 0.922 from the
-benchmark's own relation graph; edges precision 0.973 / recall 0.726 against labels that mark only the chain's edges
-(of 93 false stated edges, 50 are reversed in the labels and 36 lie on unlabelled pairs; of the 25 wrong answers, 11
-rest on a reversed label and 12 on a stated fact the labels do not carry that opened a shorter path); the check dropped
-17 stated edges, 15 of them false, and without it precision was 0.966 (800 of 828); 0.08 ms a story on CPU; one run,
-the test file not read — its numbers follow. The patterns are ported from the author's earlier research line and equal
-to its reference edge for edge on those stories. Limits: English kinship phrasings of the five patterns; the owner of
-«his / her» is the sentence's earlier name, so «[X]'s brother [Y] and his wife [Z]» reads Z as X's wife; the frontend
-is not a general relation extractor.
+refusal downstream (no path, or the table refuses), and an edge read wrongly costs a wrong answer — on the benchmark's
+test split every wrong answer rested on an edge the labels contradict. Keep the global check (`GraphCheck`, the default)
+as a safety net that names what it drops — an edge whose relation contradicts a person's gender, two relations on one
+ordered pair, or a second father / mother / husband / wife; every edge involved is dropped, the check never picks a
+winner — and do not expect it to raise precision: on the test split it dropped 70 stated edges (50 of them false by the
+labels) and changed no wrong answer, while 4 right answers went with the dropped edges (precision among the answered
+0.960 with it, 0.961 without). Give the declared genders when you have them (`genders=`): the owner of «his / her» is
+the nearest name of the pronoun's gender, and the inverse edge is chosen by the owner's gender; without them the genders
+are inferred from the relation words and an edge whose owner's gender stays unknown gets no inverse. Hand the graph to
+the rules as it is (`TextGraph.paths(x, y)` → `CompositionTable.derive_paths`; `TextGraph.story()` → `GuardedRules`, or
+its facts → `pair_fact` → `forward_chain`). Measured once on CLUTRR (Sinha et al., 2019), the clean split's test file
+(1,146 queries, chains of 2–10 relations; the composition table fitted on the whole training file — the same table as
+on the labelled graph): the graph read from the text gave precision among the answered 0.960 (314 of 327; Wilson 95 %
+0.933–0.977; 0.984 / 0.951 / 0.964 at chain lengths 2–3 / 4–7 / 8–10) at coverage 0.285 (0.526 at length 2, 0.185 at
+length 10), against 1.000 at 0.949 from the benchmark's own relation graph; edges precision 0.957 / recall 0.744 against
+labels that mark only the chain's edges (of 229 false stated edges, 173 are reversed in the labels and 47 lie on
+unlabelled pairs); all 13 wrong answers rest on such edges (9 on a reversed label, 4 on an unlabelled pair); 752 of the
+819 refusals had no path in the read graph; 0.09 ms a story on CPU; the bars were pre-registered before the run — the
+precision and coverage bars met, the check's bar (precision higher with the check than without on chains of 4 and more)
+not met. Two limits of this number: the five patterns were written, in the author's earlier research line, while
+reading this benchmark's test stories, so it measures the shipped frontend on this split and not generalisation to
+unseen phrasings (the port is equal to that line's reference edge for edge on 1,816 training stories, and nothing was
+tuned here); and coverage is bounded by the patterns' recall — in that line a model on the pairs no pattern covers
+raised edge recall to about 0.87–0.89 at a lower edge precision, and it is not shipped (torch, and trained on data under
+a non-commercial licence).
 
 ## Rules first, a model second
 

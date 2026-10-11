@@ -306,7 +306,8 @@ Since 1.1.1, with the closed world declared (`functional={"living_in": "person"}
   whose gender contradicts the person's (or the person's relation words disagree), two relations on one ordered pair,
   two people as one person's father / mother / husband / wife — every stated edge involved is dropped with its inverse
   and named; the check never chooses between them. `TextGraph.raw` keeps the edges before the check.
-- **Limits.** English kinship phrasings of the five patterns; a miss is a refusal, never a guess; not a general relation
+- **Limits.** English kinship phrasings of the five patterns; a miss is a refusal and an edge read wrongly a wrong answer (on the benchmark's test split
+  every wrong answer rested on an edge the labels contradict); not a general relation
   extractor.
 
 ## Rules first, a model second

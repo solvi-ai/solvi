@@ -98,12 +98,17 @@
   relations on one ordered pair, or a second father / mother / husband / wife — every edge involved, never a choice
   between them — and names each in `TextGraph.dropped`; `check=False` keeps the raw edges. `TextGraph.paths(x, y)` hands
   every shortest path to `CompositionTable.derive_paths`, `TextGraph.story()` gives a `Story` for `GuardedRules` and
-  `forward_chain`. A first run on the training file of the kinship benchmark's clean split (1,816 held-out stories,
-  chains of 2–3 relations; the table fitted on the rest): precision among the answered 0.970 at coverage 0.452, against
-  0.998 at 0.922 from the benchmark's relation graph; edges precision 0.973 / recall 0.726 against labels that mark only
-  the chain's edges; the check dropped 17 stated edges, 15 of them false; 0.08 ms a story. The test-split numbers follow.
-  Limits: English kinship phrasings of the five patterns; a sentence no pattern reads gives no edge (a refusal, never a
-  guess); not a general relation extractor.
+  `forward_chain`. Measured once on the test file of the kinship benchmark's clean split (1,146 queries, chains of 2–10
+  relations; the composition table fitted on the whole training file, the same table as on the labelled graph):
+  precision among the answered 0.960 (314 of 327; Wilson 95 % 0.933–0.977) at coverage 0.285 (0.526 at length 2,
+  0.185 at length 10), against 1.000 at 0.949 from the benchmark's relation graph; edges precision 0.957 / recall
+  0.744 against labels that mark only the chain's edges; all 13 wrong answers rest on edges the labels contradict (9
+  reversed in the labels, 4 on unlabelled pairs); the check dropped 70 stated edges, 50 of them false, and changed no
+  wrong answer (4 right answers lost with them); 0.09 ms a story. The five patterns were written in the author's
+  earlier research line while reading this benchmark's test stories, so the number is the shipped frontend on this
+  split, not generalisation to unseen phrasings.
+  Limits: English kinship phrasings of the five patterns; a sentence no pattern reads gives no edge (a refusal) and an edge read
+  wrongly is a wrong answer; not a general relation extractor.
 
 ### Docs
 
