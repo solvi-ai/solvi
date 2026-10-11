@@ -102,6 +102,12 @@ derived relations of one pair are a dispute, a retracted premise takes its conse
 answered dispute makes them facts without a re-run; `explain(store, id)` reads the derivation back (`ChainReport`,
 `Explanation`, `ChainLimit`). Measured by benchmarks/relations_chain.py.
 
+Rules first, a model second (`RulesFirst(table, fallback=, render=)`): the table answers the queries it derives and
+the model is never called for them; a refusal ("disagree", "underivable") goes to the fallback with the question
+rendered in words from the chains and the options, or stays a refusal without one; every answer names the path that
+answered (`who`), is journal-ready (`to_record`) and replays from its record without the model (`replay`);
+`decider_fallback(model)` adapts a DecideModel; `stats` counts the paths per reason.
+
 What is not done:
 - the enumeration grows as (terminals × operators)^size: with the twenty-odd relations of a grid window, programs of
   four or five nodes are the practical depth, and the behaviour cap bounds memory;
@@ -123,6 +129,7 @@ from .. import warn_on_import
 from ._adapters import (CREATURES, MATERIALS, PATHS, PROPOSER_OPS, Egocentric, PathTree, RelAlgProposer, encode,
                         encode_paths, relational_atom)
 from ._chain import ChainLimit, ChainReport, Explanation, explain, forward_chain, pair_fact
+from ._first import RulesFirst, RulesFirstAnswer, decider_fallback, render_chains
 from ._algebra import (BINARY, OPS, UNARY, Relations, closure, complement, compose, converse, count_at_least,
                        evaluate, intersect, minus, readout, show, size, union, xor)
 from ._compile import (BACKENDS, RUNTIME, RUNTIME_ARRAYS, DenseAnswer, ProgramCheck, check_program, compile_ast,
@@ -137,9 +144,9 @@ warn_on_import(__name__)
 __all__ = ["BACKENDS", "BINARY", "CREATURES", "Cell", "ChainLimit", "ChainReport", "CompositionTable", "DenseAnswer",
            "Derivation", "Egocentric", "Entry", "Enumerator", "Explanation", "Found", "HeldOut", "Library",
            "MATERIALS", "OPS", "PATHS", "PROPOSER_OPS", "PathTree", "Program", "ProgramCheck", "RUNTIME",
-           "RUNTIME_ARRAYS", "RelAlgProposer", "Relations", "RuleProposer", "Rules", "Score", "Scored", "TargetRecord",
+           "RUNTIME_ARRAYS", "RelAlgProposer", "Relations", "RuleProposer", "Rules", "RulesFirst", "RulesFirstAnswer", "Score", "Scored", "TargetRecord",
            "UNARY", "base_rates", "check_program", "closure", "compile_ast", "compile_program", "complement",
-           "compose", "converse", "count_at_least", "encode", "encode_paths", "enumerate_programs", "evaluate",
+           "compose", "converse", "count_at_least", "decider_fallback", "encode", "encode_paths", "enumerate_programs", "evaluate",
            "explain", "find_rules", "forward_chain", "from_keys", "intersect", "lower_bound", "minus", "pair_fact",
-           "rank", "readout", "relational_atom", "score", "show", "size", "sized_admit", "synthesize", "to_keys",
+           "rank", "readout", "relational_atom", "render_chains", "score", "show", "size", "sized_admit", "synthesize", "to_keys",
            "top_programs", "union", "xor"]
