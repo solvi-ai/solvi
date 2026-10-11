@@ -35,7 +35,8 @@ from typing import Iterable, Mapping, NamedTuple, Sequence
 
 from ._table import CompositionTable, Derivation
 
-STATUSES = ("derivable", "disputed", "other", "missing_cell", "identity", "underivable", "no_path")
+STATUSES = ("derivable", "disputed", "other", "missing_cell", "identity", "underivable", "no_path", "hypothesis",
+            "no_known_positive", "functional_conflict")
 
 
 class Gap(NamedTuple):
@@ -61,11 +62,22 @@ class WhyNot:
     truncated: bool = False
     readings: dict = field(default_factory=dict)
     gaps: list = field(default_factory=list)
+    positive: str | None = None
 
     def summary(self) -> str:
         head = f"{self.x} → {self.y}"
         if self.status == "no_path":
             return f"{head}: no path through the facts — a missing fact, not a missing rule"
+        if self.status == "no_known_positive":
+            return (f"{head}: no known {self.positive} for {self.x} — {self.relation} comes only from the closed world "
+                    f"of the functional {self.positive}; a missing fact, not a missing rule")
+        if self.status == "functional_conflict":
+            return (f"{head}: {self.x} has several known {self.positive} ({self.readings.get(self.positive)}) — the "
+                    f"functional declaration is contradicted here, so the closed world is not applied")
+        if self.status == "hypothesis":
+            return f"{head}: {self.relation} rests on a disputed fact {self.readings} — a hypothesis until it is settled"
+        if self.derivation is None and self.status == "derivable":
+            return f"{head}: {self.relation or self.readings} is derived — the rules do not refuse it"
         if self.status == "derivable":
             return f"{head}: {self.derivation.relation} is derivable ({self.paths} paths) — the table does not refuse it"
         if self.status == "disputed":
@@ -85,6 +97,13 @@ class WhyNot:
         {"kind": "dispute", "readings", ...} for "disputed"; {"kind": "other", "derived", "cells"} for "other"; []
         when derivable."""
         between = [self.x, self.y]
+        if self.status == "no_known_positive":
+            return [{"kind": "positive", "goal": f"learn a {self.positive} fact for {self.x}",
+                     "relation": self.positive, "subject": self.x, "between": between}]
+        if self.status == "functional_conflict":
+            return [{"kind": "conflict", "goal": f"settle {self.positive} of {self.x}: one of "
+                     f"{self.readings.get(self.positive)}", "relation": self.positive, "subject": self.x,
+                     "objects": list(self.readings.get(self.positive) or ()), "between": between}]
         if self.status == "no_path":
             return [{"kind": "fact", "goal": f"learn a fact linking {self.x} and {self.y}", "between": between}]
         if self.status == "disputed":
@@ -151,9 +170,19 @@ def _paths(facts, x, y, max_len, max_paths, inverse):
 def why_not(table: CompositionTable, facts: Iterable[Sequence], x, y, relation: str | None = None, *,
             max_len: int = 6, max_paths: int = 2000, inverse: Mapping[str, str] | None = None) -> WhyNot:
     """Why `relation` (or any relation) between x and y is not derived from the pair facts by the table — see the
-    module docstring. facts: (a, relation, b) triples, read from a to b, as the chains the table was fitted on."""
+    module docstring. facts: (a, relation, b) triples, read from a to b, as the chains the table was fitted on.
+
+    With guarded rules (`why_not(rules, story, x, y, relation)`; a GuardedRules and a Story): "derivable" (active on
+    the pair), "disputed" (its key holds two values), "no_known_positive" (the complement of a declared functional
+    relation, for a subject of the type with no active positive of it — `positive` names the relation, the agenda item
+    is the fact to learn), "functional_conflict" (the subject has several known positives: the declaration is
+    contradicted and the closed world left open there), "hypothesis" (present, resting on a disputed fact) or
+    "underivable"."""
+    from ._rules import GuardedRules
+    if isinstance(table, GuardedRules):
+        return _why_not_rules(table, facts, x, y, relation)
     if not isinstance(table, CompositionTable):
-        raise TypeError("why_not reads a CompositionTable (fit one on the labelled chains)")
+        raise TypeError("why_not reads a CompositionTable (fit one on the labelled chains) or GuardedRules")
     if int(max_len) < 1 or int(max_paths) < 1:
         raise ValueError("max_len and max_paths are at least 1")
     chains, truncated = _paths(list(facts), x, y, int(max_len), int(max_paths), inverse)
@@ -182,6 +211,29 @@ def why_not(table: CompositionTable, facts: Iterable[Sequence], x, y, relation: 
     else:
         status = pooled.reason if pooled.reason in STATUSES else "underivable"
     return WhyNot(x, y, relation, status, pooled, len(chains), truncated, readings, gaps)
+
+
+def _why_not_rules(rules, story, x, y, relation) -> WhyNot:
+    c = rules.closure(story)
+    ans = c.answer(x, y)
+    readings = {r: c.status(x, y, r) for r in sorted(c.relations(x, y))}
+    if (relation is None and ans) or relation in ans:
+        return WhyNot(x, y, relation, "derivable", readings=readings)
+    if relation is not None and c.status(x, y, relation) == "disputed":
+        return WhyNot(x, y, relation, "disputed", readings=readings)
+    for r, (su, _, rbar) in sorted(rules._closed_spec.items()):
+        if relation == rbar and su in c.unary.get(x, ()):
+            conflict = [zs for x2, r2, zs in c.closed_conflicts if x2 == x and r2 == r]
+            if conflict:
+                return WhyNot(x, y, relation, "functional_conflict", readings={**readings, r: list(conflict[0])},
+                              positive=r)
+            known = any(r in v and v[r][0] in (0, 1) and c.statuses.get((x, z, r)) == "active"
+                        for (x2, z), v in c.pairs.items() if x2 == x)
+            if not known:
+                return WhyNot(x, y, relation, "no_known_positive", readings=readings, positive=r)
+    if relation is not None and c.status(x, y, relation) == "hypothesis":
+        return WhyNot(x, y, relation, "hypothesis", readings=readings)
+    return WhyNot(x, y, relation, "underivable", readings=readings)
 
 
 # ───────────────────────────────────────────── with a reference derivation

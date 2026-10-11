@@ -23,8 +23,16 @@ B2 201, B2z 8, BNE 1, NEG 3) in 4 rounds, 3.0 s; exact set match 1.000 on the 4,
 answered 1.000, coverage 0.431 = every pair that holds a relation; the rest correctly empty); all 8 planted rules
 found. Without residual votes: the same 242 rules (the rounds reach them; 1.4 s). One round without residual votes
 (bodies over the story's own facts only): 35 rules, exact 0.975, precision 0.941, 7 of 8 planted rules (the guarded
-rule over a derived relation needs a second round). The store path on 3 more stories: 1,568 pairs, 3,110 facts
-written, 0 differences from the in-memory fixed point, 1.1 s."""
+rule over a derived relation needs a second round). The store path on 3 more stories: 1,568 pairs, 723 new fact
+items (3,110 before 1.1.1, which counted a justification written in the same batch as a new item), 0 differences from
+the in-memory fixed point, 1.5 s.
+
+The closed world by declaration (`functional={"living_in": "person"}`, one home per person) with only the positive
+templates (B1, B1u, B2, B2z — no «elsewhere» rule and no negative stratum to learn): 234 rules (the same with and
+without the declaration: learning is untouched), exact 0.983 / precision 1.000 / coverage 0.414 against 0.915 / 1.000
+/ 0.346 without it; 340 test pairs answered by the closed-world stratum, all right; the rest of «elsewhere» belongs to
+persons with no known home (open world: the oracle's default there is not a declaration). With the negative stratum
+learnable the declaration adds nothing here: NEG already gives «elsewhere» wherever no home is derived."""
 from __future__ import annotations
 
 import argparse
@@ -40,6 +48,8 @@ with warnings.catch_warnings():
 from solvi.core.knowledge import KnowledgeStore
 
 COMPLEMENTS = {"Not_living_in": "living_in"}
+FUNCTIONAL = {"living_in": "person"}               # the planted functional relation: one home per person
+POSITIVE = ("B1", "B1u", "B2", "B2z")
 PLANTED = {
     "child_of ← parent_of⁻": ("child_of", "B1", (("parent_of", 1),), ()),
     "father_of ← parent_of ∧ is_male(x)": ("father_of", "B1u", (("parent_of", 0),), (("is_male", "x"),)),
@@ -164,7 +174,7 @@ def examples(seeds):
 
 def score(rules, test):
     n = len(test)
-    right = answered = right_answered = 0
+    right = answered = right_answered = closed = closed_right = 0
     c, cur = None, None
     for st, q, y in test:
         if st is not cur:
@@ -174,8 +184,11 @@ def score(rules, test):
         if p:
             answered += 1
             right_answered += p == y
+        if any(c.stratum(*q, r) == 3 for r in p):
+            closed += 1
+            closed_right += p == y
     return {"exact": right / n, "precision": right_answered / answered if answered else None,
-            "coverage": answered / n, "n": n}
+            "coverage": answered / n, "n": n, "closed": closed, "closed_right": closed_right}
 
 
 def main(argv=None):
@@ -190,9 +203,12 @@ def main(argv=None):
     test = examples(range(500, 500 + a.test))
     print(f"labelled pairs: fit {len(fit)} ({a.fit} stories), check {len(check)}, test {len(test)} ({a.test} stories)")
     arms = {"rules": dict(), "no residual votes": dict(residual=False),
-            "one round, no residual votes": dict(residual=False, rounds=1)}
-    print("| arm | rules | B1 | B1u | B2 | B2z | BNE | NEG | rounds | fit s | exact | precision | coverage | planted |")
-    print("|" + "---|" * 14)
+            "one round, no residual votes": dict(residual=False, rounds=1),
+            "declared, positive templates only": dict(functional=FUNCTIONAL, templates=POSITIVE),
+            "positive templates only, no declaration": dict(templates=POSITIVE)}
+    print("| arm | rules | B1 | B1u | B2 | B2z | BNE | NEG | rounds | fit s | exact | precision | coverage | planted | "
+          "answered by the closed world (right) |")
+    print("|" + "---|" * 15)
     main_rules = None
     for name, kw in arms.items():
         t0 = time.perf_counter()
@@ -204,7 +220,7 @@ def main(argv=None):
         t = g.by_template()
         print(f"| {name} | {len(g)} | " + " | ".join(str(t[k]) for k in ("B1", "B1u", "B2", "B2z", "BNE", "NEG")) +
               f" | {g.rounds} | {fs:.1f} | {sc['exact']:.3f} | {sc['precision']:.3f} | {sc['coverage']:.3f} | "
-              f"{found}/{len(PLANTED)} |")
+              f"{found}/{len(PLANTED)} | {sc['closed']} ({sc['closed_right']}) |")
         if main_rules is None:
             main_rules = (g, have)
     g, have = main_rules

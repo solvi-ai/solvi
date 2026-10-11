@@ -29,6 +29,16 @@ Status of a fact at the fixed point: "disputed" (its key holds two values), "act
 from active premises), "hypothesis" (derived only through disputed premises). `answer(x, y)` = the active relations;
 the empty set is a refusal.
 
+The closed world by declaration (`functional={"living_in": "person"}`: relation → the subject's entity type, or
+(subject type, object type)). A declaration, never inferred: a subject of that type has at most one object for the
+relation, and the relation has a declared complement. A third stratum after NEG: for each subject x of the type with
+exactly one known positive r(x, z) — given or derived by a positive rule, active before this stratum — the complement
+r̄(x, y) on every other candidate object y (the entities of the object type; without one, those carrying every is_*
+unary of z), stratum 3 ("closed"), resting on r(x, z) (`Closure.closed`). No known positive: open world, nothing.
+Two or more: the declaration is contradicted there, nothing (`closed_conflicts`). A closed fact on a pair that holds
+a non-known r(x, y) is a dispute (`closed_disputes`). Closed facts feed no rule; statuses are recomputed after the
+stratum. Learning counts on fixed points without it unless `closed_world_in_rounds=True`.
+
 Learning (`fit`). Each labelled query pair (x, y) with its set of relations Y: every body true on (x, y) at the current
 fixed point gets one vote, and each relation of Y one hit for that body. A rule body → r is admitted when its hits for r
 are ≥ `support` and a share ≥ `majority` of its votes; never r ← r (∧ u); a guarded body (B1u, B2z) is not admitted
@@ -73,6 +83,7 @@ TEMPLATES = ("B1", "B1u", "B2", "B2z", "BNE", "NEG")
 _SHAPE = {"B1": (1, ()), "B1u": (1, (("x", "y"),)), "B2": (2, ()), "B2z": (2, (("z",),)), "BNE": (1, (("y",),)),
           "NEG": (1, (("x",), ("y",)))}
 UNARY = "unary"
+STRATA = ("given", "positive", "negative", "closed")     # Closure.pairs stratum 0..3
 
 
 def unary_fact(x, u) -> dict:
@@ -203,10 +214,13 @@ class _Index:
 
 class Closure:
     """The fixed point of a rule set on one story. pairs: (x, y) → {relation: (stratum, depth)} (stratum 0 given, 1
-    positive rule, 2 negative stratum; depth: how deep in rule applications it appeared — the worklist engine counts
+    positive rule, 2 negative stratum, 3 closed world — `STRATA` names them; depth: how deep in rule applications it appeared — the worklist engine counts
     the first derivation found, the bitset engine the sweep it appeared in: a report figure); unary: x → set; just
     (with justifications): fact → [(premises, rule index)] — premises are binary facts (x, y, r) and unary facts
-    (x, u); absent: NEG fact → [the negated relation per justification]; statuses: fact → status (see the module)."""
+    (x, u); absent: NEG fact → [the negated relation per justification]; statuses: fact → status (see the module);
+    closed: closed-world fact → [the known positives r(x, z) it rests on] (also for a fact present through another
+    stratum); closed_disputes: the keys (x, y, family) disputed only once the closed-world stratum ran;
+    closed_conflicts: (x, relation, objects) for subjects with several known positives (left open)."""
 
     def __init__(self, rules, complements):
         self.rules = rules
@@ -219,6 +233,9 @@ class Closure:
         self.statuses: dict = {}
         self.order: list = []                            # derived facts in the order of their first derivation
         self.refuted: list = []
+        self.closed: dict = {}                           # closed-world fact → [the known positives r(x, z) it rests on]
+        self.closed_disputes: list = []                  # keys (x, y, family) the closed-world stratum made disputed
+        self.closed_conflicts: list = []                 # (x, relation, objects): several known positives, no closure
 
     def family(self, rel):
         return self.complements.get(rel, rel)
@@ -238,6 +255,13 @@ class Closure:
     def status(self, x, y, rel):
         return self.statuses.get((x, y, rel))
 
+    def info(self, x, y, rel) -> dict | None:
+        """{"status", "stratum": "given" | "positive" | "negative" | "closed", "depth"} of one fact, None when absent."""
+        v = self.pairs.get((x, y), {}).get(rel)
+        if v is None:
+            return None
+        return {"status": self.statuses.get((x, y, rel)), "stratum": STRATA[v[0]], "depth": v[1]}
+
     def answer(self, x, y) -> frozenset:
         """The active relations on (x, y): the answer; the empty set is a refusal."""
         return frozenset(r for r in self.pairs.get((x, y), ()) if self.statuses.get((x, y, r)) == "active")
@@ -252,10 +276,12 @@ class Closure:
 
 
 def _closure(story: Story, rules, complements=None, *, justify=False, neg=True, statuses=None,
-             observe=True) -> Closure:
+             observe=True, functional=None) -> Closure:
     """The positive fixed point of `rules` on `story` (a worklist join: every pair of facts is joined when the later
-    of them is taken), then — with neg — the negative stratum, and — with statuses (default: justify) — the status of
-    every fact. observe: two given values of one key → the later one stands (False: both stand, a dispute)."""
+    of them is taken), then — with neg — the negative stratum, then — with functional (relation → (subject unary,
+    object unary | None, complement)) — the closed-world stratum, and — with statuses (default: justify; always with
+    functional) — the status of every fact. observe: two given values of one key → the later one stands (False: both
+    stand, a dispute)."""
     rules = list(rules)
     c = Closure(rules, complements)
     idx = _Index(rules)
@@ -373,9 +399,81 @@ def _closure(story: Story, rules, complements=None, *, justify=False, neg=True, 
             if justify:
                 J[(x, y, h)] = [(p, ri) for p, ri, _ in js]
                 c.absent[(x, y, h)] = [s for _, _, s in js]
-    if statuses if statuses is not None else justify:
+    if functional:
+        _statuses(c)                                     # which positives are known: the active ones
+        before = _disputed_keys(c)
+        _closed_world(c, functional, ents)
+        _statuses(c)
+        c.closed_disputes = sorted(_disputed_keys(c) - before, key=repr)
+    elif statuses if statuses is not None else justify:
         _statuses(c)
     return c
+
+
+def _disputed_keys(c: Closure) -> set:
+    keys = defaultdict(set)
+    for (x, y), v in c.pairs.items():
+        for r in v:
+            keys[(x, y, c.family(r))].add(r)
+    return {k for k, vs in keys.items() if len(vs) > 1}
+
+
+def _closed_world(c: Closure, spec, ents):
+    """The closed-world stratum: for a declared functional relation r (spec: r → (subject unary, object unary | None,
+    complement r̄)), every subject x of the type with a known positive r(x, z) — given or derived by a positive rule,
+    active at the statuses before this stratum — gets r̄(x, y) on every candidate object y ≠ z, x (the entities with
+    the object unary; None: those carrying every is_* unary of z). Recorded in `closed` (the positives it rests on);
+    a new fact enters the pairs at stratum 3; nothing here feeds a rule. A subject with two or more known positives
+    contradicts the declaration: nothing is derived for it, the conflict is recorded in `closed_conflicts`."""
+    P, U, st = c.pairs, c.unary, c.statuses
+    by_u = defaultdict(list)
+    for e in sorted(ents, key=repr):
+        for u in U.get(e, ()):
+            by_u[u].append(e)
+    known = defaultdict(list)
+    for (x, z), v in P.items():
+        for r, (stratum, _) in v.items():
+            if r in spec and stratum in (0, 1) and st.get((x, z, r)) == "active":
+                known[r].append((x, z))
+    for r in sorted(spec):
+        su, ou, rbar = spec[r]
+        by_x = defaultdict(list)
+        for x, z in sorted(known[r], key=repr):
+            by_x[x].append(z)
+        for x, z in sorted(known[r], key=repr):
+            if su not in U.get(x, ()):
+                continue
+            if len(by_x[x]) > 1:                         # the declaration is contradicted here: no closed world
+                if not c.closed_conflicts or c.closed_conflicts[-1][:2] != (x, r):
+                    c.closed_conflicts.append((x, r, tuple(by_x[x])))
+                continue
+            if ou is not None:
+                cands = by_u.get(ou, ())
+            else:
+                kinds = sorted(u for u in U.get(z, ()) if u.startswith("is_"))
+                if not kinds:
+                    continue
+                cs = set(by_u.get(kinds[0], ()))
+                for u in kinds[1:]:
+                    cs &= set(by_u.get(u, ()))
+                cands = sorted(cs, key=repr)
+            for y in cands:
+                if y == x or y == z:
+                    continue
+                f = (x, y, rbar)
+                c.closed.setdefault(f, []).append((x, z, r))
+                cur = P.setdefault((x, y), {})
+                if rbar not in cur:
+                    cur[rbar] = (3, 0)
+                    c.order.append(f)
+
+
+def _closed_status(c: Closure, st: dict):
+    """A fact with a closed-world justification and no active one otherwise: active when a positive it rests on is
+    active (and its key is not disputed). After the positive statuses: it never makes a positive fact active."""
+    for f, prem in c.closed.items():
+        if st.get(f) == "hypothesis" and any(st.get(p) == "active" for p in prem):
+            st[f] = "active"
 
 
 def _statuses(c: Closure):
@@ -402,6 +500,7 @@ def _statuses(c: Closure):
                     st[f] = "active"
                     changed = True
                     break
+    _closed_status(c, st)
     c.statuses = st
 
 
@@ -412,13 +511,13 @@ def _bits(m):
         m ^= low
 
 
-def _fast(story: Story, rules, complements=None, *, neg=True, statuses=True, observe=True) -> Closure:
+def _fast(story: Story, rules, complements=None, *, neg=True, statuses=True, observe=True, functional=None) -> Closure:
     """The same fixed point as _closure without justifications: per relation a row mask and a column mask per entity
     (bit y of row x: r(x, y)); a rule is one OR over masks per entity; Jacobi iterations re-evaluate only the rules
     whose body relations changed. Statuses: disputed = a key holding two values; active = the fixed point re-run from
     the given facts with the disputed facts blocked (the least fixed point over active premises); hypothesis = the
     rest. Depth = the sweep a fact first appears in (sweeps are Gauss-Seidel: a rule sees the updates of the rules
-    before it)."""
+    before it). functional: the closed-world stratum after NEG, as in _closure (statuses are computed with it)."""
     c = Closure(list(rules), complements)
     fam = c.family
     ents = sorted(story.entities(), key=repr)
@@ -579,17 +678,13 @@ def _fast(story: Story, rules, complements=None, *, neg=True, statuses=True, obs
         for (h, i), m in negf.items():
             for j in _bits(m):
                 P.setdefault((ents[i], ents[j]), {})[names[h]] = (2, 0)
-    if statuses:
-        keys = defaultdict(set)
-        for (x, y), v in P.items():
-            for r in v:
-                keys[(x, y, fam(r))].add(r)
-        disputed = {(x, y, r) for (x, y, _), vs in keys.items() if len(vs) > 1 for r in vs}
+    def fstat():
+        disputed = {(x, y, r) for (x, y, f) in _disputed_keys(c) for r in P[(x, y)] if fam(r) == f}
         active = None
-        if any(P[(x, y)][r][0] != 2 for (x, y, r) in disputed):
+        if any(P[(x, y)][r][0] in (0, 1) for (x, y, r) in disputed):
             block = [[0] * n for _ in range(R)]
             for x, y, r in disputed:
-                if P[(x, y)][r][0] != 2:
+                if P[(x, y)][r][0] in (0, 1):
                     block[rel[r]][ix[x]] |= 1 << ix[y]
             Fa, _ = run(block)
             active = Fa
@@ -599,11 +694,21 @@ def _fast(story: Story, rules, complements=None, *, neg=True, statuses=True, obs
                 f = (x, y, r)
                 if f in disputed:
                     st[f] = "disputed"
-                elif stratum == 2 or active is None or (active[rel[r]][ix[x]] >> ix[y]) & 1:
+                elif stratum == 2 or (stratum in (0, 1) and (active is None or (active[rel[r]][ix[x]] >> ix[y]) & 1)):
                     st[f] = "active"
                 else:
                     st[f] = "hypothesis"
-        c.statuses = st
+        _closed_status(c, st)
+        return st
+
+    if functional:
+        c.statuses = fstat()
+        before = _disputed_keys(c)
+        _closed_world(c, functional, ents)
+        c.statuses = fstat()
+        c.closed_disputes = sorted(_disputed_keys(c) - before, key=repr)
+    elif statuses:
+        c.statuses = fstat()
     return c
 
 
@@ -758,11 +863,16 @@ class GuardedRules:
     the check slice (0: a rule the check slice never meets is kept; its share there must be ≥ majority whenever the
     slice meets it); verify: after each round, recount the round's new rules on the fixed point of the whole new rule
     set (on the check slice, else on the examples) and retract — for good — each whose share there falls below
-    majority, until none does (`retracted`)."""
+    majority, until none does (`retracted`); functional: relation → the entity type of its subject, or (subject type,
+    object type) — a declaration that a subject of that type has at most one object for the relation (a type "t" is
+    the unary is_t; a name starting with "is_" is the unary itself; without an object type the candidates are the
+    entities carrying every is_* unary of the known object); each needs a declared complement; it adds the closed-world
+    stratum at prediction time (`closed_world_in_rounds=True`: also in the fixed points learning counts on)."""
 
     def __init__(self, majority: float = 0.9, support: int = 2, *, residual: bool = True, rounds: int = 10,
                  neg: bool = True, templates: Iterable[str] = TEMPLATES, complements: Mapping[str, str] | None = None,
-                 check_min: int = 0, verify: bool = True, log=None):
+                 check_min: int = 0, verify: bool = True, functional: Mapping | None = None,
+                 closed_world_in_rounds: bool = False, log=None):
         if not 0.5 < float(majority) <= 1.0:
             raise ValueError("majority is a share in (0.5, 1]")
         if int(support) < 1:
@@ -776,6 +886,11 @@ class GuardedRules:
             int(rounds)
         self.neg, self.templates = bool(neg), frozenset(templates)
         self.complements = dict(complements or {})
+        self._closed_spec = functional_spec(functional, self.complements)
+        self.functional = {r: (su, ou) for r, (su, ou, _) in self._closed_spec.items()}
+        self.closed_world_in_rounds = bool(closed_world_in_rounds)
+        if self.closed_world_in_rounds and not self._closed_spec:
+            raise ValueError("closed_world_in_rounds needs a functional= declaration")
         self.check_min = int(check_min)
         self.verify = bool(verify)
         self.log = log
@@ -815,12 +930,19 @@ class GuardedRules:
         """The fixed point on one story with every fact's status. justify=True: also every justification of every
         derived fact (`just`, `absent`; slower — what chain_rules writes); the facts and statuses are the same."""
         if justify:
-            return _closure(story, self._rules, self.complements, justify=True, neg=True, statuses=True)
-        return _fast(story, self._rules, self.complements, neg=True, statuses=True)
+            return _closure(story, self._rules, self.complements, justify=True, neg=True, statuses=True,
+                            functional=self._closed_spec)
+        return _fast(story, self._rules, self.complements, neg=True, statuses=True, functional=self._closed_spec)
 
     def predict(self, story: Story, query) -> frozenset:
         """The active relations on the query pair (x, y) at the fixed point; the empty set is a refusal."""
         return self.closure(story).answer(*query)
+
+    def statuses(self, story: Story, query) -> dict:
+        """Every relation present on the query pair at the fixed point → {"status", "stratum" ("given" | "positive" |
+        "negative" | "closed"), "depth"}."""
+        c = self.closure(story)
+        return {r: c.info(*query, r) for r in sorted(c.relations(*query))}
 
     # ───────────────────────────── learning
     def _say(self, *a):
@@ -830,10 +952,12 @@ class GuardedRules:
     def _pass(self, examples, rules, inner, neg=False):
         votes, nv = _Votes(), (_NegVotes(self.family) if neg else None)
         pos = [r for r in rules if r.template != "NEG"]
+        cw = self._closed_spec if self.closed_world_in_rounds else None
         c, cur = None, None
         for i, (story, q, labels) in enumerate(examples):
             if story is not cur:                         # several queries of one story: one fixed point
-                c, cur = _with_out(_fast(story, pos, self.complements, neg=False, statuses=False)), story
+                c, cur = _with_out(_fast(story, pos, self.complements, neg=False, statuses=False, functional=cw)), \
+                    story
             x, y = q
             labels = frozenset(labels)
             if nv is not None:
@@ -1012,7 +1136,8 @@ class GuardedRules:
 
     def templates_on(self, c: Closure, query, relations: Iterable[str]) -> dict:
         """Which rules give each relation on the query pair at the fixed point c: "given" (a story fact), "NEG" (the
-        negative stratum) or the sorted templates of the positive rules whose body holds there."""
+        negative stratum), "closed" (the closed-world stratum) or the sorted templates of the positive rules whose body
+        holds there (+ "closed" when the closed world gives it too)."""
         x, y = query
         pos = Closure(self._rules, self.complements)
         pos.pairs = {k: {r: v for r, v in d.items() if v[0] != 2} for k, d in c.pairs.items()}
@@ -1026,17 +1151,24 @@ class GuardedRules:
                 out[r] = ["given"]
             elif st == 2:
                 out[r] = ["NEG"]
+            elif st == 3:
+                out[r] = ["closed"]
             else:
                 out[r] = sorted({g.template for g in self._rules if g.head == r and g.body in bodies})
+                if (x, y, r) in c.closed:
+                    out[r].append("closed")
         return out
 
     # ───────────────────────────── knowledge
     def to_knowledge(self, store, scope: dict | None = None, *, by: str = "relations:GuardedRules") -> dict:
         """Write each rule into a KnowledgeStore as a "rule" item: body {"kind": "guarded", "template", "atoms",
         "unary", "s": [the body's text, head], "r": "guarded", "o": head} (one key per body and head), source
-        "outcome" (labelled pairs), evidence = hits, support, share, origin, round. Idempotent. → rule → item id."""
+        "outcome" (labelled pairs), evidence = hits, support, share, origin, round; and each functional declaration
+        as a "rule" item of source "spec" (a declaration is a specification, not an observation; `functional_body`).
+        Idempotent. → rule → item id (the guarded rules)."""
         from ...core.knowledge.store import item_id, plain_json
         sc = plain_json(scope or {})
+        write_declarations(store, self._closed_spec, sc, by=by)
         out = {}
         for r in self._rules:
             body = plain_json(rule_body(r))
@@ -1048,6 +1180,51 @@ class GuardedRules:
                     continue
             out[r] = iid
         return out
+
+
+def functional_spec(functional, complements) -> dict:
+    """The functional declarations normalised: relation → (subject unary, object unary | None, complement)."""
+    out = {}
+    anti = {}
+    for k, v in sorted((complements or {}).items()):
+        anti.setdefault(v, k)
+    for r, t in sorted((functional or {}).items()):
+        if isinstance(t, str):
+            su, ou = t, None
+        elif isinstance(t, (tuple, list)) and len(t) == 2:
+            su, ou = t
+        else:
+            raise ValueError(f"functional[{r!r}] is a subject type or (subject type, object type)")
+        if not su or not isinstance(su, str) or (ou is not None and (not ou or not isinstance(ou, str))):
+            raise ValueError(f"functional[{r!r}]: types are non-empty names")
+        if r not in anti:
+            raise ValueError(f"functional {r!r} needs a declared complement (complements={{'Not_{r}': {r!r}}})")
+        out[str(r)] = (_unary_of(su), None if ou is None else _unary_of(ou), anti[r])
+    return out
+
+
+def _unary_of(t: str) -> str:
+    return t if t.startswith("is_") else f"is_{t}"
+
+
+def functional_body(relation, spec) -> dict:
+    """The body of a functional declaration item in a KnowledgeStore (one key per relation and subject type)."""
+    su, ou, rbar = spec
+    return {"kind": "functional", "s": [relation, su], "r": "functional", "o": ou, "complement": rbar}
+
+
+def write_declarations(store, spec, scope, *, by) -> dict:
+    """Each declaration as a "rule" item of source "spec" (idempotent). → relation → item id."""
+    from ...core.knowledge.store import item_id, plain_json
+    out = {}
+    for r, sp in sorted(spec.items()):
+        body = plain_json(functional_body(r, sp))
+        iid = item_id("rule", body, scope)
+        if store.status(iid) is None:
+            if store.add("rule", body, scope, source="spec", by=by, evidence={"declared": "functional"}) is None:
+                continue
+        out[r] = iid
+    return out
 
 
 def _merge(old, new):
@@ -1101,7 +1278,7 @@ def rule_from_body(body) -> GuardedRule | None:
 
 # ───────────────────────────────────────────────────────────────── the store
 def chain_rules(store, *, scope=None, rule_scope=None, rules="active", complements: Mapping[str, str] | None = None,
-                neg: bool = True, max_facts=None, by="relations:chain_rules"):
+                neg: bool = True, functional: Mapping | None = None, max_facts=None, by="relations:chain_rules"):
     """Apply the guarded rules kept in `store` to the pair facts (`pair_fact`, single or multi) and unary facts
     (`unary_fact`) of each exact scope matching `scope`, to the positive fixed point, then the NEG stratum.
 
@@ -1111,7 +1288,14 @@ def chain_rules(store, *, scope=None, rule_scope=None, rules="active", complemen
     is written (premises: the binary and unary facts, and the rule; a justification that would rest on the fact it
     justifies is skipped), with `inferred=True` and the weakest premise's source; evidence {"rule", "premises" (in
     body order), "via", "depth", "stratum"} (+ "absent" for NEG). A NEG fact written by an earlier call whose condition
-    no longer holds is retracted. Idempotent. → ChainReport."""
+    no longer holds is retracted.
+
+    The closed-world stratum last: the functional declarations kept in the rule scope (`to_knowledge` writes them;
+    `functional=` writes them there first, as "spec" rule items) — for each active pair fact r(x, z) of a declared
+    relation (given or derived, not of the NEG stratum) whose subject has the declared type, r̄(x, y) on every
+    candidate object y ≠ z, justified by r(x, z) and the declaration (`derived_from`; the source of r(x, z); evidence
+    stratum 3). Retracting the declaration or the positive takes the facts along; a closed fact that meets an explicit
+    r(x, y) is a dispute. Idempotent. → ChainReport."""
     from ._chain import FACT_STATUSES, RULE_STATUSES, ChainLimit, ChainReport, _live, _pair, _rests_on, _scope_key, \
         pair_fact
     from ...core.knowledge.gates import RANK
@@ -1123,12 +1307,22 @@ def chain_rules(store, *, scope=None, rule_scope=None, rules="active", complemen
     t0 = time.perf_counter()
     rep = ChainReport()
     q0 = len(store.questions)
-    rlist, rids = [], []
+    if functional:
+        write_declarations(store, functional_spec(functional, comp),
+                           plain_json(rule_scope if rule_scope is not None else (scope or {})), by=by)
+    rlist, rids, decls = [], [], []
     for rec in store.find(kind="rule", scope=scope if rule_scope is None else rule_scope, status=RULE_STATUSES[rules]):
-        r = rule_from_body(rec["body"])
+        b = rec["body"]
+        if isinstance(b, dict) and b.get("kind") == "functional" and b.get("r") == "functional" \
+                and isinstance(b.get("s"), list) and len(b["s"]) == 2 and isinstance(b.get("complement"), str):
+            decls.append((rec["id"], b["s"][0], b["s"][1], b.get("o"), b["complement"]))
+            comp.setdefault(b["complement"], b["s"][0])
+            continue
+        r = rule_from_body(b)
         if r is not None:
             rlist.append(r)
             rids.append(rec["id"])
+    decls.sort(key=repr)
     if not neg:
         keep = [i for i, r in enumerate(rlist) if r.template != "NEG"]
         rlist, rids = [rlist[i] for i in keep], [rids[i] for i in keep]
@@ -1138,9 +1332,10 @@ def chain_rules(store, *, scope=None, rule_scope=None, rules="active", complemen
         if it.kind != "fact" or store.status(iid) in (None, "retracted"):
             continue
         live = _live(it)
-        if live and all(a.get("by") == by and (a.get("evidence") or {}).get("stratum") == 2 for a in live):
-            mine.add(iid)                                 # an output of the negative stratum, never its input
-            if scope is None or all(it.scope.get(kk) == vv for kk, vv in scope.items()):
+        if live and all(a.get("by") == by and (a.get("evidence") or {}).get("stratum") in (2, 3) for a in live):
+            mine.add(iid)                                 # an output of the negative or closed stratum, never an input
+            if all((a.get("evidence") or {}).get("stratum") == 2 for a in live) \
+                    and (scope is None or all(it.scope.get(kk) == vv for kk, vv in scope.items())):
                 stale[_scope_key(it.scope)].append(iid)
     groups, scopes = defaultdict(dict), {}
     for rec in store.find(kind="fact", scope=scope, status=FACT_STATUSES):
@@ -1172,6 +1367,7 @@ def chain_rules(store, *, scope=None, rule_scope=None, rules="active", complemen
         ents = st.entities()
         cap = len(ents) ** 2 * max(1, len({r for _, _, r in c.facts()})) if max_facts is None else int(max_facts)
         new_items = 0
+        counted = set()                                    # new items counted once (a batch resolves them at its end)
         neg_now = set()
         levels = defaultdict(list)
         for f in c.order:
@@ -1221,7 +1417,8 @@ def chain_rules(store, *, scope=None, rule_scope=None, rules="active", complemen
             ids[("b",) + f] = iid
             row["proposed"] += 1
             derived_ids.add(iid)
-            if new:
+            if new and iid not in counted:
+                counted.add(iid)
                 row["added"] += 1
                 new_items += 1
                 if new_items > cap:
@@ -1236,7 +1433,7 @@ def chain_rules(store, *, scope=None, rule_scope=None, rules="active", complemen
             rep.refused += row["refused"]
             rep.circular += row["circular"]
             if row["proposed"]:
-                depth_max = max(depth_max, lvl[1] + (1 if lvl[0] == 2 else 0))
+                depth_max = max(depth_max, lvl[1] + (1 if lvl[0] >= 2 else 0))
 
         def mkrow(lvl):
             return {"round": lvl[1] if lvl[0] == 1 else depth_max + 1, "proposed": 0, "added": 0, "refused": 0,
@@ -1264,6 +1461,59 @@ def chain_rules(store, *, scope=None, rule_scope=None, rules="active", complemen
                 for f, l2, ji, prem, ri in sorted(deferred, key=lambda d: (d[1], repr(d[0]), d[2])):
                     write(f, l2, ji, prem, ri, row, True)
             account(row, (1, 0))
+        if decls:                                          # the closed-world stratum, on the store's statuses
+            U = defaultdict(set)
+            for x, u in st.unary:
+                U[x].add(u)
+            by_u = defaultdict(list)
+            for e in sorted(ents, key=repr):
+                for u in U.get(e, ()):
+                    by_u[u].append(e)
+            todo = []
+            for did, r, su, ou, rbar in decls:
+                known = [(key[1], key[2], iid) for key, iid in sorted(ids.items(), key=lambda kv: repr(kv[0]))
+                         if key[0] == "b" and key[3] == r and (key[1], key[2], r) not in neg_now
+                         and su in U.get(key[1], ()) and store.status(iid) == "active"]
+                nx = Counter(x for x, _, _ in known)
+                rep.closed_conflicts += sum(1 for v in nx.values() if v > 1)
+                for x, z, iid in known:
+                    if nx[x] > 1:                          # several known positives: the declaration is contradicted
+                        continue
+                    if ou is not None:
+                        cands = by_u.get(ou, [])
+                    else:
+                        kinds = sorted(u for u in U.get(z, ()) if u.startswith("is_"))
+                        cands = sorted(set.intersection(*(set(by_u.get(u, ())) for u in kinds)), key=repr) \
+                            if kinds else []
+                    todo += [((x, y, rbar), iid, did, z) for y in cands if y != x and y != z]
+            row = mkrow((3, 0))
+            with store.batch():
+                for (x, y, rbar), pid_, did, z in todo:
+                    body = plain_json(pair_fact(x, y, rbar, multi=True, family=comp.get(rbar, rbar)))
+                    iid = item_id("fact", body, sc)
+                    just = sorted({pid_, did})
+                    it = store.items.get(iid)
+                    if it is not None and any(list(a["just"]) == just for a in _live(it)):
+                        continue
+                    s0 = store.state.get(pid_)
+                    if s0 is None or s0["rank"] not in by_rank:
+                        continue
+                    new = it is None or store.status(iid) in (None, "retracted")
+                    got = store.add("fact", body, sc, source=by_rank[s0["rank"]], by=by, derived_from=just,
+                                    evidence={"rule": did, "premises": [pid_, did], "via": z, "depth": 0,
+                                              "stratum": 3}, inferred=True)
+                    if got is None:
+                        row["refused"] += 1
+                        continue
+                    row["proposed"] += 1
+                    derived_ids.add(iid)
+                    if new and iid not in counted:
+                        counted.add(iid)
+                        row["added"] += 1
+                        new_items += 1
+                        if new_items > cap:
+                            raise ChainLimit(f"more than max_facts={cap} new facts in scope {k}")
+            account(row, (3, 0))
         for iid in stale.get(k, ()):
             it = store.items[iid]
             p = _pair(it.body)
