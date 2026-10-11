@@ -425,11 +425,39 @@ on short streams. In the toy (20 fresh layouts × 5 seeds) the set certified at 
 and System 1's share reached 0.81 in the last five with every goal still reached; per skill nothing certified within
 20 episodes.
 **Cases do not transfer, rules do:** replaying the sequence that worked from the same start state gave System 1 nothing
-on fresh layouts; a skill's condition keeps only the atoms its verified starts shared, so it reaches states no case
-has seen. On a game simulator with written mechanics, learned rules carried across worlds (no written rules given) gave +77%
-achievements and System 1 84% of the decisions after about twenty worlds (part of it is survival: the agent lived
-longer). Script:
+on fresh layouts; a skill's condition keeps only the atoms its verified starts shared, so it reaches states no case has
+seen. On Crafter (written mechanics, symbolic state, hand-written survival reflexes shared by every arm), an action
+model learned from the agent's own attempts and carried across 30 worlds (10 independent runs) raised the unique
+achievements unlocked per episode from 6.0 to 10.6 of 22 (+77%; the oracle 14.4) and System 1's share to 84% after about
+twenty worlds, part of it by living longer; with the written rules given to the agent as gates, the learned memory added
+nothing (−4.5%). Script for the gridworld:
 [skills_toy.py](../benchmarks/skills_toy.py) (`pytest -m slow tests/test_skills_toy.py`).
+
+**Measured on Crafter.** On Crafter (version 1.8.3; written mechanics as the exact model; symbolic state; hand-written
+survival reflexes shared by every arm, 60% of all steps; the planner reads the copy's full map while the game shows an
+agent a 9×7 window), in one run of 10 streams × 30 episodes, no agent seed (the loop is deterministic given the world
+seeds). Achievements are unique achievements unlocked per episode (of 22). The skill set was certified at 5% / δ 0.1
+(fifty clean uses, one e-process pooled over the stream's skills) in every stream by episode 1–2. In the last ten
+episodes System 1 acted alone 1,350 times with an observed outcome and failed twice (0.15%, Wilson upper bound 0.54%; 4
+of 2,882 over the whole run); 57 further alone runs were paused by a reflex and not resumed, so they carry no outcome
+(counted as failures they would make 4.2%, Wilson 5.4%). The promise is the set's, not a single skill's; a skill's own
+alarm retires it (4 retirements, each later re-certified). Goals that are stochastic by the written rules stayed with
+System 2 and are outside the promise. With skills the planner was called 32 times per episode against 42 when it plans
+every goal (−23%), and an episode took 84 s against 107 s on the same machine (−21%), with achievements kept: 15.2
+against 15.7 unique achievements unlocked per episode of 22 (ratio 0.966, bootstrap lower bound 0.934). System 1's share
+of the non-reflex steps rose from 7% in the first ten episodes to 23% in the last ten (9% of all steps); the
+pre-registered bar of 60% was missed. Routes to a resource and plans for unseen footprints stay System 2 by design
+(routes were 25% of non-reflex steps), and every certified skill was a one- or two-step gather sequence with a constant
+footprint: in an open world the planner did most of the work and skills took the repeatable part. Hierarchical skills
+and conditions with variables are untested. An arm that executed and compiled random action sequences of the plan's
+length in place of verified plans unlocked 4.0 unique achievements per episode against 13.7 for the same agent with no
+memory at all; none of its 5,497 unverified skills was ever certified, so System 1 never acted. The gain is the verified
+plans', not the loop's bookkeeping, and the certificate held unverified skills out; what unverified memory does on its
+own was not measured. The observation-only learner (the agent's own action memory with the written gates on) unlocked
+13.3 unique achievements per episode, no higher than the same agent without memory (13.7); the planner arms' lead over
+both is the planner's with the full map. The planner reads the whole map of the copy; a Crafter agent sees a 9×7 window
+from pixels. No number here is comparable with published Crafter scores (a geometric mean of success rates over 1M
+training steps).
 
 ## Self-change: guard refusal first
 
