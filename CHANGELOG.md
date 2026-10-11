@@ -1,9 +1,6 @@
 # Changelog
 
-## 1.1.0 (unreleased)
-
-The development tree calls itself `1.1.0.dev0` (`solvi --version`, `solvi.__version__`, the version written into
-calibration files and served by `solvi serve`), so a build from it is not mistaken for the published 1.0.1.
+## 1.1.0 — 2026-10-11 — learning from code and outcomes
 
 ### Breaking changes
 
