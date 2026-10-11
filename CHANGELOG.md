@@ -130,22 +130,6 @@
   `generalize_accepted`, `generalize_checks`. `lift=False` (the default) keeps the condition rule alone, decision
   for decision as before. The vocabulary is the world's to write (relations, domains, lifts, what a plan read). Tested
   on a small grid only (`tests/test_skills_footprint.py`); an open-world measurement is pre-registered and pending.
-
-### Docs
-
-- **The LoRA page: installing on x86_64 macOS** (torch 2.2.2, numpy<2, transformers 4.48, peft 0.19,
-  `SOLVI_NO_COMPILE=1`), and the installation section links it.
-- **Best practices: if the zero-shot decider does not separate the classes, `fit` cannot help** — it only moves the
-  priors; a LoRA adapter is needed (a user's short interface texts: 8 answers given alone of 375 before an adapter,
-  257 after); and split by source with `groups=` when examples share one.
-- The guarded-rules numbers on the test files, replacing «the test files are not scored yet — their numbers follow»
-  (API page, best practices, experimental STATUS, ROADMAP, the NoRA script's docstring): Measured once on the benchmark's three no-ambiguity test files, whole (NoRA, Das et al., NeurIPS 2025; D-na 3,345, OPEC-na 1,683 and BL-na 67,549 query pairs), with the rules learned on a third hash split of the training file (9,238 fit / 2,033 check; the strict setting — majority 1.0, support 10, two confirmations on the check slice — chosen on that split's held-out part, 1,973 pairs, before the test files were read; the bars pre-registered before the run); exact set match / precision among answered / coverage: BL-na (reasoning off the query path) 0.734 / 0.734 / 0.999; D-na (depth beyond the training depth) 0.477 / 0.961 / 0.496 — the rules refuse half of the queries, and the most frequent label set per entity kinds answers 0.491 there, more than the rules by exact match; OPEC-na 0.093 / 0.093 / 0.999; the held-out part of the training file 0.501 / 0.759 / 0.659. The default counting setting (majority 0.9, support 2) gave 0.593 / 0.603 / 0.984 on BL-na, 0.007 / 0.293 / 0.022 on D-na and 0.032 on OPEC-na. The benchmark paper reports, for its best model trained without ambiguity (an Edge Transformer, single-edge), 0.104 on BL-na, 0.822 on D-na and 0.110 on OPEC-na; models trained with ambiguity reach 0.785 on the ambiguous BL split, which was not measured here. The pre-registered bars (BL-na ≥ 0.50 and OPEC-na ≥ 0.20; D-na and held-out ≥ 0.80; precision among answered ≥ 0.95 on every split; the control ≤ 0.30) were not met — none of the four. What the test shows: labels exist only on the query pairs, so a derived fact cannot be checked where it lands, and the looser admission admits rules right on the labelled pairs and wrong elsewhere (0.593 against 0.734 on BL-na); which chain rules the strict setting keeps depends on the split of the training file (held-out 0.328 / 0.485 / 0.501 on three splits; the test numbers are from the third, one run); the «elsewhere» relation (Not_living_in, about a third of the depth split's rows) is refused by every setting, so the depth split is answered on half of its pairs; the OPEC split needs a gender guard on the middle entity of a chain (maternal / paternal), which no template carries. Next, each with its own bar: a closed-world default per entity type for near-functional relations (the partial-completeness rule of knowledge-base rule mining), a gender guard on the middle entity, and labels or a structural check on intermediate facts. The ground truth of this benchmark is computed from published rules, so an exact rule set exists by construction; what is measured is how much of it counting on query-pair labels recovers. The dataset is released under CC BY-NC 2.0: the script reads the files in place; no data and no learned rules ship with the library.
-- The strict first-run numbers of 1.1.0 on the `nora` split (0.328 / 0.681 / 0.482, 469 rules) were re-run once
-  (7 rounds, 531 s on CPU): the same numbers.
-
-
-### Added
-
 - **`solvi.experimental.laws.PriorRanker` and `HandoverRanker`: an order for candidate conditions before the buffer has
   rows.** `JointRanker` is a statistic over logged rows: with none every score is equal and the order is the blind one.
   `PriorRanker` scores a condition by its own features — its number of atoms (one-hot), and the sums over its atoms of
@@ -157,17 +141,36 @@
   `shuffle_labels=True` is the control (each task's target a random candidate). **Fallback:** unless the prior's
   held-out checks on its own training tasks (weights fitted on the other half) are `margin` (5%) below both the blind
   order's and a shuffled-label fit's, `learned` is False and every score is 0 — the blind order; `cv` holds the three
-  numbers; `fallback=False` keeps the raw fit (the control). `HandoverRanker(prior, joint=None,
-  min_rows=20)` scores by the prior below `min_rows` logged rows of the candidates' action (without the group `exclude`)
-  and by `JointRanker` from there on; `last` and the Counter `scored` say which one scored. `RankedProposer` takes
-  either; its new `scored_by` names the scorer of the last call. On a planted grammar whose condition sampler draws three
-  features 30 times as often: 10.3 checks to the true condition at 0 rows against 43.1 blind, the shuffled-label prior
-  206 (`tests/test_laws_rank_prior.py`). In `benchmarks/laws_rank_joint.py` (one seed, five-seed measurement pending):
-  on a new skewed setting D (the deep setting's grammar, three features drawn 8 times and one comparison type 4 times as
-  often) 163 at 0 rows against 1,086 blind, still ahead of the joint statistic at 100 rows (163 against 263: a fixed
-  hand-over at 20 rows is early there); on A / B / C, whose conditions are drawn uniformly from the grammar, 96 (fell
-  back) / 2,034 / 123 against 96 / 2,174 / 129 blind. The benchmark's `--curve` now covers every setting and the prior,
-  the hand-over and the shuffled-label prior.
+  numbers; `fallback=False` keeps the raw fit (the control). `HandoverRanker(prior, joint=None, *, mode="blend",
+  n0=20, min_rows=20)` hands over from the prior to the joint statistic: by default a blend — the joint Jaccard plus
+  n0 / (n0 + rows) times the prior's rank among the candidates mapped to [0, 1], ties to fewer atoms; a prior with
+  learned=False leaves the joint statistic alone; `mode="switch"` is the prior below `min_rows` logged rows of the
+  candidates' action (without the group `exclude`) and `JointRanker` from there on; `last` and the Counter `scored` say
+  what scored. `RankedProposer` takes either; its new `scored_by` names the scorer of the last call. On a planted grammar
+  whose condition sampler draws three features 30 times as often: 10.3 checks to the true condition at 0 rows against
+  43.1 blind, the shuffled-label prior 206 (`tests/test_laws_rank_prior.py`). In `benchmarks/laws_rank_joint.py` (one
+  seed, five-seed measurement pending): on a new skewed setting D (the deep setting's grammar, three features drawn 8
+  times and one comparison type 4 times as often) the prior 163 at 0 rows against 1,086 blind, the blend 124 / 83 / 3.6
+  at 20 / 100 / 300 rows against 820 / 263 / 7.4 for the joint statistic; on A / B / C, whose conditions are drawn
+  uniformly from the grammar, the prior 96 (fell back) / 2,034 / 123 against 96 / 2,174 / 129 blind, and the blend on B
+  at 300 rows 22 against 9.1 for the joint statistic. The benchmark's `--curve` now covers every setting and the prior,
+  both hand-overs and the shuffled-label prior.
+
+### Docs
+- **The LoRA page: installing on x86_64 macOS** (torch 2.2.2, numpy<2, transformers 4.48, peft 0.19,
+  `SOLVI_NO_COMPILE=1`), and the installation section links it.
+- **Best practices: if the zero-shot decider does not separate the classes, `fit` cannot help** — it only moves the
+  priors; a LoRA adapter is needed (a user's short interface texts: 8 answers given alone of 375 before an adapter,
+  257 after); and split by source with `groups=` when examples share one.
+- The guarded-rules numbers on the test files, replacing «the test files are not scored yet — their numbers follow»
+  (API page, best practices, experimental STATUS, ROADMAP, the NoRA script's docstring): Measured once on the benchmark's three no-ambiguity test files, whole (NoRA, Das et al., NeurIPS 2025; D-na 3,345, OPEC-na 1,683 and BL-na 67,549 query pairs), with the rules learned on a third hash split of the training file (9,238 fit / 2,033 check; the strict setting — majority 1.0, support 10, two confirmations on the check slice — chosen on that split's held-out part, 1,973 pairs, before the test files were read; the bars pre-registered before the run); exact set match / precision among answered / coverage: BL-na (reasoning off the query path) 0.734 / 0.734 / 0.999; D-na (depth beyond the training depth) 0.477 / 0.961 / 0.496 — the rules refuse half of the queries, and the most frequent label set per entity kinds answers 0.491 there, more than the rules by exact match; OPEC-na 0.093 / 0.093 / 0.999; the held-out part of the training file 0.501 / 0.759 / 0.659. The default counting setting (majority 0.9, support 2) gave 0.593 / 0.603 / 0.984 on BL-na, 0.007 / 0.293 / 0.022 on D-na and 0.032 on OPEC-na. The benchmark paper reports, for its best model trained without ambiguity (an Edge Transformer, single-edge), 0.104 on BL-na, 0.822 on D-na and 0.110 on OPEC-na; models trained with ambiguity reach 0.785 on the ambiguous BL split, which was not measured here. The pre-registered bars (BL-na ≥ 0.50 and OPEC-na ≥ 0.20; D-na and held-out ≥ 0.80; precision among answered ≥ 0.95 on every split; the control ≤ 0.30) were not met — none of the four. What the test shows: labels exist only on the query pairs, so a derived fact cannot be checked where it lands, and the looser admission admits rules right on the labelled pairs and wrong elsewhere (0.593 against 0.734 on BL-na); which chain rules the strict setting keeps depends on the split of the training file (held-out 0.328 / 0.485 / 0.501 on three splits; the test numbers are from the third, one run); the «elsewhere» relation (Not_living_in, about a third of the depth split's rows) is refused by every setting, so the depth split is answered on half of its pairs; the OPEC split needs a gender guard on the middle entity of a chain (maternal / paternal), which no template carries. Next, each with its own bar: a closed-world default per entity type for near-functional relations (the partial-completeness rule of knowledge-base rule mining), a gender guard on the middle entity, and labels or a structural check on intermediate facts. The ground truth of this benchmark is computed from published rules, so an exact rule set exists by construction; what is measured is how much of it counting on query-pair labels recovers. The dataset is released under CC BY-NC 2.0: the script reads the files in place; no data and no learned rules ship with the library.
+- The strict first-run numbers of 1.1.0 on the `nora` split (0.328 / 0.681 / 0.482, 469 rules) were re-run once
+  (7 rounds, 531 s on CPU): the same numbers.
+- **The LoRA page: installing on x86_64 macOS** (torch 2.2.2, numpy<2, transformers 4.48, peft 0.19,
+  `SOLVI_NO_COMPILE=1`), and the installation section links it.
+- **Best practices: if the zero-shot decider does not separate the classes, `fit` cannot help** — it only moves the
+  priors; a LoRA adapter is needed (a user's short interface texts: 8 answers given alone of 375 before an adapter,
+  257 after); and split by source with `groups=` when examples share one.
 
 ## 1.1.0 — 2026-10-11 — learning from code and outcomes
 
