@@ -308,3 +308,98 @@ def test_the_part_has_an_adapter_slot_not_the_training_calls(ckpt):
     ad = part.lora
     assert ad.kind == "lora" and ad.fingerprint() == ad.hash == rep["adapter"]
     assert remove_lora(part) == rep["adapter"] and part.lora is None
+
+
+def test_two_parts_asking_the_same_question_keep_their_own_adapters(ckpt):
+    """1.1.1: an adapter is kept per part, not per question text. Two folds of a cross-validation asking the same task
+    and options in one process: training the first must not answer the second before its own training (it did, and the
+    second fold's "before training" accuracy rose from 0.32 to 0.83–0.89); the second part's decision is the untrained
+    base's, and a SharedQuestionWarning names both parts."""
+    from solvi.core.deciders import SharedQuestionWarning
+    m = DecideModel.load(ckpt, backend="torch", device="cpu")
+    f0 = m.decision("close_f0", "Which team?", "email", TEAMS)
+    f1 = m.decision("close_f1", "Which team?", "email", TEAMS)
+    test = _toy(30, 2)
+    fresh = DecideModel.load(ckpt, backend="torch", device="cpu").decision("close_f1", "Which team?", "email", TEAMS)
+    base = [fresh.decide(t).probs for t, _ in test]
+    assert [f1.decide(t).probs for t, _ in test] == base
+    fp1 = f1.fingerprint()
+    _adapt(f0, _toy(60, 1))
+    assert f0.lora is not None and f1.lora is None and f1.fingerprint() == fp1
+    with warnings.catch_warnings(record=True) as w:
+        warnings.simplefilter("always")
+        after = [f1.decide(t).probs for t, _ in test]
+    assert after == base                                         # the untrained base, not close_f0's adapter
+    said = [str(x.message) for x in w if issubclass(x.category, SharedQuestionWarning)]
+    assert len(said) == 1 and "'close_f0'" in said[0] and "'close_f1'" in said[0]
+    assert "lora" not in f1.decide(test[0][0]).extra
+    assert [f0.decide(t).probs for t, _ in test] != base           # close_f0 answers with its adapter
+    h0 = f0.lora.hash
+    _adapt(f1, _toy(60, 3))                                      # its own training: its own adapter
+    assert f1.lora.hash != h0 and f0.lora.hash == h0
+    assert f1.decide(test[0][0]).extra["lora"]["adapter"] == f1.lora.hash
+    assert f0.decide(test[0][0]).extra["lora"]["adapter"] == h0
+    remove_lora(f0)                                              # rolling one back leaves the other's
+    assert f0.lora is None and f1.lora is not None and [f0.decide(t).probs for t, _ in test] == base
+    remove_lora(f1)
+
+
+def test_one_adapter_file_loaded_by_two_parts_survives_one_rollback(ckpt, tmp_path):
+    m = DecideModel.load(ckpt, backend="torch", device="cpu")
+    a = m.decision("a", "Which team?", "email", TEAMS)
+    b = m.decision("b", "Which team?", "email", TEAMS)
+    _adapt(a, _toy(60, 1))
+    f = a.save_lora(tmp_path / "a.lora.safetensors")
+    test = _toy(10, 2)
+    want = [a.decide(t).probs for t, _ in test]
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        b.load_lora(f)
+    remove_lora(a)
+    assert [b.decide(t).probs for t, _ in test] == want
+    remove_lora(b)
+
+
+def test_an_old_peft_is_refused_before_any_training(ckpt, monkeypatch):
+    """peft < 0.19 has no set_adapter(..., inference_mode=): the first decision after training failed on it, after a
+    long CPU training. It is refused at the start now, and the lora extra asks for peft>=0.19."""
+    import tomllib
+    from pathlib import Path
+
+    from peft.tuners.tuners_utils import BaseTunerLayer
+
+    import solvi.experimental.lora as L
+
+    def old_set_adapter(self, adapter_names):                    # peft 0.14's signature
+        raise AssertionError("not called")
+    monkeypatch.setattr(BaseTunerLayer, "set_adapter", old_set_adapter)
+    monkeypatch.setattr(L, "train", lambda *a, **k: pytest.fail("trained with an unusable peft"))
+    m, part = _part(ckpt)
+    with pytest.raises(ImportError, match=r"peft>=0\.19.*inference_mode"):
+        adapt_lora(part, _toy(40, 1))
+    py = tomllib.loads((Path(__file__).resolve().parents[1] / "pyproject.toml").read_text())
+    assert "peft>=0.19" in py["project"]["optional-dependencies"]["lora"]
+
+
+def test_solvi_no_compile_loads_the_encoder_without_torch_compile(ckpt, monkeypatch):
+    """x86_64 macOS on Python 3.12: transformers 4.x ModernBERT calls torch.compile when its module is imported, and
+    Dynamo refuses ("not supported on Python 3.12+"). SOLVI_NO_COMPILE=1 makes torch.compile a no-op while the encoder is
+    imported and built (here: a builder that compiles as that module does, with a torch.compile that refuses)."""
+    import torch
+    import transformers
+
+    def refuse(*a, **k):
+        raise RuntimeError("Dynamo is not supported on Python 3.12+")
+    real_build = transformers.AutoModel.from_config
+
+    def build_compiling(cfg, **kw):
+        torch.compile(dynamic=True)(lambda x: x)                 # what modeling_modernbert 4.48 does at import
+        return real_build(cfg, **kw)
+    monkeypatch.setattr(torch, "compile", refuse)
+    monkeypatch.setattr(transformers.AutoModel, "from_config", build_compiling)
+    with pytest.raises(RuntimeError, match="Dynamo"):
+        DecideModel.load(ckpt, backend="torch", device="cpu")
+    monkeypatch.setenv("SOLVI_NO_COMPILE", "1")
+    m = DecideModel.load(ckpt, backend="torch", device="cpu")
+    assert m.decision("t", "Which team?", "email", TEAMS).decide("my invoice").value in TEAMS
+    assert torch.compile is refuse                                # restored after the load

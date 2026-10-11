@@ -1,5 +1,66 @@
 # Changelog
 
+## 1.1.1 (unreleased)
+
+### Fixed
+
+- **A LoRA adapter belongs to its decision part, not to the question's text.** Adapters were kept on the model by the
+  question (task and options), so two parts asking the same question in one process shared one: in a
+  cross-validation the second fold started from the first fold's adapter, trained on its test examples, and its
+  accuracy «before training» rose from 0.32 to 0.83–0.89 without a warning. An adapter is now kept under the part's
+  name on its model; a part never scores with another part's adapter, a `SharedQuestionWarning`
+  (`solvi.core.deciders`) names both parts once, the cached logits are kept apart per adapter, and an adapter file
+  loaded by two parts survives one part's rollback. A question asked of the model directly (`model.logits`,
+  `model.decide`) still uses the question's adapter when exactly one part has one; the model's fingerprint is as
+  before while one part per question has an adapter.
+- **peft ≥ 0.19 for the `lora` extra, checked before training.** The code calls `set_adapter(name,
+  inference_mode=True)`, which older peft does not take; with peft 0.14 the first decision after a 15-minute CPU
+  training failed. The extra (and the `lora` dev group) now asks for `peft>=0.19`, and `adapt_lora`, training and
+  loading an adapter refuse an older peft at the start with what to install.
+- **x86_64 macOS: `SOLVI_NO_COMPILE=1` loads the torch decider without `torch.compile`.** On Python 3.12 with torch
+  2.2.2 (the last for Intel Macs) the transformers 4.x ModernBERT module calls `torch.compile` on import and Dynamo
+  refuses; with the variable set, `torch.compile` is a no-op while the encoder is imported and built (and its compiled
+  MLP is off). The `lora` extra asks for `transformers<5` and `numpy<2` on x86_64 macOS only.
+- **The compile sandbox on macOS.** `setrlimit(RLIMIT_AS, mem)` raised ValueError there below the address space
+  already reserved, so every draft «did not run» and the writer was asked to rewrite modules that were fine. The memory
+  limit is RLIMIT_DATA on macOS, a memory limit the platform refuses is skipped with a `SandboxWarning`
+  (`sandbox.set_limits`), and a failure of the sandbox itself (its interpreter, its driver) comes back as
+  `{"sandbox_error": ...}`: compilation stops with «not accepted: sandbox_error: ...» and nothing is sent back to the
+  writer.
+- **act_guard's report names its signal and direction.** `"direction": ">="` and `"rule"` («answers alone when the act
+  probability … ≥ τ; escalates below») on a part's and a combination's report. A user saw a stricter `max_risk`
+  give a lower threshold and a lower share answered alone; for one signal and one set of examples that cannot happen
+  — the threshold is monotone in `max_risk` (checked on 2,000 random calibration sets with ties, and through
+  `act_guard` on both signals) — so the two numbers came from different signals or different examples: `signal="auto"`
+  takes the act probability when the model has an act head, `adapt_lora`'s held-out report uses the confidence, and
+  the two are different scales.
+- **An ExperimentalWarning once per process.** An experimental module imported again (a package walk, a module dropped
+  from `sys.modules`) warned every time; it now warns once per module per process, with the first warning's text.
+
+### New
+
+- **`Decision.alone`.** True only for a value that was not escalated: an escalated decision keeps the value it would
+  have given, and an evaluation that counted every value counted escalations as answers. The guide shows the reading
+  (`res["question"].answer`, `.status`; a Response has no `answers` attribute).
+- **`solvi.build(..., groups=)`.** A split by group — a key of the state, a function state → group, or one group per
+  example: every share holds whole groups, so System 1's guarantee and the dispatcher are calibrated on groups System 1
+  never saw and the promise is read on unseen groups. The default (`groups=None`) is the random split as before, which
+  is optimistic when examples share a source (a user's promise of ≤ 10% gave 14% on unseen screens). On a synthetic
+  set where System 1 remembers its training screens, the random split's promise of ≤ 10% answered alone and wrong gave
+  22–26% on new screens, the grouped split 5–9% (three seeds).
+- **`LawSet.report(buffer, steps)` in `solvi.experimental.laws`.** A learning run's summary with, per action, the rows
+  the buffer has and the support the sized acceptance needs at this N (`sized_need` against the action's least base
+  null; `need_at_precision` for a law right on min_precision of its rows), and the actions with too few rows — so «0
+  laws accepted» reads as «too few rows» where that is why. `LawSet.need_at(tested, null, precision)`.
+
+### Docs
+
+- **The LoRA page: installing on x86_64 macOS** (torch 2.2.2, numpy<2, transformers 4.48, peft 0.19,
+  `SOLVI_NO_COMPILE=1`), and the installation section links it.
+- **Best practices: if the zero-shot decider does not separate the classes, `fit` cannot help** — it only moves the
+  priors; a LoRA adapter is needed (a user's short interface texts: 8 answers given alone of 375 before an adapter,
+  257 after); and split by source with `groups=` when examples share one.
+
 ## 1.1.0 — 2026-10-11 — learning from code and outcomes
 
 ### Breaking changes

@@ -18,7 +18,7 @@ from .state import _is_text, _single, _text, jsonable, state_text
 from .wire import Logits, _respan
 from .backends import LONG_CPU_TOKENS, SECTION_TOKENS
 from .adapt import ADAPTERS, _Spec, lora_key
-from .gate import Facts, GroupBy, _group_guard, _group_promise, _shown, _threshold, _vkey, confidence_source, group_record, guard_promise, no_separation, one_source
+from .gate import Facts, GroupBy, _group_guard, _group_promise, _shown, _threshold, _vkey, confidence_source, group_record, guard_promise, guard_rule, no_separation, one_source
 
 
 class DecisionPart:
@@ -72,6 +72,7 @@ class DecisionPart:
         self.asked = 0                          # decisions made by this part on its own (calls())
         self.__name__ = name
         self.__qualname__ = name
+        self.spec.owner = name                  # its LoRA adapter slot is this part's, not the question text's
         self.__doc__ = task
         self.__signature__ = inspect.Signature([inspect.Parameter(f, inspect.Parameter.POSITIONAL_OR_KEYWORD)
                                                 for f in self.facts])
@@ -417,6 +418,8 @@ class DecisionPart:
         task, desc, multi, other, kind, as_bool, sv, prim = self._spec_args
         opts = (lambda o: o + [self.spec.other] if self.spec.other is not None and self.spec.other not in o else o)
         specs = [_Spec(task, opts(list(o)), desc, multi, other, kind, as_bool, sv, **prim) for o in self._orders]
+        for sp in specs:
+            sp.owner = self.spec.owner
         idx = {o: i for i, o in enumerate(self.spec.real)}
         runs = [self.model._raw_full([(sp, t) for t in texts], read_len=read_len) for sp in specs]
         out = []
@@ -785,7 +788,12 @@ class DecisionPart:
         level) keeps the promise only by escalating, and is warned about (UserWarning, "warnings"). → {"signal",
         "threshold", "answered" (share answered alone on the examples), "error" (among them), "risk" (answered and
         wrong, on the examples), "n", "guarantee", "promise" (in words, with that error), "base_error",
-        "must_escalate_at_least", "warnings" when there are any}.
+        "must_escalate_at_least", "warnings" when there are any, "direction" (">=": a decision is answered alone when
+        its signal ≥ "threshold", escalated below) and "rule" (that in words, naming the signal)}. The threshold is on
+        the scale of its signal: "act" (the act probability, chosen by signal="auto" when the model has an act head)
+        and "confidence" are different scales, so two calibrations compare only with the same "signal". For one signal
+        and one set of examples a stricter max_risk never gives a lower threshold (the search takes the lowest
+        threshold whose risk bound holds, and that bound only falls as the threshold rises).
 
         groups: a threshold per group — a fact name ("domain"), a hierarchy of fact names (["domain", "task"]) or a
         function of facts returning a group or a path (see GroupBy); the examples then give those facts (Facts(...) or
@@ -836,7 +844,8 @@ class DecisionPart:
             thr = nodes[()]["threshold"]
             out = {"groups": info}
         err = float(1 - o[auto].mean()) if auto.any() else 0.0
-        out = {"signal": name, "threshold": thr, "answered": float(auto.mean()), "error": err,
+        out = {"signal": name, "threshold": thr, "direction": ">=", "rule": guard_rule(name, thr, groups is not None),
+               "answered": float(auto.mean()), "error": err,
                "risk": float(((1 - o) * auto).mean()), "n": len(ok), "guarantee": g["promise"],
                "promise": guard_promise(risk, err, bool(auto.any())),
                "base_error": base, "must_escalate_at_least": max(0.0, (base - risk) / (1 - risk)), **out}

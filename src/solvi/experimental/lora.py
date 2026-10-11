@@ -77,8 +77,21 @@ def _experimental():
 
 
 def _lora_key(part):
+    """The part's adapter slot on its model: the question and the part's name (two parts asking the same question have
+    two slots)."""
     from ..core.deciders import lora_key
     return lora_key(part.spec)
+
+
+def _question(part):
+    """The question an adapter is for (what its file records and load checks): the task, the options, the kind."""
+    from ..core.deciders import lora_key
+    return lora_key(part.spec.key)
+
+
+def _in_use(m, name, but):
+    """Does another slot of the model hold the adapter `name` (the same file loaded by two parts)?"""
+    return any(k != but and ad.name == name for k, ad in m.loras.items())
 
 
 @dataclass
@@ -152,6 +165,29 @@ def _peft_config(config):
 
 
 # ------------------------------------------------------------------------------------------------ scope
+PEFT_MIN = "0.19"          # the first peft whose set_adapter takes inference_mode= (what scoring with an adapter calls)
+
+
+def need_peft(what="adapt_lora"):
+    """Refuse an installed peft this module cannot use, before any training (ImportError with what to install): peft
+    missing, or older than 0.19 — its set_adapter has no `inference_mode` keyword, and the first decision after a
+    training would fail on it."""
+    import inspect
+    try:
+        import peft
+        from peft.tuners.tuners_utils import BaseTunerLayer
+    except ImportError:
+        raise ImportError(f'{what} needs peft: pip install "solvi[lora]"') from None
+    try:
+        ok = "inference_mode" in inspect.signature(BaseTunerLayer.set_adapter).parameters
+    except (TypeError, ValueError):          # no signature to read: let the call itself decide
+        ok = True
+    if not ok:
+        raise ImportError(f"{what} needs peft>={PEFT_MIN} (installed: {getattr(peft, '__version__', '?')}): its "
+                          "set_adapter has no inference_mode keyword, which scoring with an adapter uses — "
+                          f'pip install -U "peft>={PEFT_MIN}"')
+
+
 def check(part, allow_large=False):
     """Refuse what adapt_lora cannot adapt (ValueError / TypeError / ImportError with what to do instead)."""
     from ..core.deciders import DecisionPart, TorchScorer
@@ -169,10 +205,7 @@ def check(part, allow_large=False):
         else:
             why = f'LoRA needs the torch decider (DecideModel.load(..., backend="torch")), not a {name}'
         raise ValueError(f"adapt_lora({part.__name__}): {why}")
-    try:
-        import peft  # noqa: F401
-    except ImportError:
-        raise ImportError('adapt_lora needs peft: pip install "solvi[lora]"') from None
+    need_peft("adapt_lora")
     if getattr(part, "long", None) == "full":
         raise ValueError(f'adapt_lora({part.__name__}): an adapter is trained on ordinary passes, not on whole long texts '
                          '(long="full"); adapt this question with long="retrieve" (or long=None)')
@@ -230,6 +263,7 @@ def using(scorer, name):
 
 def install(scorer, ad):
     """Add an adapter to the scorer's network (inactive until a question that has it is scored)."""
+    need_peft("loading a LoRA adapter")
     import torch
     from peft import inject_adapter_in_model
     st = _state(scorer)
@@ -319,7 +353,7 @@ def _set(part, ad):
     old = m.loras.get(key)
     install(m.scorer, ad)
     m.loras[key] = ad
-    if old is not None and old.name != ad.name:
+    if old is not None and old.name != ad.name and not _in_use(m, old.name, key):
         uninstall(m.scorer, old.name)
     m._forget_cached(key)
     return _clear(part)
@@ -332,7 +366,8 @@ def remove(part):
         return None
     key, m = _lora_key(part), part.model
     m.loras.pop(key, None)
-    uninstall(m.scorer, ad.name)
+    if not _in_use(m, ad.name, key):
+        uninstall(m.scorer, ad.name)
     m._forget_cached(key)
     undo = getattr(part, "_lora_undo", None)
     if undo is not None:
@@ -365,6 +400,7 @@ def train(part, rows, *, r=8, alpha=None, epochs=6, lr=3e-4, seed=0, device=None
     """Train an adapter on [(text, label)] (labels as part.spec.label gives them) → LoraAdapter. notify(estimate_seconds,
     updates, seconds_per_update, device) is called after the first update is timed, before training. Training on the
     CPU creates no CUDA context, so it works beside a GPU that is busy or full."""
+    need_peft("training a LoRA adapter")
     import torch
     from peft import inject_adapter_in_model
     model, sp = part.model, part.spec
@@ -373,7 +409,7 @@ def train(part, rows, *, r=8, alpha=None, epochs=6, lr=3e-4, seed=0, device=None
     k = len(rows)
     U = n_updates(k, epochs, max_updates)
     config = {"format": FORMAT, "r": int(r), "alpha": int(alpha if alpha is not None else 2 * r), "target": TARGET,
-              "head": HEAD.rstrip("."), "question": repr(_lora_key(part))}
+              "head": HEAD.rstrip("."), "question": repr(_question(part))}
     st = _state(scorer)
     with st["lock"]:                               # a copy of the checkpoint as it is: scoring goes on meanwhile
         _activate(scorer, st, None)
@@ -570,7 +606,7 @@ def load(part, path, strict=True, expect=None):
     if expect is not None and ad.hash != expect:
         raise ValueError(f"{path}: adapter #{ad.hash}, the calibration was made with #{expect}")
     if strict:
-        if ad.config.get("question") != repr(_lora_key(part)):
+        if ad.config.get("question") != repr(_question(part)):
             raise ValueError(f"{path}: an adapter for another question ({ad.info.get('question')}); this part asks "
                              f"{[part.spec.task, *map(str, part.spec.real)]}")
         if ad.info.get("weights") != part.model.weights_fingerprint():

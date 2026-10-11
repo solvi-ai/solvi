@@ -34,6 +34,22 @@ Built on the account above: what works becomes the stable low level, and the hig
 |---|---|---|
 | **solvi-ai/recipes** | Subprojects, one per task: how a real task is solved, why it is solved this way, and what the library does in it — and where it does not help. Kept apart from the library so a recipe can use any data, model or service. | planned |
 
+## Next (1.2): from use over the automated tests of a live web application
+
+A user ran solvi as the decision layer over the automated tests of a live web application (thousands of step
+decisions, a hard-check oracle on every screen transition, verdicts per scenario). The defects found are fixed in 1.1.1;
+what was missing, and was written by hand around solvi's records, is planned here.
+
+| Item | What it gives | Status |
+|---|---|---|
+| **A verdict history across runs** | The same question over runs, with stability classes (stable / flaky / regression / fixed), quarantine, «passed on the second attempt», and the share of stable outcomes as a metric: on a live environment a single verdict says little | planned |
+| **A known-bug registry** | Failing checks and their text matched to a known bug's id, with its status (open / fixed) and a signal when a bug has not been seen for N runs («check that it is fixed») | planned |
+| **«Environment degraded» at the run level** | When many checks of one run are blocked at once, one run-level status instead of many independent failures (the per-answer `contract(applicable=...)` exists) | planned |
+| **Several acceptable answers in a label** | A label as a set of right answers (close by the button or by Escape): `solvi.build` and `act_guard` calibrated on sets of acceptable answers, so another right answer is not counted as an error | planned |
+| **Updating `solvi.build` heads through `changes`** | An example (and what is missing for it) of a gated update with held-out groups, honesty checks, versions and rollback for a `solvi.build` head or an external model, through `solvi.experimental.changes` | planned |
+| **A run id and parent-decision links across storages** | One run writes to many stores from several processes: a run id and the parent decision in every record, and one chronology across the stores | planned |
+| **Laws: coarse outcomes and a hierarchical base out of the box** | `solvi.experimental.laws` with outcomes grouped coarser than the observation and a base predictor that backs off from specific to general; the per-action row need is in the run report since 1.1.1 (`LawSet.report`) | planned |
+
 ## Library: open items from earlier releases
 
 | Item | What it gives | Status |

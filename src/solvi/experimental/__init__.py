@@ -7,7 +7,7 @@ deadline.
 
 What marks them:
 
-- importing one warns once (`solvi.ExperimentalWarning`, a UserWarning: silence it with
+- importing one warns once per process (`solvi.ExperimentalWarning`, a UserWarning: silence it with
   `warnings.filterwarnings("ignore", category=solvi.ExperimentalWarning)`);
 - a decision made by a System that uses one records it: `meta["experimental"]` in the stored decision (the names, e.g.
   `["lora"]`), and the system report counts them;
@@ -206,8 +206,16 @@ for _s in STATUS.values():
 del _s
 
 
+_WARNED: set = set()        # the experimental modules that have warned in this process
+
+
 def warn_on_import(module, why=None):
-    """Called at the top of each experimental module: one ExperimentalWarning, located at the import that loaded it."""
+    """Called at the top of each experimental module: one ExperimentalWarning, located at the import that loaded it —
+    once per module per process (a module imported again, by a package walk or after it left sys.modules, is quiet:
+    long runs keep their logs clean)."""
+    if module in _WARNED:
+        return
+    _WARNED.add(module)
     from .._deprecate import _warn_from_caller
     from ..core.catalog import ExperimentalWarning
     name = module.split(".")[2]

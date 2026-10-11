@@ -518,3 +518,63 @@ def test_a_risk_or_coverage_outside_0_1_is_refused_everywhere_not_recorded_as_a_
         with pytest.raises(ValueError, match="(risk|coverage) must be a number strictly between 0 and 1"):
             call()
     assert part.guarantee is None
+
+
+class _ActScorer:
+    """Two options with logits and an act logit that follow a hash of the text (an act head that is not the confidence)."""
+    model_id = "test/act"
+
+    def fingerprint(self):
+        return "act-1"
+
+    def logits(self, items):
+        import zlib
+        out = []
+        for it in items:
+            h = zlib.crc32(it.text.encode()) % 10_000 / 10_000
+            g = zlib.crc32(it.text[::-1].encode()) % 10_000 / 10_000
+            out.append({"logits": np.array([h * 4 - 2, 0.0]), "act": float(g * 6 - 3)})
+        return out
+
+
+def _act_examples(n, seed):
+    import zlib
+    r = np.random.default_rng(seed)
+    out = []
+    for i in range(n):
+        t = f"case {seed} {i}"
+        h = zlib.crc32(t.encode()) % 10_000 / 10_000
+        g = zlib.crc32(t[::-1].encode()) % 10_000 / 10_000
+        good = "a" if h > 0.5 else "b"
+        right = r.uniform() < 0.5 + 0.25 * abs(h - 0.5) * 2 + 0.25 * g
+        out.append((t, good if right else ("b" if good == "a" else "a")))
+    return out
+
+
+def test_act_guard_names_its_signal_and_direction_and_a_stricter_risk_never_lowers_the_threshold():
+    """A user saw max_risk=0.05 give a lower threshold (0.824) than 0.10 (0.917) and a lower alone share, and could
+    not tell from the report what was thresholded. For one signal and one set of examples the threshold is monotone:
+    checked on 2,000 random calibration sets (with ties) and on 77-example sets through act_guard with each signal.
+    The act probability and the confidence are different scales — the report now says which one, and the direction."""
+    rng = np.random.default_rng(3)
+    for k in range(2000):
+        n = int(rng.integers(10, 300))
+        s = rng.uniform(size=n) if k % 2 else np.round(rng.uniform(size=n), 1)
+        w = (rng.uniform(size=n) > np.clip(s + rng.normal(0, 0.3, n), 0, 1)).astype(float)
+        ts = [crc_threshold(s, w, r) for r in (0.3, 0.2, 0.1, 0.05, 0.02)]
+        assert ts == sorted(ts)
+    m = DecideModel(_ActScorer(), meta={"format": "test", "temperature": 1.0, "act": {}})
+    got = {}
+    for sig in ("act", "confidence"):
+        for seed in range(10):
+            ex = _act_examples(77, seed)
+            part = m.decision(f"close_{sig}_{seed}", "Which?", "screen", ["a", "b"])
+            r10, r05 = part.act_guard(ex, max_risk=0.10, signal=sig), part.act_guard(ex, max_risk=0.05, signal=sig)
+            assert r10["signal"] == r05["signal"] == sig
+            assert r05["threshold"] >= r10["threshold"] and r05["answered"] <= r10["answered"]
+            assert r10["direction"] == ">=" and ("≥" in r10["rule"] or "never answers alone" in r10["rule"])
+            got.setdefault(sig, r10)
+    assert "act probability" in got["act"]["rule"] and "confidence" in got["confidence"]["rule"]
+    auto = m.decision("close_auto", "Which?", "screen", ["a", "b"]).act_guard(_act_examples(77, 0), max_risk=0.10)
+    assert auto["signal"] == "act"                       # "auto" takes the act head when the model has one
+    assert got["act"]["threshold"] != got["confidence"]["threshold"]

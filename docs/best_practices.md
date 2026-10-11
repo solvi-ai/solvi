@@ -118,6 +118,21 @@ differs from the stream from the start. Treat a quiet monitor as "no large chang
 calibration and the mix of answers, and level off within a few dozen examples. When a question needs the model to read
 the input differently, use a LoRA adapter (`adapt_lora`), a head over computed facts, or a rule.
 
+**If the zero-shot decider does not separate the classes, `fit` cannot help — a LoRA adapter is needed.** `fit` only
+moves the priors (a shift and a scale on the logits): when the logits carry no signal about the classes, it collapses
+to one class. A user deciding how to close pop-up windows from short interface texts (window titles and the list of
+actions, 375 labelled examples, judged on screens the model had not seen) got 8 answers given alone out of 375 from
+solvi-base with `fit` and `act_guard`, and 257 with a LoRA adapter (88% of them right). Check first: if the
+calibrated decider's accuracy on held-out labels is near the majority share, go to `adapt_lora` (or a head over
+computed facts) rather than more examples for `fit` — and calibrate the adapter on held-out groups (the promise of an
+adapter's confidence was optimistic on unseen screens: 14.3% against 10%).
+
+**Split by source when examples share one.** Several examples from one screen, customer or document are not
+independent: a random split calibrates on sources the model was fitted on, and the promise is optimistic on new ones.
+`solvi.build(..., groups="screen")` (a key of the state, a function, or one group per example) keeps every group on one
+side, so the guarantee is read on unseen groups; on a synthetic set where the model remembers its training screens the
+random split promised ≤ 10% answered alone and wrong and gave 22–26% on new screens, the grouped split 5–9%.
+
 **Let a second system's verified answers recalibrate a guarantee — and nothing else, unless you measured it.** When
 an LLM handles what a fast system escalates, its answers that passed the checks and its own guarantee can be stored
 as labels (`label_source="verified"`) and read by `System.guarantee(..., corrections=store, sources=...)`. We replayed

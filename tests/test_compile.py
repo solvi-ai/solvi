@@ -553,3 +553,49 @@ def test_a_compilation_is_a_catalog_version_and_the_stable_versions_take_it(tmp_
     v = Versions(tmp_path / "v")
     assert v.add(c, "v1") == 1 and v.get(1).source == c.source and v.get(1).fingerprint == c.fingerprint
     assert isinstance(Compiled.load(c.save(tmp_path / "c")), Compiled)
+
+
+def test_a_memory_limit_the_platform_refuses_is_skipped_with_a_note_and_macos_limits_rlimit_data(monkeypatch):
+    """macOS: setrlimit(RLIMIT_AS, mem) raises ValueError("current limit exceeds maximum limit") below the address space
+    the interpreter has reserved (1–4 GB all failed). On darwin the limit is RLIMIT_DATA; a memory limit the platform
+    refuses is skipped with a note (the run goes on), the CPU limit is still set."""
+    import resource
+
+    from solvi.experimental.compile import sandbox
+    calls = []
+
+    def setrlimit(which, limits):
+        calls.append(which)
+        if which != resource.RLIMIT_CPU:
+            raise ValueError("current limit exceeds maximum limit")
+    monkeypatch.setattr(resource, "setrlimit", setrlimit)
+    notes = sandbox.set_limits(2 ** 30, 60, platform="darwin")
+    assert calls == [resource.RLIMIT_DATA, resource.RLIMIT_CPU]
+    assert len(notes) == 1 and "1024 MB, RLIMIT_DATA" in notes[0] and "current limit exceeds" in notes[0]
+    calls.clear()
+    assert sandbox.set_limits(2 ** 30, 60, platform="linux") and calls == [resource.RLIMIT_AS, resource.RLIMIT_CPU]
+
+
+def test_a_failure_of_the_sandbox_itself_is_a_sandbox_error_not_a_draft_sent_back_to_the_writer(monkeypatch):
+    from solvi.experimental.compile import sandbox
+
+    def no_interpreter(*a, **k):
+        raise OSError("[Errno 2] No such file or directory: 'python'")
+    monkeypatch.setattr(sandbox.subprocess, "run", no_interpreter)
+    assert "sandbox_error" in sandbox.run(GOOD, "solvi.experimental.compile:box_main", {})
+    monkeypatch.undo()
+    monkeypatch.setattr(sandbox, "run", lambda *a, **k: {"sandbox_error": "ValueError: current limit exceeds maximum limit"})
+    w = Writer([[GOOD], [GOOD]])
+    c = compile_spec(Spec(POLICY), QS, INPUTS, w, rounds=3)
+    assert not c.accepted and "sandbox_error" in c.reason and "current limit exceeds" in c.reason
+    assert not any("Your previous module" in p for p, _ in w.prompts)       # the writer is not asked to rewrite
+    assert not any("did not run in the sandbox" in p for p, _ in w.prompts)
+
+
+def test_the_sandbox_runs_a_module_end_to_end_with_its_limits():
+    from solvi.experimental.compile import sandbox
+    w = Writer([[GOOD], [GOOD]])
+    assert compile_spec(Spec(POLICY), QS, INPUTS, w).accepted
+    r = sandbox.run("def f(x):\n    return x\n", "solvi.experimental.compile:box_main",
+                    {"parts": {}, "questions": [], "inputs": [], "item_s": 1})
+    assert "sandbox_error" not in r and "crash" not in r, r

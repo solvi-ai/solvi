@@ -230,3 +230,89 @@ def test_the_example_runs_and_hands_the_notes_slice_to_the_slow_path(capsys):
     load("24_one_entry_point")
     out = capsys.readouterr().out
     assert "Is a slice open to it? The probe" in out and "replay failures: 0" in out and "'s2': 0" not in out
+
+
+# ------------------------------------------------------------------------------------------------ groups: a split by source
+class _ScreenScorer:
+    """Remembers the label of every screen it was fitted on (right 95% there); on a screen it never saw it goes by a
+    hint whose strength k (1–5) is also its act signal. The act signal does not know whether the screen was seen."""
+
+    def __init__(self, memory):
+        self.memory, self.model_id = memory, "toy-screens"
+
+    def fingerprint(self):
+        return "toy-screens-" + str(sorted(self.memory.items()))
+
+    def logits(self, items):
+        out = []
+        for it in items:
+            screen, hint, k = it.text.split()
+            k = int(k[1:])
+            pick = self.memory.get(screen, hint[1:])
+            z = np.array([2.0, -2.0]) if pick == it.options[0] else np.array([-2.0, 2.0])
+            out.append({"logits": z, "act": (k - 3) * 1.5})
+        return out
+
+
+def _screen_learner(ex):
+    from collections import Counter
+
+    from solvi.core.deciders import DecideModel
+    seen = {}
+    for st, y in ex:
+        seen.setdefault(st["text"].split()[0], Counter())[y] += 1
+    memory = {s: c.most_common(1)[0][0] for s, c in seen.items()}
+    model = DecideModel(_ScreenScorer(memory), meta={"format": "stand-in", "temperature": 1.0, "act": {}})
+    return model.decision("close", "How to close it?", "text", ["a", "b"], min_act=0.0)
+
+
+def _screens(n_screens, per, seed, first=0):
+    rng = random.Random(seed)
+    out, gs = [], []
+    for s in range(first, first + n_screens):
+        label = rng.choice("ab")
+        for _ in range(per):
+            y = label if rng.random() < 0.95 else ("b" if label == "a" else "a")
+            k = rng.randint(1, 5)
+            hint = y if rng.random() < 0.5 + 0.09 * k else ("b" if y == "a" else "a")
+            out.append(({"text": f"s{s} h{hint} k{k}"}, y))
+            gs.append(f"s{s}")
+    return out, gs
+
+
+def _risk_on_new_screens(s, fresh):
+    out = [(s.ask(st), y) for st, y in fresh]
+    return sum(r.by == "s1" and r.answer != y for r, y in out) / len(out)
+
+
+def test_groups_split_by_source_and_the_promise_holds_on_unseen_groups():
+    """Examples from one screen on both sides of a random split: System 1 is calibrated on screens it remembers and
+    the promise (≤ 10% answered alone and wrong) is optimistic on new screens (a user saw 14% against 10%). groups=
+    keeps every screen on one side, so the guarantee is calibrated on screens System 1 never saw — and holds there."""
+    ex, gs = _screens(120, 8, seed=1)
+    fresh, _ = _screens(80, 8, seed=2, first=1000)
+    plain = build("close", ex, learner=_screen_learner, max_risk=0.10, novel=False)
+    grouped = build("close", ex, learner=_screen_learner, max_risk=0.10, novel=False, groups=gs)
+    by_key = build("close", ex, learner=_screen_learner, max_risk=0.10, novel=False,
+                   groups=lambda st: st["text"].split()[0])
+    assert by_key.choices["split"] == grouped.choices["split"]
+    r_plain, r_grouped = _risk_on_new_screens(plain, fresh), _risk_on_new_screens(grouped, fresh)
+    assert r_plain > 0.15                                        # the random split's promise does not hold on new screens
+    assert r_grouped <= 0.10 + 0.02                              # the grouped one does (up to sampling)
+    g = grouped.choices["groups"]
+    assert g["n"] == 120 and g["fit"] + g["calibrate"] == 120 and g["fit"] == 90
+    assert "split by group" in grouped.explain() and "split by group" not in plain.explain()
+    # no screen on both sides
+    n_fit = grouped.choices["split"]["to fit System 1"]
+    import random as _r
+    kinds = list(dict.fromkeys(gs))
+    _r.Random(0).shuffle(kinds)
+    rank = {k: i for i, k in enumerate(kinds)}
+    order = sorted(range(len(ex)), key=lambda i: rank[gs[i]])
+    assert not {gs[i] for i in order[:n_fit]} & {gs[i] for i in order[n_fit:]}
+    with pytest.raises(ValueError, match="one group per example"):
+        build("close", ex, learner=_screen_learner, max_risk=0.10, novel=False, groups=gs[:-1])
+    with pytest.raises(ValueError, match="at least two"):
+        build("close", ex, learner=_screen_learner, max_risk=0.10, novel=False, groups=["one"] * len(ex))
+    with pytest.raises(ValueError, match="has no key 'screen'"):
+        build("close", ex, learner=_screen_learner, max_risk=0.10, novel=False, groups="screen")

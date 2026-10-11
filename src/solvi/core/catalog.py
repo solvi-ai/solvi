@@ -157,6 +157,14 @@ class Decision:
         return self.escalate is None
 
     @property
+    def alone(self):
+        """Is this an answer the model gives alone — a value, and not escalated (handed over to a person)? An escalated
+        decision keeps `value` (what the model would have answered) and says why in `escalate`: count a decision as the
+        model's answer only when `alone` is True. In a System the same reading is `res[question].status != "abstain"`
+        (an escalated decision abstains there, with the reason in `res[question].why`)."""
+        return self.escalate is None and self.value is not None
+
+    @property
     def conf(self):
         if self.confidence is not None:
             return float(self.confidence)

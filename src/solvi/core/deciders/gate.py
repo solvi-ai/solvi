@@ -62,6 +62,27 @@ def guard_promise(risk, error, answered=True):
             f"and wrong" + among)
 
 
+SIGNAL_WORDS = {"act": "the act probability (the model's own P(its answer is right))",
+                "confidence": "the answer's calibrated confidence",
+                "shared": "each part's own signal (the act probability, else the confidence) against one shared threshold",
+                "shared-rank": "each part's signal as its rank among that part's calibration signals, against one shared "
+                               "threshold"}
+
+
+def guard_rule(signal, threshold, groups=False):
+    """act_guard's rule in words: which signal is thresholded and in which direction — always «answers alone when the
+    signal ≥ the threshold, escalates below». Thresholds on different signals are on different scales: compare two
+    calibrations only when their "signal" is the same."""
+    words = SIGNAL_WORDS.get(signal, repr(signal))
+    if threshold is None or not math.isfinite(threshold):
+        rule = f"never answers alone: no threshold on {words} keeps the risk on these examples (threshold inf)"
+    else:
+        rule = f"answers alone when {words} ≥ {threshold:.4g}; escalates below"
+    if groups:
+        rule += " (the rest of the stream; each group with its own threshold: see \"groups\")"
+    return rule
+
+
 def no_separation(sig, ok, name, error, base, who=""):
     """A warning when the signal does not tell right answers from wrong ones on the calibration examples (one-sided
     Mann-Whitney test of its AUROC against chance at the 5% level: solvi.core.calibration.separation), else None — tested

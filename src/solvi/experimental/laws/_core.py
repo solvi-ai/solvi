@@ -1036,6 +1036,77 @@ class LawSet:
         """The loop over a stream, in order (not a schedule: every transition is predicted before it is learned from)."""
         return [self.step(t, buffer, remember=remember) for t in stream]
 
+    def need_at(self, tested: int, null: float, precision: float = 1.0, cap: int = 1_000_000) -> int | None:
+        """The least support with which a law right on `precision` of its rows passes the acceptance at N = `tested`
+        candidates against `null` (min_support, min_precision and — sized — the binomial bound); None when no support
+        does: a precision at or below the null, or below min_precision. At precision 1 and sized: sized_need."""
+        p = float(precision)
+        if p < self.min_precision or (self.sized and p <= float(null)):
+            return None
+        if p >= 1.0 and self.sized:
+            return max(self.min_support, sized_need(tested, self.delta, null, self.space))
+
+        def ok(sup):
+            return self.passes(sup, math.ceil(p * sup - 1e-9), tested, null)
+        hi = max(1, self.min_support)
+        while not ok(hi):                          # doubling, then the least passing support below the first that passes
+            if hi >= cap:
+                return None
+            hi *= 2
+        lo = hi // 2
+        while hi - lo > 1:
+            mid = (lo + hi) // 2
+            lo, hi = (lo, mid) if ok(mid) else (mid, hi)
+        return hi
+
+    def report(self, buffer: Buffer, steps: Iterable[Step] | None = None, *, precision: float | None = None) -> dict:
+        """What a learning run did, and per action whether the buffer could admit a law at all — so «0 laws accepted»
+        reads as «too few rows» where that is the reason. → {"accepted", "active", "retired", "tested" (N, the
+        candidates scored on the buffer), "cost", the run's "steps" / "mismatches" (with `steps`), "actions": {action:
+        {"rows", "outcomes", "null", "need", "need_at_precision", "precision", "enough"}}, "too_few_rows" (the actions
+        whose rows are fewer than "need"), "summary" (in words)}.
+
+        Per action: "rows" in the buffer; "null" the least base null among its outcomes (the rarest outcome's share,
+        floored at 0.05 — the set's fixed null when it has one); "need" the least support a law right on every row
+        needs to pass at this N against that null (sized_need; min_support with sized=False) — a law's support is at
+        most the action's rows, so rows < need means no law of that action can be accepted on this buffer, whatever
+        its condition; "need_at_precision" the same for a law right on `precision` of its rows (default
+        min_precision; None when no support suffices). More outcomes are harder: their nulls are higher."""
+        from collections import Counter
+        steps = list(steps) if steps is not None else None
+        N = max(1, int(buffer.tested))
+        prec = self.min_precision if precision is None else float(precision)
+        cap = self.min_precision if self.min_precision < 1.0 else 0.95
+        actions, short = {}, []
+        for a in list(buffer._rows):
+            rows = buffer._rows[a]
+            n = len(rows)
+            counts = Counter(_key(t.observed) for t in rows)
+            if isinstance(self.null, str):
+                null = min(max(min(counts.values()) / n, self.NULL_FLOOR), cap) if n else min(self.NULL_FLOOR, cap)
+            else:
+                null = float(self.null)
+            need = (max(self.min_support, sized_need(N, self.delta, null, self.space)) if self.sized
+                    else self.min_support)
+            info = {"rows": n, "outcomes": len(counts), "null": round(null, 4), "need": need,
+                    "need_at_precision": self.need_at(N, null, prec), "precision": prec, "enough": n >= need}
+            actions[rows[0].action if rows else a] = info
+            if n < need:
+                short.append(rows[0].action if rows else a)
+        out = {"accepted": self.cost["accepted"], "active": len(self.laws), "retired": len(self.retired), "tested": N,
+               "cost": dict(self.cost), "actions": actions, "too_few_rows": short}
+        if steps is not None:
+            out["steps"] = len(steps)
+            out["mismatches"] = sum(1 for st in steps if st.mismatch)
+        few = sorted(((actions[x]["rows"], actions[x]["need"], x) for x in short), key=lambda r: (r[0] - r[1], repr(r[2])))
+        text = f"{self.cost['accepted']} law(s) accepted ({len(self.laws)} active) after {N} candidate(s) tested"
+        if short:
+            eg = "; ".join(f"{x!r}: {r} rows, a law needs ≥ {nd}" for r, nd, x in few[:3])
+            text += (f"; {len(short)} of {len(actions)} action(s) have fewer rows than any law of theirs needs at "
+                     f"this N (e.g. {eg}) — too few rows, not a missing law")
+        out["summary"] = text
+        return out
+
     # ----------------------------------------------------------------------------------- compiled
     def to_module(self) -> str:
         """The active laws as one Python module that imports nothing from solvi: one function per law, `LAWS` in this

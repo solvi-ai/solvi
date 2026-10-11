@@ -2,6 +2,7 @@
 re-exports every name.)"""
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import os
 import threading
@@ -16,6 +17,11 @@ from .capabilities import capabilities
 class LongInputWarning(UserWarning):
     """long="full": a checkpoint forced to read long inputs it was not trained on, or whole long texts read on a CPU.
     Without long=: an input that does not fit the pass was read cut (the decision's extra["truncated"] says how much)."""
+
+
+class SharedQuestionWarning(UserWarning):
+    """Two decision parts of one model ask the same question (task and options) and one of them has a LoRA adapter:
+    adapters are kept per part, so the other part is scored without it (named once per pair of parts)."""
 
 
 LONG_CPU_TOKENS = 2048               # long="full" on a CPU warns (once per model) when it reads a text longer than this
@@ -281,6 +287,31 @@ class OnnxScorer(_NetScorer):
         return self.sess.run(None, {k: v for k, v in feed.items() if k in self.names})[0].astype(np.float32)
 
 
+NO_COMPILE_ENV = "SOLVI_NO_COMPILE"
+
+
+def no_compile():
+    """Is torch.compile switched off for the torch decider (the environment variable SOLVI_NO_COMPILE=1)? On a platform
+    where Dynamo does not run — x86_64 macOS, whose last torch is 2.2.2, on Python 3.12, where transformers 4.x
+    ModernBERT calls torch.compile when its module is imported — set it before loading the decider."""
+    return os.environ.get(NO_COMPILE_ENV, "").strip().lower() in ("1", "true", "yes", "on")
+
+
+@contextlib.contextmanager
+def _compile_off(torch):
+    """torch.compile as a no-op while the encoder's module is imported and built (decorators applied at import time
+    then return the function itself); restored afterwards."""
+    real = torch.compile
+
+    def compile(model=None, *args, **kwargs):            # noqa: A001 — stands in for torch.compile
+        return model if model is not None else (lambda fn: fn)
+    torch.compile = compile
+    try:
+        yield
+    finally:
+        torch.compile = real
+
+
 class TorchScorer(_NetScorer):
     """The checkpoint's encoder (transformers AutoModel from config.json) + the option head, weights from model.safetensors.
     The block layout passes per-layer-type attention masks and position ids (sdpa attention)."""
@@ -289,17 +320,20 @@ class TorchScorer(_NetScorer):
         torch = need("torch", "model", 'backend="torch"')
         need("transformers", "model", 'backend="torch"')
         from safetensors.torch import load_file
-        from transformers import AutoConfig, AutoModel
         self.torch = torch
         self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
         self._setup(path, max_len, bs, caps)
         sd = load_file(os.path.join(path, "model.safetensors"))
-        cfg = AutoConfig.from_pretrained(path)
-        if self.mq is not None and self.mq["layout"] == "block":
-            cfg._attn_implementation = "sdpa"
-            encoder = AutoModel.from_config(cfg, attn_implementation="sdpa")
-        else:
-            encoder = AutoModel.from_config(cfg)
+        with _compile_off(torch) if no_compile() else contextlib.nullcontext():
+            from transformers import AutoConfig, AutoModel
+            cfg = AutoConfig.from_pretrained(path)
+            if no_compile() and hasattr(cfg, "reference_compile"):
+                cfg.reference_compile = False      # transformers 4.x ModernBERT: no compiled MLP at run time either
+            if self.mq is not None and self.mq["layout"] == "block":
+                cfg._attn_implementation = "sdpa"
+                encoder = AutoModel.from_config(cfg, attn_implementation="sdpa")
+            else:
+                encoder = AutoModel.from_config(cfg)
         h = encoder.config.hidden_size
         n_out = sd["head.3.weight"].shape[0] if "head.3.weight" in sd else 2
         head = torch.nn.Sequential(torch.nn.Linear(h, h), torch.nn.GELU(), torch.nn.LayerNorm(h), torch.nn.Linear(h, n_out))
@@ -367,4 +401,4 @@ def _file_fingerprint(paths, chunks=32, size=4096):
     return h.hexdigest()[:16]
 
 
-__all__ = ["block_masks", "BlockUnsupported", "LongInputWarning", "OnnxScorer", "TorchScorer"]
+__all__ = ["block_masks", "BlockUnsupported", "LongInputWarning", "OnnxScorer", "SharedQuestionWarning", "TorchScorer"]

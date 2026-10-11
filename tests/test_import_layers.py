@@ -377,3 +377,22 @@ def test_every_old_path_names_a_module_that_exists_now():
     from solvi import _deprecate
     for old, new in _deprecate.old_paths().items():
         assert importlib.import_module(new).__name__ == new, (old, new)
+
+
+def test_an_experimental_module_warns_once_per_process():
+    """Long runs that import an experimental module again (a package walk, a module dropped from sys.modules and
+    imported anew) logged the ExperimentalWarning every time: it is given once per module per process, with the first
+    warning's text."""
+    import subprocess
+    import sys
+    code = ("import importlib, sys, warnings\nfrom solvi.core.catalog import ExperimentalWarning\n"
+            "with warnings.catch_warnings(record=True) as w:\n"
+            "    warnings.simplefilter('always')\n"
+            "    for _ in range(3):\n"
+            "        importlib.import_module('solvi.experimental.laws')\n"
+            "        for m in [m for m in sys.modules if m.startswith('solvi.experimental.laws')]:\n"
+            "            del sys.modules[m]\n"
+            "said = [str(x.message) for x in w if x.category is ExperimentalWarning]\n"
+            "assert len(said) == 1 and said[0].startswith('solvi.experimental.laws is experimental'), said\n")
+    run = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True)
+    assert run.returncode == 0, run.stderr[-2000:]

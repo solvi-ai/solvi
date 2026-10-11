@@ -42,13 +42,13 @@ from .kinds import ACT_FEATURES, ACT_FEATURES_V3, DEFAULT_T, FORMAT, KINDS, KIND
 from .state import SERIALIZATIONS, _KEY_OK, _is_text, _jkey, _paths, _pkey, _scalar, _single, _text, _tree, jsonable, state_text  # noqa: F401
 from .wire import Item, Logits, Pass, _respan, _typed_span, decode_pointer, pass_prompt, pointer_evidence, prompt  # noqa: F401
 from .capabilities import _DEFAULTS, _max_len_long, _multi_question, _pointer_caps, _unknown_caps, _v3, capabilities  # noqa: F401
-from .backends import BlockUnsupported, LONG_CPU_TOKENS, LongInputWarning, OnnxScorer, SECTION_TOKENS, TorchScorer, _Encoder, _NetScorer, _batches, _file_fingerprint, _onnx_file, block_masks, need  # noqa: F401
+from .backends import BlockUnsupported, LONG_CPU_TOKENS, LongInputWarning, OnnxScorer, SECTION_TOKENS, SharedQuestionWarning, TorchScorer, _Encoder, _NetScorer, _batches, _file_fingerprint, _onnx_file, block_masks, need  # noqa: F401
 from .adapt import ADAPTERS, Adaptation, _Spec, _basis, _fit_shift, _fit_temperature, _from_type, _given, _is_type, _sig, _softmax, _usable, lora_key  # noqa: F401
-from .gate import Facts, GroupBy, SEPARATION_MIN, _group_guard, _group_info, _group_promise, _shown, _threshold, _vkey, act_features, confidence_source, decision_of, group_name, group_record, guard_promise, no_separation, one_source  # noqa: F401
+from .gate import Facts, GroupBy, SEPARATION_MIN, _group_guard, _group_info, _group_promise, _shown, _threshold, _vkey, act_features, confidence_source, decision_of, group_name, group_record, guard_promise, guard_rule, no_separation, one_source  # noqa: F401
 from .part import DecisionPart, plan_batches  # noqa: F401
 from .model import DecideModel, _json_default  # noqa: F401
 
-__all__ = ["act_features", "Adaptation", "block_masks", "BlockUnsupported", "capabilities", "DecideModel", "decision_of", "DecisionPart", "decode_pointer", "Facts", "group_name", "group_record", "GroupBy", "guard_promise", "Item", "jsonable", "KINDS", "Logits", "LongInputWarning", "lora_key", "no_separation", "one_source", "OnnxScorer", "Pass", "pass_prompt", "plan_batches", "pointer_evidence", "prompt", "state_text", "TorchScorer"]
+__all__ = ["act_features", "Adaptation", "block_masks", "BlockUnsupported", "capabilities", "DecideModel", "decision_of", "DecisionPart", "decode_pointer", "Facts", "group_name", "group_record", "GroupBy", "guard_promise", "Item", "jsonable", "KINDS", "Logits", "LongInputWarning", "lora_key", "no_separation", "one_source", "OnnxScorer", "Pass", "pass_prompt", "plan_batches", "pointer_evidence", "prompt", "SharedQuestionWarning", "state_text", "TorchScorer"]
 
 
 class _Package(type(sys.modules[__name__])):

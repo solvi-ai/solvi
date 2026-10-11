@@ -127,7 +127,10 @@ where the most specific matching laws — those no other matching law's conditio
 outcomes: both passed their test, neither is an exception of the other, and the order between them would only be a
 tie-break. It is counted in `abstained`; the default stays most specific first, the learning loop always predicts so,
 and a compiled module dispatches most specific first. The search cost: `lawset.cost` (candidates proposed, tests,
-accepted, probes, simulated) and `Step.tested` — report it next to accuracy.
+accepted, probes, simulated) and `Step.tested` — report it next to accuracy. `lawset.report(buffer, steps)` sums a
+run up and states per action the rows the buffer has and the support the sized acceptance needs at this N
+(`sized_need` against the action's least base null; `need_at_precision` for a law right on min_precision of its rows):
+an action with fewer rows than that cannot get a law on this buffer — «too few rows», not «no law».
 
 What is not done:
 - no grammar that cannot be enumerated (where the mismatch should matter most) has been measured;

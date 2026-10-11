@@ -39,7 +39,7 @@ import numpy as np
 
 from ... import _deprecate
 from ..catalog import Decision, Quote, Unknown, gone_in_1_0
-from . import DecisionPart, Facts, GroupBy, _group_info, _group_promise, _single, group_record, guard_promise, no_separation, one_source
+from . import DecisionPart, Facts, GroupBy, _group_info, _group_promise, _single, group_record, guard_promise, guard_rule, no_separation, one_source
 from ..provenance import ESCALATED, code_fingerprint, digest
 from ..runtime import RECORD_KEYS          # what a replay compares with the recomputed (defined there; re-exported)
 
@@ -669,7 +669,8 @@ class Combination:
         err = float(lo[a].sum() / a.sum()) if a.any() else 0.0
         base = float(np.mean([not self._right(self.final(st, -math.inf, rk).value, y)       # every question answered
                               for st, y in zip(states, gold)])) if n else 0.0
-        out = {"signal": _SIGNAL[scale], "threshold": t, "answered": float(a.mean()), "error": err,
+        out = {"signal": _SIGNAL[scale], "threshold": t, "direction": ">=",
+               "rule": guard_rule(_SIGNAL[scale], t, groups is not None), "answered": float(a.mean()), "error": err,
                "risk": float(lo.mean()), "n": n, "guarantee": self.guarantee["promise"],
                "promise": guard_promise(risk, err, bool(a.any())), "base_error": base,
                "must_escalate_at_least": max(0.0, (base - risk) / (1 - risk)),

@@ -130,7 +130,9 @@ def _fit_temperature(oof, multi, prior=1.0):
 
 class _Spec:
     """A question: its kind, all its options, the ones the model scores (without "other"), their descriptions; for a bool
-    question the labels are "yes" / "no" and the values True / False."""
+    question the labels are "yes" / "no" and the values True / False. owner: the name of the decision part that asks it
+    (None for a question asked of the model directly) — a LoRA adapter belongs to a part, not to the question's text."""
+    owner = None
 
     def __init__(self, task, options, descriptions=None, multi=False, other=None, kind=None, as_bool=False,
                  score_value="median", *, unknown=False, k=None, bins=None, integer=None, unit=None, coverage=0.8,
@@ -305,10 +307,15 @@ def _from_type(t, kind=None, options=None, descriptions=None):
 
 
 def lora_key(sp_or_key):
-    """The question a LoRA adapter (solvi.experimental.lora) belongs to: the task, the scored options with their descriptions (in any
-    order — option_order="average" asks rotations of the same question) and the kind. A _Spec or a _Spec.key."""
+    """The slot a LoRA adapter (solvi.experimental.lora) is kept under: the question — the task, the scored options with
+    their descriptions (in any order: option_order="average" asks rotations of the same question) and the kind — and,
+    for a _Spec a decision part asks, the part's name as a fourth element. Two parts asking the same question in one
+    process have two slots: one part's adapter never answers the other's question. A _Spec.key (or a _Spec with no
+    owner) gives the question alone; `key[:3]` is always the question."""
     k = sp_or_key.key if isinstance(sp_or_key, _Spec) else sp_or_key
-    return (k[0], tuple(sorted(zip(map(str, k[1]), k[2]))), k[3])
+    q = (k[0], tuple(sorted(zip(map(str, k[1]), k[2]))), k[3])
+    owner = sp_or_key.owner if isinstance(sp_or_key, _Spec) else None
+    return q if owner is None else q + (owner,)
 
 
 # The adapter kinds a decision part's adapter slot can load from a file (part.load_lora, a calibration file that names

@@ -377,3 +377,35 @@ def test_skill_learner_episodes_record_their_search_cost():
     c = e1["cost"]
     assert c["candidates"] > 0 and c["tests"] >= 1 and c["probes"] == 0 and c["simulated"] == e1["simulated"]
     assert L.report()["totals"]["cost"]["simulated"] >= c["simulated"]
+
+
+def test_the_run_report_says_too_few_rows_per_action_with_the_sized_need():
+    """A user's run on a transition log accepted 0 of 598 candidates with a few rows per action; the run said only
+    «0 laws». The report states, per action, the rows the buffer has and the support the sized acceptance needs at this
+    N (sized_need against the action's least base null) — fewer rows than that: no law of the action can pass."""
+    rng = random.Random(4)
+    g = sparse_grammar(n=12)
+    b = Buffer(g)
+    stream = []
+    for r in range(600):                                   # "do": many rows, E exactly where f0 and f1 hold
+        s = tuple(rng.random() < 0.3 for _ in range(12))
+        stream.append(Transition(s, "do", "E" if s[0] and s[1] else "N", group=r % 10, id=f"d{r}"))
+    for r in range(6):                                     # "rare": six rows, a law would hold but cannot be shown
+        s = tuple(rng.random() < 0.3 for _ in range(12))
+        stream.append(Transition(s, "rare", "E" if s[2] else "N", group=r % 3, id=f"r{r}"))
+    b.extend(stream)
+    ls = LawSet(g, base=lambda s, a: "N", min_support=5, min_precision=0.9)
+    steps = ls.learn(stream, b)
+    rep = ls.report(b, steps)
+    rare, do = rep["actions"]["rare"], rep["actions"]["do"]
+    assert rare["rows"] == 6 and rare["need"] > 6 and not rare["enough"] and rep["too_few_rows"] == ["rare"]
+    assert rare["need"] == max(5, sized_need(rep["tested"], 0.1, rare["null"]))
+    assert do["rows"] == 600 and do["enough"] and do["need"] <= 600
+    assert do["need_at_precision"] is not None and do["need_at_precision"] >= do["need"]
+    assert rep["steps"] == len(stream) and rep["mismatches"] >= 1 and rep["accepted"] >= 1
+    assert "too few rows" in rep["summary"] and "'rare': 6 rows" in rep["summary"]
+    # need_at agrees with passes: the least support that passes at precision 0.95
+    nd = ls.need_at(rep["tested"], 0.3, 0.95)
+    assert ls.passes(nd, math.ceil(0.95 * nd - 1e-9), rep["tested"], 0.3)
+    assert not ls.passes(nd - 1, math.ceil(0.95 * (nd - 1) - 1e-9), rep["tested"], 0.3) or nd <= 5
+    assert ls.need_at(rep["tested"], 0.97, 0.95) is None   # a precision at or below the null never passes

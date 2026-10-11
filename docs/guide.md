@@ -111,8 +111,12 @@ pip install "solvi[onnx]"      # + onnxruntime, tokenizers: the decider (solvi.c
 pip install "solvi[serve]"     # + fastapi, uvicorn: solvi serve over HTTP
 pip install "solvi[mcp]"       # + the official MCP SDK for solvi serve --mcp (without it, a built-in stdio server is used)
 pip install "solvi[duckdb]"    # + duckdb: stored decisions in a DuckDB file; "solvi[postgres]" for PostgreSQL
-pip install "solvi[lora]"      # + torch, transformers, peft: solvi.experimental.lora.adapt_lora, a LoRA adapter per question (experimental)
+pip install "solvi[lora]"      # + torch, transformers, peft>=0.19: solvi.experimental.lora.adapt_lora, a LoRA adapter per question (experimental)
 ```
+
+On x86_64 macOS (Intel), whose last torch is 2.2.2, see [the LoRA page](api/lora.md#install-on-x86_64-macos-intel) for a
+working set (torch 2.2.2, numpy<2, transformers 4.48, peft 0.19) and `SOLVI_NO_COMPILE=1`, which loads the torch
+decider without `torch.compile`.
 
 For development, from a clone: `uv sync`, then `uv run pytest`.
 
@@ -920,6 +924,22 @@ a fallback producer (a rule, a human queue) runs if there is one:
 
 The provenance stays `decided` and the model's fingerprint is in the trace either way; `Decision.act` is `False` for an
 escalated decision.
+
+**Reading an answer: given alone or escalated.** An escalated decision keeps its `value` — what the model would have
+answered — next to the reason in `escalate`, so counting every `value` counts escalations as the model's answers.
+`Decision.alone` is True only for a value that was not escalated; in a System the escalation is an abstention, and the
+answer is read per question as `res["question"].answer` (a `Response` has no `answers` attribute: `res.results` is the
+dict of every `Result`):
+
+```python
+d = part.decide("I was charged twice for order 7")
+d.value, d.escalate, d.alone      # 'billing', None, True — or 'billing', "confidence 0.62 < 0.80 ...", False
+
+res = system.ask({"email": "I was charged twice for order 7"})
+r = res["team"]                   # the Result of the question "team"
+r.answer, r.status, r.why         # 'billing', "ok", ... — escalated: None, "abstain", "model escalated: ..."
+alone = r.status != "abstain"     # answered by the system itself; "abstain": handed over (r.guard says which safeguard)
+```
 
 #### Thresholds with a guarantee: act_guard, learn-then-test, conformal sets
 
@@ -1783,7 +1803,7 @@ Every option after `questions` is keyword-only. With a JSON-lines store every `a
 
 | Field | Content |
 |---|---|
-| `res["q"]` | the `Result` for question `q` |
+| `res["q"]` | the `Result` for question `q`: its answer is `res["q"].answer` (there is no `res.answers`) |
 | `res.results` | dict of all results |
 | `res.flow` | the planned flow; `print(res.flow)` lists the steps and why each was taken |
 | `res.flow.per_question` | question -> names of the parts in its flow |

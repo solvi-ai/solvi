@@ -1064,10 +1064,17 @@ class _Draft:
     notes: list = field(default_factory=list)      # parts treated as helpers (demote_helpers), this round
 
 
+class SandboxError(RuntimeError):
+    """The sandbox itself failed (its interpreter, its driver, a required limit): not the draft's failure, so it is
+    never sent back to the writer as one."""
+
+
 def _run_draft(d, questions, inputs, mem_mb, item_s):
     payload = {"parts": d.parts, "questions": [q.model_dump() for q in questions], "inputs": inputs, "item_s": item_s}
     r = sandbox.run(d.source, "solvi.experimental.compile:box_main", payload, mem_mb=mem_mb, cpu_s=60 + len(inputs),
                     wall_s=120 + 2 * len(inputs))
+    if "sandbox_error" in r:
+        raise SandboxError(r["sandbox_error"])
     if "rows" not in r:
         return None, r.get("load_error") or r.get("crash") or "no result"
     return r["rows"], None
@@ -1163,7 +1170,12 @@ def _loop(spec, questions, inputs, gens, *, rounds, tests, examples, reference, 
         for d in drafts:
             if d.problems:
                 continue
-            rows, err = _run_draft(d, questions, allin, mem_mb, item_s)
+            try:
+                rows, err = _run_draft(d, questions, allin, mem_mb, item_s)
+            except SandboxError as e:
+                history.append({"round": rnd, "sandbox_error": str(e)})
+                return None, None, (f"not accepted: sandbox_error: {e} — the sandbox could not run the drafts (not "
+                                    "their failure: nothing was sent back to the writer)"), history, reviewed
             if rows is None:
                 d.problems.append(f"the module did not run in the sandbox: {err}")
                 d.caught.append("sandbox")
@@ -1471,7 +1483,11 @@ def _certify(drafts, cert: Certificate, questions, seen, mem_mb, item_s) -> tupl
     for d in drafts:
         runs = []
         for _ in range(max(1, cert.runs)):
-            rows, err = _run_draft(d, questions, inputs, mem_mb, item_s)
+            try:
+                rows, err = _run_draft(d, questions, inputs, mem_mb, item_s)
+            except SandboxError as e:
+                rec["sandbox_error"] = str(e)
+                return f"not accepted: sandbox_error: {e} — the sandbox could not run the certificate", rec
             if rows is None:
                 rec["failures"].append({"draft": d.index, "error": err})
                 return f"not accepted: draft {d.index} did not run on the certificate: {err}", rec
@@ -1776,6 +1792,6 @@ def to_guard(compiled: Compiled, guard, tools=None, *, question: str | None = No
     return names
 
 
-__all__ = ["CatalogVersion", "Certificate", "Clause", "Compiled", "DecisionDiff", "Dispute", "Inputs", "Rejected", "Ruling", "Spec", "Versions",
+__all__ = ["CatalogVersion", "Certificate", "Clause", "Compiled", "DecisionDiff", "Dispute", "Inputs", "Rejected", "Ruling", "SandboxError", "Spec", "Versions",
            "compile_spec", "coverage", "decision_diff", "fresh_examples_needed", "merge", "numbers_in", "read_module", "recompile",
            "reference_reviewer", "skew_guard", "split_clauses", "to_guard", "build_catalog"]

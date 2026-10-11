@@ -21,7 +21,7 @@ from .kinds import DEFAULT_T, FORMAT, LEGACY_FORMAT, NULL_SOURCE, TYPED2_FORMAT,
 from .state import _single, _text
 from .wire import Logits, Pass, _typed_span, decode_pointer, pointer_evidence, prompt
 from .capabilities import _max_len_long, capabilities
-from .backends import BlockUnsupported, LongInputWarning, OnnxScorer, TorchScorer, _Encoder, _file_fingerprint, _onnx_file, need
+from .backends import BlockUnsupported, LongInputWarning, OnnxScorer, SharedQuestionWarning, TorchScorer, _Encoder, _file_fingerprint, _onnx_file, need
 from .adapt import Adaptation, _Spec, _basis, _fit_shift, _fit_temperature, _from_type, _given, _is_type, _sig, _softmax, _usable, lora_key
 from .gate import Facts, act_features
 from .part import DecisionPart
@@ -218,7 +218,8 @@ class DecideModel:
         from ..provenance import digest
         ads = {repr(k): a.params() for k, a in sorted(self.adaptations.items(), key=repr)}
         if self.loras:                       # a model without adapters hashes as before
-            return digest(self.weights_fingerprint(), ads, {repr(k): ad.fingerprint() for k, ad in sorted(self.loras.items(), key=repr)})
+            return digest(self.weights_fingerprint(), ads, {repr(self._lora_fp_key(k)): ad.fingerprint()
+                                                             for k, ad in sorted(self.loras.items(), key=repr)})
         return digest(self.weights_fingerprint(), ads)
 
     def metadata(self):
@@ -231,7 +232,8 @@ class DecideModel:
                 "act_threshold": self.act_threshold, "meta": base,
                 "adaptations": [{"task": k[0], "options": list(k[1]), "descriptions": list(k[2]), "multi": k[3], **a.params()}
                                 for k, a in self.adaptations.items()],
-                **({"loras": [{"task": k[0], "options": [o for o, _ in k[1]], **_described(ad)} for k, ad in self.loras.items()]}
+                **({"loras": [{"task": k[0], "options": [o for o, _ in k[1]], **({"part": k[3]} if len(k) > 3 else {}),
+                               **_described(ad)} for k, ad in self.loras.items()]}
                    if self.loras else {})}
 
     @property
@@ -354,9 +356,43 @@ class DecideModel:
         mq = self.caps["multi_question"]
         return mq is not None and mq["layout"] == "block" and callable(getattr(self.scorer, "logits_pass", None))
 
+    def _lora_fp_key(self, k):
+        """An adapter slot as the model's fingerprint names it: the question alone while one part has an adapter for
+        it (the fingerprint 1.1.0 gave), the question and the part when several parts asking it have one."""
+        if len(k) > 3 and sum(1 for o in self.loras if o[:3] == k[:3]) == 1:
+            return k[:3]
+        return k
+
+    def _lora_of(self, sp):
+        """The adapter that scores this question: the asking part's own (its slot: lora_key(sp)); for a question asked of
+        the model directly (no part), the question's adapter when exactly one part has one. A part never scores with
+        another part's adapter — when another part asking the same question has one, a SharedQuestionWarning names
+        both, once."""
+        if not self.loras:
+            return None
+        k = lora_key(sp)
+        ad = self.loras.get(k)
+        others = [o for o in self.loras if o[:3] == k[:3] and o != k]
+        if len(k) == 3:                                  # asked of the model directly
+            return ad if ad is not None or len(others) != 1 else self.loras[others[0]]
+        for o in others:
+            mine = "its own adapter" if ad is not None else "no adapter"
+            self._warn_once(("lora-shared", k[3], o[3] if len(o) > 3 else None), (
+                f"part {k[3]!r} asks the same question (task and options) as part "
+                f"{o[3] if len(o) > 3 else '(the model)'!r}, which has a LoRA adapter: adapters are kept per part, so "
+                f"{k[3]!r} is scored with {mine}, not with {o[3] if len(o) > 3 else 'that'!r}'s (before 1.1.1 it "
+                "silently used the other part's adapter)"), SharedQuestionWarning)
+        return ad
+
     def _lora_name(self, sp):
-        ad = self.loras.get(lora_key(sp)) if self.loras else None
+        ad = self._lora_of(sp)
         return None if ad is None else ad.fingerprint()
+
+    def _ck(self, sp):
+        """The cache key of a question: its key, and the adapter that scores it (two parts asking the same question
+        with different adapters — or one with an adapter and one without — never share cached logits)."""
+        name = self._lora_name(sp) if self.loras else None
+        return sp.key if name is None else sp.key + (("lora", name),)
 
     def _using(self, name):
         """The scorer with this adapter active (None: none) while scoring — a no-op for a model without adapters. An
@@ -372,7 +408,7 @@ class DecideModel:
     def _forget_cached(self, key):
         """Drop the cached logits of one question (every option order): its adapter changed."""
         with self._lock:
-            for k in [k for k in self._cache if lora_key(k[0]) == key]:
+            for k in [k for k in self._cache if lora_key(k[0])[:3] == key[:3]]:
                 del self._cache[k]
 
     def _score(self, pairs, read_len=0):
@@ -452,7 +488,7 @@ class DecideModel:
         out, todo = [None] * len(specs_texts), []
 
         def key(sp, t):                               # "not stated" allowed is another question to the scorer: a
-            k = (sp.key, t, "unknown") if sp.unknown else (sp.key, t)    # Maybe[...] part and a plain one do not share a reply
+            k = (self._ck(sp), t, "unknown") if sp.unknown else (self._ck(sp), t)    # Maybe[...] part and a plain one do not share a reply
             return k + (("read", int(read_len)),) if read_len else k
         with self._lock:
             for i, (sp, t) in enumerate(specs_texts):
@@ -489,8 +525,8 @@ class DecideModel:
             with self._pass_lock:                     # parallel steps of one pass: the first runs it, the others read it
                 res = self._raw_full([(sp, text) for sp in specs], info)
             return [(z, a, info["block"]) for z, a in res]
-        sig = tuple(sp.key for sp in specs)
-        keys = [(sp.key, text, sig) for sp in specs]
+        sig = tuple(self._ck(sp) for sp in specs)
+        keys = [(ck, text, sig) for ck in sig]
 
         def cached():
             with self._lock:
@@ -716,9 +752,9 @@ class DecideModel:
         """Act or escalate: the model's act signal (its probability is recorded; below the threshold → "model escalated"),
         else the calibrated confidence below escalate_below (→ "confidence … < …", the low-confidence safeguard)."""
         if self.loras:
-            name = self._lora_name(sp)
-            if name is not None:
-                d.extra["lora"] = {"adapter": self.loras[lora_key(sp)].fingerprint(), "experimental": True}
+            ad = self._lora_of(sp)
+            if ad is not None:
+                d.extra["lora"] = {"adapter": ad.fingerprint(), "experimental": True}
         if act is not None:
             p = self.act_probability(sp, d, act)
             d.extra["act"] = p

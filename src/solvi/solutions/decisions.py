@@ -23,6 +23,13 @@ head or a learner; 1/3 to choose a signal for a rule), the rest for calibration 
 or half for it and half for the dispatcher when there is a slow path, since the dispatcher must be calibrated on
 examples System 1's guarantee did not see. `split=(fit, guarantee, dispatch)` sets the shares.
 
+Examples that share a source — several from one screen, one customer, one document — are not independent: a random
+split puts some of each source on both sides, System 1 is calibrated on sources it was fitted on, and the promise is
+optimistic on new sources (a user's promise of ≤ 10% confident errors gave up to 14% on unseen screens).
+`groups=` (a key of the state, a function state → group, or one group per example) splits by group instead: the groups
+are shuffled and every example of a group goes to one share, so the guarantee (and the dispatcher) is calibrated on
+groups System 1 never saw and the promise is read on unseen groups. The default (`groups=None`) is the random split.
+
 The signal System 1's guarantee reads: signal= when given; else the act probability of a decision part that has one;
 else the answer's confidence; and when that does not vary (a rule's answer is always sure), the number the catalog
 computes that best separates right from wrong answers on the fit share (AUROC), recorded with its AUROC.
@@ -104,7 +111,11 @@ class DecisionSystem:
         promise and its threshold, the open-set gate, who answers each slice System 1 hands over, the budget, the
         store, and what is not covered."""
         c = self.choices
-        lines = [f"Question {self.question!r}: {c['examples']} labelled examples, shuffled with seed {c['seed']}: "
+        grp = c.get("groups")
+        how = (f"split by group ({grp['by']}: {grp['n']} groups, each whole on one side — {grp['fit']} to fit, "
+               f"{grp['calibrate']} to calibrate on, so the promise is read on groups System 1 did not see), groups "
+               f"shuffled with seed {c['seed']}" if grp else f"shuffled with seed {c['seed']}")
+        lines = [f"Question {self.question!r}: {c['examples']} labelled examples, {how}: "
                  + ", ".join(f"{v} {k}" for k, v in c["split"].items() if v) + "."]
         lines.append(f"System 1: {c['system1']}.")
         lines.append(f"Its signal: {c['signal']}.")
@@ -145,6 +156,52 @@ class DecisionSystem:
 
 
 # ------------------------------------------------------------------------------------------------ helpers
+def _group_ids(groups, examples):
+    """groups= → one hashable group per example, or None (the random split)."""
+    if groups is None:
+        return None
+    if isinstance(groups, str):
+        miss = [i for i, (st, _) in enumerate(examples) if groups not in st]
+        if miss:
+            raise ValueError(f"groups={groups!r}: example {miss[0]} has no key {groups!r} in its state")
+        ids = [st[groups] for st, _ in examples]
+    elif callable(groups):
+        ids = [groups(st) for st, _ in examples]
+    else:
+        ids = list(groups)
+        if len(ids) != len(examples):
+            raise ValueError(f"groups: {len(ids)} groups for {len(examples)} examples (one group per example)")
+    ids = [g if _hashable(g) else repr(g) for g in ids]
+    if len(set(ids)) < 2:
+        raise ValueError("groups=: the examples come from one group; a split by group needs at least two")
+    return ids
+
+
+def _hashable(x):
+    try:
+        hash(x)
+        return True
+    except TypeError:
+        return False
+
+
+def _group_desc(groups):
+    if isinstance(groups, str):
+        return f"the state's {groups!r}"
+    if callable(groups):
+        return f"{getattr(groups, '__name__', 'a function')}(state)"
+    return "the given groups"
+
+
+def _edge(gs, k):
+    """A cut at k moved to the nearest boundary between two groups (ties: the earlier one), so no group is on both
+    sides; k as it is without groups."""
+    if gs is None or k <= 0 or k >= len(gs):
+        return k
+    edges = [i for i in range(1, len(gs)) if gs[i] != gs[i - 1]]
+    return min(edges, key=lambda e: (abs(e - k), e)) if edges else k
+
+
 def _with_knowledge(state, snap):
     """The state with the knowledge's snapshot as the given fact "knowledge" (a state that has one keeps it)."""
     if snap is None or not isinstance(state, dict) or "knowledge" in state:
@@ -279,7 +336,7 @@ def _slow_path(slow, q, reads, novel_on, writer, inputs):
 # ------------------------------------------------------------------------------------------------ build
 def build(question, examples, *, catalog=None, learner=None, slow=None, reads=None, max_risk=None, max_error=None,
           signal=None, correct=None, novel="auto", budget=None, total=None, price=None, storage=None, split=None,
-          seed=0, delta=0.10, min_slice=20, writer=None, inputs=None, knowledge=None):
+          seed=0, delta=0.10, min_slice=20, writer=None, inputs=None, knowledge=None, groups=None):
     """Fit System 1, calibrate its guarantee and the dispatcher, wire the store → a DecisionSystem (see the module docs).
 
     question: a Question, or the name of one a rule of `catalog` (or learner=) answers. examples: [(state, correct
@@ -295,7 +352,9 @@ def build(question, examples, *, catalog=None, learner=None, slow=None, reads=No
     confidence. min_slice: a slice of the slow path with fewer calibration examples goes to a person. writer, inputs:
     gone in 1.0 (they compiled a Spec here): a TypeError says to compile it first. knowledge: a solvi.Knowledge (or a
     function state → snapshot) — every decision, and every example at build time, is given its snapshot as the fact
-    "knowledge", which System 1's rules read like any fact (`Knowledge.value(knowledge, s, r)`)."""
+    "knowledge", which System 1's rules read like any fact (`Knowledge.value(knowledge, s, r)`). groups: split by
+    group (module docs) — a key of the state, a function state → group, or a list with one group per example; every
+    share then holds whole groups (at least two groups); None: the random split."""
     from ..core.dispatch import SIGNALS, THINK, Dispatcher
     from ..core.guarantees.guarantee import promise_text
     from ..core.store import open_storage
@@ -328,9 +387,17 @@ def build(question, examples, *, catalog=None, learner=None, slow=None, reads=No
         if isinstance(question, str):
             raise ValueError(f"no rule answers {qname!r} in the catalog: give the Question (its answer type) so a head "
                              "can be fitted, or learner=")
-    order = list(range(len(examples)))
-    random.Random(seed).shuffle(order)
+    gids = _group_ids(groups, examples)
+    if gids is None:
+        order = list(range(len(examples)))
+        random.Random(seed).shuffle(order)
+    else:                                      # whole groups, in a shuffled order of groups
+        kinds = list(dict.fromkeys(gids))
+        random.Random(seed).shuffle(kinds)
+        rank = {g: i for i, g in enumerate(kinds)}
+        order = sorted(range(len(examples)), key=lambda i: rank[gids[i]])
     shuffled = [examples[i] for i in order]
+    sg = None if gids is None else [gids[i] for i in order]      # the group of each shuffled example
     n = len(shuffled)
     has_slow = slow is not None
 
@@ -343,8 +410,9 @@ def build(question, examples, *, catalog=None, learner=None, slow=None, reads=No
     else:
         fit_share = SPLIT_FIT if mode != "given" else 0.0
         g_ratio = 0.5 if has_slow else 1.0
-    n_fit = int(round(n * fit_share))
+    n_fit = _edge(sg, int(round(n * fit_share)))
     fit_ex, rest = shuffled[:n_fit], shuffled[n_fit:]
+    rest_g = None if sg is None else sg[n_fit:]
     if mode != "given" and not fit_ex:
         raise ValueError("System 1 is fitted here and the fit share is empty: more examples, or split=")
 
@@ -379,6 +447,7 @@ def build(question, examples, *, catalog=None, learner=None, slow=None, reads=No
         desc1 = f"the catalog's rule for {qname!r}, as written"
     if mode == "given" and fit_ex:              # nothing is fitted on them: they calibrate
         rest, fit_ex = fit_ex + rest, []
+        rest_g = sg
 
     # --- the signal the guarantee reads
     sig_name, sig_desc, choose_on = signal, f"{signal!r} (given)", []
@@ -392,8 +461,9 @@ def build(question, examples, *, catalog=None, learner=None, slow=None, reads=No
             if fit_ex:
                 choose_on = fit_ex
             else:
-                k = int(round(len(rest) * SPLIT_SELECT))
+                k = _edge(rest_g, int(round(len(rest) * SPLIT_SELECT)))
                 choose_on, rest = rest[:k], rest[k:]
+                rest_g = None if rest_g is None else rest_g[k:]
             best, auc, scores = _choose_signal(system, qname, choose_on, correct, q)
             if best is None:
                 sig_name, sig_desc = "confidence", ("the answer's confidence (it does not vary, and no number the catalog "
@@ -406,7 +476,7 @@ def build(question, examples, *, catalog=None, learner=None, slow=None, reads=No
                             + "); the answer's confidence does not vary")
             if choose_on is fit_ex:
                 choose_on = []                  # counted as the fit share
-    k = int(round(len(rest) * g_ratio))
+    k = _edge(rest_g, int(round(len(rest) * g_ratio)))
     g_ex, d_ex = rest[:k], rest[k:]
     if has_slow and not d_ex:
         raise ValueError("a slow path is calibrated on examples System 1's guarantee did not see: none are left")
@@ -513,6 +583,10 @@ def build(question, examples, *, catalog=None, learner=None, slow=None, reads=No
                            if d.storage is not None else "not stored (storage= keeps every decision)")}
     choices["probe"] = probe_desc
     choices["knowledge"] = knowledge_desc
+    if sg is not None:
+        side = {"fit": len({sg[i] for i in range(len(fit_ex))}) if mode != "given" else 0}
+        choices["groups"] = {"n": len(set(sg)), "by": _group_desc(groups), "fit": side["fit"],
+                             "calibrate": len(set(sg)) - side["fit"]}
     if has_slow and slice_open:
         rep = d.calibrate(d_ex, max_risk=max_risk, max_error=max_error, delta=delta, min_slice=min_slice,
                           correct=None if correct is None else (lambda ans, label, res: correct(ans, label)))
