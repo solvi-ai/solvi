@@ -585,13 +585,13 @@ scores and so cannot represent two atoms that matter only together; in distribut
 generators as the settings. Use it where the journal has rows; a trained scorer over the whole condition is a possible
 later extra, only if a multi-seed measurement on deep conditions shows a gain over it.
 
-**Before the journal has rows, rank by a prior; hand over to the joint statistic at about 20 rows.** `PriorRanker`
+**Before the journal has rows, rank by a prior; let the joint statistic take over as rows arrive.** `PriorRanker`
 scores a condition by its own features — its number of atoms, its atoms' kinds, each atom's prior usefulness and the
 co-occurrence of its features in true conditions — learned from synthetic tasks of your grammar (`fit(grammar, sample,
 tasks=, rows=, sizes=)`; or `fit_tasks(grammar, tasks)` on mismatches whose law you know); it reads no rows.
-`HandoverRanker(prior, JointRanker(), min_rows=20)` uses it below 20 logged rows of the action and the joint statistic
-from there on (`last` / `RankedProposer.scored_by` say which one scored): the joint statistic's gain starts at about 20
-rows (the curve above), so the hand-over point is there. **A prior only knows what the task family favours:** on a planted grammar whose sampler
+`HandoverRanker(prior, JointRanker())` lets the evidence take over gradually: score = the joint Jaccard + 20 / (20 +
+rows) × the prior's rank among the candidates in [0, 1] — the prior's order with no rows, the joint statistic's as rows
+grow (`mode="switch"` is a fixed switch at `min_rows`; `last` / `RankedProposer.scored_by` say what scored). **A prior only knows what the task family favours:** on a planted grammar whose sampler
 draws three features 30 times as often, the prior needed 10.3 checks at 0 rows against 43.1 blind (a prior fitted on
 shuffled labels: 206 — worse than blind; `tests/test_laws_rank_prior.py`); on a skewed family of deep conditions (three
 features drawn 8 times and one comparison type 4 times as often; about 4,400 candidates per task) 163 against 1,086
@@ -599,10 +599,11 @@ blind; on the three settings above, where the conditions are drawn uniformly, 0.
 deep and the correlated setting, and on the first it fell back to the blind order (one seed). The fallback is built in:
 unless the prior's held-out checks on its own training tasks are 5% below both the blind order's and a shuffled-label
 fit's, `learned` is False and it scores as the blind order. Fit the prior on tasks that look like yours (`sizes=`, the
-features your laws use, or `fit_tasks` on past mismatches whose law you know), not on the grammar alone. **Where the
-prior is strong, hand over later:** on the skewed family the prior still beat the joint statistic at 100 rows (163
-against 263; at 20 rows 163 against 820), so the fixed hand-over at 20 rows cost checks there — check the curve
-(`benchmarks/laws_rank_joint.py --curve`) before fixing `min_rows`.
+features your laws use, or `fit_tasks` on past mismatches whose law you know), not on the grammar alone. **Blend, do not switch:** on the skewed family the prior still beat the joint statistic at 100 rows (163 against 263;
+at 20 rows 163 against 820), so a fixed switch at 20 rows cost checks; the blend needed 124 / 83 / 3.6 at 20 / 100 / 300
+rows — better than either part. Its price is on the deep uniform setting at many rows: 22 against 9.1 for the joint
+statistic at 300 rows (the medians equal; in a few tasks the prior's small weight reorders the top under label noise),
+one seed — check the curve (`benchmarks/laws_rank_joint.py --curve`) and lower `n0` where the journal is large.
 
 ## Learn composition tables by exact counting, derive by composition, refuse what the table cannot derive
 
