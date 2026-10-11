@@ -270,7 +270,8 @@ class Law:
     observations from other groups since, while it was the law applied; held: (hits, n) on the buffer rows where it is
     the applied law, from the last test; status: "active" | "retired"; why: the retirement's reason. tested: the
     candidates scored on the buffer when it was accepted (with the sized acceptance, the N of its bound; admitted by
-    probes: the candidates it was told apart from); need: the clean support the sized rule asked for at that N; level:
+    probes: the candidates it was told apart from); null: the null precision it was tested against (the effect's
+    base rate, or the set's fixed null); need: the clean support the sized rule asked for at that N; level:
     the per-candidate error level δ_N it passed (None: fixed thresholds, `sized=False`, or a law added by hand);
     admitted: "test" (the held-out buffer), "probes" (`admit_by_probes`) or "hand" (`add`)."""
     id: str
@@ -293,6 +294,7 @@ class Law:
     tested: int = 0
     need: int = 0
     level: float | None = None
+    null: float | None = None
     admitted: str = "test"
 
     def holds(self, true: Iterable[str]) -> bool:
@@ -405,8 +407,8 @@ def sized_level(tested: int, delta: float, space: int | None = None) -> float:
 
 def sized_need(tested: int, delta: float, null: float, space: int | None = None) -> int:
     """The smallest support with which a law that is right on every row passes the sized rule at this N: the least s
-    with null**s ≤ level, i.e. ⌈ln(1/level) / ln(1/null)⌉ ≈ (ln N + ln 1/δ) / ε for null = 1 − ε (twice ln N
-    without a declared space)."""
+    with null**s ≤ level, i.e. ⌈ln(1/level) / ln(1/null)⌉ — about (2·ln N + ln 1/δ) / ln(1/null) without a declared
+    space. At N = 52,000, δ = 0.1: 9 at null 0.05 (a rare effect's base rate, floored), 68 at 0.7, 228 at 0.9."""
     lvl = sized_level(tested, delta, space)
     return max(1, math.ceil(math.log(1.0 / lvl) / math.log(1.0 / float(null)) - 1e-9))
 
@@ -476,14 +478,20 @@ class LawSet:
     The sized acceptance (sized=True). Fixed thresholds do not see how many candidates were tried on one buffer: on a
     buffer with no law at all (2,000 rows, an effect at 70% independent of 40 sparse atoms) the 821 conditions of at
     most two atoms passed support ≥ 5 and precision ≥ 0.9 in 100 of 100 buffers. The sized rule tests each candidate
-    against the null "its precision is at most null_precision" (min_precision; 0.95 when min_precision is 1) at the
-    level δ_N = sized_level(N, delta, space), N the candidates scored on this buffer so far (`buffer.tested`): it
-    passes when P[Binomial(support, null) ≥ hits] ≤ δ_N. A law right on every row needs support ≥ sized_need(N, ...)
-    ≈ (ln N + ln 1/δ) / ε (ε = 1 − null; with the anytime level, 2·ln N); every row it gets wrong asks for more. Then a
-    candidate whose true precision is at most the null passes with probability ≤ δ_N, and over every candidate tested
-    on the buffer the chance of any such acceptance is ≤ delta — on the same buffers: 0 of 100. The bound assumes the
+    against a null at the level δ_N = sized_level(N, delta, space), N the candidates scored on this buffer so far
+    (`buffer.tested`): it passes when P[Binomial(support, null) ≥ hits] ≤ δ_N. The null (`null=`): "base" (the
+    default) — "the condition is no better than chance": the effect's base rate, the share of the buffer's rows of
+    that action (the proposing group left out) whose observation the candidate's effect predicts, floored at 0.05 and
+    capped at min_precision (0.95 when that is 1) — or a fixed float (the precision the law must beat). min_precision
+    stays a separate filter on the observed precision. A law right on every row needs support ≥ sized_need(N, δ,
+    null) = ⌈ln(1/δ_N) / ln(1/null)⌉: at 52,000 candidates and δ = 0.1, 9 rows at a base rate of 3% (floored to 5%),
+    68 at 70%, and 228 against a fixed null of 0.9; every row it gets wrong asks for more. Then a candidate no better
+    than its null passes with probability ≤ δ_N, and over every candidate tested on the buffer the chance of any such
+    acceptance is ≤ delta — on the same null buffers: 0 of 100. With the base null that statement is "better than
+    chance", not "precision above min_precision" (the filter adds that on the observed rows). The bound assumes the
     held-out rows are independent draws and the candidates were not chosen by looking at them. sized=False: the
-    fixed thresholds (the measured stands ran so). Each accepted Law records `tested` (N), `need` and `level`.
+    fixed thresholds (the measured stands ran so). Each accepted Law records `tested` (N), `null`, `need` and
+    `level`.
 
     disagree: "first" (default: the most specific matching law, ties to the earlier) or "abstain" (`predict` returns
     `Undetermined` where laws none of which is an exception of another disagree; see `predict`).
@@ -496,7 +504,7 @@ class LawSet:
                  effects: Callable | None = None, proposer: Proposer | None = None, min_support: int = 5,
                  min_precision: float = 0.9, retire_below: float = 0.8, retire_min: int = 5, cap: int = 300,
                  sized: bool = True, delta: float = 0.1, space: int | None = None,
-                 null_precision: float | None = None, disagree: str = "first"):
+                 null: str | float = "base", disagree: str = "first"):
         if disagree not in ("first", "abstain"):
             raise ValueError(f"disagree is 'first' or 'abstain', not {disagree!r}")
         if not 0.0 < float(delta) < 1.0:
@@ -510,11 +518,14 @@ class LawSet:
         self.retire_below, self.retire_min, self.cap = float(retire_below), int(retire_min), int(cap)
         self.sized, self.delta = bool(sized), float(delta)
         self.space = int(space) if space is not None else None
-        if null_precision is None:
-            null_precision = self.min_precision if self.min_precision < 1.0 else 0.95
-        if not 0.0 < float(null_precision) < 1.0:
-            raise ValueError("null_precision is strictly between 0 and 1")
-        self.null_precision = float(null_precision)
+        if isinstance(null, str):
+            if null != "base":
+                raise ValueError(f"null is 'base' or a precision strictly between 0 and 1, not {null!r}")
+        elif not 0.0 < float(null) < 1.0:
+            raise ValueError("a fixed null is a precision strictly between 0 and 1")
+        else:
+            null = float(null)
+        self.null = null
         self.disagree = disagree
         self.abstained = 0                 # predictions that abstained (disagree="abstain")
         self.cost = {"candidates": 0, "tests": 0, "accepted": 0, "probes": 0, "simulated": 0}
@@ -651,17 +662,44 @@ class LawSet:
         take = m & ~cov[min(len(cond), self.grammar.k + 1)]
         return m.bit_count(), (m & E).bit_count(), (take & E).bit_count() - (take & ok).bit_count()
 
-    def passes(self, support: int, hits: int, tested: int) -> bool:
+    NULL_FLOOR = 0.05
+
+    def base_rate(self, buffer: Buffer, action, effect, exclude=None) -> float:
+        """The base null for (action, effect): the share of the buffer's rows of `action` (without the group
+        `exclude`) whose observation `effect` predicts, floored at 0.05 and capped at min_precision (0.95 when that is
+        1); the floor when the buffer has no row of the action."""
+        allowed = buffer.allowed(action, exclude)
+        n = allowed.bit_count()
+        cap = self.min_precision if self.min_precision < 1.0 else 0.95
+        if not n:
+            return min(self.NULL_FLOOR, cap)
+        share = (allowed & self._effect_mask(buffer, action, effect)).bit_count() / n
+        return min(max(share, self.NULL_FLOOR), cap)
+
+    def passes(self, support: int, hits: int, tested: int, null: float | None = None) -> bool:
         """The acceptance on counts alone (net aside): support ≥ min_support, hits ≥ min_precision · support, and with
-        sized=True P[Binomial(support, null_precision) ≥ hits] ≤ sized_level(tested, delta, space)."""
+        sized=True P[Binomial(support, null) ≥ hits] ≤ sized_level(tested, delta, space). null: the set's fixed null
+        when it has one; with null="base" pass the rate (`base_rate`)."""
         if support < self.min_support or hits < self.min_precision * support:
             return False
         if not self.sized:
             return True
-        if support < sized_need(tested, self.delta, self.null_precision, self.space):
+        if null is None:
+            if isinstance(self.null, str):
+                raise ValueError("this set's null is the base rate: pass null=lawset.base_rate(buffer, action, effect)")
+            null = self.null
+        if support < sized_need(tested, self.delta, null, self.space):
             return False
-        return _log_tail(int(support), int(hits), self.null_precision) <= math.log(
+        return _log_tail(int(support), int(hits), float(null)) <= math.log(
             sized_level(tested, self.delta, self.space)) + 1e-12
+
+    def _null_of(self, buffer, c, exclude, cache):
+        if not isinstance(self.null, str):
+            return self.null
+        k = (_key(c.action), _key(c.effect))
+        if k not in cache:
+            cache[k] = self.base_rate(buffer, c.action, c.effect, exclude)
+        return cache[k]
 
     def test(self, candidates: Iterable[Candidate], buffer: Buffer, exclude=None, accept: int = 1) -> list[Law]:
         """Accept up to `accept` candidates (default one: the best) that pass on the held-out rows of every group but
@@ -681,6 +719,7 @@ class LawSet:
         self.cost["tests"] += scored
         self._last_tested = scored
         n_tested = buffer.tested
+        nulls: dict = {}
         out = []
         for _ in range(accept):
             views = {}
@@ -694,14 +733,17 @@ class LawSet:
                 if a not in views:
                     views[a] = self._view(buffer, c.action, exclude)
                 sup, hits, net = self.score(c, buffer, exclude, _view=views[a])
-                if net <= 0 or not self.passes(sup, hits, n_tested):
+                if net <= 0:
+                    continue
+                nl = self._null_of(buffer, c, exclude, nulls) if self.sized else None
+                if not self.passes(sup, hits, n_tested, nl):
                     continue
                 key = (net, -len(cond), hits / sup, -i)
                 if best is None or key > best[0]:
-                    best = (key, c, sup, hits, net)
+                    best = (key, c, sup, hits, net, nl)
             if best is None or len(self.laws) >= self.cap:
                 break
-            _, c, sup, hits, net = best
+            _, c, sup, hits, net, nl = best
             m = buffer.match(c.action, tuple(c.condition)) & views[_key(c.action)][0]
             law = self._accept(c, born=exclude, support=sup, hits=hits, net=net,
                                sources=tuple(buffer.ids(c.action, m)))
@@ -709,7 +751,8 @@ class LawSet:
             self.cost["accepted"] += 1
             if self.sized:
                 law.level = sized_level(n_tested, self.delta, self.space)
-                law.need = sized_need(n_tested, self.delta, self.null_precision, self.space)
+                law.null = nl
+                law.need = sized_need(n_tested, self.delta, nl, self.space)
             out.append(law)
             self.check(buffer, c.action)
         return out

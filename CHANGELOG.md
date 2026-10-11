@@ -100,12 +100,15 @@ calibration files and served by `solvi serve`), so a build from it is not mistak
 - **Laws and skills: the acceptance sized by the search, admission by probes, abstention, the search cost
   (experimental).** `LawSet(sized=True)` — now the default — accepts a candidate only when P[Binomial(support, null) ≥
   hits] ≤ δ / (N·(N + 1)), N the candidates scored on that buffer so far (`Buffer.tested`; `space=` declares N in
-  advance, Bonferroni; `delta=0.1`, `null_precision=` min_precision or 0.95 at 1); `sized_level` / `sized_need` give the
-  level and the clean support it asks for. On a synthetic buffer with no law the fixed thresholds accepted a law in 100
-  of 100 buffers, the sized rule in 0 of 100; a real law on 250 rows was still accepted. `sized=False` keeps the fixed
-  thresholds (the measured toys and benchmarks pass it). A law now needs about 150 held-out rows at 800 candidates and
-  about 230 at 52,000; a small buffer accepts nothing — declare `space=` or pass `sized=False` knowingly. Each `Law` records
-  `tested`, `need`, `level` and `admitted`. `LawSet.admit_by_probes(candidates, ask, probes=, safe=, budget=, buffer=)`
+  advance, Bonferroni; `delta=0.1`; `null="base"`, the default, is the effect's base rate among the buffer's rows of
+  that action, floored at 0.05 and capped at min_precision, `null=<float>` a fixed null; min_precision stays a separate
+  filter); `LawSet.base_rate`, `sized_level` / `sized_need` give the null, the level and the clean support it asks for.
+  On a synthetic buffer with no law the fixed thresholds accepted a law in 100 of 100 buffers, the sized rule in 0 of
+  100; a deterministic law at a base rate of 3% was accepted in 100 of 100 buffers on a median of 29 rows with the base
+  null and in none with a fixed null of 0.9. A deterministic law needs ⌈ln(1/δ_N) / ln(1/null)⌉ rows: at 52,000
+  candidates about 9 at a base rate of 3%, 68 at 70%, 228 against 0.9; a buffer too small for its null accepts nothing —
+  declare `space=` or pass `sized=False` (the measured toys and benchmarks pass it) knowingly. Each `Law` records
+  `tested`, `null`, `need`, `level` and `admitted`. `LawSet.admit_by_probes(candidates, ask, probes=, safe=, budget=, buffer=)`
   asks the world where the surviving candidates disagree (`split`), accepts the shortest one only when one equivalence
   class survives and returns an `Admission` ("accepted" / "undetermined" with the classes); on a synthetic world at 8
   checks a random held-out sample accepted a wrong law in 0.593 of 300 trials, the probes in none (0.987 right).

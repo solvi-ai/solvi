@@ -342,11 +342,15 @@ that a stand tried tens of thousands of candidates on the same buffer, and some 
 synthetic buffer with no law at all (2,000 rows, an effect at 70% independent of 40 sparse atoms, 821 conditions) the
 fixed bar accepted a law in 100 of 100 buffers. `LawSet(sized=True)` — the default — tests each candidate at the level
 δ / (N·(N + 1)), N the candidates scored on that buffer so far, so the chance of any false acceptance stays below δ:
-0 of 100 on the same buffers, while a real law on 250 rows was still accepted. **Its price is data: a law needs about
-150 rows at 800 candidates and about 230 at 52,000** ((2·ln N + ln 1/δ) / ε rows for a law right on every row; 125 at
-52,000 if you declare `space=52_000`). **A small buffer accepts nothing — that is the rule working, not failing.**
-Collect more held-out rows, test fewer candidates, declare `space=`, or pass `sized=False` knowingly and treat the
-fixed bar's false accepts as the known price; the stands measured above ran with `sized=False`.
+0 of 100 on the same buffers. **Test against chance, not against 0.9.** The default null is the effect's base rate in
+the buffer (`null="base"`: what a random condition achieves for that action and effect, floored at 0.05), with
+`min_precision` kept as a separate filter: a deterministic law at a base rate of 3% was accepted in 100 of 100 buffers
+on a median of 29 rows, where a fixed null of 0.9 (`null=0.9`) accepted it in none — beating 0.9 at tens of thousands of
+candidates takes hundreds of rows even for a law that is never wrong. **The need:** a deterministic law needs
+⌈ln(1/δ_N) / ln(1/null)⌉ rows, δ_N = δ / (N·(N + 1)): at 52,000 candidates and δ = 0.1, about 9 rows at a base rate of
+3%, 68 at 70%, 228 against a fixed 0.9. **A buffer too small for its null accepts nothing — that is the rule working,
+not failing.** Collect more held-out rows, test fewer candidates, declare `space=`, or pass `sized=False` knowingly and
+treat the fixed bar's false accepts as the known price; the stands measured above ran with `sized=False`.
 
 **Where the world answers questions, admit by discriminating probes, not by a random sample.** A neighbouring research
 line measured that a hypothesis "certified" on 8 random held-out examples is wrong more often the larger the space

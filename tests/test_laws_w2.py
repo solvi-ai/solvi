@@ -80,7 +80,8 @@ def test_the_sized_rule_still_accepts_a_real_law_with_the_support_it_needs():
     got = ls.test([Candidate("do", c, "E") for c in conds], b)
     assert len(got) == 1 and got[0].condition == ("f0", "f1")
     law = got[0]
-    assert law.tested == len(conds) and law.need == sized_need(law.tested, 0.1, 0.9)
+    assert law.tested == len(conds) and law.need == sized_need(law.tested, 0.1, law.null)
+    assert law.null == pytest.approx(ls.base_rate(b, "do", "E"))         # the default null: the effect's base rate
     assert law.level == pytest.approx(sized_level(law.tested, 0.1)) and law.support >= law.need
     assert b.tested == len(conds)                       # counted on the buffer
 
@@ -101,7 +102,7 @@ def test_the_count_accumulates_on_the_buffer_and_sized_false_keeps_the_old_rule(
 
 
 def test_the_sized_rule_with_errors_needs_a_binomial_tail_below_the_level():
-    ls = LawSet(sparse_grammar(n=2, k=1), min_support=5, min_precision=0.9)
+    ls = LawSet(sparse_grammar(n=2, k=1), min_support=5, min_precision=0.9, null=0.9)
     lvl = sized_level(10, ls.delta)
     need = sized_need(10, ls.delta, 0.9)
     assert ls.passes(need, need, 10) and not ls.passes(need - 1, need - 1, 10)
@@ -112,10 +113,52 @@ def test_the_sized_rule_with_errors_needs_a_binomial_tail_below_the_level():
     assert tail <= lvl
 
 
-def test_min_precision_one_uses_the_null_precision():
-    ls = LawSet(sparse_grammar(n=2, k=1), min_support=1, min_precision=1.0)
-    assert ls.null_precision == 0.95
+def test_a_fixed_null_and_its_checks():
+    ls = LawSet(sparse_grammar(n=2, k=1), min_support=1, min_precision=1.0, null=0.95)
+    assert ls.null == 0.95
     assert ls.passes(sized_need(5, 0.1, 0.95), sized_need(5, 0.1, 0.95), 5)
+    assert LawSet(sparse_grammar(n=2, k=1)).null == "base"                  # the default
+    with pytest.raises(ValueError):
+        LawSet(sparse_grammar(n=2, k=1), null=1.0)
+    with pytest.raises(ValueError):
+        LawSet(sparse_grammar(n=2, k=1), null="chance")
+    with pytest.raises(ValueError):
+        LawSet(sparse_grammar(n=2, k=1)).passes(10, 10, 5)                  # a base null needs the rate: null=
+
+
+def test_the_base_rate_null_is_the_effects_share_floored_and_capped():
+    rng = random.Random(4)
+    g = sparse_grammar(n=10, k=1)
+    b = noise_buffer(rng, g, rows=1000, n=10, p_atom=0.5, p_effect=0.7)
+    ls = LawSet(g, base=lambda s, a: "N", min_precision=0.9)
+    share = sum(t.observed == "E" for t in b.rows("do")) / 1000
+    assert ls.base_rate(b, "do", "E") == pytest.approx(share)
+    assert ls.base_rate(b, "do", "never") == 0.05                            # floored
+    hi = noise_buffer(rng, g, rows=200, n=10, p_atom=0.5, p_effect=0.99)
+    assert ls.base_rate(hi, "do", "E") == 0.9                                # capped at min_precision
+    one = LawSet(g, min_precision=1.0)
+    assert one.base_rate(hi, "do", "E") == 0.95                              # at min_precision 1: capped at 0.95
+    excl = ls.base_rate(b, "do", "E", exclude=0)
+    rows = [t for t in b.rows("do") if t.group != 0]
+    assert excl == pytest.approx(sum(t.observed == "E" for t in rows) / len(rows))
+
+
+def test_a_deterministic_law_at_a_low_base_rate_needs_few_rows_under_the_base_null():
+    """The regime of a game simulator: the world is deterministic and the effect is rare, so beating its base rate
+    takes a handful of rows where beating a null of 0.9 takes about 150."""
+    rng = random.Random(5)
+    g = sparse_grammar(n=40, k=2)
+    b = noise_buffer(rng, g, rows=1000, p_atom=0.17, law=(0, 1))           # E on ≈ 3% of the rows
+    conds = every_condition(g, 2)
+    cands = [Candidate("do", c, "E") for c in conds]
+    base = LawSet(g, base=lambda s, a: "N", min_support=5, min_precision=0.9)
+    got = base.test(cands, b)
+    assert len(got) == 1 and got[0].condition == ("f0", "f1") and got[0].support < 60
+    assert got[0].null == 0.05 and got[0].need == sized_need(len(conds), 0.1, 0.05) <= 10
+    b2 = noise_buffer(random.Random(5), g, rows=1000, p_atom=0.17, law=(0, 1))
+    fixed = LawSet(g, base=lambda s, a: "N", min_support=5, min_precision=0.9, null=0.9)
+    assert fixed.test(cands, b2) == []                                      # null 0.9: 150 rows needed
+    assert sized_need(52_000, 0.1, 0.05) <= 10 and sized_need(52_000, 0.1, 0.7) <= 70
 
 
 def test_the_search_cost_is_recorded_on_the_set_and_per_step():
