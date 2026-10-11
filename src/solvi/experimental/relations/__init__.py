@@ -151,7 +151,7 @@ What is not done:
   through the fixed point;
 - residual synthesis: chains only (atoms, converses, ∖ I on segments) — no union, intersection, closure or counts,
   and two masked segments side by side only through a library entry;
-- the text frontend: English kinship phrasings of five patterns; a miss is a refusal, never a guess; not a general
+- the text frontend: English kinship phrasings of five patterns; a miss is a refusal and an edge read wrongly a wrong answer; not a general
   relation extractor; the owner of «his / her» is an earlier name of the sentence, never one in another sentence;
 - composition tables: one relation per cell; a cell that depends on something the chain does not carry (a gender)
   stays below the majority and its chains are refused, not split by that attribute;
