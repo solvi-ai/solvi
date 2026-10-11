@@ -171,7 +171,7 @@ def forward_chain(store, *, scope=None, rule_scope=None, rules="active", max_rou
                 pairs.update((f, g) for g in out_by[y])
                 pairs.update((e, f) for e in in_by[x])
             row = {"round": rnd, "proposed": 0, "added": 0, "refused": 0, "circular": 0}
-            fresh = []
+            fresh, seen_fresh = [], set()
             with store.batch():
                 for f1, f2 in sorted(pairs):
                     x, y, r1 = facts[f1]
@@ -191,7 +191,9 @@ def forward_chain(store, *, scope=None, rule_scope=None, rules="active", max_rou
                         if st1 is None or st2 is None:
                             continue                        # a premise left the store during the chain
                         rank = min(st1["rank"], st2["rank"])
-                        new = it is None or not _live(it)
+                        if rank not in by_rank:
+                            continue
+                        new = iid not in facts and iid not in seen_fresh   # not a usable fact before this proposal
                         got = store.add("fact", body, sc, source=by_rank[rank], by=by, derived_from=just,
                                         evidence={"rule": rid, "via": y, "depth": rnd}, inferred=True)
                         if got is None:
@@ -206,6 +208,7 @@ def forward_chain(store, *, scope=None, rule_scope=None, rules="active", max_rou
                                                  "facts are not what forward_chain expects (pair facts, composition "
                                                  "rules)")
                             fresh.append(iid)
+                            seen_fresh.add(iid)
             delta = set()
             for iid in fresh:                                # read after the batch: the store has resolved them
                 derived_ids.add(iid)
