@@ -5,13 +5,17 @@ PriorRanker scores a condition by its own features — its number of atoms, its 
 type), each atom's prior usefulness and the pairwise co-occurrence of its atoms' features in true conditions — learned
 from synthetic tasks drawn from the grammar; it reads no rows. Positive control: on a planted grammar whose condition
 sampler favours some features, at 0 rows it needs at most half the blind checks. Negative control: the same prior fitted
-on shuffled labels is not better than the blind order. HandoverRanker scores by the prior below `min_rows` logged rows of
+on shuffled labels is not better than the blind order. Fallback: a fit whose held-out checks are not 5% below both the
+blind order's and the shuffled-label fit's on its own training tasks records learned=False and scores as the blind
+order — on a family whose true condition is any candidate with equal chance it falls back, on the planted grammar it
+does not; on the rank test's grammar (drawn uniformly, a small signal left) it is not worse than blind by more than 5%. HandoverRanker scores by the prior below `min_rows` logged rows of
 the action and by JointRanker from there on, and says which one scored. Deterministic for a seed."""
 import importlib.util
 import random
 import warnings
 from collections import Counter
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -75,7 +79,7 @@ def prior():
 
 @pytest.fixture(scope="module")
 def shuffled():
-    return PriorRanker(seed=0, shuffle_labels=True).fit(FAV, sample, tasks=150, rows=200, noise=0.02)
+    return PriorRanker(seed=0, shuffle_labels=True, fallback=False).fit(FAV, sample, tasks=150, rows=200, noise=0.02)
 
 
 class _Fixed:
@@ -233,3 +237,43 @@ def test_the_benchmark_curve_has_the_prior_and_the_hand_over():
     assert c["0"]["joint"]["mean"] == c["0"]["blind"]["mean"]
     assert c["5"]["handover"] == c["5"]["prior"] and c["20"]["handover"] == c["20"]["joint"]
     assert c["300"]["handover"] == c["300"]["joint"]
+
+
+def test_the_fallback_keeps_a_prior_that_learned_something_and_drops_one_that_did_not(prior, shuffled):
+    assert prior.learned is True
+    assert prior.cv["prior"] <= 0.95 * min(prior.cv["blind"], prior.cv["shuffled"])
+    # the raw control (fallback=False) keeps its weights; with the fallback on, the shuffled fit is the blind order
+    assert shuffled.learned is None and np.any(shuffled.weights != 0)
+    fell = PriorRanker(seed=0, shuffle_labels=True).fit(FAV, sample, tasks=150, rows=200, noise=0.02)
+    assert fell.learned is False
+    t = fav_tasks(5, 1)[0]
+    blind = [c.condition for c in Enumerate().propose(t.lawset, t.state, t.action, t.observed)]
+    assert [c.condition for c in order(t, fell, Buffer(FAV))] == blind
+    # a family whose true condition is any candidate of the state with equal chance: nothing to learn → the blind order
+    G3 = Grammar(atoms(), k=3)
+    rng = random.Random(5)
+    flat_tasks = []
+    for _ in range(150):
+        st = sample(rng)
+        conds = [c for c in G3.conditions(G3.true(st, "act")) if c]
+        flat_tasks.append(SimpleNamespace(state=st, action="act", condition=rng.choice(conds)))
+    flat = PriorRanker(seed=0).fit_tasks(G3, flat_tasks)
+    assert flat.learned is False and set(flat.cv) == {"prior", "shuffled", "blind"}
+    st = sample(random.Random(9))
+    lawset = LawSet(G3, base=lambda s, a: "off")
+    cands = Enumerate().propose(lawset, st, "act", "on")
+    ranked = RankedProposer(Enumerate(), flat, Buffer(G3)).propose(lawset, st, "act", "on")
+    assert [c.condition for c in ranked] == [c.condition for c in cands]
+    # the rank test's grammar (conditions drawn uniformly from the grammar, sizes 1..3): its counters' thresholds of
+    # different rates and the empty condition the blind order puts first leave a small signal; whichever way the
+    # fallback decides, the prior is not worse than blind on fresh tasks by more than 5%
+    a3 = PriorRanker(seed=0).fit(G3, sample, tasks=150, rows=200, noise=0.02)
+    rng = random.Random(77)
+    b, q = [], []
+    for _ in range(40):
+        u = synthetic_task(G3, sample, rng, rows=200, noise=0.02)
+        b.append(checks_to(Enumerate().propose(u.lawset, u.state, u.action, u.observed), u.condition))
+        q.append(checks_to(order(u, a3, Buffer(G3)), u.condition))
+    assert np.mean(q) <= 1.05 * np.mean(b)
+    with pytest.raises(ValueError):
+        PriorRanker(margin=1.0)
