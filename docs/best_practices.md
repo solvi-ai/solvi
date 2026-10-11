@@ -495,7 +495,13 @@ catches what the sample missed. On the small grid of the tests (`tests/test_skil
 player in a direction drawn per layout, 30 layouts, the certificate at 20% pooled over the set) one turned skill «move
 D, do» replaced the constant ones (3 skills against 5) and System 1 decided 30% of the steps of the last ten layouts
 against 0 with the condition rule alone; in the same grid with «do» refused in one direction the turned candidate was
-refuted on the copy every time and no alone run failed. Not yet measured in an open world.
+refuted on the copy every time and no alone run failed. Measured once in an open world (the simulator stand of 1.1, 10
+streams × 30 episodes): System 1's share of non-reflex steps 0.343 / 0.486 / 0.385 by thirds against 0.071 / 0.175 / 0.233
+with constant footprints, failures 0.51 % under the certificate, achievements 0.918 of planning always; the share fell in
+the last third while the pooled certificate's alarms retired skills — if shares fall late, check the certificate's
+restart policy first (a hypothesis; not tested by a separate arm). Generalising a verified plan's conditions is old
+(explanation-based macro-operators, lifted action models learned from traces); what is this library's is the judge — the
+plan re-run on an exact copy of the world for the states the wider footprint admits.
 
 ## Self-change: guard refusal first
 
@@ -594,16 +600,20 @@ rows) × the prior's rank among the candidates in [0, 1] — the prior's order w
 grow (`mode="switch"` is a fixed switch at `min_rows`; `last` / `RankedProposer.scored_by` say what scored). **A prior only knows what the task family favours:** on a planted grammar whose sampler
 draws three features 30 times as often, the prior needed 10.3 checks at 0 rows against 43.1 blind (a prior fitted on
 shuffled labels: 206 — worse than blind; `tests/test_laws_rank_prior.py`); on a skewed family of deep conditions (three
-features drawn 8 times and one comparison type 4 times as often; about 4,400 candidates per task) 163 against 1,086
-blind; on the three settings above, where the conditions are drawn uniformly, 0.94 / 0.95 of the blind checks on the
-deep and the correlated setting, and on the first it fell back to the blind order (one seed). The fallback is built in:
+features drawn 8 times and one comparison type 4 times as often; 5,112 candidates per task; five seeds, 300 tasks, training and test tasks
+from the same sampler) 208 against 1,245 blind; on the three settings above, where the conditions are drawn uniformly,
+0.91 / 0.83 of the blind checks on the deep and the correlated setting, and 0.93 on the first, where it fell back to the
+blind order in 2 of 5 seeds — the prior's large gain is where the family is skewed, and the skew here was chosen. The fallback is built in:
 unless the prior's held-out checks on its own training tasks are 5% below both the blind order's and a shuffled-label
 fit's, `learned` is False and it scores as the blind order. Fit the prior on tasks that look like yours (`sizes=`, the
-features your laws use, or `fit_tasks` on past mismatches whose law you know), not on the grammar alone. **Blend, do not switch:** on the skewed family the prior still beat the joint statistic at 100 rows (163 against 263;
-at 20 rows 163 against 820), so a fixed switch at 20 rows cost checks; the blend needed 124 / 83 / 3.6 at 20 / 100 / 300
-rows — better than either part. Its price is on the deep uniform setting at many rows: 22 against 9.1 for the joint
-statistic at 300 rows (the medians equal; in a few tasks the prior's small weight reorders the top under label noise),
-one seed — check the curve (`benchmarks/laws_rank_joint.py --curve`) and lower `n0` where the journal is large.
+features your laws use, or `fit_tasks` on past mismatches whose law you know), not on the grammar alone. **Blend, do not switch:** on the skewed family the prior still beat the joint statistic at 100 rows (208 against 361;
+at 20 rows 208 against 1,019), so a fixed switch at 20 rows cost checks; the blend needed 184 / 98.6 / 8.9 at 20 / 100 /
+300 rows — better than either part there. Its price is on the deep uniform setting at many rows: 27.2 against 17.2 for
+the joint statistic at 300 rows (111 of 300 tasks worse, 31 better, medians 2 and 1; five seeds — a tail under label
+noise, the mechanism not tested) — check the curve (`benchmarks/laws_rank_joint.py --curve`); only `mode="switch"` was
+measured as the alternative there (the joint statistic's number at 300 rows), a smaller `n0` was not. The weight
+n0 / (n0 + rows) has the form of a pseudo-count shrinkage, but the blend adds a Jaccard score to a rank and is not a
+posterior.
 
 ## Learn composition tables by exact counting, derive by composition, refuse what the table cannot derive
 

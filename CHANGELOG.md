@@ -129,7 +129,18 @@
   generalization`; `SkillSet(vocabulary=)`, `SkillSet.binding / actions_for`; per episode `generalized`,
   `generalize_accepted`, `generalize_checks`. `lift=False` (the default) keeps the condition rule alone, decision
   for decision as before. The vocabulary is the world's to write (relations, domains, lifts, what a plan read). Tested
-  on a small grid only (`tests/test_skills_footprint.py`); an open-world measurement is pre-registered and pending.
+  on a small grid (`tests/test_skills_footprint.py`) and measured once in an open world (the simulator stand of 1.1,
+  10 streams × 30 episodes, one run, the share of non-reflex steps): System 1's share 0.343 / 0.486 / 0.385 by thirds of
+  the 30 episodes against 0.071 / 0.175 / 0.233 with constant footprints — the pre-registered 0.40 line met in the
+  middle third and missed in the last; 886 of 1,032 lattice runs accepted (0.859; a verdict on a sample of up to 16
+  cases — the certificate catches what the sample missed) and 99.4 % of System 1's steps by skills with variables; 10
+  failures in 1,976 alone decisions with an outcome (0.51 %), none without a certificate; achievements 14.43 per episode
+  against 15.72 when System 2 plans every goal (0.918); planner calls per episode 11.8 against 28.1 and 43.2. The
+  pooled certificate's 23 alarms retired 23 skills, and episodes started without a certificate in force numbered 38 /
+  19 / 43 by thirds — with it in force System 1 took 0.50–0.58 in every third (the likely cause of the last third's
+  fall; not tested by a separate arm). Generalising a verified plan's conditions is old (explanation-based
+  macro-operators, lifted action models learned from traces); what is this library's is the judge — the plan re-run on
+  an exact copy of the world for the states the wider footprint admits.
 - **`solvi.experimental.laws.PriorRanker` and `HandoverRanker`: an order for candidate conditions before the buffer has
   rows.** `JointRanker` is a statistic over logged rows: with none every score is equal and the order is the blind one.
   `PriorRanker` scores a condition by its own features — its number of atoms (one-hot), and the sums over its atoms of
@@ -148,12 +159,17 @@
   candidates' action (without the group `exclude`) and `JointRanker` from there on; `last` and the Counter `scored` say
   what scored. `RankedProposer` takes either; its new `scored_by` names the scorer of the last call. On a planted grammar
   whose condition sampler draws three features 30 times as often: 10.3 checks to the true condition at 0 rows against
-  43.1 blind, the shuffled-label prior 206 (`tests/test_laws_rank_prior.py`). In `benchmarks/laws_rank_joint.py` (one
-  seed, five-seed measurement pending): on a new skewed setting D (the deep setting's grammar, three features drawn 8
-  times and one comparison type 4 times as often) the prior 163 at 0 rows against 1,086 blind, the blend 124 / 83 / 3.6
-  at 20 / 100 / 300 rows against 820 / 263 / 7.4 for the joint statistic; on A / B / C, whose conditions are drawn
-  uniformly from the grammar, the prior 96 (fell back) / 2,034 / 123 against 96 / 2,174 / 129 blind, and the blend on B
-  at 300 rows 22 against 9.1 for the joint statistic. The benchmark's `--curve` now covers every setting and the prior,
+  43.1 blind, the shuffled-label prior 206 (`tests/test_laws_rank_prior.py`). In `benchmarks/laws_rank_joint.py`, measured once on five seeds (300
+  tasks per setting; the prior and the bag fitted on 150 tasks per seed): on a skewed setting D (the deep setting's
+  grammar with a skew the experimenter chose — three features drawn 8 times and one comparison type 4 times as often;
+  5,112 candidates per task; training and test tasks from the same sampler) the prior needed 208 checks to the true
+  condition at 0 rows against 1,245 blind (0.167; the 95th percentile over seeds 0.19), the blend 184 / 98.6 / 8.9 at
+  20 / 100 / 300 rows against 208 for the prior and 1,019 / 361 / 16.8 for the joint statistic; on A / B / C, whose
+  conditions are drawn uniformly from the grammar, the prior 79 (fell back in 2 of 5 seeds) / 1,984 / 105 against 85 /
+  2,182 / 126 blind; the blend on B at 20 rows 1,427 against 1,569 for the joint statistic and 1,984 for the prior, at
+  100 rows 525 against 534, and at 300 rows 27.2 against 17.2 — 111 of 300 tasks worse, 31 better, medians 2 and 1 (the
+  pre-registered bar of 5 % at 300 rows missed there; a smaller `n0` was not measured); the shuffled-label prior was
+  worse than blind on every setting. The benchmark's `--curve` now covers every setting and the prior,
   both hand-overs and the shuffled-label prior.
 
 ### Docs

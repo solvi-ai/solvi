@@ -68,17 +68,18 @@ atom's prior usefulness (how often it is in the true condition when it is true i
 co-occurrence of its features in true conditions — a linear softmax over each synthetic task's candidates; it reads no
 rows (`shuffle_labels=True` is the control). Unless its held-out checks on its own training tasks are 5% below both the
 blind order's and a shuffled-label fit's, it records `learned=False` and scores as the blind order: a prior that learned
-nothing is never worse than blind. `HandoverRanker(prior, JointRanker())` hands over gradually:
+nothing scores as blind (the held-out check covers the training family only). `HandoverRanker(prior, JointRanker())` hands over gradually:
 score = the joint Jaccard + n0 / (n0 + rows) × the prior's rank among the candidates in [0, 1] (n0 = 20): the prior's order
 with no rows, the joint statistic's as rows grow; a prior with learned=False leaves the joint statistic alone;
 `mode="switch"` is the fixed switch at `min_rows`; `last` says what scored (`RankedProposer.scored_by` too). The prior
 learns what the task family favours: on a planted grammar whose sampler draws three features 30 times as often it needed
 10.3 checks at 0 rows against 43.1 blind (tests/test_laws_rank_prior.py); on a skewed family of deep conditions (the
-second setting's grammar, three features drawn 8 times and one comparison type 4 times as often) 163 against 1,086
-blind, and the blend 124 / 83 / 3.6 at 20 / 100 / 300 rows against 820 / 263 / 7.4 for the joint statistic (the fixed
-switch at 20 rows: the joint statistic's); on the three settings above, drawn uniformly, the prior fell back (the first)
-or needed 0.94 / 0.95 of the blind checks, and on the deep one the blend at 300 rows needed 22 against 9.1 (one seed;
-benchmarks/laws_rank_joint.py, five-seed measurement pending).
+second setting's grammar with a chosen skew: three features drawn 8 times and one comparison type 4 times as often;
+5,112 candidates per task; five seeds, 300 tasks) 208 against 1,245 blind, and the blend 184 / 98.6 / 8.9 at 20 / 100 /
+300 rows against 1,019 / 361 / 16.8 for the joint statistic (the fixed switch at 20 rows: the joint statistic's); on
+the three settings above, drawn uniformly, the prior fell back in 2 of 5 seeds on the first and needed 0.93 / 0.91 /
+0.83 of the blind checks, and on the deep one the blend at 300 rows needed 27.2 against 17.2 (111 of 300 tasks worse,
+31 better, medians 2 and 1; benchmarks/laws_rank_joint.py, five seeds, one run).
 Measured once on a live file server (8 mismatches; candidates contradicted by logged rows skipped free): every order
 spent 29 probes in all, because 1–5 candidates per mismatch were left to probe and the true conditions were single atoms
 — the shortest hypotheses, which the length-first order meets first. Ranking can pay only where many consistent
