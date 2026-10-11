@@ -91,7 +91,7 @@ What is not done:
 - the condition rule only widens by shared atoms; the lattice (lift="lattice") searches a bounded set of wider
   footprints, most general first, judged on the copy — it is not the smallest sufficient condition, its verification
   cases are a sample (a candidate wrong on a rare state can pass; the certificate is what catches it), and neither
-  specialises a skill after a failure (the failure blocks a widening and feeds the certificate);
+  specializes a skill after a failure (the failure blocks a widening and feeds the certificate);
 - footprints with variables need a vocabulary written for the world (relations, domains, lifts, what a plan read):
   the library brings the lattice and the judge, not the relations;
 - the planner is a blind search: no heuristic, no learned model; a world too large to search within the budget falls

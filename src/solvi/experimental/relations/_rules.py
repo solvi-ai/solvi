@@ -42,7 +42,7 @@ stratum. Learning counts on fixed points without it unless `closed_world_in_roun
 Learning (`fit`). Each labelled query pair (x, y) with its set of relations Y: every body true on (x, y) at the current
 fixed point gets one vote, and each relation of Y one hit for that body. A rule body → r is admitted when its hits for r
 are ≥ `support` and a share ≥ `majority` of its votes; never r ← r (∧ u); a guarded body (B1u, B2z) is not admitted
-when its unguarded generalisation (B1, B2) is admitted for the same head. NEG bodies are counted on the pairs whose
+when its unguarded generalization (B1, B2) is admitted for the same head. NEG bodies are counted on the pairs whose
 positive fixed point holds nothing of the head's key, and only for a relation s that occurs on at least `support`
 labelled pairs of the same unary types (so that ¬s excludes something). `check=`: labelled pairs of an independent
 slice; a rule whose share there is below `majority` (on at least one pair) is refused, and one with fewer than
@@ -50,7 +50,7 @@ slice; a rule whose share there is below `majority` (on at least one pair) is re
 
 Rounds. Round k counts the bodies on the fixed point of the rules admitted so far (round 1: the given facts; votes
 are recounted every round, never accumulated) and admits the rules that pass; the rule set only grows (a guarded body
-leaves it when its unguarded generalisation joins: its consequences are a subset), so the rounds stop at a fixed point
+leaves it when its unguarded generalization joins: its consequences are a subset), so the rounds stop at a fixed point
 of the rule set or after `rounds`. Each rule is admitted on the fixed point of the rules before it; rules admitted
 together can still be wrong together (a rule right at the labelled pairs and wrong elsewhere derives facts that make
 others fire wrongly), so after each round (`verify=True`) the round's new rules are recounted on the fixed point of
@@ -1183,7 +1183,7 @@ class GuardedRules:
 
 
 def functional_spec(functional, complements) -> dict:
-    """The functional declarations normalised: relation → (subject unary, object unary | None, complement)."""
+    """The functional declarations normalized: relation → (subject unary, object unary | None, complement)."""
     out = {}
     anti = {}
     for k, v in sorted((complements or {}).items()):
@@ -1229,7 +1229,7 @@ def write_declarations(store, spec, scope, *, by) -> dict:
 
 def _merge(old, new):
     """Rounds are monotone: the rules of earlier rounds stay (with the counts they were admitted with) and the new ones
-    join; a guarded body is dropped once its unguarded generalisation is in the set (its consequences are a subset)."""
+    join; a guarded body is dropped once its unguarded generalization is in the set (its consequences are a subset)."""
     have = {r: r for r in old}
     for r in new:
         have.setdefault(r, r)

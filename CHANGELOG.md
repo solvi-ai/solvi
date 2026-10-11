@@ -36,7 +36,7 @@
   writer.
 - **act_guard's report names its signal and direction.** `"direction": ">="` and `"rule"` («answers alone when the act
   probability … ≥ τ; escalates below») on a part's and a combination's report. A user saw a stricter `max_risk`
-  give a lower threshold and a lower share answered alone; for one signal and one set of examples that cannot happen
+  give a lower threshold and a lower share answered alone; for one signal and one set of examples that is not expected
   — the threshold is monotone in `max_risk` (checked on 2,000 random calibration sets with ties, and through
   `act_guard` on both signals) — so the two numbers came from different signals or different examples: `signal="auto"`
   takes the act probability when the model has an act head, `adapt_lora`'s held-out report uses the confidence, and
@@ -106,7 +106,7 @@
   reversed in the labels, 4 on unlabelled pairs); the check dropped 70 stated edges, 50 of them false, and changed no
   wrong answer (4 right answers lost with them); 0.09 ms a story. The five patterns were written in the author's
   earlier research line while reading this benchmark's test stories, so the number is the shipped frontend on this
-  split, not generalisation to unseen phrasings.
+  split, not generalization to unseen phrasings.
   Limits: English kinship phrasings of the five patterns; a sentence no pattern reads gives no edge (a refusal) and an edge read
   wrongly is a wrong answer; not a general relation extractor.
 - **Skill footprints with variables, generalized on the exact copy (`solvi.experimental.skills`, experimental).**
@@ -129,7 +129,7 @@
   generalization`; `SkillSet(vocabulary=)`, `SkillSet.binding / actions_for`; per episode `generalized`,
   `generalize_accepted`, `generalize_checks`. `lift=False` (the default) keeps the condition rule alone, decision
   for decision as before. The vocabulary is the world's to write (relations, domains, lifts, what a plan read). Tested
-  on a small grid (`tests/test_skills_footprint.py`) and measured once in an open world (the simulator stand of 1.1,
+  on a small grid (`tests/test_skills_footprint.py`) and measured once in an open world (the simulator benchmark of 1.1,
   10 streams × 30 episodes, one run, the share of non-reflex steps): System 1's share 0.343 / 0.486 / 0.385 by thirds of
   the 30 episodes against 0.071 / 0.175 / 0.233 with constant footprints — the pre-registered 0.40 line met in the
   middle third and missed in the last; 886 of 1,032 lattice runs accepted (0.859; a verdict on a sample of up to 16
@@ -138,7 +138,7 @@
   against 15.72 when System 2 plans every goal (0.918); planner calls per episode 11.8 against 28.1 and 43.2. The
   pooled certificate's 23 alarms retired 23 skills, and episodes started without a certificate in force numbered 38 /
   19 / 43 by thirds — with it in force System 1 took 0.50–0.58 in every third (the likely cause of the last third's
-  fall; not tested by a separate arm). Generalising a verified plan's conditions is old (explanation-based
+  fall; not tested by a separate arm). Generalizing a verified plan's conditions is old (explanation-based
   macro-operators, lifted action models learned from traces); what is this library's is the judge — the plan re-run on
   an exact copy of the world for the states the wider footprint admits.
 - **`solvi.experimental.laws.PriorRanker` and `HandoverRanker`: an order for candidate conditions before the buffer has
@@ -176,17 +176,12 @@
 - **The LoRA page: installing on x86_64 macOS** (torch 2.2.2, numpy<2, transformers 4.48, peft 0.19,
   `SOLVI_NO_COMPILE=1`), and the installation section links it.
 - **Best practices: if the zero-shot decider does not separate the classes, `fit` cannot help** — it only moves the
-  priors; a LoRA adapter is needed (a user's short interface texts: 8 answers given alone of 375 before an adapter,
+  priors; in that case a LoRA adapter is needed (one user's short interface texts: 8 answers given alone of 375 before an adapter,
   257 after); and split by source with `groups=` when examples share one.
 - The guarded-rules numbers on the test files, replacing «the test files are not scored yet — their numbers follow»
-  (API page, best practices, experimental STATUS, ROADMAP, the NoRA script's docstring): Measured once on the benchmark's three no-ambiguity test files, whole (NoRA, Das et al., NeurIPS 2025; D-na 3,345, OPEC-na 1,683 and BL-na 67,549 query pairs), with the rules learned on a third hash split of the training file (9,238 fit / 2,033 check; the strict setting — majority 1.0, support 10, two confirmations on the check slice — chosen on that split's held-out part, 1,973 pairs, before the test files were read; the bars pre-registered before the run); exact set match / precision among answered / coverage: BL-na (reasoning off the query path) 0.734 / 0.734 / 0.999; D-na (depth beyond the training depth) 0.477 / 0.961 / 0.496 — the rules refuse half of the queries, and the most frequent label set per entity kinds answers 0.491 there, more than the rules by exact match; OPEC-na 0.093 / 0.093 / 0.999; the held-out part of the training file 0.501 / 0.759 / 0.659. The default counting setting (majority 0.9, support 2) gave 0.593 / 0.603 / 0.984 on BL-na, 0.007 / 0.293 / 0.022 on D-na and 0.032 on OPEC-na. The benchmark paper reports, for its best model trained without ambiguity (an Edge Transformer, single-edge), 0.104 on BL-na, 0.822 on D-na and 0.110 on OPEC-na; models trained with ambiguity reach 0.785 on the ambiguous BL split, which was not measured here. The pre-registered bars (BL-na ≥ 0.50 and OPEC-na ≥ 0.20; D-na and held-out ≥ 0.80; precision among answered ≥ 0.95 on every split; the control ≤ 0.30) were not met — none of the four. What the test shows: labels exist only on the query pairs, so a derived fact cannot be checked where it lands, and the looser admission admits rules right on the labelled pairs and wrong elsewhere (0.593 against 0.734 on BL-na); which chain rules the strict setting keeps depends on the split of the training file (held-out 0.328 / 0.485 / 0.501 on three splits; the test numbers are from the third, one run); the «elsewhere» relation (Not_living_in, about a third of the depth split's rows) is refused by every setting, so the depth split is answered on half of its pairs; the OPEC split needs a gender guard on the middle entity of a chain (maternal / paternal), which no template carries. Next, each with its own bar: a closed-world default per entity type for near-functional relations (the partial-completeness rule of knowledge-base rule mining), a gender guard on the middle entity, and labels or a structural check on intermediate facts. The ground truth of this benchmark is computed from published rules, so an exact rule set exists by construction; what is measured is how much of it counting on query-pair labels recovers. The dataset is released under CC BY-NC 2.0: the script reads the files in place; no data and no learned rules ship with the library.
+  (API page, best practices, experimental STATUS, ROADMAP, the NoRA script's docstring): Measured once on the benchmark's three no-ambiguity test files, whole (NoRA, Das et al., NeurIPS 2025; D-na 3,345, OPEC-na 1,683 and BL-na 67,549 query pairs), with the rules learned on a third hash split of the training file (9,238 fit / 2,033 check; the strict setting — majority 1.0, support 10, two confirmations on the check slice — chosen on that split's held-out part, 1,973 pairs, before the test files were read; the bars pre-registered before the run); exact set match / precision among answered / coverage: BL-na (reasoning off the query path) 0.734 / 0.734 / 0.999; D-na (depth beyond the training depth) 0.477 / 0.961 / 0.496 — the rules refuse half of the queries, and the most frequent label set per entity kinds answers 0.491 there, more than the rules by exact match; OPEC-na 0.093 / 0.093 / 0.999; the held-out part of the training file 0.501 / 0.759 / 0.659. The default counting setting (majority 0.9, support 2) gave 0.593 / 0.603 / 0.984 on BL-na, 0.007 / 0.293 / 0.022 on D-na and 0.032 on OPEC-na. The benchmark paper reports, for its best model trained without ambiguity (an Edge Transformer, single-edge), 0.104 on BL-na, 0.822 on D-na and 0.110 on OPEC-na; models trained with ambiguity reach 0.785 on the ambiguous BL split, which was not measured here. The pre-registered bars (BL-na ≥ 0.50 and OPEC-na ≥ 0.20; D-na and held-out ≥ 0.80; precision among answered ≥ 0.95 on every split; the control ≤ 0.30) were not met — none of the four (BL-na's exact match 0.734 clears its 0.50 line, but its precision among answered, 0.734, is below the 0.95 required of every split). What the test shows: labels exist only on the query pairs, so a derived fact cannot be checked where it lands, and the looser admission admits rules right on the labelled pairs and wrong elsewhere (0.593 against 0.734 on BL-na); which chain rules the strict setting keeps depends on the split of the training file (held-out 0.328 / 0.485 / 0.501 on three splits; the test numbers are from the third, one run); the «elsewhere» relation (Not_living_in, about a third of the depth split's rows) is refused by every setting, so the depth split is answered on half of its pairs; the OPEC split needs a gender guard on the middle entity of a chain (maternal / paternal), which no template carries. Next, each with its own bar: a closed-world default per entity type for near-functional relations (the partial-completeness rule of knowledge-base rule mining), a gender guard on the middle entity, and labels or a structural check on intermediate facts. The ground truth of this benchmark is computed from published rules, so an exact rule set exists by construction; what is measured is how much of it counting on query-pair labels recovers. The dataset is released under CC BY-NC 2.0: the script reads the files in place; no data and no learned rules ship with the library.
 - The strict first-run numbers of 1.1.0 on the `nora` split (0.328 / 0.681 / 0.482, 469 rules) were re-run once
   (7 rounds, 531 s on CPU): the same numbers.
-- **The LoRA page: installing on x86_64 macOS** (torch 2.2.2, numpy<2, transformers 4.48, peft 0.19,
-  `SOLVI_NO_COMPILE=1`), and the installation section links it.
-- **Best practices: if the zero-shot decider does not separate the classes, `fit` cannot help** — it only moves the
-  priors; a LoRA adapter is needed (a user's short interface texts: 8 answers given alone of 375 before an adapter,
-  257 after); and split by source with `groups=` when examples share one.
 
 ## 1.1.0 — 2026-10-11 — learning from code and outcomes
 

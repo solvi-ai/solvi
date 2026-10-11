@@ -118,7 +118,7 @@ differs from the stream from the start. Treat a quiet monitor as "no large chang
 calibration and the mix of answers, and level off within a few dozen examples. When a question needs the model to read
 the input differently, use a LoRA adapter (`adapt_lora`), a head over computed facts, or a rule.
 
-**If the zero-shot decider does not separate the classes, `fit` cannot help — a LoRA adapter is needed.** `fit` only
+**If the zero-shot decider does not separate the classes, `fit` cannot help — in that case a LoRA adapter is needed.** `fit` only
 moves the priors (a shift and a scale on the logits): when the logits carry no signal about the classes, it collapses
 to one class. A user deciding how to close pop-up windows from short interface texts (window titles and the list of
 actions, 375 labelled examples, judged on screens the model had not seen) got 8 answers given alone out of 375 from
@@ -407,7 +407,7 @@ relational atom (ancestor directory named secret) refused none of the 35 calls u
 session (the flat grammar refused all 35) and wrongly skipped none of 130 allowed calls; one unrelated refusal remained
 (a listing of a file link, mispredicted by both grammars), so the pre-registered bar of zero refusals was missed. On the
 game simulator +0.02 points (0.9882 vs 0.9880). One layout, one run each. **Equivalence holds on the examples only**:
-the smallest program of a class may not generalise, so keep the held-out check on other groups, sizes or families.
+the smallest program of a class may not generalize, so keep the held-out check on other groups, sizes or families.
 Expect programs of four or five nodes with twenty-odd relations; with many or large examples search a subset and
 re-check on all (`synthesize(..., check=)`), and with noisy labels rank by agreement (`top_programs`), not by an exact
 match.
@@ -495,11 +495,11 @@ catches what the sample missed. On the small grid of the tests (`tests/test_skil
 player in a direction drawn per layout, 30 layouts, the certificate at 20% pooled over the set) one turned skill «move
 D, do» replaced the constant ones (3 skills against 5) and System 1 decided 30% of the steps of the last ten layouts
 against 0 with the condition rule alone; in the same grid with «do» refused in one direction the turned candidate was
-refuted on the copy every time and no alone run failed. Measured once in an open world (the simulator stand of 1.1, 10
+refuted on the copy every time and no alone run failed. Measured once in an open world (the simulator benchmark of 1.1, 10
 streams × 30 episodes): System 1's share of non-reflex steps 0.343 / 0.486 / 0.385 by thirds against 0.071 / 0.175 / 0.233
 with constant footprints, failures 0.51 % under the certificate, achievements 0.918 of planning always; the share fell in
 the last third while the pooled certificate's alarms retired skills — if shares fall late, check the certificate's
-restart policy first (a hypothesis; not tested by a separate arm). Generalising a verified plan's conditions is old
+restart policy first (a hypothesis; not tested by a separate arm). Generalizing a verified plan's conditions is old
 (explanation-based macro-operators, lifted action models learned from traces); what is this library's is the judge — the
 plan re-run on an exact copy of the world for the states the wider footprint admits.
 
@@ -670,11 +670,11 @@ unlabelled pairs); all 13 wrong answers rest on such edges (9 on a reversed labe
 819 refusals had no path in the read graph; 0.09 ms a story on CPU; the bars were pre-registered before the run — the
 precision and coverage bars met, the check's bar (precision higher with the check than without on chains of 4 and more)
 not met. Two limits of this number: the five patterns were written, in the author's earlier research line, while
-reading this benchmark's test stories, so it measures the shipped frontend on this split and not generalisation to
+reading this benchmark's test stories, so it measures the shipped frontend on this split and not generalization to
 unseen phrasings (the port is equal to that line's reference edge for edge on 1,816 training stories, and nothing was
 tuned here); and coverage is bounded by the patterns' recall — in that line a model on the pairs no pattern covers
 raised edge recall to about 0.87–0.89 at a lower edge precision, and it is not shipped (torch, and trained on data under
-a non-commercial licence).
+a non-commercial license).
 
 ## Rules first, a model second
 
