@@ -5,8 +5,9 @@ bottom-up enumerator with observational equivalence (`enumerate_programs`, `synt
 accepted programs, compilation into plain set code or index arrays with a differential check (`compile_program`,
 `check_program`), encoders (`encode`, `encode_paths`), `RelAlgProposer` for the laws' held-out test, `CompositionTable` (a composition
 table of relations learned by counting, derivation over every bracketing, refusal of what it cannot derive),
-`forward_chain` (its rules applied to the facts of a knowledge store to a fixed point), `synthesize_residual` (top-down
-synthesis of chain programs through residuals) and `why_not` (why a relation was not derived: the missing cell or fact).
+`forward_chain` (its rules applied to the facts of a knowledge store to a fixed point), `RulesFirst` (the table
+answers first, a model only what it refuses), `synthesize_residual` (top-down synthesis of chain programs through
+residuals) and `why_not` (why a relation was not derived: the missing cell or fact).
 
 ## Composites with a library
 
@@ -165,6 +166,47 @@ fact through the store's gates.
   identity relation is chained as an ordinary relation.
 
 Measured on CLUTRR (Sinha et al., 2019), the clean split's training file only (the relation graph of each story, not its text): on 1,816 held-out stories (a fifth of the training file by a hash of the id, chains of 2 and 3 relations; the table fitted on the other four fifths, 111 cells) the store's reading of the query pair after chaining to the fixed point was compared with the table's derivation over the shortest paths: 1,675 equal (0.922), 11 disputed where the bracketings disagree (0.006), 130 with nothing derived where the table cannot derive (0.072), 0 differences; the fixed point took 0 rounds for 72 stories, 1 for 826 and 2 for 918; 2.6 s of chaining in all, 1.4 ms a story, on CPU; one run, the test file not read. On 120 random chains of 2–7 relations over 12 random tables whose bracketings can disagree: 0 differences (2 answers equal to the table's rest only on a disputed pair and stay hypotheses until a person answers it) (`benchmarks/relations_chain.py`, `tests/test_relations_chain.py`).
+
+## Rules first, a model second
+
+`RulesFirst(rules, *, fallback=None, render=None, by="relations:RulesFirst")`: `rules` is a `CompositionTable` (its
+`derive_paths`) or a callable `(chains) -> Derivation`; `fallback(question, options)` returns `(answer, confidence)`,
+`(answer, confidence, raw)` (raw kept in the record), a plain answer, or None (the model refuses).
+
+    from solvi.experimental.relations import RulesFirst, decider_fallback, render_chains
+
+    rf = RulesFirst(table, fallback=decider_fallback(model, task="What is Z to A?"))
+    a = rf.answer([("father", "sister")], options, tail="Z")   # one chain or several chains of one query
+    a.value, a.who, a.reason       # "aunt", "rules", "derived" — or the model's answer, "model", "underivable"
+    rec = a.to_record()            # plain JSON: the path, the cells used or the model's output, options, confidence
+    rf.replay(rec).ok              # derives again; re-reads the model's recorded output; never calls the model
+    rf.stats                       # {"rules": n, "model": n, "refused": n, "by_reason": {...}}
+
+- **Rules first.** A "derived" derivation is the answer; the question is not even rendered and the model is not
+  called. On "disagree" / "underivable" (or "identity") the fallback answers; without a fallback the refusal stays a
+  refusal (`value` None, `who` None) with the rules' reason.
+- **The question.** `render_chains(chains, head="A", tail=None)` reads a chain the table's way: (father, sister) is
+  "B is the father of A. C is the sister of B. What is C to A?"; several chains share the head and the tail, the
+  people in between are new per chain. Pass your own `render(chains, head, tail)` for another wording.
+- **The answer.** `who` is the path that answered; `reason` is always the rules' reason (why the model was asked on the
+  model path); `confidence` is the model's — the rules give none per answer, their precision is measured. A model
+  answer outside the options is not an answer (`note` says so) and counts as refused in `stats`.
+- **Replay.** `replay(record)` requires the same derivation (relation, reason, candidates, cells), the same rendered
+  question and the same value from the recorded model output; an edited record or a changed table is a problem
+  (`Replay.ok` False, `Replay.problems`).
+- **Limits.** A model answer is taken as given (no confidence gate). An empty reply (a reasoning model at its token
+  cap) or a word outside the options counts as refused; no retry or budget check is built. Whole-graph questions over
+  `forward_chain` and the text setting are not covered.
+
+Measured once on the frozen test split of CLUTRR (Sinha et al., 2019), the clean split (the relation graph of each story, not its text; 1,146 queries, chains of 2–10 relations; the table fitted on the whole training file, the same 111 cells; the rules' answers byte-identical to the composition table's own measurement on this split): the rules answered 1,087 with 0 wrong and refused 59 (21 disagreeing bracketings, 38 underivable). With a small hosted LLM (z-ai/glm-5.3-flash) as the fallback (temperature 0, reasoning effort low, 2,000 output tokens; the first of two drafts answers; the refused queries rendered in words with the 18 relation names as options), 50 of the 59 refused queries got a readable option and 39 were right; 8 replies were empty because the model's reasoning used the whole output budget (finish reason "length"), and 1 named a relation outside the option list: overall 0.983 at coverage 0.992 (1,126 right of 1,137 answered; 11 wrong, 10 of them one chain of three relations whose gold in this split is itself split between mother and mother-in-law), against 0.949 at coverage 0.949 and 0 wrong for the rules alone. On an equal-size sample of queries the rules answered, the same LLM gave a readable option to 42 of 59 and was right on 41; on chains of 4 or more relations its precision among readable replies was the same on the refused and on the answered queries (34 of 35 each), the loss being empty replies (9 of 44 and 17 of 52). solvi-base as the fallback answered all 59 and was right on 2 (11 of 59 on the sample): it does not compose relations. Every answer replayed from its record without the model (0 failures). One run; $0.017 after the proxy's cache; the pre-registered bar of coverage 1.0 was missed. A pilot before the test run, on the training file only (1,816 held-out stories, a fifth of it by a hash of the id, chains of 2 and 3 relations; the table fitted on the other four fifths): the table answered 1,675 (4 wrong) and refused 141 (11 disagreeing bracketings, 130 underivable); the same LLM got 137 of the 141 right and solvi-base 11 of 141; one run, secondary to the test numbers (`tests/test_relations_first.py`).
+
+::: solvi.experimental.relations.RulesFirst
+
+::: solvi.experimental.relations.RulesFirstAnswer
+
+::: solvi.experimental.relations.render_chains
+
+::: solvi.experimental.relations.decider_fallback
 
 ::: solvi.experimental.relations.forward_chain
 

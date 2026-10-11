@@ -102,6 +102,12 @@ derived relations of one pair are a dispute, a retracted premise takes its conse
 answered dispute makes them facts without a re-run; `explain(store, id)` reads the derivation back (`ChainReport`,
 `Explanation`, `ChainLimit`). Measured by benchmarks/relations_chain.py.
 
+Rules first, a model second (`RulesFirst(table, fallback=, render=)`): the table answers the queries it derives and
+the model is never called for them; a refusal ("disagree", "underivable") goes to the fallback with the question
+rendered in words from the chains and the options, or stays a refusal without one; every answer names the path that
+answered (`who`), is journal-ready (`to_record`) and replays from its record without the model (`replay`);
+`decider_fallback(model)` adapts a DecideModel; `stats` counts the paths per reason.
+
 Residual synthesis (`synthesize_residual(examples, target, depth=, budget=, test=, name=)`): the shortest chain program
 found top-down from the target — X = A ∘ Y gives Y's bounds through the residual ¬(Aᵀ ∘ ¬Up) and the single-witness
 pairs, X = Y ∖ I drops the diagonal, a step without a witness is pruned — checked exactly by `evaluate`, on `check=`
@@ -137,6 +143,7 @@ from .. import warn_on_import
 from ._adapters import (CREATURES, MATERIALS, PATHS, PROPOSER_OPS, Egocentric, PathTree, RelAlgProposer, encode,
                         encode_paths, relational_atom)
 from ._chain import ChainLimit, ChainReport, Explanation, explain, forward_chain, pair_fact
+from ._first import RulesFirst, RulesFirstAnswer, decider_fallback, render_chains
 from ._algebra import (BINARY, OPS, UNARY, Relations, closure, complement, compose, converse, count_at_least,
                        evaluate, intersect, minus, readout, show, size, union, xor)
 from ._compile import (BACKENDS, RUNTIME, RUNTIME_ARRAYS, DenseAnswer, ProgramCheck, check_program, compile_ast,
@@ -153,10 +160,10 @@ warn_on_import(__name__)
 __all__ = ["BACKENDS", "BINARY", "CREATURES", "Cell", "ChainLimit", "ChainReport", "CompositionTable", "DenseAnswer",
            "Derivation", "Egocentric", "Entry", "Enumerator", "Explanation", "Found", "Gap", "HeldOut", "Library",
            "MATERIALS", "OPS", "PATHS", "PROPOSER_OPS", "PathTree", "Program", "ProgramCheck", "RUNTIME",
-           "RUNTIME_ARRAYS", "RelAlgProposer", "Relations", "ResidualFound", "RuleProposer", "Rules", "Score",
-           "Scored", "TargetRecord", "UNARY", "WhyNot", "base_rates", "check_program", "closure", "compile_ast",
-           "compile_program", "complement", "compose", "converse", "count_at_least", "encode", "encode_paths",
-           "enumerate_programs", "evaluate", "explain", "find_rules", "first_missing_step", "forward_chain",
-           "from_keys", "intersect", "lower_bound", "minus", "pair_fact", "rank", "readout", "relational_atom",
-           "rule_schema", "score", "show", "size", "sized_admit", "synthesize", "synthesize_residual", "to_keys",
-           "top_programs", "union", "why_not", "xor"]
+           "RUNTIME_ARRAYS", "RelAlgProposer", "Relations", "ResidualFound", "RuleProposer", "Rules", "RulesFirst",
+           "RulesFirstAnswer", "Score", "Scored", "TargetRecord", "UNARY", "WhyNot", "base_rates", "check_program",
+           "closure", "compile_ast", "compile_program", "complement", "compose", "converse", "count_at_least",
+           "decider_fallback", "encode", "encode_paths", "enumerate_programs", "evaluate", "explain", "find_rules",
+           "first_missing_step", "forward_chain", "from_keys", "intersect", "lower_bound", "minus", "pair_fact",
+           "rank", "readout", "relational_atom", "render_chains", "rule_schema", "score", "show", "size",
+           "sized_admit", "synthesize", "synthesize_residual", "to_keys", "top_programs", "union", "why_not", "xor"]
