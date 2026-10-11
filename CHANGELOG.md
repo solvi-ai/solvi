@@ -109,6 +109,27 @@
   split, not generalisation to unseen phrasings.
   Limits: English kinship phrasings of the five patterns; a sentence no pattern reads gives no edge (a refusal) and an edge read
   wrongly is a wrong answer; not a general relation extractor.
+- **Skill footprints with variables, generalized on the exact copy (`solvi.experimental.skills`, experimental).**
+  `SkillLearner(..., lift="lattice", vocabulary=voc, verify_n=16, verify_min=None, perturb=None, pool_size=64,
+  max_candidates=12, drop_witness=2)`: every newly compiled skill's footprint is widened by a bounded lattice — the
+  world's lifts (a constant replaced by a variable in the footprint, the plan and the goal: «move D, do» for «move_left,
+  do»; a cell widened to «a resource within 2 steps in direction D»; a tool to «has a tool for R»), its old condition
+  kept or dropped, single atoms dropped — most general first. A candidate is accepted only when the plan, instantiated
+  for every verification case that matches it but not the original (each goal its variables can take, the footprint's
+  first binding), reaches its goal on a fresh copy of that state: up to `verify_n` cases (at least `verify_min`, default
+  half) from a reservoir of the stream's recorded states alternating with the world's `perturb` edits; it fails at its
+  first failed check, and a drop counts only when it was exercised — each dropped atom (and a dropped old condition)
+  false in at least `drop_witness` (2) of the passing cases. The most general passing candidate becomes the skill's
+  `footprint` and its plan a `template`; the skill records the `original` footprint, the `verified` count and the
+  lattice record (written into the knowledge store with the skill), and `SkillLearner.replay(skill)` re-runs its
+  verification cases against their simulation hashes. A skill whose candidates lacked verification cases is tried again
+  when a later plan merges into it (three runs at most). The certificate is unchanged. New: `Var`, `Footprint`,
+  `Vocabulary`, `Lift`, `Candidate`, `Generalization`, `lattice`, `generalize`, `replay`, `unify`, `in_domain` (a goal
+  outside a variable's domain is not a skill's); `Skill.footprint / template / goal_template / original / verified /
+  generalization`; `SkillSet(vocabulary=)`, `SkillSet.binding / actions_for`; per episode `generalized`,
+  `generalize_accepted`, `generalize_checks`. `lift=False` (the default) keeps the condition rule alone, decision
+  for decision as before. The vocabulary is the world's to write (relations, domains, lifts, what a plan read). Tested
+  on a small grid only (`tests/test_skills_footprint.py`); an open-world measurement is pre-registered and pending.
 
 ### Docs
 

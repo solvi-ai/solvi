@@ -482,6 +482,21 @@ both is the planner's with the full map. The planner reads the whole map of the 
 from pixels. No number here is comparable with published Crafter scores (a geometric mean of success rates over 1M
 training steps).
 
+**Generalize a footprint only against the code of the world** (1.1.1, `lift="lattice"`). A skill whose footprint
+is all constants («the cell to the left is stone») matches rarely in an open world; widening it is a claim about the
+world, so let the world's code judge it: write the relations and lifts once (`Vocabulary`: «a resource within 2 steps in
+direction D», «has a tool for R», a lower bound for a count), let the lattice propose the wider footprints most general
+first, and keep one only when the plan, instantiated on states that match the wider footprint but not the original,
+reaches its goal on the exact copy — never because it looks right or a model says so. Feed it both kinds of state:
+recorded states of the stream (what the skill will meet) and the world's own perturbations (bindings the stream has not
+shown yet); check every goal a variable can take (a use is asked for a goal, so a stone-gathering footprint without the
+pickaxe atom must meet a state without the pickaxe). The verification is a sample, so keep the certificate on: it
+catches what the sample missed. On the small grid of the tests (`tests/test_skills_footprint.py`: a tree next to the
+player in a direction drawn per layout, 30 layouts, the certificate at 20% pooled over the set) one turned skill «move
+D, do» replaced the constant ones (3 skills against 5) and System 1 decided 30% of the steps of the last ten layouts
+against 0 with the condition rule alone; in the same grid with «do» refused in one direction the turned candidate was
+refuted on the copy every time and no alone run failed. Not yet measured in an open world.
+
 ## Self-change: guard refusal first
 
 **Refusal is the first casualty of self-change; the regression check cannot be switched off.** Each change looks fine on
