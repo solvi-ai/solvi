@@ -433,3 +433,21 @@ def test_rule_text_and_validation():
         GuardedRule("x", "B3", (("a", 0),), ())
     with pytest.raises(ValueError):
         GuardedRules(majority=0.4)
+
+
+def test_rules_wrong_together_are_retracted_on_the_joint_fixed_point():
+    """A: s ← e and B: r ← f ∘ s are each right where they were counted; together they fire B on check pairs whose
+    s comes from e — the joint fixed point contradicts B, which is retracted for good."""
+    fit, check = [], []
+    for i in range(4):
+        b = 10 * i
+        fit.append((Story.from_facts([(b, b + 1, "e")]), (b, b + 1), frozenset({"s"})))
+        st = Story.from_facts([(b + 2, b + 3, "f"), (b + 3, b + 4, "s")])
+        fit.append((st, (b + 2, b + 4), frozenset({"r"})))
+        check.append((Story.from_facts([(b + 5, b + 6, "f"), (b + 6, b + 7, "e")]), (b + 5, b + 7), frozenset({"q"})))
+    B = GuardedRule("r", "B2", (("f", 0), ("s", 0)), ())
+    loose = GuardedRules(residual=False, neg=False, verify=False).fit(fit, check=check)
+    assert B in set(loose)
+    strict = GuardedRules(residual=False, neg=False).fit(fit, check=check)
+    assert B not in set(strict) and B in strict.retracted
+    assert GuardedRule("s", "B1", (("e", 0),), ()) in set(strict)

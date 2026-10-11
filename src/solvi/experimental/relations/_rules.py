@@ -41,7 +41,14 @@ slice; a rule whose share there is below `majority` (on at least one pair) is re
 Rounds. Round k counts the bodies on the fixed point of the rules admitted so far (round 1: the given facts; votes
 are recounted every round, never accumulated) and admits the rules that pass; the rule set only grows (a guarded body
 leaves it when its unguarded generalisation joins: its consequences are a subset), so the rounds stop at a fixed point
-of the rule set or after `rounds`. The NEG rules are learned once, on the final positive fixed point.
+of the rule set or after `rounds`. Each rule is admitted on the fixed point of the rules before it; rules admitted
+together can still be wrong together (a rule right at the labelled pairs and wrong elsewhere derives facts that make
+others fire wrongly), so after each round (`verify=True`) the round's new rules are recounted on the fixed point of
+the whole new set — on the check slice when one is given — and a new rule whose share there is below `majority` is
+retracted and never admitted again — the worse half of the failing rules per recount, lowest share first, since a
+rule can fail only through the wrong facts of another; the recount repeats until no new rule falls (the rules of
+earlier rounds passed the same recount with the rules before them and are kept). The NEG rules are learned once, on the final positive fixed
+point.
 
 Residual votes (`residual=True`), the composition table's residual fill generalised: within a round, the rules
 admitted on that round's direct votes are applied to the length-3 walks x –a1– z1 –a2– z2 –a3– y of each labelled pair;
@@ -749,11 +756,13 @@ class GuardedRules:
     from length-3 walks; rounds: the cap on rounds; neg: learn the NEG stratum; templates: the bodies counted;
     complements: relation → the relation whose key it shares (its complement); check_min: the least hits a rule needs on
     the check slice (0: a rule the check slice never meets is kept; its share there must be ≥ majority whenever the
-    slice meets it)."""
+    slice meets it); verify: after each round, recount the round's new rules on the fixed point of the whole new rule
+    set (on the check slice, else on the examples) and retract — for good — each whose share there falls below
+    majority, until none does (`retracted`)."""
 
     def __init__(self, majority: float = 0.9, support: int = 2, *, residual: bool = True, rounds: int = 10,
                  neg: bool = True, templates: Iterable[str] = TEMPLATES, complements: Mapping[str, str] | None = None,
-                 check_min: int = 0, log=None):
+                 check_min: int = 0, verify: bool = True, log=None):
         if not 0.5 < float(majority) <= 1.0:
             raise ValueError("majority is a share in (0.5, 1]")
         if int(support) < 1:
@@ -768,7 +777,10 @@ class GuardedRules:
         self.neg, self.templates = bool(neg), frozenset(templates)
         self.complements = dict(complements or {})
         self.check_min = int(check_min)
+        self.verify = bool(verify)
         self.log = log
+        self._banned: set = set()
+        self.retracted: list[GuardedRule] = []
         self._rules: list[GuardedRule] = []
         self.rounds = 0
         self.refused_by_check = 0
@@ -853,6 +865,8 @@ class GuardedRules:
                     if chh < self.check_min or (ct and chh / ct < m):
                         refused += 1
                         continue
+                if GuardedRule(h, t, atoms, unary) in self._banned:
+                    continue
                 origin = "direct" if votes.dhits.get((b, h), 0) else "residual"
                 cand[(h, b)] = GuardedRule(h, t, atoms, unary, n, tot, origin, rnd)
         out = []
@@ -878,6 +892,7 @@ class GuardedRules:
         examples = _sorted_examples(examples)
         check = None if check is None else _sorted_examples(check)
         rules: list[GuardedRule] = []
+        self._banned, self.retracted = set(), []
         self.history, self.rounds = [], 0
         refused = 0
         for rnd in range(1, self.max_rounds + 1):
@@ -893,13 +908,30 @@ class GuardedRules:
                     cv = self._pass(check, rules, inner) if check is not None else None
                     new = self._admit(v, cv, rnd)
             refused = max(refused, self.refused_by_check)
-            merged = _merge(rules, new)
+            merged = _merge(rules, [r for r in new if r not in self._banned])
+            n_retracted = 0
+            if self.verify:                              # the joint fixed point: retract what it contradicts
+                ver = check if check is not None else examples
+                while True:
+                    vv = self._pass(ver, merged, None)
+                    old = set(rules)                     # verified together with the rules before them
+                    sh = {r: vv.hits.get((r.body, r.head), 0) / vv.tot[r.body] for r in merged
+                          if r not in old and vv.tot.get(r.body, 0)}
+                    bad = sorted((r for r, x in sh.items() if x < self.majority - 1e-12),
+                                 key=lambda r: (sh[r], -vv.tot[r.body], _rule_key(r)))
+                    if not bad:
+                        break
+                    bad = bad[:(len(bad) + 1) // 2]      # worst first: a rule wrong only through others may recover
+                    self._banned.update(bad)
+                    self.retracted += bad
+                    n_retracted += len(bad)
+                    merged = [r for r in merged if r not in set(bad)]
             added = set(merged) - set(rules)
             self.rounds = rnd
             row = {"round": rnd, "rules": len(merged), "added": len(added), "direct_added": n_direct,
                    "residual_origin_added": sum(r.origin == "residual" for r in merged if r in added),
                    "by_template_added": dict(Counter(r.template for r in merged if r in added)),
-                   "refused_by_check": self.refused_by_check, "bodies": len(v.tot),
+                   "refused_by_check": self.refused_by_check, "retracted": n_retracted, "bodies": len(v.tot),
                    "seconds": round(time.perf_counter() - t0, 3)}
             self.history.append(row)
             self._say(f"round {rnd}: {row}")
