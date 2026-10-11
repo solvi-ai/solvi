@@ -151,3 +151,39 @@ def test_one_extractor_protocol():
     from solvi.core.extract import LongSpanExtractor
     for name in ("fit", "predict", "field", "save", "load", "fingerprint"):
         assert callable(getattr(LongSpanExtractor, name)), name
+
+
+def test_fitting_on_the_cpu_does_not_touch_a_full_gpu(monkeypatch):
+    """fit() on the CPU beside a visible GPU held by another job: creating a CUDA context fails (out of memory). No CUDA
+    context may be created — torch's AdamW asks the accelerator for its stream at step() even for CPU tensors, and the
+    library skips that check on the CPU. A tiny real torch encoder stands in for ModernBERT."""
+    torch = pytest.importorskip("torch")
+    ex = LongSpanExtractor.__new__(LongSpanExtractor)
+    ex.torch, ex.device, ex.tok = torch, "cpu", Tok()
+    ex.max_len, ex.stride, ex.max_span, ex.thr, ex.thr_default = 32, 8, 16, {}, 0.5
+    ex._cache, ex._tok_key, ex._tok_val, ex._fp_weights, ex.model_name = {}, None, None, None, "tiny"
+    torch.manual_seed(0)
+
+    class Enc(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.emb = torch.nn.Embedding(256, 8)
+
+        def forward(self, input_ids, attention_mask):
+            return types.SimpleNamespace(last_hidden_state=self.emb(input_ids))
+    ex.enc, ex.head = Enc(), torch.nn.Linear(8, 2)
+    text = "the invoice total is 42 dollars and the due date is friday"
+    items = [(text, "invoice total", (text.index("42"), text.index("42") + 2)), (text, "ship to", None)]
+
+    def full_gpu(*a, **kw):
+        raise torch.AcceleratorError("CUDA error: out of memory (simulated: the shared GPU is full)")
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
+    monkeypatch.setattr(torch.accelerator, "is_available", lambda: True)
+    monkeypatch.setattr(torch.accelerator, "current_accelerator", lambda *a, **kw: torch.device("cuda"))
+    monkeypatch.setattr(torch.accelerator, "current_stream", full_gpu)
+    monkeypatch.setattr(torch.cuda, "current_stream", full_gpu)
+    monkeypatch.setattr(torch.cuda, "is_current_stream_capturing", full_gpu)
+    monkeypatch.setattr(torch.cuda, "_lazy_init", full_gpu)
+    w0 = ex.head.weight.detach().clone()
+    assert ex.fit(items, epochs=2, lr=1e-2, bs=2, log=lambda *_: None) is ex
+    assert not torch.equal(w0, ex.head.weight.detach())           # the optimizer stepped
