@@ -1,5 +1,5 @@
 """solvi.core.explain (stable since 1.1, graduated from solvi.experimental.counterfactual — measured on the credit
-policy by the X1 run, its script benchmarks/counterfactual_credit.py): the smallest change of a decision's inputs that
+policy by the run of benchmarks/counterfactual_credit.py): the smallest change of a decision's inputs that
 changes its answer, with the cost of changing a text (enumerated) field a parameter (`text_cost=`) and a weight per
 field (`costs=`); the old path re-exports the same objects with the experimental warning for one release."""
 import importlib

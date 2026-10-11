@@ -1,5 +1,5 @@
-"""The MCP proxy with a guard graduated into solvi.serve in 1.1 (measured against the real filesystem server: the X2
-run, its script benchmarks/mcp_proxy_filesystem.py): solvi.serve exports it, `solvi serve --guard --upstream` imports
+"""The MCP proxy with a guard graduated into solvi.serve in 1.1 (measured against the real filesystem server: the
+run of benchmarks/mcp_proxy_filesystem.py): solvi.serve exports it, `solvi serve --guard --upstream` imports
 nothing experimental, and the old path solvi.experimental.mcp re-exports the same objects with the experimental warning
 for one release."""
 import importlib

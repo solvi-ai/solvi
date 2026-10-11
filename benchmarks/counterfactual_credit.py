@@ -15,13 +15,13 @@ is the data's (min, max) over the 1,000 applications, a text field's is the set 
 asserts that neither the catalog nor the searched fields read a sensitive field of about.json.
 
 Per application: `search(res, "decision", target="approve", max_changes=1)` and `max_changes=2` (default max_evals);
-  X1-1 validity  — every explanation returned is applied to the application and decided again with `ask`: "approve";
-  X1-2 minimality — for credit_amount_dm and duration_months, in each direction: the nearest integer of the domain at
-                    which the decision is "approve" (every integer tried, outward from the current value) against the
-                    single-field change found, within 1 unit; a case is a (field, direction) where such a value exists;
-  X1-3 coverage  — a one- or two-field change is found (≥ 80%);
-  X1-4 determinism — the searches are run twice, in two separate pools of freshly spawned processes (each its own hash
-                    seed): identical `to_dict()`s; `max_evals` never reached; evaluations and seconds per search reported.
+  validity    — every explanation returned is applied to the application and decided again with `ask`: "approve";
+  minimality  — for credit_amount_dm and duration_months, in each direction: the nearest integer of the domain at
+                which the decision is "approve" (every integer tried, outward from the current value) against the
+                single-field change found, within 1 unit; a case is a (field, direction) where such a value exists;
+  coverage    — a one- or two-field change is found (≥ 80%);
+  determinism — the searches are run twice, in two separate pools of freshly spawned processes (each its own hash
+                seed): identical `to_dict()`s; `max_evals` never reached; evaluations and seconds per search reported.
 An application without an explanation gets a diagnosis: the points it has, the points approve needs, and for each field
 the largest drop of points a change of that field alone reaches (every value of its domain tried); the policy's points
 are a sum of one rule per field, so when the two largest drops do not reach the need no pair of fields can.
@@ -52,11 +52,11 @@ from solvi.core.store import SQLiteStorage  # noqa: E402
 from solvi.experimental.counterfactual import search  # noqa: E402
 
 QUESTION, TARGET = "decision", "approve"
-NUMERIC = ("credit_amount_dm", "duration_months")             # the X1-2 fields
+NUMERIC = ("credit_amount_dm", "duration_months")             # the minimality fields
 SENSITIVE_DEFAULT = ("personal_status_and_sex", "foreign_worker", "age")
 OVER = [f for f in cc.DECLARED if f != "id"]
-BARS = {"X1-1": "validity = 100% of the explanations returned", "X1-2": "minimality within 1 unit ≥ 95% of the cases",
-        "X1-3": "coverage (one or two fields) ≥ 80%", "X1-4": "two runs identical; max_evals never reached"}
+BARS = {"validity": "validity = 100% of the explanations returned", "minimality": "minimality within 1 unit ≥ 95% of the cases",
+        "coverage": "coverage (one or two fields) ≥ 80%", "determinism": "two runs identical; max_evals never reached"}
 DRY_N, BEST_N = 20, 10
 
 
@@ -185,7 +185,7 @@ def diagnose(system, inp, domains):
         return r.values.get("points")
     p0 = pts(inp)
     top = _approve_at_most()
-    reach, forced = {}, {}
+    reach = {}
     for f in OVER:
         d = domains[f]
         vals = range(d[0], d[1] + 1) if isinstance(d, tuple) else d
@@ -255,7 +255,7 @@ def _work(job):
     res = _W["store"].get(sid, s)
     try:
         rec = explain_one(s, res, _W["inputs"][app_id], _W["domains"], brute)
-    except Exception as e:                                          # logged, the run goes on
+    except Exception as e:                                          # noqa: BLE001 — logged, the run goes on
         rec = {"id": app_id, "error": f"{type(e).__name__}: {e}"}
     rec["id"] = app_id
     return rec
@@ -330,17 +330,17 @@ def report(ids, p1, p2, decisions, meta):
     exhausted = [i for i in ok_ids for m in ("mc1", "mc2") if p1[i][m]["exhausted"] or p2[i][m]["exhausted"]]
     n = len(ok_ids)
     bars = {
-        "X1-1": {"bar": BARS["X1-1"], "valid": n_valid, "explanations": len(valid),
+        "validity": {"bar": BARS["validity"], "valid": n_valid, "explanations": len(valid),
                  "rate": n_valid / len(valid) if valid else None,
                  "pass": bool(valid) and n_valid == len(valid)},
-        "X1-2": {"bar": BARS["X1-2"], "ok": n_min, "cases": len(cases), "rate": n_min / len(cases) if cases else None,
+        "minimality": {"bar": BARS["minimality"], "ok": n_min, "cases": len(cases), "rate": n_min / len(cases) if cases else None,
                  "pass": bool(cases) and n_min / len(cases) >= 0.95,
                  "by_field": {f: f"{sum(c['ok'] for c in cases if c['field'] == f)} of "
                                  f"{sum(c['field'] == f for c in cases)}" for f in NUMERIC},
                  "misses": [c for c in cases if not c["ok"]][:50]},
-        "X1-3": {"bar": BARS["X1-3"], "covered": len(cov2), "population": len(ids), "rate": len(cov2) / len(ids) if ids
+        "coverage": {"bar": BARS["coverage"], "covered": len(cov2), "population": len(ids), "rate": len(cov2) / len(ids) if ids
                  else None, "one_field_only": len(cov1), "pass": bool(ids) and len(cov2) / len(ids) >= 0.80},
-        "X1-4": {"bar": BARS["X1-4"], "identical": len(same), "compared": n, "exhausted": len(exhausted),
+        "determinism": {"bar": BARS["determinism"], "identical": len(same), "compared": n, "exhausted": len(exhausted),
                  "pass": n > 0 and len(same) == n and not exhausted and not errors,
                  "differ": [i for i in ok_ids if i not in same][:20]},
     }
@@ -368,17 +368,18 @@ def report(ids, p1, p2, decisions, meta):
 
 def to_md(r):
     m, b = r["meta"], r["bars"]
-    L = [f"# X1 — counterfactual explanations on the credit policy v2 ({'dry' if m['dry'] else 'full'} run)", "",
-         f"Verdict of the bars: **{r['verdict']}**. Population: {b['X1-3']['population']} applications v2 refuses or "
+    L = [f"# Counterfactual credit decisions — explanations on the credit policy v2 "
+         f"({'dry' if m['dry'] else 'full'} run)", "",
+         f"Verdict of the bars: **{r['verdict']}**. Population: {b['coverage']['population']} applications v2 refuses or "
          f"sends to review (of {m['applications']}; v2 decisions {r['decisions_v2']}).", "",
          "| id | bar | measured | pass |", "|---|---|---|---|",
-         f"| X1-1 | {b['X1-1']['bar']} | {b['X1-1']['valid']} of {b['X1-1']['explanations']} | {b['X1-1']['pass']} |",
-         f"| X1-2 | {b['X1-2']['bar']} | {b['X1-2']['ok']} of {b['X1-2']['cases']} ({b['X1-2']['by_field']}) | "
-         f"{b['X1-2']['pass']} |",
-         f"| X1-3 | {b['X1-3']['bar']} | {b['X1-3']['covered']} of {b['X1-3']['population']} (one field: "
-         f"{b['X1-3']['one_field_only']}) | {b['X1-3']['pass']} |",
-         f"| X1-4 | {b['X1-4']['bar']} | {b['X1-4']['identical']} of {b['X1-4']['compared']} identical; "
-         f"{b['X1-4']['exhausted']} reached max_evals | {b['X1-4']['pass']} |", "",
+         f"| validity | {b['validity']['bar']} | {b['validity']['valid']} of {b['validity']['explanations']} | {b['validity']['pass']} |",
+         f"| minimality | {b['minimality']['bar']} | {b['minimality']['ok']} of {b['minimality']['cases']} ({b['minimality']['by_field']}) | "
+         f"{b['minimality']['pass']} |",
+         f"| coverage | {b['coverage']['bar']} | {b['coverage']['covered']} of {b['coverage']['population']} (one field: "
+         f"{b['coverage']['one_field_only']}) | {b['coverage']['pass']} |",
+         f"| determinism | {b['determinism']['bar']} | {b['determinism']['identical']} of {b['determinism']['compared']} identical; "
+         f"{b['determinism']['exhausted']} reached max_evals | {b['determinism']['pass']} |", "",
          "## Cost per search", "", "| search | evaluations median / p95 / max | seconds median / p95 / max | > 2 s |",
          "|---|---|---|---|"]
     for k, c in r["cost_per_search"].items():
@@ -392,8 +393,8 @@ def to_md(r):
     L += [f"- {x['id']} ({x['answer']}): {x['best']}" for x in r["best_10_by_hash"]]
     L += ["", f"## Without an explanation ({len(r['no_explanation'])})", ""]
     L += [f"- {x['id']} ({x['answer']}, {x['status']}): {x.get('why')}" for x in r["no_explanation"]]
-    if r["bars"]["X1-2"]["misses"]:
-        L += ["", "## Minimality misses", ""] + [f"- {json.dumps(c)}" for c in r["bars"]["X1-2"]["misses"]]
+    if r["bars"]["minimality"]["misses"]:
+        L += ["", "## Minimality misses", ""] + [f"- {json.dumps(c)}" for c in r["bars"]["minimality"]["misses"]]
     if r["errors"]:
         L += ["", "## Errors", ""] + [f"- {e['id']}: {e['error']}" for e in r["errors"]]
     L += ["", "## Run", "", "```", json.dumps(m, indent=1, ensure_ascii=False, default=str), "```", ""]

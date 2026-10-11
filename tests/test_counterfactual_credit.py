@@ -1,4 +1,4 @@
-"""The logic of benchmarks/counterfactual_credit.py (the X1 measurement): the brute-force crossing over an integer
+"""The logic of benchmarks/counterfactual_credit.py (the counterfactual credit measurement): the brute-force crossing over an integer
 domain, the validity re-check of an explanation, the minimality cases, the population and its hash order, the
 sensitive-field assertion and the no-explanation diagnosis — on hand-made applications, no data needed."""
 import hashlib

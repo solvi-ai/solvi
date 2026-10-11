@@ -1,5 +1,5 @@
 """Answer primitives: "not stated" (solvi.Unknown) vs abstain, evidence quotes, spans, rankings, estimates — each a value with
-a confidence — from plain rules, model-backed rules and the typed decider (a stub with the L14g contract); types → questions,
+a confidence — from plain rules, model-backed rules and the typed decider (a stub with the typed v2 contract); types → questions,
 grounding, constraints and joint decoding, the audit, overall confidence, JSON round trip and replay, backward compatibility."""
 import dataclasses
 import json
@@ -413,7 +413,7 @@ def test_old_answer_types_and_questions_dump_as_before():
     assert "require_evidence" not in Question("q", "?", Answer.yes_no()).model_dump()
 
 
-# --------------------------------------------------------------------------------------------------- the decider (L14g)
+# ----------------------------------------------------------------------------------------------- the decider (typed v2)
 L14G = {"format": "solvi_decide v2", "subformat": "l14g typed v2", "multi_question": {"layout": "block", "max_questions": 6},
         "temperature": {"choice": 1.0, "score": 1.0, "noul": 1.0, "rank": 1.0, "number": 1.0}}
 TEXT = "Invoice. Total 1250.50 EUR. Contact via phone, phone preferred, not email. Delivery in 9 days."

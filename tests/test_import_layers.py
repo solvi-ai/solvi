@@ -314,11 +314,11 @@ SURFACES = {
                    "find_whole", "ground", "has_evidence", "locate", "NOT_STATED_KEY", "NotStated", "Part", "plain_json",
                    "PRIMITIVES", "Question", "question_data", "Quote", "Serial", "Unknown", "unknown_key", "unwrap",
                    "validated",
-                   # the extension points (LAYOUT §3, lane L4): protocols, base classes and what they meet
+                   # the extension points (LAYOUT §3): protocols, base classes and what they meet
                    "Scorer", "Decider", "Adapter", "Head", "Extractor", "Strategist", "DefaultStrategist", "Monitor",
                    "TraceStorage", "Response", "System", "Fail", "Proposer", "Space", "SlowPath", "AskPath",
                    "RefinePath", "SearchPath", "Thought", "Dispatcher", "Environment", "Outcome",
-                   # knowledge (lane L5)
+                   # knowledge
                    "KnowledgeStore", "WriteGate", "ActionModel", "Vocabulary", "Agenda", "RiskPolicy"],
     "solvi.core.knowledge": ["ActionModel", "Agenda", "ConservativeActionModel", "ConsistencyGate", "FailureMemory",
                              "KINDS", "KnowledgeStore", "LearnedGate", "MISSING", "Prediction", "Protect",

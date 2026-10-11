@@ -1,5 +1,5 @@
 {
- "labeller": "the X3 builder (an AI agent, Claude) by hand reading, before any proposer ran on these texts",
+ "labeller": "the stand's builder (an AI agent, Claude) by hand reading, before any proposer ran on these texts",
  "procedure": "see README.md 'Labels'",
  "units": {
   "%": {
