@@ -47,6 +47,7 @@ import warnings
 from dataclasses import dataclass, field
 
 from .. import _deprecate
+from ..core._torchopt import adamw
 from . import warn_on_import
 
 warn_on_import(__name__)
@@ -362,7 +363,8 @@ def _duration(s):
 
 def train(part, rows, *, r=8, alpha=None, epochs=6, lr=3e-4, seed=0, device=None, max_updates=400, notify=None):
     """Train an adapter on [(text, label)] (labels as part.spec.label gives them) → LoraAdapter. notify(estimate_seconds,
-    updates, seconds_per_update, device) is called after the first update is timed, before training."""
+    updates, seconds_per_update, device) is called after the first update is timed, before training. Training on the
+    CPU creates no CUDA context, so it works beside a GPU that is busy or full."""
     import torch
     from peft import inject_adapter_in_model
     model, sp = part.model, part.spec
@@ -421,7 +423,7 @@ def train(part, rows, *, r=8, alpha=None, epochs=6, lr=3e-4, seed=0, device=None
     per = time.perf_counter() - t0
     if notify is not None:
         notify(per * U, U, per, str(dev))
-    opt = torch.optim.AdamW(params, lr=lr, weight_decay=0.0, betas=(0.9, 0.98), eps=1e-6)
+    opt = adamw(params, dev, lr=lr, weight_decay=0.0, betas=(0.9, 0.98), eps=1e-6)
     warm = max(1, U // 10)
     sched = torch.optim.lr_scheduler.LambdaLR(opt, lambda u: (u + 1) / warm if u < warm else max(0.0, (U - u) / max(1, U - warm)))
     rng = random.Random(seed)

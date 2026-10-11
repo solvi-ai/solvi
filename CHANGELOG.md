@@ -17,6 +17,31 @@ calibration files and served by `solvi serve`), so a build from it is not mistak
 
 ### New
 
+- **Residual synthesis of relation programs (`solvi.experimental.relations.synthesize_residual`, experimental).** The
+  shortest chain program equal to a target on every example, found top-down: a subgoal Lo ⊆ X ⊆ Up, the step
+  X = A ∘ Y through the residual ¬(Aᵀ ∘ ¬Up) and the pairs with a single witness, X = Y ∖ I, a step pruned when a pair
+  has no witness left, iterative deepening on the number of atoms. The same inputs as `synthesize` (Relations) and
+  `find_rules` (worlds, a target as a function of a world), library entries as atoms; a candidate is accepted only when
+  the package's evaluator gives the target exactly on the examples, on `check=` worlds and by `test=` (a `HeldOut`) —
+  a failed one is counted (`rejected`) and the search goes on; a hard stop in steps (`budget`) and seconds;
+  deterministic. `ResidualFound(program, steps, seconds, atoms, stopped, rejected)`. `synthesize(method=
+  "residual-first")` runs it before the enumerator (`"residual"`: alone); `Found` gains `by` ("enumerate" |
+  "residual") and `steps`, with defaults, so code that builds a `Found` keeps working (code that unpacks it into
+  four names does not). The grammar is chains of atoms and converses with ∖ I on segments; union, intersection,
+  closure, counts and two masked segments side by side are out. Measured without a library
+  (`benchmarks/relations_residual.py`, five seeds): on the kinship ladder all nine rungs on every seed (45 of 45; second
+  cousin once removed in 0.40–0.55 s) with 0 false accepts on check worlds, against 20 of 45 for the enumerator at
+  100,000 behaviours (size 12, U left out); on a five-level path-tree policy only the one chain level is found, and the
+  levels that need a count or an intersection are ruled out in 0.04 s, nothing false accepted. Ported from the author's
+  earlier research line, which reported the same 45 of 45 against 20 of 45.
+- **Why a relation was not derived (`solvi.experimental.relations.why_not`, experimental).** The mirror of `explain`:
+  over every path between two entities through the pair facts, a composition table's status — derivable, disputed
+  (two readings), another relation, a missing cell r1 ∘ r2 → ? ranked by the paths one cell would unblock, or no path
+  (a missing fact). `CompositionTable.derive` / `derive_paths` refusals now carry the blocking cells
+  (`Derivation.missing`); `WhyNot.agenda_items()` gives the refusal as learning targets and `to_agenda(agenda, table)`
+  declares a goal «learn cell r1 ∘ r2» per gap, done when the table has the cell. `first_missing_step` / `rule_schema`
+  name the first step of a reference derivation that was not derived. Tested with a positive control (a cell removed
+  from a fitted table is named exactly); not measured on a real split yet.
 - **Composition tables of relations (`solvi.experimental.relations.CompositionTable`, experimental).** Which relation a
   chain of two relations composes to (kinship chains: father ∘ sister → aunt), learned by exact counting from labelled
   chains of length 2 — a cell is admitted when its majority relation has a share ≥ `majority` (0.9) and at least
@@ -77,6 +102,16 @@ calibration files and served by `solvi serve`), so a build from it is not mistak
   independent oracle (`benchmarks/relations_rules_toy.py`): exact set match 1.000 on 4,992 test pairs, all 8 planted
   rules found, 0 differences between the store path and the in-memory fixed point on 1,568 pairs
   (`tests/test_relations_rules.py`).
+- **Rules first, a model second (`solvi.experimental.relations.RulesFirst`, experimental).** `RulesFirst(table,
+  fallback=, render=)`: a composition table (or any `(chains) -> Derivation`) answers the queries it derives and the
+  model is never called for them; a refusal ("disagree", "underivable") goes to the fallback — `(question, options) ->
+  (answer, confidence)`, with `decider_fallback(model)` for a `DecideModel` — with the question rendered in words from
+  the chains (`render_chains`: (father, sister) is "B is the father of A. C is the sister of B. What is C to A?"),
+  or stays a refusal with the rules' reason when there is no fallback. A model answer outside the options is not an
+  answer. Every answer names the path that answered (`who`: "rules" | "model" | None) and the rules' reason, is
+  journal-ready (`to_record()`: the cells used or the model's output, the options, the confidence) and replays from its
+  record (`replay`): the rules path by deriving again, the model path from the recorded output — the model is never
+  called on replay; `stats` counts the paths per reason. Measured once on the frozen test split of CLUTRR (Sinha et al., 2019), the clean split (the relation graph of each story, not its text; 1,146 queries, chains of 2–10 relations; the table fitted on the whole training file, the same 111 cells; the rules' answers byte-identical to the composition-table measurement above): the rules answered 1,087 with 0 wrong and refused 59 (21 disagreeing bracketings, 38 underivable). With a small hosted LLM (z-ai/glm-5.3-flash) as the fallback (temperature 0, reasoning effort low, 2,000 output tokens; the first of two drafts answers; the refused queries rendered in words with the 18 relation names as options), 50 of the 59 refused queries got a readable option and 39 were right; 8 replies were empty because the model's reasoning used the whole output budget (finish reason "length"), and 1 named a relation outside the option list: overall 0.983 at coverage 0.992 (1,126 right of 1,137 answered; 11 wrong, 10 of them one chain of three relations whose gold in this split is itself split between mother and mother-in-law), against 0.949 at coverage 0.949 and 0 wrong for the rules alone. On an equal-size sample of queries the rules answered, the same LLM gave a readable option to 42 of 59 and was right on 41; on chains of 4 or more relations its precision among readable replies was the same on the refused and on the answered queries (34 of 35 each), the loss being empty replies (9 of 44 and 17 of 52). solvi-base as the fallback answered all 59 and was right on 2 (11 of 59 on the sample): it does not compose relations. Every answer replayed from its record without the model (0 failures). One run; $0.017 after the proxy's cache; the pre-registered bar of coverage 1.0 was missed. A pilot before the test run, on the training file only (1,816 held-out stories, a fifth of it by a hash of the id, chains of 2 and 3 relations; the table fitted on the other four fifths): the table answered 1,675 (4 wrong) and refused 141 (11 disagreeing bracketings, 130 underivable); the same LLM got 137 of the 141 right and solvi-base 11 of 141; one run, secondary to the test numbers (`tests/test_relations_first.py`).
 - **`KnowledgeStore.add(..., inferred=True)`: an assertion computed from its premises, not observed.** An "outcome"
   assertion refutes the value a key holds (the world changed); an inferred one does not — it competes by rank like any
   other source, so two inferences of different values from equal-rank premises are a dispute, and an inference never
@@ -284,6 +319,26 @@ calibration files and served by `solvi serve`), so a build from it is not mistak
   candidates per mismatch were left to probe and the true conditions were single atoms — the shortest hypotheses, which
   the length-first order meets first. Ranking can pay only where many consistent hypotheses remain after the free
   checks; the control first.
+- **`solvi.experimental.laws.JointRanker`: rank by the joint statistic of the whole condition.** A scorer for
+  `RankedProposer` with no training: it ranks candidate conditions by the joint statistic of the whole condition over
+  the logged rows — the Jaccard between the rows the whole condition matches (`buffer.match(action, condition)`, without
+  the group `exclude`) and the rows where its effect predicts right; equal Jaccard → fewer atoms, then the inner order.
+  `jaccard(...)` gives the statistic itself, `effect_mask(...)` the rows it compares against (override it for a
+  control). A sum over atoms cannot see two atoms that pick out the effect only together, or a correlated twin of a true
+  atom; this scores the conjunction itself. With no logged rows every score is equal and the order is the blind one —
+  the statistic needs rows. On three synthetic settings drawn from the library's own grammars, five seeds × 60 tasks
+  each (`benchmarks/laws_rank_joint.py` runs one seed): the library test's grammar (k = 3, about 330 candidates per
+  task) 1.00 checks to the true condition on average (median 1) against 85 blind, 27 for the raw Jaccard and 2.1 for the
+  trained bag of atoms; deep conditions (3–5 atoms of k = 5, about 6,000 candidates per task, 5% label noise) 17 (median
+  1) against 2,182 / 1,310 / 591 (medians 1,480.5 / 823.5 / 86); correlated features (three feature pairs copied with
+  probability 0.8) 1.01 (median 1) against 126 / 47 / 7.7; a control scoring against the effect's rows shuffled was
+  worse than the blind order (112 / 2,434 / 166). On the deep setting with the buffer cut to its first 5 / 20 / 100 /
+  300 rows: 1,997 / 1,569 (median 522) / 534 (median 9.5) / 17 — the gain shows from about 20 rows and is full by 300.
+  The same law was accepted under every order in 894 of 900 tasks (by construction: the acceptance scores every
+  candidate; six exact ties); on the deep noisy setting nothing was accepted in 180 of 300 tasks at 300 rows —
+  acceptance needs more rows than ranking. The trained scorer it beats is the library's linear bag of atoms; in
+  distribution only. A trained scorer over the whole condition is a possible later extra, only if a multi-seed
+  measurement shows a gain over this one on deep conditions.
 - **Sensitive fields: declared on the catalog, refused by `solvi check`.** `Catalog(sensitive={"age", "sex"})`,
   `lint(obj, sensitive=...)` and `solvi check module:system --sensitive age,sex` (the names add up) name given facts no
   part may read. A part that reads one (a fn, extract, check, rule, `then` function, alternative producer or
@@ -456,6 +511,13 @@ ModuleNotFoundError.
 | `solvi.experimental.learning` (`Learning`, `ShadowGate`, `UpdateReport`, `split_of`) and its 0.9 path `solvi.learning` | on streams of one kind of decision the loop gave no measurable gain (2026-10, "Tried and left out"); its verified-labels channel has been in the core since 0.9 | `solvi.experimental.changes` (`Change(artifact="update")`, `LearningTarget`); for a shadow measurement in a knowledge store, a write gate of your own reading `add(..., shadow=)` |
 
 ### Fixed
+
+- **LoRA training and extractor fitting on the CPU no longer touch the GPU.**
+  `solvi.experimental.lora.adapt_lora(..., device="cpu")` (and `train`) and `LongSpanExtractor.fit` on a CPU device
+  failed with `torch.AcceleratorError: out of memory` on a machine whose GPU was busy with another job: torch's AdamW
+  asks the accelerator for its current stream at every `step()` (a check for graph capture), and that creates a CUDA
+  context even for CPU parameters. On the CPU the check is now skipped (CPU parameters cannot be graph-captured), so
+  no CUDA context is created; training on a GPU is unchanged.
 
 - **The nine-task stand's RAGTruth keys.** `benchmarks/tasks/ragtruth/reply_format.py` printed its label after the module's
   1.0 move (`solvi.core.deciders.llm, …`), and `stand.py check` keyed six published numbers by the old label — every

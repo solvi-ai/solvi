@@ -481,7 +481,8 @@ answered 137 of 137 hand-overs and was refused, while 12 exact corrections passe
 3. Put accepted rules into the library as new terminals, so composites become small programs.
 4. Use a gradient-trained learner only when the enumeration budget runs out or the labels are noisy, and only as a
    proposer whose program is then checked like any other candidate (`proposer=`).
-5. Rank candidates with a learned or feature ranker only when a check is expensive (`RankedProposer`).
+5. Rank candidates only when a check is expensive (`RankedProposer`): by the joint statistic of the whole condition
+   first (`JointRanker`, no training), a learned ranker only after it.
 
 On two toys ([relations_library_toy.py](../benchmarks/relations_library_toy.py), five seeds each) the library found
 every level — a path tree's "denied if an ancestor directory is named secret and the depth is at least 3" (three levels)
@@ -519,6 +520,33 @@ server (8 mismatches; candidates contradicted by logged rows skipped free): ever
 which the length-first order meets first. Ranking can pay only where many consistent hypotheses remain after the free
 checks; the control first.
 
+**Rank by the joint statistic of the whole condition.** `JointRanker` ranks candidate conditions by the joint statistic
+of the whole condition over the logged rows — the Jaccard between the rows the whole condition matches and the rows
+where its effect predicts right, equal Jaccard → fewer atoms — with no training. A per-atom scorer (the raw
+`FeatureRanker`, the trained `BagOfAtomsRanker`) adds atom scores, so it cannot see two atoms that pick out the effect
+only together, or a correlated twin of a true atom. On three synthetic settings drawn from the library's own grammars
+(five seeds × 60 tasks each, 300 logged rows per task; [laws_rank_joint.py](../benchmarks/laws_rank_joint.py) runs one
+seed): on the grammar above (about 330 candidates per task) 1.00 checks to the true condition on average (median 1)
+against 85 in the blind order, 27 for the raw per-atom Jaccard and 2.1 for the trained bag of atoms; on deep conditions
+(3–5 atoms of k = 5, about 6,000 candidates per task, 5% label noise) 17 (median 1) against 2,182 / 1,310 / 591 (medians
+1,480.5 / 823.5 / 86); on correlated features (three feature pairs copied with probability 0.8, about 350 candidates)
+1.01 (median 1) against 126 / 47 / 7.7. The mean on the deep setting hides a tail: single tasks took up to 836 checks
+(17 of 300 above 50, five above 170), and in 112 of 300 tasks a condition with a strictly higher Jaccard under the label
+noise came before the true one — the only room a trained scorer over the whole condition could have, and it is not
+measured. A control scoring against the effect's rows shuffled among the allowed rows (the count kept) was worse than
+the blind order (112 / 2,434 / 166): the gain is in which rows the whole condition shares with the effect, not in how
+many. It is a statistic over the logged rows: with no logged rows every score is equal and the order is the blind one —
+the statistic needs rows; on the deep setting with the buffer cut to its first 5 / 20 / 100 / 300 rows it needed 1,997 /
+1,569 (median 522) / 534 (median 9.5) / 17 checks against 2,182 blind (at 5 rows the trained bag of atoms was worse than
+the blind order, 2,224), so the gain shows from about 20 rows and is full by 300 (`--curve`). Ranking does not change
+what is accepted: the held-out test accepted the same law under every order in 894 of 900 tasks (by construction: the
+acceptance scores every candidate; six exact ties), and on the deep noisy setting it accepted nothing in 180 of 300
+tasks at 300 rows — acceptance needs more rows than ranking does. The trained scorer it beats is the library's linear
+bag of atoms above, which sums per-atom scores and so cannot represent two atoms that matter only together; in
+distribution only — the tasks come from the same generators as the settings. Use it where the journal has rows; a
+trained scorer over the whole condition is a possible later extra, only if a multi-seed measurement on deep conditions
+shows a gain over it.
+
 ## Learn composition tables by exact counting, derive by composition, refuse what the table cannot derive
 
 Where a relation between two things follows from a chain of relations between them (kinship chains: a father's sister
@@ -542,6 +570,42 @@ derivations of one pair disagree — the store makes the pair disputed, which is
 as a question for a person; a person's answer (`store.resolve`) then settles the consequences of both sides without a
 re-run. Keep the rules promoted before you rely on what follows from them: `rules="any"` chains hypothesis rules too,
 and everything they derive stays a hypothesis until the rule is promoted. Measured on CLUTRR (Sinha et al., 2019), the clean split's training file only (the relation graph of each story, not its text): on 1,816 held-out stories (a fifth of the training file by a hash of the id, chains of 2 and 3 relations; the table fitted on the other four fifths, 111 cells) the store's reading of the query pair after chaining to the fixed point was compared with the table's derivation over the shortest paths: 1,675 equal (0.922), 11 disputed where the bracketings disagree (0.006), 130 with nothing derived where the table cannot derive (0.072), 0 differences; the fixed point took 0 rounds for 72 stories, 1 for 826 and 2 for 918; 2.6 s of chaining in all, 1.4 ms a story, on CPU; one run, the test file not read. On 120 random chains of 2–7 relations over 12 random tables whose bracketings can disagree: 0 differences (2 answers equal to the table's rest only on a disputed pair and stay hypotheses until a person answers it) (`benchmarks/relations_chain.py`).
+
+## Rules first, a model second
+
+Where rules derive most answers exactly and refuse the rest, let the rules answer first and ask a model only what they refuse (`relations.RulesFirst(table, fallback=...)`): the rules' share keeps its precision and costs no call, the refused share goes to the fallback, which answers or refuses, and every answer says which path gave it (`who`). The rules answer every query they derive and the model is not called for it; only a refusal (disagreeing bracketings or an underivable chain) goes to the fallback, with the question rendered in words and the list of options; every answer records which path gave it and what it used (the cells, or the model's output); a replay derives the rules' answers again and re-reads the recorded model output through the same option check without calling the model. Measure the fallback on the refused queries and on a sample of the ones the rules answered: the two shares can differ: here the refused ones held a chain whose gold is itself split, and long chains where the model returned nothing. Pick the fallback by that measurement, not by its size — solvi-base, a decider over options, did not compose relations here. The fallback must be able to do the task and to return an answer in the required form: a decider over options that cannot compose relations gives coverage without accuracy, and a reasoning model whose output budget runs out on long chains returns no answer at all; the dispatcher records both as what they are (a model path with a wrong answer; a refusal) and repairs neither. Measure the fallback on the refused queries and on a sample of the answered ones before trusting it, and check the finish reason of every reply. Measured once on the frozen test split of CLUTRR (Sinha et al., 2019), the clean split (the relation graph of each story, not its text; 1,146 queries, chains of 2–10 relations; the table fitted on the whole training file, the same 111 cells; the rules' answers byte-identical to the composition-table measurement above): the rules answered 1,087 with 0 wrong and refused 59 (21 disagreeing bracketings, 38 underivable). With a small hosted LLM (z-ai/glm-5.3-flash) as the fallback (temperature 0, reasoning effort low, 2,000 output tokens; the first of two drafts answers; the refused queries rendered in words with the 18 relation names as options), 50 of the 59 refused queries got a readable option and 39 were right; 8 replies were empty because the model's reasoning used the whole output budget (finish reason "length"), and 1 named a relation outside the option list: overall 0.983 at coverage 0.992 (1,126 right of 1,137 answered; 11 wrong, 10 of them one chain of three relations whose gold in this split is itself split between mother and mother-in-law), against 0.949 at coverage 0.949 and 0 wrong for the rules alone. On an equal-size sample of queries the rules answered, the same LLM gave a readable option to 42 of 59 and was right on 41; on chains of 4 or more relations its precision among readable replies was the same on the refused and on the answered queries (34 of 35 each), the loss being empty replies (9 of 44 and 17 of 52). solvi-base as the fallback answered all 59 and was right on 2 (11 of 59 on the sample): it does not compose relations. Every answer replayed from its record without the model (0 failures). One run; $0.017 after the proxy's cache; the pre-registered bar of coverage 1.0 was missed. A pilot before the test run, on the training file only (1,816 held-out stories, a fifth of it by a hash of the id, chains of 2 and 3 relations; the table fitted on the other four fifths): the table answered 1,675 (4 wrong) and refused 141 (11 disagreeing bracketings, 130 underivable); the same LLM got 137 of the 141 right and solvi-base 11 of 141; one run, secondary to the test numbers.
+
+## Synthesise chains by residuals first, enumerate second
+
+When the rule you look for may be a chain of relations — kinship degrees, «the parent of the sibling of», a path of
+fixed shape — search it top-down from the target first (`relations.synthesize_residual`, or
+`synthesize(method="residual-first")`) and leave the enumerator for what a chain cannot express. Bottom-up enumeration
+pays for every program of the size whether or not it could lead to the target; residuals prune a step as soon as a
+pair of the target has no witness left. Measured without a library on the kinship ladder of
+[relations_library_toy.py](../benchmarks/relations_library_toy.py) ([relations_residual.py](../benchmarks/relations_residual.py),
+five seeds): residuals found all nine rungs on every seed (45 of 45; second cousin once removed in 0.40–0.55 s, 3 s for
+all 45), the enumerator at 100,000 behaviours (size 12, U left out) found the four rungs up to great-grandparent and
+none above (20 of 45, ≈ 6 s per rung at the cap); 0 false accepts in both on check worlds of another shape. The two
+searches count different things (residual steps, distinct behaviours): compare what is found and the time. **Give the
+search a held-out test** (`test=HeldOut(...)`): a candidate that fits the examples and fails it is counted and the search
+goes on — on a path-tree policy the enumerator, without one, returned a program exact on three example trees and wrong
+on the check trees. **Know the limit:** only chains (atoms and converses, ∖ I on segments); union, intersection,
+closure and counts are out, so on the five-level path-tree policy the residuals found the one chain level and ruled
+the count and intersection levels out in 0.04 s — there the enumerator with a library is the search (previous
+section). Two masked segments side by side are out too, unless one of them is a library entry, which residuals take as
+an atom.
+
+## Ask why a rule did not derive, and learn what is missing
+
+A refusal of a composition table says *that* the table cannot derive an answer; `relations.why_not(table, facts, x,
+y, relation)` says *why*, over every path between the two: a missing cell r1 ∘ r2 → ? (ranked by the paths one cell
+would unblock), a dispute between paths, another relation derived, or no path at all — a missing fact, not a missing
+rule. Use the reason as the learning target: `Derivation.missing` carries the blocking cells on every "underivable"
+refusal, and `WhyNot.to_agenda(agenda, table)` turns each gap into a goal «learn cell father ∘ sister» whose done check
+reads the table, so the goal closes when the cell is observed and the table refitted. Keep a dispute where it already
+is — a person question in the knowledge store — and a missing fact as a question about the story, not the rules. The
+positive control is in the tests: remove one cell from a fitted table and `why_not` names exactly that cell; it has
+not yet been measured on the refusals of a real split.
 
 ## Storage and audit
 

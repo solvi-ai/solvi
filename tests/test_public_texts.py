@@ -39,8 +39,8 @@ def test_no_author_only_default_paths_in_scripts():
 # Research experiment codes (L14g, L25, ...), working-branch names and project names mean nothing to a
 # reader. Allowed: math (L0 L1 L2, L2 regularization), model names (MiniLM-L6), lowercase format strings ('l14g typed
 # v2') and the alt text of an image that shows such a label. Pre-registration codes and their bar labels (an X, a digit,
-# an optional dash and digit) are matched too.
-CODE = re.compile(r"\bL[0-9]{1,2}[a-z]?\b|\bAL[0-9]+\b|\biter[0-9]{2}\b|\brel11[ab]?\b|\bw2[abc]\b|\bw3a\b"
+# an optional dash and digit) are matched too; a working-branch name is a w, a digit and a letter (w0, w1 are variables).
+CODE = re.compile(r"\bL[0-9]{1,2}[a-z]?\b|\bAL[0-9]+\b|\biter[0-9]{2}\b|\brel11[ab]?\b|\bw[0-9][a-z]\b"
                   r"|\bX[0-9]\b|\bX[0-9]-[0-9]\b|albert|kelly")
 CODE_OK = re.compile(r"MiniLM-L[0-9]+|\bL[0-2]\b")
 CODE_SKIP = {"docs/images/ALT.md"}

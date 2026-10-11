@@ -109,6 +109,23 @@ rounds over the fixed point of the rules admitted so far, residual votes for cha
 derivable, a check slice; `predict` answers a pair with its active relations (∅ = refusal), declared complements
 dispute; `chain_rules` applies the rules kept in a KnowledgeStore with every justification. Measured by
 benchmarks/relations_rules_toy.py.
+Rules first, a model second (`RulesFirst(table, fallback=, render=)`): the table answers the queries it derives and
+the model is never called for them; a refusal ("disagree", "underivable") goes to the fallback with the question
+rendered in words from the chains and the options, or stays a refusal without one; every answer names the path that
+answered (`who`), is journal-ready (`to_record`) and replays from its record without the model (`replay`);
+`decider_fallback(model)` adapts a DecideModel; `stats` counts the paths per reason.
+
+Residual synthesis (`synthesize_residual(examples, target, depth=, budget=, test=, name=)`): the shortest chain program
+found top-down from the target — X = A ∘ Y gives Y's bounds through the residual ¬(Aᵀ ∘ ¬Up) and the single-witness
+pairs, X = Y ∖ I drops the diagonal, a step without a witness is pruned — checked exactly by `evaluate`, on `check=`
+worlds and by a HeldOut; `ResidualFound` (program, steps, seconds, atoms, stopped, rejected). `synthesize(...,
+method="residual-first")` runs it before the enumerator. Measured by benchmarks/relations_residual.py.
+
+Why not derived (`why_not(table, facts, x, y, relation)`): over every path x → y through the pair facts, why the table
+does not derive the relation — a missing cell r1 ∘ r2 → ? ranked by the paths it would unblock (`Gap`), a dispute,
+another relation, or no path (a missing fact); `Derivation.missing` carries the blocking cells of every underivable
+refusal, `WhyNot.to_agenda(agenda, table)` makes each gap a goal done when the table has the cell, and
+`first_missing_step` names the first underived step of a reference derivation.
 
 What is not done:
 - the enumeration grows as (terminals × operators)^size: with the twenty-odd relations of a grid window, programs of
@@ -124,6 +141,8 @@ What is not done:
 - guarded rules: two binary atoms per body, unary predicates only as given (none learned or invented); the store
   path writes every justification and is slow on dense stories; a wrong rule admitted at a small support spreads
   through the fixed point;
+- residual synthesis: chains only (atoms, converses, ∖ I on segments) — no union, intersection, closure or counts,
+  and two masked segments side by side only through a library entry;
 - composition tables: one relation per cell; a cell that depends on something the chain does not carry (a gender)
   stays below the majority and its chains are refused, not split by that attribute;
 - the compiled atom of a state's graph allows complements (its domain, the window or the path's chain, is bounded);
@@ -135,24 +154,28 @@ from ._adapters import (CREATURES, MATERIALS, PATHS, PROPOSER_OPS, Egocentric, P
                         encode_paths, relational_atom)
 from ._chain import ChainLimit, ChainReport, Explanation, explain, forward_chain, pair_fact
 from ._rules import TEMPLATES, Closure, GuardedRule, GuardedRules, Story, chain_rules, unary_fact
+from ._first import RulesFirst, RulesFirstAnswer, decider_fallback, render_chains
 from ._algebra import (BINARY, OPS, UNARY, Relations, closure, complement, compose, converse, count_at_least,
                        evaluate, intersect, minus, readout, show, size, union, xor)
 from ._compile import (BACKENDS, RUNTIME, RUNTIME_ARRAYS, DenseAnswer, ProgramCheck, check_program, compile_ast,
                        compile_program, from_keys, to_keys)
 from ._enumerate import (Entry, Enumerator, Found, Library, Program, Score, Scored, enumerate_programs, lower_bound,
                          rank, score, synthesize, top_programs)
+from ._residual import ResidualFound, synthesize_residual
 from ._table import Cell, CompositionTable, Derivation, base_rates, sized_admit
+from ._why_not import Gap, WhyNot, first_missing_step, rule_schema, why_not
 from .library import HeldOut, RuleProposer, Rules, TargetRecord, find_rules
 
 warn_on_import(__name__)
 
 __all__ = ["BACKENDS", "BINARY", "CREATURES", "Cell", "ChainLimit", "ChainReport", "Closure", "CompositionTable",
-           "DenseAnswer", "Derivation", "Egocentric", "Entry", "Enumerator", "Explanation", "Found", "GuardedRule",
-           "GuardedRules", "HeldOut", "Library", "MATERIALS", "OPS", "PATHS", "PROPOSER_OPS", "PathTree", "Program",
-           "ProgramCheck", "RUNTIME", "RUNTIME_ARRAYS", "RelAlgProposer", "Relations", "RuleProposer", "Rules",
-           "Score", "Scored", "Story", "TEMPLATES", "TargetRecord", "UNARY", "base_rates", "chain_rules",
-           "check_program", "closure", "compile_ast", "compile_program", "complement", "compose", "converse",
-           "count_at_least", "encode", "encode_paths", "enumerate_programs", "evaluate", "explain", "find_rules",
+           "DenseAnswer", "Derivation", "Egocentric", "Entry", "Enumerator", "Explanation", "Found", "Gap",
+           "GuardedRule", "GuardedRules", "HeldOut", "Library", "MATERIALS", "OPS", "PATHS", "PROPOSER_OPS",
+           "PathTree", "Program", "ProgramCheck", "RUNTIME", "RUNTIME_ARRAYS", "RelAlgProposer", "Relations",
+           "ResidualFound", "RuleProposer", "Rules", "RulesFirst", "RulesFirstAnswer", "Score", "Scored", "Story",
+           "TEMPLATES", "TargetRecord", "UNARY", "WhyNot", "base_rates", "chain_rules", "check_program", "closure",
+           "compile_ast", "compile_program", "complement", "compose", "converse", "count_at_least", "decider_fallback",
+           "encode", "encode_paths", "enumerate_programs", "evaluate", "explain", "find_rules", "first_missing_step",
            "forward_chain", "from_keys", "intersect", "lower_bound", "minus", "pair_fact", "rank", "readout",
-           "relational_atom", "score", "show", "size", "sized_admit", "synthesize", "to_keys", "top_programs",
-           "unary_fact", "union", "xor"]
+           "relational_atom", "render_chains", "rule_schema", "score", "show", "size", "sized_admit", "synthesize",
+           "synthesize_residual", "to_keys", "top_programs", "unary_fact", "union", "why_not", "xor"]

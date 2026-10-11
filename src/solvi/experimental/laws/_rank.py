@@ -1,6 +1,6 @@
 """Ranking candidate laws where each check is expensive (see the package docstring): features from the Buffer's
-bitsets, a bag-of-atoms scorer trained on synthetic tasks drawn from the grammar, the raw-feature control, and a proposer
-that only reorders another one."""
+bitsets, a bag-of-atoms scorer trained on synthetic tasks drawn from the grammar, the raw-feature control, the joint
+statistic of the whole condition (no training), and a proposer that only reorders another one."""
 from __future__ import annotations
 
 import random
@@ -164,6 +164,48 @@ class BagOfAtomsRanker(_ByAtom):
         return X @ self.w + self.b
 
 
+class JointRanker:
+    """The joint statistic of the whole condition, no training: a candidate's score is the Jaccard between the logged
+    rows its whole condition matches and the rows where its effect predicts right (`buffer.match(action, condition)`
+    against the effect mask, both over the rows without the group `exclude`); equal Jaccard → fewer atoms first, then
+    the inner order. The bag-of-atoms scorers add per-atom scores and so cannot see that two atoms together pick out the
+    effect's rows when neither does alone, or that a correlated twin of a true atom adds nothing; this one scores the
+    conjunction itself. A statistic over the logged rows: with no rows every score is equal and the order is the inner
+    one (the blind order). `effect_mask` is the rows a score compares against — override it for a control."""
+
+    def effect_mask(self, lawset: LawSet | None, buffer: Buffer, action, effect, exclude=None) -> int:
+        """The rows of `action` (without the group `exclude`) where `effect` predicts right."""
+        return _effect_mask(lawset, buffer, action, effect) & buffer.allowed(action, exclude)
+
+    def jaccard(self, candidates: Sequence[Candidate], lawset: LawSet | None, buffer: Buffer,
+                exclude=None) -> list[float]:
+        """The Jaccard per candidate (0 where neither its condition nor its effect has a row)."""
+        cache: dict = {}
+        out = []
+        for c in candidates:
+            k = (_key(c.action), _key(c.effect))
+            if k not in cache:
+                cache[k] = (buffer.allowed(c.action, exclude), self.effect_mask(lawset, buffer, c.action, c.effect,
+                                                                                exclude))
+            allowed, E = cache[k]
+            m = buffer.match(c.action, tuple(c.condition)) & allowed
+            union = (m | E).bit_count()
+            out.append((m & E).bit_count() / union if union else 0.0)
+        return out
+
+    def score(self, candidates: Sequence[Candidate], lawset: LawSet | None, buffer: Buffer, exclude=None) -> list[float]:
+        """A score per candidate (higher = check earlier): the Jaccard minus a tie-break by the number of atoms small
+        enough never to reorder two different Jaccards (they differ by at least 1 / rows²)."""
+        if not candidates:
+            return []
+        jac = self.jaccard(candidates, lawset, buffer, exclude)
+        actions = {_key(c.action): c.action for c in candidates}
+        rows = max(buffer.allowed(a, exclude).bit_count() for a in actions.values())
+        longest = max(len(tuple(c.condition)) for c in candidates)
+        eps = 1.0 / ((rows + 1) ** 2 * (longest + 1))
+        return [j - eps * len(tuple(c.condition)) for j, c in zip(jac, candidates)]
+
+
 class RankedProposer:
     """Another proposer's candidates, reordered by `scorer.score(candidates, lawset, buffer)` (highest first, ties in
     the inner order). Never adds, drops or changes a candidate: only the order, which is what a probe budget spends
@@ -239,5 +281,5 @@ def checks_to(order: Sequence[Candidate], condition) -> int | None:
     return None
 
 
-__all__ = ["BagOfAtomsRanker", "FEATURES", "FeatureRanker", "RankedProposer", "SyntheticTask", "atom_features",
-           "candidate_features", "checks_to", "synthetic_task"]
+__all__ = ["BagOfAtomsRanker", "FEATURES", "FeatureRanker", "JointRanker", "RankedProposer", "SyntheticTask",
+           "atom_features", "candidate_features", "checks_to", "synthetic_task"]

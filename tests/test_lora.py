@@ -43,18 +43,6 @@ def _threads():
     torch.set_num_threads(n)
 
 
-@pytest.fixture(scope="module", autouse=True)
-def _cpu_only():
-    """Every test here runs on the CPU (device="cpu"), yet torch's optimizers check for CUDA-graph capture at step() by
-    asking the accelerator for its current stream, which creates a CUDA context: on a shared GPU held by another job
-    that raises out of memory (torch.AcceleratorError) in a CPU-only test. The accelerator is hidden from torch for
-    this module, so the tests take the same CPU path on any machine and any GPU load (none is skipped)."""
-    import torch
-    with pytest.MonkeyPatch.context() as mp:
-        mp.setattr(torch.accelerator, "current_accelerator", lambda *a, **kw: None)
-        yield
-
-
 @pytest.fixture(scope="module")
 def ckpt(tmp_path_factory):
     """A tiny decider checkpoint: word-level tokenizer with the solvi markers, a 2-layer ModernBERT, the option head."""
@@ -145,16 +133,23 @@ def test_training_changes_predictions_fingerprint_trace_and_rollback(ckpt):
 
 
 def test_cpu_training_does_not_touch_a_full_gpu(ckpt, monkeypatch):
-    """Every test here trains on the CPU. A GPU busy with another job (a CUDA context cannot be created: out of memory)
-    must not fail them — torch's optimizers ask the accelerator for its stream at step() even for CPU tensors."""
+    """train(device="cpu") beside a visible GPU held by another job: creating a CUDA context fails (out of memory). No
+    CUDA context may be created — torch's optimizers ask the accelerator for its stream at step() even for CPU
+    tensors, and the library skips that check on the CPU (no fixture in this module hides the accelerator)."""
     import torch
+    m, part = _part(ckpt)
 
     def full_gpu(*a, **kw):
         raise torch.AcceleratorError("CUDA error: out of memory (simulated: the shared GPU is full)")
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
+    monkeypatch.setattr(torch.accelerator, "is_available", lambda: True)
+    monkeypatch.setattr(torch.accelerator, "current_accelerator", lambda *a, **kw: torch.device("cuda"))
     monkeypatch.setattr(torch.accelerator, "current_stream", full_gpu)
-    m, part = _part(ckpt)
+    monkeypatch.setattr(torch.cuda, "current_stream", full_gpu)
+    monkeypatch.setattr(torch.cuda, "is_current_stream_capturing", full_gpu)
+    monkeypatch.setattr(torch.cuda, "_lazy_init", full_gpu)
     rep, _ = _adapt(part, _toy(40, 7), holdout=20, epochs=2)
-    assert rep["device"] == "cpu"
+    assert rep["device"] == "cpu" and rep["updates"] > 0
 
 
 def test_other_questions_are_not_affected(ckpt):

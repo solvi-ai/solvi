@@ -18,8 +18,8 @@ The construction rule:
 3. Put accepted rules into the library as new terminals, so composites become small programs; enumerate again.
 4. Use a learned proposer (a gradient-trained rule memory, for example) only when the enumeration budget runs out or the
    labels are noisy, and only as a proposer: its programs are checked like any other candidate (`proposer=`).
-5. Rank candidates with a learned or feature ranker only when a check is expensive (`solvi.experimental.laws.
-   RankedProposer`).
+5. Rank candidates only when a check is expensive (`solvi.experimental.laws.RankedProposer`): by the joint statistic of
+   the whole condition first (`JointRanker`, no training), a learned ranker only after it.
 
 What it does not do: invent the intermediate concepts. The targets are given (as an unordered set: find_rules sorts
 them by name, so the caller's order is not a curriculum); what it finds by itself is which target is within reach of the

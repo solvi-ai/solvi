@@ -48,7 +48,20 @@ condition labels sampled states); a condition's score is the sum of its atoms' l
 and 3 counter features, 30 atoms, k = 3; 60 fresh tasks with 2% label noise, trained on 150) the checks to the true
 condition were 69.7 in the blind order (by length, then name), 2.1 with the trained ranker, and 24.6 / 30.4 / 42.8
 with the raw Jaccard / recall / precision (the best raw threshold picked after the fact: 12.8; tests/test_laws_rank.py).
-In distribution only on the synthetic tasks.
+In distribution only on the synthetic tasks. `JointRanker()` ranks candidate conditions by the joint statistic of the
+whole condition over the logged rows — the Jaccard between the rows the whole condition matches and the rows where the
+effect predicts right, equal Jaccard → fewer atoms — with no training: a sum over atoms cannot see two atoms that pick
+out the effect only together, or a correlated twin of a true atom. With no logged rows every score is equal and the
+order is the blind one — the statistic needs rows. On three synthetic settings of the library's own grammars (five seeds
+× 60 tasks each; benchmarks/laws_rank_joint.py runs one seed) — the grammar above; deep conditions of 3–5 atoms of k = 5
+with about 6,000 candidates per task and 5% label noise; correlated features (three feature pairs copied with p = 0.8) —
+it needed 1.00 / 17 / 1.01 checks to the true condition (medians 1 / 1 / 1) against 85 / 2,182 / 126 blind, 27 / 1,310 /
+47 for the raw Jaccard and 2.1 / 591 / 7.7 for the trained bag of atoms; a control scoring against the effect's rows
+shuffled was worse than the blind order (112 / 2,434 / 166). On the deep setting the gain shows from about 20 logged
+rows and is full by 300. The same law was accepted under every order in 894 of 900 tasks (by construction: the
+acceptance scores every candidate; six exact ties); nothing was accepted in 180 of 300 deep noisy tasks at 300 rows —
+acceptance needs more rows than ranking. The trained scorer it beats is the library's linear bag of atoms; in
+distribution only.
 Measured once on a live file server (8 mismatches; candidates contradicted by logged rows skipped free): every order
 spent 29 probes in all, because 1–5 candidates per mismatch were left to probe and the true conditions were single atoms
 — the shortest hypotheses, which the length-first order meets first. Ranking can pay only where many consistent
@@ -130,13 +143,13 @@ from ._compile import CompiledCheck, check_compiled, load_module
 from ._core import (Admission, Atom, Buffer, CallableProposer, Candidate, Enumerate, Grammar, Law, LawSet, Proposer,
                     RandomProposer, Step, Transition, Undetermined, sized_level, sized_need)
 from ._probes import Probe, discriminate, split
-from ._rank import (FEATURES, BagOfAtomsRanker, FeatureRanker, RankedProposer, SyntheticTask, atom_features,
-                    candidate_features, checks_to, synthetic_task)
+from ._rank import (FEATURES, BagOfAtomsRanker, FeatureRanker, JointRanker, RankedProposer, SyntheticTask,
+                    atom_features, candidate_features, checks_to, synthetic_task)
 
 warn_on_import(__name__)
 
 __all__ = ["Admission", "Atom", "BagOfAtomsRanker", "Buffer", "CallableProposer", "Candidate", "CompiledCheck", "Enumerate",
-           "FEATURES", "FeatureRanker", "Grammar", "Law", "LawSet", "Probe", "Proposer", "RandomProposer",
+           "FEATURES", "FeatureRanker", "Grammar", "JointRanker", "Law", "LawSet", "Probe", "Proposer", "RandomProposer",
            "RankedProposer", "Step", "SyntheticTask", "Transition", "atom_features", "candidate_features",
            "check_compiled", "checks_to", "discriminate", "load_module", "sized_level", "sized_need", "split",
            "synthetic_task", "Undetermined"]
