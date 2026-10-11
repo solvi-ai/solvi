@@ -1,9 +1,12 @@
 """Ranking candidate laws where each check is expensive (see the package docstring): features from the Buffer's
 bitsets, a bag-of-atoms scorer trained on synthetic tasks drawn from the grammar, the raw-feature control, the joint
-statistic of the whole condition (no training), and a proposer that only reorders another one."""
+statistic of the whole condition (no training), a prior order over the condition's own features for a buffer with no
+rows yet and the hand-over from it to the joint statistic, and a proposer that only reorders another one."""
 from __future__ import annotations
 
+import math
 import random
+from collections import Counter
 from dataclasses import dataclass
 from itertools import combinations
 from typing import Any, Callable, Sequence
@@ -210,17 +213,21 @@ class RankedProposer:
     """Another proposer's candidates, reordered by `scorer.score(candidates, lawset, buffer)` (highest first, ties in
     the inner order). Never adds, drops or changes a candidate: only the order, which is what a probe budget spends
     (the order in which split / discriminate receive hypotheses). The buffer: the logged rows the features are read
-    from; the held-out test stays the judge."""
+    from; the held-out test stays the judge. Any scorer with that `score` works (FeatureRanker, BagOfAtomsRanker,
+    JointRanker, PriorRanker, HandoverRanker); `scored_by` after a call: the scorer's `last` when it has one (a
+    HandoverRanker's "prior" / "joint"), else its class name."""
 
     def __init__(self, inner, scorer, buffer: Buffer, *, exclude=None):
         self.inner, self.scorer, self.buffer, self.exclude = inner, scorer, buffer, exclude
         self.name = getattr(inner, "name", "ranked")
+        self.scored_by: str | None = None
 
     def propose(self, lawset, state, action, observed):
         cands = list(self.inner.propose(lawset, state, action, observed))
         if len(cands) < 2:
             return cands
         scores = self.scorer.score(cands, lawset, self.buffer, exclude=self.exclude)
+        self.scored_by = getattr(self.scorer, "last", None) or type(self.scorer).__name__
         order = sorted(range(len(cands)), key=lambda i: (-scores[i], i))
         return [cands[i] for i in order]
 
@@ -268,6 +275,235 @@ def synthetic_task(grammar: Grammar, sample: Callable[[random.Random], Any], rng
     return SyntheticTask(buf, LawSet(grammar, base=_off), state, action, "on", tuple(cond))
 
 
+# ───────────────────────────────────────────── a prior order (no rows) and the hand-over
+_OPS = (("!=", "!="), (">=", ">="), ("<=", "<="), ("==", "="), ("=", "="), (">", ">"), ("<", "<"))
+
+
+def atom_kind(name: str) -> str:
+    """An atom's comparison type, read off its name: the first of != >= <= == = > < it contains ("==" reads as "="),
+    else "bool"."""
+    for op, kind in _OPS:
+        if op in name:
+            return kind
+    return "bool"
+
+
+class _Counts:
+    """How often each atom / feature / kind / feature pair that is true in the mismatched state is in the condition."""
+
+    def __init__(self):
+        self.true: Counter = Counter()
+        self.inside: Counter = Counter()
+
+    def add(self, grammar: Grammar, true: Sequence[str], condition: Sequence[str]):
+        feat = grammar.feature
+        cond = set(condition)
+        tf = sorted({feat[x] for x in true})
+        cf = {feat[x] for x in cond}
+        for x in true:
+            self.true["a", x] += 1
+            self.true["k", atom_kind(x)] += 1
+            if x in cond:
+                self.inside["a", x] += 1
+                self.inside["k", atom_kind(x)] += 1
+        for f in tf:
+            self.true["f", f] += 1
+            self.inside["f", f] += f in cf
+        for f, h in combinations(tf, 2):
+            self.true["p", f, h] += 1
+            self.inside["p", f, h] += f in cf and h in cf
+
+
+class PriorRanker:
+    """A prior order for candidate conditions that reads no rows: a linear score over features of the condition itself,
+    learned from synthetic tasks drawn from the grammar — for a buffer with no rows yet (then the row statistics give
+    the blind order). The features of a condition: its number of atoms (one-hot 0..k) and the sums over its atoms of
+    four log-rates learned from the tasks' true conditions — the atom's prior usefulness (how often the atom is in the
+    true condition when it is true in the mismatched state), its feature's, its kind's (the comparison type read off the
+    name: `atom_kind`), and over its pairs of features their co-occurrence in true conditions beyond the two features'
+    own rates (a log ratio; 0 for independent features). The rates are smoothed towards the overall rate with
+    `smoothing` pseudo-counts; an atom, feature or kind never seen scores the overall rate.
+
+    `fit` draws `tasks` synthetic tasks (`synthetic_task`, the same signature as BagOfAtomsRanker.fit; `sizes=(lo, hi)`
+    draws condition sizes uniform in lo..hi as a setting does) and fits the weights by a softmax over each task's
+    candidates (`grammar.conditions` of the atoms true in the mismatched state) with the true condition as the target:
+    Newton's method from zero weights on standardised features (L2 `l2`, at most `steps` steps), the rates of each half of the tasks read
+    from the other half (so a task's own condition never feeds its features), the final rates from all tasks. Seeded
+    and deterministic. `shuffle_labels=True` is the control: each task's target replaced by one of its candidates drawn
+    at random (seeded) — a prior that learns nothing should do no better than the blind order. Unfitted: every score
+    0 (the inner order)."""
+
+    def __init__(self, seed: int = 0, *, l2: float = 1e-3, steps: int = 50, smoothing: float = 2.0,
+                 shuffle_labels: bool = False):
+        self.seed, self.l2, self.steps, self.smoothing = int(seed), float(l2), int(steps), float(smoothing)
+        self.shuffle_labels = bool(shuffle_labels)
+        self.grammar: Grammar | None = None
+        self.k = 0
+        self.feature_names: list[str] = []
+        self.weights = np.zeros(0)
+        self.mean = np.zeros(0)
+        self.scale = np.ones(0)
+        self.usefulness: dict[str, dict] = {"atom": {}, "feature": {}, "kind": {}, "pair": {}}
+        self._rates: dict = {}
+        self._base = 0.0
+        self.trained_on = 0
+
+    # fitting
+    def fit(self, grammar: Grammar, sample: Callable[[random.Random], Any], *, tasks: int = 200, rows: int = 300,
+            noise: float = 0.0, sizes: tuple[int, int] | None = None) -> "PriorRanker":
+        """Train on `tasks` synthetic tasks: `sample(rng)` → a state drawn as the logged states are (seeded rng)."""
+        rng = random.Random(self.seed)
+        ts = []
+        for _ in range(tasks):
+            size = rng.randint(*sizes) if sizes else None
+            ts.append(synthetic_task(grammar, sample, rng, rows=rows, noise=noise, size=size))
+        return self.fit_tasks(grammar, ts)
+
+    def fit_tasks(self, grammar: Grammar, tasks: Sequence[Any]) -> "PriorRanker":
+        """Train on given tasks: anything with `state`, `action` and `condition` (a SyntheticTask, a logged mismatch
+        whose law is known). ValueError for none."""
+        examples = []
+        rng = random.Random(self.seed * 7919 + 1)
+        for t in tasks:
+            true = grammar.true(t.state, t.action)
+            conds = grammar.conditions(true)
+            target = tuple(sorted(t.condition))
+            if self.shuffle_labels:
+                target = rng.choice([c for c in conds if c] or conds)
+            examples.append((true, conds, target))
+        if not examples:
+            raise ValueError("PriorRanker needs at least one task")
+        self.grammar, self.k = grammar, grammar.k
+        self.feature_names = [f"atoms={i}" for i in range(self.k + 1)] + ["atom", "feature", "kind", "pair"]
+        folds = [examples[0::2], examples[1::2]]
+        X, seg, y = [], [], []
+        for i, fold in enumerate(folds):
+            other = folds[1 - i] or fold
+            self._set_rates(grammar, other)
+            for true, conds, target in fold:
+                seg.append(len(X))
+                for c in conds:
+                    X.append(self._phi(c))
+                    y.append(1.0 if c == target else 0.0)
+        self._set_rates(grammar, examples)
+        self._fit_softmax(np.array(X), np.array(seg), np.array(y))
+        self.trained_on = len(examples)
+        return self
+
+    def _set_rates(self, grammar, examples):
+        n = _Counts()
+        for true, _, target in examples:
+            n.add(grammar, true, target)
+        tot_true = sum(v for key, v in n.true.items() if key[0] == "a")
+        tot_in = sum(v for key, v in n.inside.items() if key[0] == "a")
+        self._base = math.log((tot_in + 1.0) / (tot_true + 2.0))
+        a, base = self.smoothing, math.exp(self._base)
+        rates = {}
+        for key, v in n.true.items():
+            if key[0] != "p":
+                rates[key] = math.log((n.inside[key] + a * base) / (v + a))
+        for key, v in n.true.items():
+            if key[0] == "p":
+                both = math.exp(rates["f", key[1]] + rates["f", key[2]])
+                rates[key] = math.log((n.inside[key] + a * both) / (v + a)) - math.log(both)
+        self._rates = rates
+        self._feat = dict(grammar.feature)
+        u = self.usefulness = {"atom": {}, "feature": {}, "kind": {}, "pair": {}}
+        names = {"a": "atom", "f": "feature", "k": "kind", "p": "pair"}
+        for key, v in rates.items():
+            u[names[key[0]]][key[1] if len(key) == 2 else key[1:]] = v
+
+    def _phi(self, cond) -> list[float]:
+        r, base = self._rates, self._base
+        size = [0.0] * (self.k + 1)
+        size[min(len(cond), self.k)] = 1.0
+        feats = sorted({self._feat.get(x, x) for x in cond})
+        atom = sum(r.get(("a", x), base) for x in cond)
+        feat = sum(r.get(("f", f), base) for f in feats)
+        kind = sum(r.get(("k", atom_kind(x)), base) for x in cond)
+        pair = sum(r.get(("p", f, h), 0.0) for f, h in combinations(feats, 2))
+        return size + [atom, feat, kind, pair]
+
+    def _fit_softmax(self, X, seg, y):
+        self.mean = X.mean(0)
+        sd = X.std(0)
+        self.scale = np.where(sd > 1e-12, sd, 1.0)
+        Z = (X - self.mean) / self.scale
+        ids = np.repeat(np.arange(len(seg)), np.diff(np.append(seg, len(Z))))
+        n = len(seg)
+
+        def loss_grad_hess(w):
+            z = Z @ w
+            m = np.maximum.reduceat(z, seg)
+            e = np.exp(z - m[ids])
+            tot = np.add.reduceat(e, seg)
+            p = e / tot[ids]
+            nll = float((np.log(tot) + m).sum() - (z * y).sum()) / n + 0.5 * self.l2 * float(w @ w)
+            g = Z.T @ (p - y) / n + self.l2 * w
+            M = np.add.reduceat(p[:, None] * Z, seg)
+            H = ((Z * p[:, None]).T @ Z - M.T @ M) / n + self.l2 * np.eye(len(w))
+            return nll, g, H
+
+        w = np.zeros(Z.shape[1])
+        f, g, H = loss_grad_hess(w)
+        for _ in range(self.steps):              # Newton's method with a backtracking line search
+            step = np.linalg.solve(H, g)
+            t = 1.0
+            while True:
+                w2 = w - t * step
+                f2, g2, H2 = loss_grad_hess(w2)
+                if f2 <= f - 1e-4 * t * float(g @ step) or t < 1e-6:
+                    break
+                t *= 0.5
+            done = f - f2 < 1e-10
+            w, f, g, H = w2, f2, g2, H2
+            if done:
+                break
+        self.weights = w
+
+    # scoring
+    def score(self, candidates: Sequence[Candidate], lawset: LawSet | None, buffer: Buffer, exclude=None) -> list[float]:
+        """A score per candidate (higher = check earlier); reads no rows of `buffer` (its grammar names the features of
+        atoms added after the fit)."""
+        if not candidates:
+            return []
+        if self.grammar is None or not len(self.weights):
+            return [0.0] * len(candidates)
+        for x, f in buffer.grammar.feature.items():
+            self._feat.setdefault(x, f)
+        X = np.array([self._phi(tuple(c.condition)) for c in candidates])
+        return [float(v) for v in ((X - self.mean) / self.scale) @ self.weights]
+
+
+class HandoverRanker:
+    """The prior until the buffer has rows, then the joint statistic: scores by `prior` while the candidates' action has
+    fewer than `min_rows` logged rows (without the group `exclude`; with several actions, the fewest counts), by
+    `joint` (default JointRanker()) from then on. `last`: "prior" or "joint", whichever scored the last call;
+    `scored`: a Counter of both."""
+
+    def __init__(self, prior, joint=None, min_rows: int = 20):
+        if int(min_rows) < 0:
+            raise ValueError("min_rows must be ≥ 0")
+        self.prior, self.joint, self.min_rows = prior, joint if joint is not None else JointRanker(), int(min_rows)
+        self.last: str | None = None
+        self.scored: Counter = Counter()
+
+    def rows(self, candidates: Sequence[Candidate], buffer: Buffer, exclude=None) -> int:
+        """The logged rows the hand-over counts: the fewest among the candidates' actions."""
+        actions = {_key(c.action): c.action for c in candidates}
+        return min((buffer.allowed(a, exclude).bit_count() for a in actions.values()), default=0)
+
+    def score(self, candidates: Sequence[Candidate], lawset: LawSet | None, buffer: Buffer, exclude=None) -> list[float]:
+        """A score per candidate from the prior or the joint statistic (see the class)."""
+        if not candidates:
+            return []
+        who = "joint" if self.rows(candidates, buffer, exclude) >= self.min_rows else "prior"
+        self.last = who
+        self.scored[who] += 1
+        scorer = self.joint if who == "joint" else self.prior
+        return scorer.score(candidates, lawset, buffer, exclude=exclude)
+
+
 def checks_to(order: Sequence[Candidate], condition) -> int | None:
     """Checks until `condition` in a candidate order: its position among the distinct conditions (1-based), or None."""
     seen: list = []
@@ -281,5 +517,6 @@ def checks_to(order: Sequence[Candidate], condition) -> int | None:
     return None
 
 
-__all__ = ["BagOfAtomsRanker", "FEATURES", "FeatureRanker", "JointRanker", "RankedProposer", "SyntheticTask",
-           "atom_features", "candidate_features", "checks_to", "synthetic_task"]
+__all__ = ["BagOfAtomsRanker", "FEATURES", "FeatureRanker", "HandoverRanker", "JointRanker", "PriorRanker",
+           "RankedProposer", "SyntheticTask", "atom_features", "atom_kind", "candidate_features", "checks_to",
+           "synthetic_task"]

@@ -585,6 +585,20 @@ scores and so cannot represent two atoms that matter only together; in distribut
 generators as the settings. Use it where the journal has rows; a trained scorer over the whole condition is a possible
 later extra, only if a multi-seed measurement on deep conditions shows a gain over it.
 
+**Before the journal has rows, rank by a prior; hand over to the joint statistic at about 20 rows.** `PriorRanker`
+scores a condition by its own features — its number of atoms, its atoms' kinds, each atom's prior usefulness and the
+co-occurrence of its features in true conditions — learned from synthetic tasks of your grammar (`fit(grammar, sample,
+tasks=, rows=, sizes=)`; or `fit_tasks(grammar, tasks)` on mismatches whose law you know); it reads no rows.
+`HandoverRanker(prior, JointRanker(), min_rows=20)` uses it below 20 logged rows of the action and the joint statistic
+from there on (`last` / `RankedProposer.scored_by` say which one scored): the joint statistic's gain starts at about 20
+rows (the curve above), so the hand-over point is there. **A prior only knows what the task generator favours:** on a planted grammar whose sampler
+draws three features 30 times as often, the prior needed 10.3 checks at 0 rows against 43.1 blind (a prior fitted on
+shuffled labels: 206 — worse than blind; `tests/test_laws_rank_prior.py`); on the three settings above, where the
+conditions are drawn uniformly, it needed 0.94 / 0.95 of the blind checks on the deep and the correlated setting and no
+gain on the first (98 against 96), one seed — and a Bayes-optimal prior from the exact sampler would need 0.89 / 0.85.
+So fit the prior on tasks that look like yours (the condition sizes with `sizes=`, the features your laws use), not on
+the grammar alone; where conditions are uniform over the grammar, the blind order is about as good.
+
 ## Learn composition tables by exact counting, derive by composition, refuse what the table cannot derive
 
 Where a relation between two things follows from a chain of relations between them (kinship chains: a father's sister

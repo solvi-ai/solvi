@@ -62,6 +62,17 @@ rows and is full by 300. The same law was accepted under every order in 894 of 9
 acceptance scores every candidate; six exact ties); nothing was accepted in 180 of 300 deep noisy tasks at 300 rows —
 acceptance needs more rows than ranking. The trained scorer it beats is the library's linear bag of atoms; in
 distribution only.
+Before the buffer has rows: `PriorRanker(seed).fit(grammar, sample, tasks=, rows=, sizes=)` scores a condition by its
+own features — its number of atoms, its atoms' kinds (feature, comparison type read off the name: `atom_kind`), each
+atom's prior usefulness (how often it is in the true condition when it is true in the mismatched state) and the
+co-occurrence of its features in true conditions — a linear softmax over each synthetic task's candidates; it reads no
+rows (`shuffle_labels=True` is the control). `HandoverRanker(prior, JointRanker(), min_rows=20)` scores by the prior
+below `min_rows` logged rows of the action and by the joint statistic from there on; `last` says which one scored
+(`RankedProposer.scored_by` too). The prior learns what the grammar's condition sampler favours: on a planted grammar
+whose sampler draws three features 30 times as often it needed 10.3 checks at 0 rows against 43.1 blind (the shuffled
+control 206; tests/test_laws_rank_prior.py); on the three settings above, whose conditions are drawn uniformly, 0.94 /
+0.95 of the blind checks on the deep and the correlated setting (one seed; a Bayes-optimal prior from the exact sampler
+0.89 / 0.85) and no gain on the first — a uniform grammar leaves a prior little to learn; it needs the task family.
 Measured once on a live file server (8 mismatches; candidates contradicted by logged rows skipped free): every order
 spent 29 probes in all, because 1–5 candidates per mismatch were left to probe and the true conditions were single atoms
 — the shortest hypotheses, which the length-first order meets first. Ranking can pay only where many consistent
@@ -148,13 +159,14 @@ from ._compile import CompiledCheck, check_compiled, load_module
 from ._core import (Admission, Atom, Buffer, CallableProposer, Candidate, Enumerate, Grammar, Law, LawSet, Proposer,
                     RandomProposer, Step, Transition, Undetermined, sized_level, sized_need)
 from ._probes import Probe, discriminate, split
-from ._rank import (FEATURES, BagOfAtomsRanker, FeatureRanker, JointRanker, RankedProposer, SyntheticTask,
-                    atom_features, candidate_features, checks_to, synthetic_task)
+from ._rank import (FEATURES, BagOfAtomsRanker, FeatureRanker, HandoverRanker, JointRanker, PriorRanker, RankedProposer,
+                    SyntheticTask, atom_features, atom_kind, candidate_features, checks_to, synthetic_task)
 
 warn_on_import(__name__)
 
 __all__ = ["Admission", "Atom", "BagOfAtomsRanker", "Buffer", "CallableProposer", "Candidate", "CompiledCheck", "Enumerate",
-           "FEATURES", "FeatureRanker", "Grammar", "JointRanker", "Law", "LawSet", "Probe", "Proposer", "RandomProposer",
-           "RankedProposer", "Step", "SyntheticTask", "Transition", "atom_features", "candidate_features",
+           "FEATURES", "FeatureRanker", "Grammar", "HandoverRanker", "JointRanker", "Law", "LawSet", "PriorRanker", "Probe",
+           "Proposer", "RandomProposer",
+           "RankedProposer", "Step", "SyntheticTask", "Transition", "atom_features", "atom_kind", "candidate_features",
            "check_compiled", "checks_to", "discriminate", "load_module", "sized_level", "sized_need", "split",
            "synthetic_task", "Undetermined"]

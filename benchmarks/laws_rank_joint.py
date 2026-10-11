@@ -1,10 +1,13 @@
 """Ranking candidate laws by the joint statistic of the whole condition (`JointRanker`, no training) against the blind
-order, the raw per-atom control (`FeatureRanker`), the trained bag of atoms (`BagOfAtomsRanker`) and a negative control
-(the same scorer against an effect mask whose rows are shuffled), on synthetic tasks drawn from three grammars:
+order, the raw per-atom control (`FeatureRanker`), the trained bag of atoms (`BagOfAtomsRanker`), a negative control
+(the same scorer against an effect mask whose rows are shuffled), the prior order that reads no rows (`PriorRanker`, its
+control fitted on shuffled labels) and the hand-over from the prior to the joint statistic at 20 rows
+(`HandoverRanker`), on synthetic tasks drawn from three grammars:
 
     python benchmarks/laws_rank_joint.py                  # A, B, C at seed 0, as JSON (a few minutes on a laptop CPU)
     python benchmarks/laws_rank_joint.py --settings A --tasks 20 --train 50
     python benchmarks/laws_rank_joint.py --settings B --curve     # + the rows curve: 0 / 5 / 20 / 100 / 300 rows
+    python benchmarks/laws_rank_joint.py --curve --tasks 20       # the rows curve on A, B and C
 
 A — 7 categorical features (3 values) and 3 counters (thresholds 1, 2, 3): 30 atoms, k = 3, conditions of 1–3 atoms,
     2% label noise (the grammar of tests/test_laws_rank.py).
@@ -14,10 +17,11 @@ C — correlated features: the grammar of A, but c1 copies c0, c3 copies c2 and 
 
 Per task: the candidates of `Enumerate` for the mismatch, reordered by each scorer through `RankedProposer` (the same
 set, checked), and `checks_to` the true condition — its 1-based position among the distinct conditions. The bag of atoms
-is trained on `--train` tasks of the same setting (the same condition sizes). Reported per setting and order: mean,
+and the prior are trained on `--train` tasks of the same setting (the same condition sizes). Reported per setting and order: mean,
 median, the share found first, and the distinct candidates per task. `--curve`: the same tasks with each buffer cut to
 its first 0 / 5 / 20 / 100 / 300 logged rows (the bag of atoms as trained) — a statistic over rows needs rows; with
-none every scorer gives the blind order. Deterministic for a seed."""
+none every row scorer gives the blind order, the prior does not read rows, and the hand-over is the prior below 20 rows
+and the joint statistic from 20 on. Deterministic for a seed."""
 from __future__ import annotations
 
 import argparse
@@ -32,10 +36,11 @@ import numpy as np
 
 with warnings.catch_warnings():
     warnings.simplefilter("ignore")
-    from solvi.experimental.laws import (Atom, BagOfAtomsRanker, Buffer, Enumerate, FeatureRanker, Grammar, JointRanker,
-                                         RankedProposer, atom_features, checks_to, synthetic_task)
+    from solvi.experimental.laws import (Atom, BagOfAtomsRanker, Buffer, Enumerate, FeatureRanker, Grammar,
+                                         HandoverRanker, JointRanker, PriorRanker, RankedProposer, atom_features,
+                                         checks_to, synthetic_task)
 
-ORDERS = ("blind", "feature", "bag", "joint", "joint_shuffled")
+ORDERS = ("blind", "feature", "bag", "joint", "joint_shuffled", "prior", "handover", "prior_shuffled")
 CUTS = (0, 5, 20, 100, 300)
 
 
@@ -119,8 +124,12 @@ def _cut(buffer, n: int):
 def run(name: str, seed: int = 0, tasks: int = 60, train: int = 150, rows: int = 300, curve: bool = False) -> dict:
     g, sample, noise, sizes = settings()[name]
     t0 = time.time()
+    prior = PriorRanker(seed=seed).fit(g, sample, tasks=train, rows=rows, noise=noise, sizes=sizes)
     scorers = {"feature": FeatureRanker("jaccard"), "bag": train_bag(g, sample, noise, sizes, train, seed, rows),
-               "joint": JointRanker(), "joint_shuffled": ShuffledMask(seed)}
+               "joint": JointRanker(), "joint_shuffled": ShuffledMask(seed), "prior": prior,
+               "handover": HandoverRanker(prior, JointRanker(), min_rows=20),
+               "prior_shuffled": PriorRanker(seed=seed, shuffle_labels=True).fit(g, sample, tasks=train, rows=rows,
+                                                                               noise=noise, sizes=sizes)}
     rng = random.Random(10_000 + seed)
     got = {o: [] for o in ORDERS}
     cut = {n: {o: [] for o in ORDERS} for n in CUTS} if curve else {}
