@@ -4,6 +4,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from ._certificate import Certificate, EProcess
+from ._footprint import Footprint, Vocabulary, in_domain, unify, variables
 from ._model import Plan, _plain, state_key
 
 MAX_COUNTEREXAMPLES = 32
@@ -19,7 +20,15 @@ class Skill:
     compiled from); certificate: its own EProcess (None without a certificate). status: "active" or "retired" (its
     alarm fired: not used alone until its own process certifies again). start / simulation: the first plan's start key
     and simulation hash; starts: the start keys of every plan merged into it; counterexamples: the atoms of states
-    where it failed (a generalisation never covers one)."""
+    where it failed (a generalization never covers one).
+
+    A skill generalized on the exact copy (`SkillLearner(lift="lattice")`) also carries: footprint — the accepted
+    footprint (a solvi.experimental.skills Footprint; its atoms may hold variables) that must hold, besides `condition`,
+    for it to match; template / goal_template — the plan and goal under the same variables (the actions it runs are
+    the template grounded by the first binding the footprint finds in the state); original — the verified plan's own
+    ground footprint (and its old condition); verified — the verification states the accepted footprint passed;
+    generalization — the lattice record (every candidate tried, the verification states, the checks). A skill whose
+    lattice found nothing keeps footprint None and the record."""
     condition: tuple
     actions: tuple
     goal: str
@@ -34,6 +43,17 @@ class Skill:
     simulation: str = ""
     starts: list = field(default_factory=list)
     counterexamples: list = field(default_factory=list)
+    footprint: Footprint | None = None
+    template: tuple | None = None
+    goal_template: object = None
+    original: list = field(default_factory=list)
+    verified: int = 0
+    generalization: dict | None = None
+
+    @property
+    def variables(self) -> tuple:
+        """The variables of its footprint (empty for a skill with constants only)."""
+        return self.footprint.variables if self.footprint is not None else ()
 
     def __post_init__(self):
         self.condition = tuple(sorted(self.condition))
@@ -47,6 +67,10 @@ class Skill:
                 "source": self.source, "support": self.support, "status": self.status, "why": self.why,
                 "outcomes": dict(self.outcomes), "start": self.start, "simulation": self.simulation,
                 "starts": len(self.starts), "counterexamples": len(self.counterexamples),
+                "footprint": str(self.footprint) if self.footprint is not None else None,
+                "template": [_plain(a) for a in self.template] if self.template is not None else None,
+                "variables": [repr(v) for v in self.variables], "original": list(self.original),
+                "verified": self.verified,
                 "certificate": self.certificate.to_dict() if self.certificate is not None else None}
 
     def __repr__(self):
@@ -72,10 +96,15 @@ class SkillSet:
     No abstention between skills: two certified skills of one goal are both verified plans, and a different action
     sequence is not a disagreement about the world (laws abstain where they predict different outcomes:
     `LawSet.predict(..., disagree="abstain")`). A skill set could abstain only on conflicting predicted end states
-    for the same goal, which skills do not carry; `match` stays most specific first."""
+    for the same goal, which skills do not carry; `match` stays most specific first.
+
+    vocabulary: the world's relations (a Vocabulary) for skills with a footprint (generalized on the exact copy): such a
+    skill matches when its condition holds and its footprint finds a binding in the state (its goal template unified
+    with the goal first); it runs its template grounded by that binding (`actions_for`). It is never widened by the
+    condition rule; a verified plan it already covers (same goal, same ground actions) adds support only."""
 
     def __init__(self, grammar=None, certificate: Certificate | None | bool = True, *, generalize: bool = True,
-                 key=None):
+                 key=None, vocabulary: Vocabulary | None = None):
         if certificate is True:
             certificate = Certificate()
         if certificate is False:
@@ -84,6 +113,7 @@ class SkillSet:
             raise TypeError("certificate= takes a Certificate (or None: no certificate, a control)")
         self.grammar, self.certificate, self.generalize = grammar, certificate, bool(generalize)
         self.key = key or state_key
+        self.vocabulary = vocabulary
         self.skills: list[Skill] = []
         self.pools: dict[str, EProcess] = {}
         self._items: dict[str, str] = {}             # skill id → its current knowledge item id
@@ -96,12 +126,49 @@ class SkillSet:
             return frozenset({"key=" + self.key(state)})
         return frozenset(self.grammar.true(state, None))
 
+    def binding(self, skill: Skill, state, goal) -> dict | None:
+        """The binding under which a skill with a footprint applies to `goal` in `state` ({} for a skill with constants
+        only when its goal is `goal`), or None. Its condition is not read here."""
+        if skill.footprint is None:
+            return {} if skill.goal == goal else None
+        voc = self.vocabulary
+        if voc is None:
+            raise ValueError("a skill with a footprint needs the SkillSet's vocabulary")
+        gt = skill.goal_template if skill.goal_template is not None else voc.goal(skill.goal)
+        b = unify(gt, voc.goal(goal))
+        if b is None or not in_domain(voc, b, state):
+            return None                               # a goal outside the variables' domains is not this skill's
+        b = skill.footprint.match(voc, state, b)
+        if b is None or any(v not in b for v in variables(skill.template or ())):
+            return None
+        return b
+
+    def actions_for(self, skill: Skill, state, goal) -> tuple | None:
+        """The actions a skill runs for `goal` in `state`: its sequence, or its template grounded by the first binding
+        of its footprint (None when it does not apply)."""
+        if skill.footprint is None:
+            return skill.actions if skill.goal == goal else None
+        b = self.binding(skill, state, goal)
+        if b is None:
+            return None
+        voc = self.vocabulary
+        assert voc is not None
+        return tuple(voc.act(voc.ground(a, b)) for a in (skill.template or ()))
+
     def candidates(self, state, goal, *, atoms=None) -> list[Skill]:
-        """The skills of `goal` whose condition holds in `state` (active and retired), most specific first (more atoms;
-        ties: the earlier skill)."""
+        """The skills of `goal` whose condition holds in `state` (active and retired), most specific first (more atoms,
+        a footprint's atoms counted; ties: the earlier skill). A skill with a footprint must also find a binding."""
         at = self.atoms(state) if atoms is None else atoms
-        out = [s for s in self.skills if s.goal == goal and at.issuperset(s.condition)]
-        return sorted(out, key=lambda s: -len(s.condition))
+        out = []
+        for s in self.skills:
+            if not at.issuperset(s.condition):
+                continue
+            if s.footprint is None:
+                if s.goal == goal:
+                    out.append(s)
+            elif self.binding(s, state, goal) is not None:
+                out.append(s)
+        return sorted(out, key=lambda s: -(len(s.condition) + (len(s.footprint) if s.footprint is not None else 0)))
 
     def pool(self, skill) -> EProcess | None:
         """The process whose certification a skill acts on (its own under scope "skill")."""
@@ -148,10 +215,20 @@ class SkillSet:
         at = self.atoms(state)
         acts = tuple(plan.actions)
         k = self.key(state)
+        if self.vocabulary is not None:
+            for s in self.skills:
+                if s.footprint is None or s.source != source or s.status != "active":
+                    continue
+                if at.issuperset(s.condition) and self.actions_for(s, state, goal) == acts:
+                    s.support += 1                    # already covered by a generalized skill
+                    s.starts.append(k)
+                    return s
         if self.generalize and self.grammar is not None:
             for s in self.skills:
                 if s.goal != goal or s.actions != acts or s.source != source or s.status != "active":
                     continue
+                if s.footprint is not None:
+                    continue                          # a generalized skill is never widened by the condition rule
                 new = tuple(sorted(at.intersection(s.condition)))
                 if any(set(cx).issuperset(new) for cx in s.counterexamples):
                     continue                          # it would cover a state where this skill failed
@@ -218,6 +295,10 @@ class SkillSet:
             if s.source != "verified":
                 continue
             body = {"kind": "plan", "goal": s.goal, "if": list(s.condition), "do": [_plain(a) for a in s.actions]}
+            if s.footprint is not None:
+                body["footprint"] = s.footprint.to_list()
+                body["do"] = [_plain(a) for a in (s.template or ())]
+                body["goal_template"] = _plain(s.goal_template)
             iid = item_id("skill", plain_json(body), sc)
             prev = self._items.get(s.id)
             if prev is not None and prev != iid and store.status(prev) == "active":
@@ -228,6 +309,8 @@ class SkillSet:
                       "simulation": s.simulation, "starts": len(s.starts), "support": s.support,
                       "outcomes": dict(s.outcomes),
                       "certificate": s.certificate.to_dict() if s.certificate is not None else None}
+                if s.generalization is not None:
+                    ev.update(original=list(s.original), verified=s.verified, generalization=s.generalization)
                 got = store.add("skill", body, sc, source="outcome", by="skills", evidence=ev)
                 if got is None:
                     continue

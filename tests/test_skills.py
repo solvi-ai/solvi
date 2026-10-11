@@ -189,7 +189,7 @@ def compiled(skills, env, seed, goal=at_goal, name="door"):
     return skills.compile(name, p, s), s
 
 
-def test_condition_generalisation_keeps_the_atoms_every_verified_start_shares():
+def test_condition_generalization_keeps_the_atoms_every_verified_start_shares():
     env = Corridor()
     ks = SkillSet(grammar(), certificate=Certificate(0.5, 0.5))
     a, s0 = compiled(ks, env, 0)
@@ -201,7 +201,7 @@ def test_condition_generalisation_keeps_the_atoms_every_verified_start_shares():
     assert ks.candidates({"pos": 1, "colour": 2}, "door") == []       # not where no verified plan started
 
 
-def test_a_recorded_failure_blocks_a_generalisation_that_would_cover_it():
+def test_a_recorded_failure_blocks_a_generalization_that_would_cover_it():
     env = Corridor()
     ks = SkillSet(grammar(), certificate=Certificate(0.5, 0.5))
     a, _ = compiled(ks, env, 0)
@@ -318,7 +318,7 @@ def test_the_learner_plans_compiles_supervises_then_acts_alone():
     e1, e2, e3, e4, e5 = eps
     assert e1["s2"] == 3 and e1["s1"] == 0 and e1["planner_calls"] == 1 and e1["compiled"] == 1
     assert e1["goals"] == ["door"] and e1["simulated"] > 0
-    assert e2["planner_calls"] == 1 and len(L.skills.skills) == 1          # the same plan: generalised, not a new skill
+    assert e2["planner_calls"] == 1 and len(L.skills.skills) == 1          # the same plan: generalized, not a new skill
     assert e3["planner_calls"] == 0 and e3["supervised"] == 1 and e3["s2"] == 3   # under supervision: System 2's
     assert e4["supervised"] == 1
     assert e5["s1"] == 3 and e5["s1_share"] == 1.0 and e5["planner_calls"] == 0 and e5["alone_runs"] == 1

@@ -161,7 +161,9 @@ STATUS: dict[str, dict] = {
                "copy of the environment), only plans the code verified are compiled into System 1 skills with "
                "conditions over a grammar of atoms, each used alone only while its outcomes keep an anytime-valid "
                "certificate; a search-cost record per episode; the "
-               "planner as System 2 of solvi.Agent; export into the knowledge store", "missing":
+               "planner as System 2 of solvi.Agent; export into the knowledge store; footprints with variables "
+               "generalized on the exact copy (1.1.1: lift='lattice', a wider footprint kept only when the plan "
+               "instantiated on verification states reaches its goal on the copy)", "missing":
                "on a deterministic gridworld (20 fresh layouts, five seeds) System 1's share reached 0.81 in the "
                "last five episodes with every goal reached, as when System 2 plans every goal, and 1.5% of System "
                "1's decisions were in failed runs under a 20% promise pooled over the skills, while replayed cases "
@@ -195,7 +197,8 @@ STATUS: dict[str, dict] = {
                "is the planner's with the full map. The planner reads the whole map of the copy; a Crafter agent "
                "sees a 9×7 window from pixels. No number here is comparable with published Crafter scores (a "
                "geometric mean of success rates over 1M training steps). Still missing: hierarchical skills, "
-               "footprints with variables, a world where observation is expensive, a service with a specification, a "
+               "footprints with variables measured in an open world (built in 1.1.1, tested on a small grid only), "
+               "a world where observation is expensive, a service with a specification, a "
                "condition rule that specialises after a failure, and a planner with a heuristic; the search-cost "
                "record is tested on a synthetic corridor only, and skills are not admitted by discriminating probes "
                "(laws are: LawSet.admit_by_probes)",

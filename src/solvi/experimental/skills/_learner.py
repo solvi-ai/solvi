@@ -3,15 +3,19 @@ from __future__ import annotations
 
 import hashlib
 import json
+import random
 
 from ...core.dispatch import SlowPath, Thought
 from ._certificate import Certificate
-from ._model import ExactModel, Plan, _plain, plan, verify
-from ._skills import SkillSet
+from ._footprint import Footprint, Generalization, Vocabulary, generalize as _generalize, replay as _replay
+from ._model import ExactModel, Plan, _plain, plan, simulation_hash, verify
+from ._skills import Skill, SkillSet
+
+GENERALISE_ATTEMPTS = 3                      # lattice runs per skill while its candidates lack verification states
 
 _EPISODE = ("steps", "s1", "s2", "fallback", "planner_calls", "plans_found", "plans_rejected", "compiled", "supervised",
             "supervised_failed", "alone_runs", "alone_failures", "s1_failed", "mismatch", "guard_violations", "searched",
-            "verify_calls")
+            "verify_calls", "generalized", "generalize_accepted", "generalize_checks")
 
 
 def _cost(rec):
@@ -45,6 +49,22 @@ class SkillLearner:
     generalize: the condition rule's merge. guard: check after every planner and verify call that the real
     environment's hash did not change (a RuntimeError if it did). seed: the fallback's tie-breaks.
 
+    Footprints with variables. `lift="lattice"` (default False: the condition rule only, as before) with
+    `vocabulary=` (a Vocabulary: the world's relations and what a plan read): every newly compiled skill is generalized
+    on the exact copy — the lattice above its plan's footprint (the vocabulary's lifts: constants to variables, a
+    relation widened; atoms dropped; its old grammar condition kept or dropped as a block), most general first, at most
+    `max_candidates`; a candidate is accepted only when the plan, instantiated for every verification state that
+    matches the candidate but not the original, reaches its goal on a fresh copy of that state — up to `verify_n`
+    states (at least `verify_min`, default verify_n // 2), alternating the stream's recorded states (a reservoir of
+    `pool_size` (state, copy of the environment) pairs taken at choice points) and `perturb(copy, state, rng,
+    candidate)` → [(state, copy)] (the world's edits; None: recorded states only); a dropped atom (or the dropped old
+    condition) must be false in at least `drop_witness` (default 2) of the passing cases. The most general passing
+    candidate becomes the skill's footprint; the skill records the original footprint and the verification count;
+    `replay(skill)` re-runs its verification states. A skill whose lattice found no candidate refuted but too few
+    verification states or witnesses is tried again (from the new plan's start) when a later verified plan merges into
+    it, at most three runs. The certificate is unchanged. Per episode: generalized, generalize_accepted,
+    generalize_checks.
+
     Per step (`act(state)` → an action; the caller steps the environment and calls `observe(outcome)`; `run(seed,
     steps)` does both): a skill run in progress takes its next action; else, for the first open goal, System 1 runs
     the most specific matching skill whose certificate holds, alone; else the most specific matching skill is
@@ -66,7 +86,9 @@ class SkillLearner:
     def __init__(self, env, grammar, goals, *, planner=plan, horizon: int = 12, budget: int = 20_000,
                  promise: float = 0.05, delta: float = 0.1, certificate=None, actions=None, cost=None, key=None,
                  clone=None, verify_plans: bool = True, learn: bool = True, generalize: bool = True,
-                 guard: bool = True, seed: int = 0):
+                 guard: bool = True, seed: int = 0, lift: bool | str = False,
+                 vocabulary: Vocabulary | None = None, verify_n: int = 16, verify_min: int | None = None,
+                 perturb=None, pool_size: int = 64, max_candidates: int = 12, drop_witness: int = 2):
         self.env = env
         self.model = ExactModel(env, clone=clone, key=key)
         self.goals = _goals(goals)
@@ -77,7 +99,23 @@ class SkillLearner:
             certificate = None
         elif not isinstance(certificate, Certificate):
             raise TypeError("certificate= takes a Certificate, or False (none: a control)")
-        self.skills = SkillSet(grammar, certificate, generalize=generalize, key=self.model.key)
+        if lift not in (False, None, "lattice"):
+            raise ValueError("lift= takes False (the condition rule only) or 'lattice'")
+        self.lift = "lattice" if lift == "lattice" else False
+        if self.lift and not isinstance(vocabulary, Vocabulary):
+            raise ValueError("lift='lattice' needs vocabulary= (a Vocabulary: the world's relations)")
+        if int(verify_n) < 1 or int(pool_size) < 0:
+            raise ValueError("verify_n ≥ 1 and pool_size ≥ 0")
+        self.vocabulary = vocabulary
+        self.verify_n, self.verify_min = int(verify_n), verify_min
+        self.perturb, self.pool_size, self.max_candidates = perturb, int(pool_size), int(max_candidates)
+        self.drop_witness = int(drop_witness)
+        self._pool: list = []
+        self._pool_seen = 0
+        self._pool_rng = random.Random(f"pool|{seed}")
+        self._gens: dict[str, Generalization] = {}
+        self.skills = SkillSet(grammar, certificate, generalize=generalize, key=self.model.key,
+                               vocabulary=vocabulary if self.lift else None)
         self.planner, self.horizon, self.budget = planner, int(horizon), int(budget)
         self.actions, self.cost = actions, cost
         self.verify_plans, self.learn, self.guard, self.seed = bool(verify_plans), bool(learn), bool(guard), int(seed)
@@ -194,20 +232,23 @@ class SkillLearner:
             return None
         fn = self._goal_fn[g]
         run = None
+        if self.learn and self.lift:
+            self._record(state)
         if self.learn:
             atoms = self.skills.atoms(state)
             sk = self.skills.match(state, g, atoms=atoms)
             if sk is not None:
-                run = self._start(sk.actions, g, "s1", sk, "alone", state)
+                run = self._start(self.skills.actions_for(sk, state, g) or sk.actions, g, "s1", sk, "alone", state)
             elif self.skills.certificate is not None:
                 cands = self.skills.candidates(state, g, atoms=atoms)
                 if cands:
                     top = cands[0]
-                    chk = self._verify(state, Plan(top.actions, goal=fn), fn)
+                    acts = self.skills.actions_for(top, state, g) or top.actions
+                    chk = self._verify(state, Plan(acts, goal=fn), fn)
                     self.skills.observe(top, chk.ok, alone=False, state=state)
                     self._count("supervised")
                     if chk.ok:
-                        run = self._start(top.actions, g, "s2", top, "supervised", state)
+                        run = self._start(acts, g, "s2", top, "supervised", state)
                     else:
                         self._count("supervised_failed")
         if run is None:
@@ -221,6 +262,12 @@ class SkillLearner:
                     n0 = len(self.skills.skills)
                     sk = self.skills.compile(g, p, state, verified=self.verify_plans)
                     self._count("compiled", len(self.skills.skills) - n0)
+                    if self.lift and sk.source == "verified":
+                        rec = sk.generalization
+                        if len(self.skills.skills) > n0 or (
+                                sk.footprint is None and rec is not None and rec.get("short")
+                                and rec.get("attempt", 1) < GENERALISE_ATTEMPTS):
+                            self._generalize_skill(sk, p, state, g)
                 run = self._start(p.actions, g, "s2", sk, "planned", state)
         if run is None:
             a = self._fallback(state)
@@ -229,6 +276,85 @@ class SkillLearner:
                 return None
             return self._take(a, None, g)
         return self._take(run["actions"][0], run)
+
+    # --- footprints with variables (lift="lattice")
+    def _record(self, state):
+        """A reservoir of the stream's states (with a copy of the environment at each) for verification."""
+        if self.pool_size <= 0:
+            return
+        n = self._pool_seen
+        self._pool_seen += 1
+        if len(self._pool) < self.pool_size:
+            self._pool.append((state, self.model.fork(state)))
+            return
+        j = self._pool_rng.randrange(n + 1)
+        if j < self.pool_size:
+            self._pool[j] = (state, self.model.fork(state))
+
+    def _check_on(self, world, state, actions, goal):
+        """The ground plan on a fresh copy of `world` (at `state`) → (reached its goal, the simulation's hash): every
+        step accepted until the goal holds; the episode must not end first."""
+        fn = self._goal_fn.get(goal)
+        key = self.model.key
+        start = key(state)
+        if fn is None:
+            return False, simulation_hash(start, [])
+        w = self.model.copy(world, state)
+        trace = []
+        st = state
+        for a in actions:
+            out = self.model.step(w, a)
+            trace.append((a, bool(out.accepted), key(out.state) if out.accepted else key(st)))
+            if not out.accepted:
+                return False, simulation_hash(start, trace)
+            st = out.state
+            if fn(st):
+                return True, simulation_hash(start, trace)
+            if out.done:
+                return False, simulation_hash(start, trace)
+        return False, simulation_hash(start, trace)
+
+    def _generalize_skill(self, sk: Skill, p: Plan, state, goal):
+        voc = self.vocabulary
+        assert voc is not None
+        core = tuple(voc.footprint(state, p.actions, p.predicted))
+        cond = frozenset(sk.condition)
+        orig = Footprint(core)
+
+        def original(s, g):
+            return g == goal and cond <= self.skills.atoms(s) and orig.match(voc, s) is not None
+
+        def context_holds(s, acts):
+            return cond <= self.skills.atoms(s)
+
+        gen = self._guarded(
+            _generalize, core, p.actions, goal, voc, pool=list(self._pool), check=self._check_on, original=original,
+            context_holds=context_holds if cond else None, perturb=self.perturb,
+            start=(state, self.model.fork(state)), goals=lambda g: g in self._goal_fn, verify_n=self.verify_n,
+            drop_witness=self.drop_witness, verify_min=self.verify_min,
+            max_candidates=self.max_candidates, seed=f"{self.seed}|{sk.id}", key=self.model.key)
+        self._count("generalized")
+        self._count("generalize_checks", gen.checks)
+        attempt = (sk.generalization or {}).get("attempt", 0) + 1
+        if not sk.original:
+            sk.original = orig.to_list() + [["condition", sorted(cond)]]
+        sk.generalization = dict(gen.to_dict(), attempt=attempt)
+        if gen.accepted:
+            self._count("generalize_accepted")
+            sk.footprint, sk.template, sk.goal_template = gen.footprint, tuple(gen.actions), gen.goal
+            if not gen.context:
+                sk.condition = ()
+            sk.verified = gen.verified
+            self._gens[sk.id] = gen
+        return gen
+
+    def replay(self, skill: Skill) -> dict:
+        """Re-run a generalized skill's verification states on fresh copies of their recorded worlds → {"states",
+        "same", "differ"} (a state differs when its check fails now or its simulation hash changed)."""
+        gen = self._gens.get(skill.id)
+        if gen is None:
+            return {"states": 0, "same": 0, "differ": []}
+        return self._guarded(_replay, gen, self._check_on)
 
     def _start(self, actions, goal, by, skill, kind, state):
         self._runs += 1
