@@ -481,7 +481,8 @@ answered 137 of 137 hand-overs and was refused, while 12 exact corrections passe
 3. Put accepted rules into the library as new terminals, so composites become small programs.
 4. Use a gradient-trained learner only when the enumeration budget runs out or the labels are noisy, and only as a
    proposer whose program is then checked like any other candidate (`proposer=`).
-5. Rank candidates with a learned or feature ranker only when a check is expensive (`RankedProposer`).
+5. Rank candidates only when a check is expensive (`RankedProposer`): by the joint statistic of the whole condition
+   first (`JointRanker`, no training), a learned ranker only after it.
 
 On two toys ([relations_library_toy.py](../benchmarks/relations_library_toy.py), five seeds each) the library found
 every level — a path tree's "denied if an ancestor directory is named secret and the depth is at least 3" (three levels)
@@ -518,6 +519,21 @@ server (8 mismatches; candidates contradicted by logged rows skipped free): ever
 1–5 candidates per mismatch were left to probe and the true conditions were single atoms — the shortest hypotheses,
 which the length-first order meets first. Ranking can pay only where many consistent hypotheses remain after the free
 checks; the control first.
+
+**Rank by the joint statistic of the whole condition.** `JointRanker` ranks candidate conditions by the joint statistic
+of the whole condition over the logged rows — the Jaccard between the rows the whole condition matches and the rows
+where its effect predicts right, equal Jaccard → fewer atoms — with no training. A per-atom scorer (the raw
+`FeatureRanker`, the trained `BagOfAtomsRanker`) adds atom scores, so it cannot see two atoms that pick out the effect
+only together, or a correlated twin of a true atom. On three synthetic settings at one seed (60 tasks each,
+[laws_rank_joint.py](../benchmarks/laws_rank_joint.py)): on the grammar above 1.00 checks to the true condition against
+96.3 blind, 30.7 for the raw Jaccard and 1.68 for the trained bag of atoms; on deep conditions (3–5 atoms of k = 5,
+5,598 candidates per task, 5% label noise) 9.08 (median 1.5) against 2,174 / 1,303 / 693; on correlated features (three
+pairs copied with probability 0.8) 1.05 against 129 / 43.7 / 10.2. A control scoring against the effect's rows
+shuffled stayed at the blind order's level (97.8 / 2,109 / 166). It is a statistic over the logged rows: with no rows it
+is the blind order, and on the deep setting it needed 2,075 checks at 5 rows, 1,920 at 20, 650 (median 11.5) at 100
+and 9.08 at 300 (`--curve`). Use it where the journal has rows; a trained scorer over the whole condition is a possible
+later extra, only if a multi-seed measurement on deep conditions shows a gain over it. One seed: a five-seed
+measurement is pending.
 
 ## Learn composition tables by exact counting, derive by composition, refuse what the table cannot derive
 
