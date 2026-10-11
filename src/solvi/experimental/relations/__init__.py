@@ -102,6 +102,18 @@ derived relations of one pair are a dispute, a retracted premise takes its conse
 answered dispute makes them facts without a re-run; `explain(store, id)` reads the derivation back (`ChainReport`,
 `Explanation`, `ChainLimit`). Measured by benchmarks/relations_chain.py.
 
+Residual synthesis (`synthesize_residual(examples, target, depth=, budget=, test=, name=)`): the shortest chain program
+found top-down from the target — X = A ∘ Y gives Y's bounds through the residual ¬(Aᵀ ∘ ¬Up) and the single-witness
+pairs, X = Y ∖ I drops the diagonal, a step without a witness is pruned — checked exactly by `evaluate`, on `check=`
+worlds and by a HeldOut; `ResidualFound` (program, steps, seconds, atoms, stopped, rejected). `synthesize(...,
+method="residual-first")` runs it before the enumerator. Measured by benchmarks/relations_residual.py.
+
+Why not derived (`why_not(table, facts, x, y, relation)`): over every path x → y through the pair facts, why the table
+does not derive the relation — a missing cell r1 ∘ r2 → ? ranked by the paths it would unblock (`Gap`), a dispute,
+another relation, or no path (a missing fact); `Derivation.missing` carries the blocking cells of every underivable
+refusal, `WhyNot.to_agenda(agenda, table)` makes each gap a goal done when the table has the cell, and
+`first_missing_step` names the first underived step of a reference derivation.
+
 What is not done:
 - the enumeration grows as (terminals × operators)^size: with the twenty-odd relations of a grid window, programs of
   four or five nodes are the practical depth, and the behaviour cap bounds memory;
@@ -113,6 +125,8 @@ What is not done:
   concepts; library entries are never retired, and every entry makes the rules it does not help dearer;
 - forward chaining: composition of two relations over pair facts only (no general rules, negation or
   aggregation); a learned identity relation is chained as an ordinary relation;
+- residual synthesis: chains only (atoms, converses, ∖ I on segments) — no union, intersection, closure or counts,
+  and two masked segments side by side only through a library entry;
 - composition tables: one relation per cell; a cell that depends on something the chain does not carry (a gender)
   stays below the majority and its chains are refused, not split by that attribute;
 - the compiled atom of a state's graph allows complements (its domain, the window or the path's chain, is bounded);
@@ -129,17 +143,20 @@ from ._compile import (BACKENDS, RUNTIME, RUNTIME_ARRAYS, DenseAnswer, ProgramCh
                        compile_program, from_keys, to_keys)
 from ._enumerate import (Entry, Enumerator, Found, Library, Program, Score, Scored, enumerate_programs, lower_bound,
                          rank, score, synthesize, top_programs)
+from ._residual import ResidualFound, synthesize_residual
 from ._table import Cell, CompositionTable, Derivation, base_rates, sized_admit
+from ._why_not import Gap, WhyNot, first_missing_step, rule_schema, why_not
 from .library import HeldOut, RuleProposer, Rules, TargetRecord, find_rules
 
 warn_on_import(__name__)
 
 __all__ = ["BACKENDS", "BINARY", "CREATURES", "Cell", "ChainLimit", "ChainReport", "CompositionTable", "DenseAnswer",
-           "Derivation", "Egocentric", "Entry", "Enumerator", "Explanation", "Found", "HeldOut", "Library",
+           "Derivation", "Egocentric", "Entry", "Enumerator", "Explanation", "Found", "Gap", "HeldOut", "Library",
            "MATERIALS", "OPS", "PATHS", "PROPOSER_OPS", "PathTree", "Program", "ProgramCheck", "RUNTIME",
-           "RUNTIME_ARRAYS", "RelAlgProposer", "Relations", "RuleProposer", "Rules", "Score", "Scored", "TargetRecord",
-           "UNARY", "base_rates", "check_program", "closure", "compile_ast", "compile_program", "complement",
-           "compose", "converse", "count_at_least", "encode", "encode_paths", "enumerate_programs", "evaluate",
-           "explain", "find_rules", "forward_chain", "from_keys", "intersect", "lower_bound", "minus", "pair_fact",
-           "rank", "readout", "relational_atom", "score", "show", "size", "sized_admit", "synthesize", "to_keys",
-           "top_programs", "union", "xor"]
+           "RUNTIME_ARRAYS", "RelAlgProposer", "Relations", "ResidualFound", "RuleProposer", "Rules", "Score",
+           "Scored", "TargetRecord", "UNARY", "WhyNot", "base_rates", "check_program", "closure", "compile_ast",
+           "compile_program", "complement", "compose", "converse", "count_at_least", "encode", "encode_paths",
+           "enumerate_programs", "evaluate", "explain", "find_rules", "first_missing_step", "forward_chain",
+           "from_keys", "intersect", "lower_bound", "minus", "pair_fact", "rank", "readout", "relational_atom",
+           "rule_schema", "score", "show", "size", "sized_admit", "synthesize", "synthesize_residual", "to_keys",
+           "top_programs", "union", "why_not", "xor"]
