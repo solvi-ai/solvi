@@ -1552,6 +1552,10 @@ team.fit(labelled)                       # [(input, correct)], e.g. 16–64 exam
 system.teach("team", {"email": text}, "billing")   # one correction, absorbed at once
 ```
 
+An adaptation (and a LoRA adapter) belongs to its part: two parts asking the same task and options on one model —
+the folds of a cross-validation — each keep their own, and a part that has none is scored by the base model, not by
+the other part's fit (a `SharedQuestionWarning` names both, once).
+
 A decider likes some labels whatever the text. `adapt` estimates that preference on unlabelled inputs of your domain: for
 each option, the mean logit over the inputs (centered over the options) is subtracted before the softmax / sigmoid. No
 labels are needed (solvi-base's and solvi-large's model cards give its effect on Fast Decisions as "Zc").

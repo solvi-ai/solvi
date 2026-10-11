@@ -493,3 +493,73 @@ def test_decision_alone_is_a_value_that_was_not_escalated():
     q = part.question(cat)
     res = System(cat, [q]).ask({"email": "I was charged twice, please refund order 3."})
     assert res["team"].answer is None and res["team"].status == "abstain" and not hasattr(res, "answers")
+
+
+def test_two_parts_asking_the_same_question_keep_their_own_fit():
+    """The fit / adapt / teach of one part was kept by the question's text, so a second part asking the same task and
+    options (another fold of a cross-validation) decided with it. Each part keeps its own now: the second part's
+    probabilities are the base's until its own fit, a SharedQuestionWarning names both parts, and the first part's
+    adaptation is untouched by the second's fit and reset."""
+    import warnings
+
+    from solvi.core.deciders import SharedQuestionWarning
+    m = model(bias={"billing": 1.5})
+    f0 = m.decision("close_f0", TASK, "email", TEAMS)
+    f1 = m.decision("close_f1", TASK, "email", TEAMS)
+    probe = texts("technical", 5) + texts("billing", 5, 100)
+    base = [f1.decide(t).probs for t in probe]
+    fp1, mfp = f1.fingerprint(), m.fingerprint()
+    ex = [(t, "technical") for t in texts("technical", 30)] + [(t, "billing") for t in texts("billing", 30, 200)]
+    f0.fit(ex)
+    assert f0.adaptation is not None and f1.adaptation is None and f1.fingerprint() == fp1
+    with warnings.catch_warnings(record=True) as w:
+        warnings.simplefilter("always")
+        assert [f1.decide(t).probs for t in probe] == base          # not close_f0's fit
+    said = [str(x.message) for x in w if issubclass(x.category, SharedQuestionWarning)]
+    assert len(said) == 1 and "'close_f0'" in said[0] and "'close_f1'" in said[0]
+    assert [f0.decide(t).probs for t in probe] != base
+    a0, fp0, mfp0 = f0.adaptation.params(), f0.fingerprint(), m.fingerprint()
+    assert mfp0 != mfp
+    f1.fit(ex[:20])                                              # its own entry
+    f1.teach(probe[0], "technical")
+    assert f1.adaptation is not None and f1.adaptation is not f0.adaptation
+    assert f0.adaptation.params() == a0 and f0.fingerprint() == fp0 and f1.fingerprint() != fp1
+    assert m.fingerprint() != mfp0                               # a second part's entry: the model's fingerprint moves
+    f1.reset()
+    assert f1.adaptation is None and f0.adaptation.params() == a0
+    # the model asked directly reads the question's (first part's) adaptation, as before
+    assert m.adaptation(TASK, sorted(TEAMS)) is f0.adaptation
+
+
+def test_a_journal_with_1_1_0_adaptation_keys_verifies_and_replays(tmp_path):
+    """tests/fixtures/fit_1_1_0 was written with the adaptation keyed by the question alone (1.1.0): with one part per
+    question the keys, the fingerprints and the replay are unchanged."""
+    import shutil
+    import sys
+
+    from solvi.core.store import JSONLStorage
+    data = Path(__file__).parent / "fixtures" / "fit_1_1_0"
+    sys.path.insert(0, str(data))
+    try:
+        import task as fit_task
+        fp = json.loads((data / "fingerprints.json").read_text())
+        part = fit_task.fitted_part()
+        assert part.model.fingerprint() == fp["model"] and part.fingerprint() == fp["part"]
+        assert list(part.model.adaptations) == [part.spec.key]          # the 1.1.0 key
+        system = fit_task.system()
+        assert system.fingerprint() == fp["system"]
+        for f in data.glob("decisions.*"):
+            shutil.copy(f, tmp_path / f.name)
+        store = JSONLStorage(str(tmp_path / "decisions.jsonl"))
+        store.catalog = system
+        v = store.verify()
+        assert v["ok"] and not v["problems"]
+        assert store.replay_all(system) == []
+        for s, st in zip(store.iter(), fit_task.STATES):
+            old = store.get(s.id, system)
+            assert old.trace.replay(system)["ok"]
+            assert old["category"].answer == system.ask(st, store=False)["category"].answer
+        store.close()
+    finally:
+        sys.path.remove(str(data))
+        sys.modules.pop("task", None)

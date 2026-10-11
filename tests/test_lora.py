@@ -403,3 +403,22 @@ def test_solvi_no_compile_loads_the_encoder_without_torch_compile(ckpt, monkeypa
     m = DecideModel.load(ckpt, backend="torch", device="cpu")
     assert m.decision("t", "Which team?", "email", TEAMS).decide("my invoice").value in TEAMS
     assert torch.compile is refuse                                # restored after the load
+
+
+def test_adapt_lora_clears_only_its_own_parts_adaptation(ckpt):
+    """adapt_lora forgets what was fitted on the model without its adapter — its own part's fit, never another part's
+    asking the same question."""
+    m = DecideModel.load(ckpt, backend="torch", device="cpu")
+    f0 = m.decision("close_f0", "Which team?", "email", TEAMS)
+    f1 = m.decision("close_f1", "Which team?", "email", TEAMS)
+    f0.fit(_toy(40, 1))
+    f1.fit(_toy(40, 2))
+    a0, a1 = f0.adaptation.params(), f1.adaptation.params()
+    rep, _ = _adapt(f1, _toy(60, 3))
+    assert "adaptation" in rep["cleared"] and f1.adaptation is None and f0.adaptation.params() == a0
+    remove_lora(f1)                                              # the rollback restores f1's own
+    assert f1.adaptation.params() == a1 and f0.adaptation.params() == a0
+    _adapt(f0, _toy(60, 3))
+    assert f0.adaptation is None and f1.adaptation.params() == a1
+    remove_lora(f0)
+    assert f0.adaptation.params() == a0

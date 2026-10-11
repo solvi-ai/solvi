@@ -13,6 +13,13 @@
   loaded by two parts survives one part's rollback. A question asked of the model directly (`model.logits`,
   `model.decide`) still uses the question's adapter when exactly one part has one; the model's fingerprint is as
   before while one part per question has an adapter.
+- **`fit`, `adapt` and `teach` belong to their decision part too.** A part's adaptation was kept by the question's
+  text as well, so a second part asking the same question decided with the first part's fit. The first part that
+  fits a question keeps the 1.1.0 key (so its fingerprints, calibration files and stored decisions verify and replay
+  unchanged — tested on a journal written with 1.1.0's keys); another part asking the same question gets its own
+  entry, its probabilities are the base's until its own fit, a `SharedQuestionWarning` names both parts, and its own
+  fit changes its fingerprint and the model's. An adaptation nobody claimed (`load_adaptations`, `model.fit`) is read
+  by every part asking the question, as before. `adapt_lora` clears only its own part's adaptation.
 - **peft ≥ 0.19 for the `lora` extra, checked before training.** The code calls `set_adapter(name,
   inference_mode=True)`, which older peft does not take; with peft 0.14 the first decision after a 15-minute CPU
   training failed. The extra (and the `lora` dev group) now asks for `peft>=0.19`, and `adapt_lora`, training and

@@ -300,6 +300,7 @@ class Updates:
                 m = copy.copy(p.model)
                 if isinstance(getattr(p.model, "adaptations", None), dict):
                     m.adaptations = copy.deepcopy(p.model.adaptations)
+                    m._adapt_owner = dict(getattr(p.model, "_adapt_owner", {}))
                 models[id(p.model)] = m
         made = {}
 
@@ -349,7 +350,7 @@ class Updates:
             st = state.get(q)
             if st is None:
                 continue
-            key = p.spec.key
+            key = p.model._akey(p.spec, write=True) if hasattr(p.model, "_akey") else p.spec.key
             ad = st.get("adaptation")
             if ad is None:
                 p.model.adaptations.pop(key, None)

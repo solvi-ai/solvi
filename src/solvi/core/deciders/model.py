@@ -78,6 +78,7 @@ class DecideModel:
         self.act_thresholds = {float(k): float(v) for k, v in (a.get("threshold_for_error") or {}).items()}
         self.escalate_below = th.get("escalate_below")          # a default for parts that set none (None: no default)
         self.adaptations: dict[tuple, Adaptation] = {}
+        self._adapt_owner: dict = {}         # question key → the part that fitted the adaptation under it first
         self.loras: dict = {}                # lora_key → an Adapter (solvi.experimental.lora.LoraAdapter; experimental: solvi.experimental.lora.adapt_lora)
         self._cache, self._cache_size, self._lock = OrderedDict(), cache_size, threading.Lock()
         self._pass_lock = threading.Lock()
@@ -356,6 +357,31 @@ class DecideModel:
         mq = self.caps["multi_question"]
         return mq is not None and mq["layout"] == "block" and callable(getattr(self.scorer, "logits_pass", None))
 
+    def _akey(self, sp, write=False, warn=False):
+        """The key of a question's adaptation (fit / adapt / teach): the question's key — as in 1.1.0 — for a question
+        asked of the model directly and for the first part that fits it; another part asking the same question (task
+        and options) gets its own entry, the key and ("part", its name), and never reads the first part's adaptation
+        (a SharedQuestionWarning names both, once). An adaptation nobody claimed (load_adaptations, model.fit) is read
+        by every part asking the question, as before, and the first part that fits it claims it. write: a fit is
+        about to store under the key; warn: the part is being scored (where the warning is given)."""
+        owner = getattr(sp, "owner", None)
+        if owner is None:
+            return sp.key
+        mine = sp.key + (("part", owner),)
+        if mine in self.adaptations:
+            return mine
+        first = self._adapt_owner.get(sp.key)
+        if first is None or first == owner:
+            if write and first is None:
+                self._adapt_owner[sp.key] = owner
+            return sp.key
+        if warn and sp.key in self.adaptations:
+            self._warn_once(("adapt-shared", owner, first), (
+                f"part {owner!r} asks the same question (task and options) as part {first!r}, which has an "
+                f"adaptation (fit / adapt / teach): adaptations are kept per part, so {owner!r} is scored without "
+                f"{first!r}'s (before 1.1.1 it silently used it)"), SharedQuestionWarning)
+        return mine
+
     def _lora_fp_key(self, k):
         """An adapter slot as the model's fingerprint names it: the question alone while one part has an adapter for
         it (the fingerprint 1.1.0 gave), the question and the part when several parts asking it have one."""
@@ -575,7 +601,7 @@ class DecideModel:
     # --- calibrated scores
     def _scores(self, sp, z):
         """Raw logits → calibrated scores s (softmax / sigmoid input) with this question's adaptation."""
-        a = self.adaptations.get(sp.key)
+        a = self.adaptations.get(self._akey(sp, warn=True))
         z = np.asarray(z, float)
         if a is not None and a.bias is not None:
             z = z - np.asarray(a.bias)
@@ -694,7 +720,7 @@ class DecideModel:
 
     def _decision_v1(self, sp, z):
         s = self._scores(sp, z)
-        a = self.adaptations.get(sp.key)
+        a = self.adaptations.get(self._akey(sp))
         if sp.multi:
             p = _sig(s)
             probs = {o: float(v) for o, v in zip(sp.real, p)}
@@ -829,10 +855,11 @@ class DecideModel:
         """The Adaptation of one question (None when it has none; `create=True` makes an empty one). `spec` as for
         adapt / fit / teach (not_stated=, evidence=, ...): a question asking for evidence has its own key, so its
         adaptation is found only with the same spec."""
-        sp = _Spec(task, options, descriptions, multi, other, kind, **spec)
-        if create and sp.key not in self.adaptations:
-            self.adaptations[sp.key] = Adaptation()
-        return self.adaptations.get(sp.key)
+        sp = _Spec.owned(spec.pop("owner", None), task, options, descriptions, multi, other, kind, **spec)
+        k = self._akey(sp, write=create)
+        if create and k not in self.adaptations:
+            self.adaptations[k] = Adaptation()
+        return self.adaptations.get(k)
 
     @_spec_names
     def adapt(self, texts, task, options, descriptions=None, multi=False, other=None, kind=None, logits=None, **spec):
@@ -840,7 +867,7 @@ class DecideModel:
         (centered over the options) is subtracted before the softmax / sigmoid. → the Adaptation. A later fit is kept
         consistent. logits: the inputs' logits already computed (one per text, in the question's option order) — what a
         DecisionPart passes, so the correction is fitted on the signal it decides on (option_order="average", long)."""
-        sp = _Spec(task, options, descriptions, multi, other, kind, **spec)
+        sp = _Spec.owned(spec.pop("owner", None), task, options, descriptions, multi, other, kind, **spec)
         if sp.kind == "span":
             raise ValueError("a span question has no options to adapt")
         texts = [self.text(t) for t in texts]
@@ -848,7 +875,7 @@ class DecideModel:
             raise ValueError("adapt needs unlabelled texts")
         Z = np.array(_usable(self._raw([(sp, t) for t in texts])) if logits is None else _given(logits, len(texts)))
         mean = Z.mean(0)
-        a = self.adaptations.setdefault(sp.key, Adaptation())
+        a = self.adaptations.setdefault(self._akey(sp, write=True), Adaptation())
         a.bias = [float(v) for v in mean - mean.mean()]
         a.n_unlabelled = len(texts)
         if a.examples:
@@ -864,13 +891,13 @@ class DecideModel:
         maximizes out-of-fold accuracy. Replaces earlier examples. Examples labelled "not stated" are left out (the "not
         stated" logit is not adapted). logits: the examples' logits already computed (one per example; see adapt).
         → the Adaptation."""
-        sp = _Spec(task, options, descriptions, multi, other, kind, **spec)
+        sp = _Spec.owned(spec.pop("owner", None), task, options, descriptions, multi, other, kind, **spec)
         examples = list(examples)
         given = None if logits is None else _given(logits, len(examples))
         keep = [i for i, (_, y) in enumerate(examples) if y is not Unknown]
         ex = [(self.text(examples[i][0]), examples[i][1]) for i in keep]
         Z = _usable(self._raw([(sp, t) for t, _ in ex])) if given is None else [given[i] for i in keep]
-        a = self.adaptations.setdefault(sp.key, Adaptation())
+        a = self.adaptations.setdefault(self._akey(sp, write=True), Adaptation())
         a.examples = [(list(map(float, z)), sp.label(y)) for z, (_, y) in zip(Z, ex)]
         self._refit(sp, a, lam, folds)
         return a
@@ -882,10 +909,10 @@ class DecideModel:
         parameters or fewer — about a millisecond or two); the temperature and the "other" threshold stay until the next
         fit. logits: the input's logits already computed (see adapt). → the update time in ms (the model's forward pass,
         if the input was not scored before, is not included)."""
-        sp = _Spec(task, options, descriptions, multi, other, kind, **spec)
+        sp = _Spec.owned(spec.pop("owner", None), task, options, descriptions, multi, other, kind, **spec)
         z = _usable(self._raw([(sp, self.text(text))]))[0] if logits is None else _given([logits], 1)[0]
         t0 = time.perf_counter()
-        a = self.adaptations.setdefault(sp.key, Adaptation())
+        a = self.adaptations.setdefault(self._akey(sp, write=True), Adaptation())
         a.examples.append((list(map(float, z)), sp.label(correct)))
         self._refit(sp, a, lam, folds=0, warm=True)
         return (time.perf_counter() - t0) * 1000
@@ -952,7 +979,8 @@ class DecideModel:
         if task is None:
             self.adaptations.clear()
         else:
-            self.adaptations.pop(_Spec(task, options, descriptions, multi, other, kind, **spec).key, None)
+            sp = _Spec.owned(spec.pop("owner", None), task, options, descriptions, multi, other, kind, **spec)
+            self.adaptations.pop(self._akey(sp, write=True), None)
 
     def save_adaptations(self, path):
         """Write every adaptation (with its kept examples' logits) to a JSON file, with the checkpoint's fingerprint."""
@@ -969,6 +997,7 @@ class DecideModel:
             raise ValueError(f"adaptations were fitted on checkpoint #{data.get('weights')}, this is #{self.weights_fingerprint()}")
         for d in data["adaptations"]:
             k = d.pop("key")
+            k = k[:4] + [tuple(x) if isinstance(x, list) else x for x in k[4:]]   # ("part", name): a part's own entry
             ex = [(list(z), tuple(y) if isinstance(y, list) else y) for z, y in d.pop("examples", [])]
             self.adaptations[(k[0], tuple(k[1]), tuple(k[2]), k[3] if isinstance(k[3], str) else bool(k[3]), *k[4:])] = \
                 Adaptation(**d, examples=ex)             # k[4:]: "pointer" / "evidence" questions (files before 0.8 lost it)

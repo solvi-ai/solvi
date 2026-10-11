@@ -134,6 +134,13 @@ class _Spec:
     (None for a question asked of the model directly) — a LoRA adapter belongs to a part, not to the question's text."""
     owner = None
 
+    @classmethod
+    def owned(cls, owner, *args, **kw):
+        """A _Spec asked by the part named `owner` (None: the model directly)."""
+        sp = cls(*args, **kw)
+        sp.owner = owner
+        return sp
+
     def __init__(self, task, options, descriptions=None, multi=False, other=None, kind=None, as_bool=False,
                  score_value="median", *, unknown=False, k=None, bins=None, integer=None, unit=None, coverage=0.8,
                  evidence=0, vtype=None):

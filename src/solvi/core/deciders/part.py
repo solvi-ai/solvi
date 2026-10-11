@@ -121,7 +121,8 @@ class DecisionPart:
 
     @property
     def adaptation(self):
-        return self.model.adaptations.get(self.spec.key)
+        return self.model.adaptations.get(self.model._akey(self.spec)) if hasattr(self.model, "_akey") else \
+            self.model.adaptations.get(self.spec.key)
 
     @property
     def lora(self):
@@ -595,7 +596,7 @@ class DecisionPart:
     def _kw(self):
         sp = self.spec
         kw = dict(task=sp.task, options=sp.options, descriptions=sp.descriptions, multi=sp.multi, other=sp.other or False,
-                  kind=sp.kind)
+                  kind=sp.kind, owner=sp.owner)
         for x, v in (("unknown", sp.unknown), ("k", sp.k), ("bins", sp.edges), ("unit", sp.unit), ("evidence", sp.evidence)):
             if v not in (None, False, 0):         # the same question key as the part's own spec
                 kw[x] = v

@@ -1,0 +1,14 @@
+{
+ "model": "eaf9f52112c0745a",
+ "part": "ffba89aa81ce8055",
+ "system": {
+  "catalog": "0f41235e34db7484",
+  "models": {
+   "answer:category": "ffba89aa81ce8055"
+  },
+  "parts": {
+   "answer:category": "9ce06df1574e122e"
+  },
+  "questions": "0d64611854cd24ab"
+ }
+}

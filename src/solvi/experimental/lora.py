@@ -89,6 +89,11 @@ def _question(part):
     return lora_key(part.spec.key)
 
 
+def _akey(part, write=False):
+    """The key of this part's own adaptation on its model (another part asking the same question has its own)."""
+    return part.model._akey(part.spec, write=write)
+
+
 def _in_use(m, name, but):
     """Does another slot of the model hold the adapter `name` (the same file loaded by two parts)?"""
     return any(k != but and ad.name == name for k, ad in m.loras.items())
@@ -314,7 +319,7 @@ def uninstall(scorer, name):
 
 # ------------------------------------------------------------------------------------------------ the part's state
 def _snapshot(part):
-    return {"adaptation": copy.deepcopy(part.model.adaptations.get(part.spec.key)),
+    return {"adaptation": copy.deepcopy(part.model.adaptations.get(_akey(part))),
             "escalate_below": part.escalate_below, "act_threshold": part.act_threshold,
             "guarantee": copy.deepcopy(part.guarantee), "conformal_set": copy.deepcopy(part.conformal_set),
             "groups": part.groups, "signature": part.__signature__}
@@ -322,9 +327,9 @@ def _snapshot(part):
 
 def _restore(part, snap):
     if snap["adaptation"] is None:
-        part.model.adaptations.pop(part.spec.key, None)
+        part.model.adaptations.pop(_akey(part), None)
     else:
-        part.model.adaptations[part.spec.key] = snap["adaptation"]
+        part.model.adaptations[_akey(part, write=True)] = snap["adaptation"]
     part.escalate_below, part.act_threshold = snap["escalate_below"], snap["act_threshold"]
     part.guarantee, part.conformal_set, part.groups = snap["guarantee"], snap["conformal_set"], snap["groups"]
     part.__signature__ = snap["signature"]
@@ -334,7 +339,7 @@ def _clear(part):
     """Forget what was fitted on the model without this adapter → the names of what was cleared."""
     import inspect
     cleared = []
-    if part.model.adaptations.pop(part.spec.key, None) is not None:
+    if part.model.adaptations.pop(_akey(part), None) is not None:
         cleared.append("adaptation")
     for a in ("escalate_below", "act_threshold", "guarantee", "conformal_set", "groups"):
         if getattr(part, a) is not None:
