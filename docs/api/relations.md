@@ -277,6 +277,38 @@ Since 1.1.1, with the closed world declared (`functional={"living_in": "person"}
 
 ::: solvi.experimental.relations.unary_fact
 
+## Text frontend: a story's text read into a relation graph
+
+    from solvi.experimental.relations import TextFrontend, GraphCheck, CompositionTable
+
+    fe = TextFrontend()                          # KINSHIP (16 relations: gender, inverse by the other's gender), check on
+    g = fe.read("[Ann] took her son [Bob] out. [Bob]'s sister [Kim] sang.",
+                genders={"Ann": "female", "Bob": "male", "Kim": "female"})
+    g.edges        # TextEdge(x, relation, y, pattern, sentence, inverse): «y is relation of x», inverse edges included
+    g.genders      # name → GenderFact(name, gender, source): "declared" | "inferred:<word>" | "inferred:pronoun" | "conflict" | "unknown"
+    g.dropped      # Dropped(edge, reason, detail): reason "gender" | "pair" | "functional"
+    g.no_inverse   # stated edges whose owner's gender is unknown (no inverse added)
+    table.derive_paths(g.paths("Ann", "Kim"))    # every shortest path as relation chains → the table's answer
+    g.story()      # Story(facts (x, y, relation), unary is_male / is_female) for GuardedRules; fe.story(text) does both
+    fe.read("Ann took her son Bob out.", names=["Ann", "Bob"])     # unbracketed names, given as a list
+
+- **Patterns** (`PATTERNS`, one sentence at a time): `x_rel_y` «[X]'s REL,? [Y]»; `y_x_rel` «[Y], [X]'s REL»;
+  `y_is_rel_of_x` «[Y],? is / was (the | a | an)? REL of [X]»; `y_the_rel_of_x` «[Y], (the | a | an)? REL of [X]»;
+  `his_her_rel_y` «his / her REL,? [Y]» — the owner is the nearest earlier name of the sentence with the pronoun's
+  gender that is not itself the object of a relation phrase of the sentence (an enumeration «[R] took his son [P] and
+  his daughter [J]» keeps R for both); no such name, no edge. Each reads «Y is REL of X» as (X, REL, Y).
+- **Inverses.** `relations=` maps a relation to (the gender it names, the inverse when the other person is male, the
+  inverse when female); every stated edge carries its inverse, chosen by the owner's gender (the same inverse for both
+  genders needs none). Both directions stated: no duplicate.
+- **Genders.** Declared first; else inferred from the relation words naming the person (mother ⇒ female); words that
+  disagree give "conflict" (unknown). An owner of unknown gender is taken only when it is the one eligible earlier name.
+- **Check** (`check=True`, or a `GraphCheck(functional=FUNCTIONAL)`; `check=False` keeps the raw edges): a relation
+  whose gender contradicts the person's (or the person's relation words disagree), two relations on one ordered pair,
+  two people as one person's father / mother / husband / wife — every stated edge involved is dropped with its inverse
+  and named; the check never chooses between them. `TextGraph.raw` keeps the edges before the check.
+- **Limits.** English kinship phrasings of the five patterns; a miss is a refusal, never a guess; not a general relation
+  extractor.
+
 ## Rules first, a model second
 
 `RulesFirst(rules, *, fallback=None, render=None, by="relations:RulesFirst")`: `rules` is a `CompositionTable` (its
@@ -331,6 +363,18 @@ Measured once on the frozen test split of CLUTRR (Sinha et al., 2019), the clean
 ::: solvi.experimental.relations.Derivation
 
 ::: solvi.experimental.relations.Cell
+
+::: solvi.experimental.relations.TextFrontend
+
+::: solvi.experimental.relations.TextGraph
+
+::: solvi.experimental.relations.TextEdge
+
+::: solvi.experimental.relations.GenderFact
+
+::: solvi.experimental.relations.GraphCheck
+
+::: solvi.experimental.relations.Dropped
 
 ::: solvi.experimental.relations.synthesize_residual
 

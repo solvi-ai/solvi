@@ -88,6 +88,23 @@
   the stories never state it for a queried person, so it comes from the living_in chain rule, which the strict setting
   keeps on one split and not on the other. The test files have not been scored with the declaration.
 
+- **A text frontend for kinship stories (`solvi.experimental.relations.TextFrontend`, `GraphCheck`, experimental).**
+  `TextFrontend(relations=KINSHIP, genders=None, check=True).read(text, names=None, genders=None)` reads a story's text
+  into a relation graph by code, without a model: five sentence patterns («[X]'s REL [Y]», «[Y], [X]'s REL», «[Y] is the
+  REL of [X]», «[Y], the REL of [X]», «his / her REL [Y]» — the owner the nearest earlier name of the pronoun's gender
+  that is not itself the object of a relation phrase, so «[R] took his son [P] and his daughter [J]» keeps R for both),
+  every edge with its inverse by the relation table and the owner's gender, gender facts with their source (declared,
+  inferred from a relation word or a pronoun, conflict). `GraphCheck` (on by default) drops a gender contradiction, two
+  relations on one ordered pair, or a second father / mother / husband / wife — every edge involved, never a choice
+  between them — and names each in `TextGraph.dropped`; `check=False` keeps the raw edges. `TextGraph.paths(x, y)` hands
+  every shortest path to `CompositionTable.derive_paths`, `TextGraph.story()` gives a `Story` for `GuardedRules` and
+  `forward_chain`. A first run on the training file of the kinship benchmark's clean split (1,816 held-out stories,
+  chains of 2–3 relations; the table fitted on the rest): precision among the answered 0.970 at coverage 0.452, against
+  0.998 at 0.922 from the benchmark's relation graph; edges precision 0.973 / recall 0.726 against labels that mark only
+  the chain's edges; the check dropped 17 stated edges, 15 of them false; 0.08 ms a story. The test-split numbers follow.
+  Limits: English kinship phrasings of the five patterns; a sentence no pattern reads gives no edge (a refusal, never a
+  guess); not a general relation extractor.
+
 ### Docs
 
 - **The LoRA page: installing on x86_64 macOS** (torch 2.2.2, numpy<2, transformers 4.48, peft 0.19,
