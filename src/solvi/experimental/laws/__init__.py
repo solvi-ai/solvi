@@ -66,13 +66,16 @@ Before the buffer has rows: `PriorRanker(seed).fit(grammar, sample, tasks=, rows
 own features — its number of atoms, its atoms' kinds (feature, comparison type read off the name: `atom_kind`), each
 atom's prior usefulness (how often it is in the true condition when it is true in the mismatched state) and the
 co-occurrence of its features in true conditions — a linear softmax over each synthetic task's candidates; it reads no
-rows (`shuffle_labels=True` is the control). `HandoverRanker(prior, JointRanker(), min_rows=20)` scores by the prior
+rows (`shuffle_labels=True` is the control). Unless its held-out checks on its own training tasks are 5% below both the
+blind order's and a shuffled-label fit's, it records `learned=False` and scores as the blind order: a prior that learned
+nothing is never worse than blind. `HandoverRanker(prior, JointRanker(), min_rows=20)` scores by the prior
 below `min_rows` logged rows of the action and by the joint statistic from there on; `last` says which one scored
-(`RankedProposer.scored_by` too). The prior learns what the grammar's condition sampler favours: on a planted grammar
-whose sampler draws three features 30 times as often it needed 10.3 checks at 0 rows against 43.1 blind (the shuffled
-control 206; tests/test_laws_rank_prior.py); on the three settings above, whose conditions are drawn uniformly, 0.94 /
-0.95 of the blind checks on the deep and the correlated setting (one seed; a Bayes-optimal prior from the exact sampler
-0.89 / 0.85) and no gain on the first — a uniform grammar leaves a prior little to learn; it needs the task family.
+(`RankedProposer.scored_by` too). The prior learns what the task family favours: on a planted grammar whose sampler draws
+three features 30 times as often it needed 10.3 checks at 0 rows against 43.1 blind (tests/test_laws_rank_prior.py); on
+a skewed family of deep conditions (the second setting's grammar, three features drawn 8 times and one comparison type 4
+times as often) 163 against 1,086 blind, and it still beat the joint statistic at 100 rows (163 against 263) — a fixed
+hand-over at 20 rows is too early there; on the three settings above, drawn uniformly, it fell back (the first) or
+needed 0.94 / 0.95 of the blind checks (one seed; benchmarks/laws_rank_joint.py, five-seed measurement pending).
 Measured once on a live file server (8 mismatches; candidates contradicted by logged rows skipped free): every order
 spent 29 probes in all, because 1–5 candidates per mismatch were left to probe and the true conditions were single atoms
 — the shortest hypotheses, which the length-first order meets first. Ranking can pay only where many consistent
