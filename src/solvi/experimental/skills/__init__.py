@@ -77,7 +77,7 @@ unifies with the goal and its footprint finds a binding; it runs the template gr
 is unchanged in its mechanics. `lift=False` (the default) keeps the condition rule alone, exactly as before.
 Tested on a small grid (tests/test_skills_footprint.py): a plan learned for one direction is accepted turned in every
 direction where the copy agrees, refused where the world disagrees (an interaction refused in one direction), and a
-dropped tool atom is refuted by a state without the tool; not yet measured in an open world.
+dropped tool atom is refuted by a state without the tool; measured once in an open world in 1.1.1 (the experimental page).
 
 The search cost. Each episode records `searched` (simulated steps of the planner's searches), `verify_calls` and
 `cost` = {candidates, tests, probes, simulated} — report it next to System 1's share.
