@@ -58,6 +58,25 @@ calibration files and served by `solvi serve`), so a build from it is not mistak
   disputes and hypotheses. `explain(store, fact_id)` reads the derivation back down to the original facts and the
   rule cells used — on a chain, the cells `CompositionTable.derive` gives. Measured on CLUTRR (Sinha et al., 2019), the clean split's training file only (the relation graph of each story, not its text): on 1,816 held-out stories (a fifth of the training file by a hash of the id, chains of 2 and 3 relations; the table fitted on the other four fifths, 111 cells) the store's reading of the query pair after chaining to the fixed point was compared with the table's derivation over the shortest paths: 1,675 equal (0.922), 11 disputed where the bracketings disagree (0.006), 130 with nothing derived where the table cannot derive (0.072), 0 differences; the fixed point took 0 rounds for 72 stories, 1 for 826 and 2 for 918; 2.6 s of chaining in all, 1.4 ms a story, on CPU; one run, the test file not read. On 120 random chains of 2–7 relations over 12 random tables whose bracketings can disagree: 0 differences (2 answers equal to the table's rest only on a disputed pair and stay hypotheses until a person answers it) (`benchmarks/relations_chain.py`,
   `tests/test_relations_chain.py`).
+- **Guarded rules: Datalog-lite learned by counting, with a negative stratum (`solvi.experimental.relations.GuardedRules`,
+  `chain_rules`, `Story`, `unary_fact`, experimental).** Rules over pair facts and the story's unary facts, learned by
+  exact counting on labelled query pairs (majority share and support; the label of a pair is a set of relations):
+  bodies r ← s, r ← s ∧ u(x|y), r ← s1 ∘ s2, r ← s1 ∘ s2 ∧ u(z), r ← s(x,z) ∧ z ≠ y ∧ u(y), and a negative stratum
+  r ← u1(x) ∧ u2(y) ∧ ¬s(x,y) applied after the positive fixed point only where nothing positive holds on the pair's
+  key; s read forwards or backwards. Rounds recount the votes on the fixed point of the rules admitted so far (a
+  derived fact feeds further bodies) until the rule set stops growing; residual votes (opt-out) let a chain body whose
+  middle fact is not yet derivable count from walks of three, as the composition table's residual fill does; a check
+  slice (`check=`, `check_min=`); never r ← r (∧ u); a guarded body leaves when its generalisation is admitted. A pair
+  holds a set of relations; declared complements (`complements=`) share a key and dispute. `closure` gives every
+  fact's status (active, hypothesis, disputed); `predict` the active relations on a pair, the empty set a refusal.
+  `to_knowledge` writes the rules as rule items; `chain_rules(store, ...)` applies them to a scope's facts through the
+  store's gates with every justification (unary guards among the premises), writes the negative stratum after, and
+  retracts a negative fact whose condition ended; `explain` covers guards and the stratum. `pair_fact(..., multi=True,
+  family=)` and `forward_chain(..., multi=True, complements=)` keep several relations per pair; the default pair fact
+  and `forward_chain` are unchanged. `ChainReport.retracted` counts retractions. Measured on a planted world with an
+  independent oracle (`benchmarks/relations_rules_toy.py`): exact set match 1.000 on 4,992 test pairs, all 8 planted
+  rules found, 0 differences between the store path and the in-memory fixed point on 1,568 pairs
+  (`tests/test_relations_rules.py`).
 - **`KnowledgeStore.add(..., inferred=True)`: an assertion computed from its premises, not observed.** An "outcome"
   assertion refutes the value a key holds (the world changed); an inferred one does not — it competes by rank like any
   other source, so two inferences of different values from equal-rank premises are a dispute, and an inference never

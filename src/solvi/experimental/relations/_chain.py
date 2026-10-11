@@ -39,15 +39,23 @@ FACT_STATUSES = ("active", "hypothesis", "disputed")
 RULE_STATUSES = {"active": ("active",), "any": ("active", "hypothesis", "disputed")}
 
 
-def pair_fact(x, y, relation) -> dict:
+def pair_fact(x, y, relation, multi=False, family=None) -> dict:
     """The body of the fact «x is `relation` of … y» as forward_chain reads it: {"s": [x, y], "r": "relation",
-    "o": relation} (the key is the ordered pair; x and y are strings or integers)."""
+    "o": relation} (the key is the ordered pair; x and y are strings or integers). multi=True: a pair may carry
+    several relations — {"s": [x, y], "r": "relation/<family>", "o": relation}, one key per pair and family (family
+    defaults to the relation itself; relations given one family, e.g. a relation and its complement, share a key and
+    dispute)."""
+    if multi:
+        return {"s": [x, y], "r": f"{RELATION}/{family if family is not None else relation}", "o": relation}
+    if family is not None:
+        raise ValueError("family= is for multi=True pair facts")
     return {"s": [x, y], "r": RELATION, "o": relation}
 
 
 def _pair(body):
-    if isinstance(body, dict) and body.get("r") == RELATION and isinstance(body.get("s"), list) \
-            and len(body["s"]) == 2 and "o" in body:
+    if isinstance(body, dict) and isinstance(body.get("r"), str) and isinstance(body.get("s"), list) \
+            and len(body["s"]) == 2 and "o" in body \
+            and (body["r"] == RELATION or body["r"].startswith(RELATION + "/")):
         return body["s"][0], body["s"][1], body["o"]
     return None
 
@@ -63,7 +71,8 @@ class ChainReport:
     False when max_rounds stopped it first; facts_read / rules_read: what it started from; facts_proposed: new
     justifications written; facts_added: new fact items among them; refused: proposals a write gate refused (e.g. a
     derivation that would refute its own premise); circular: justifications not written because they would rest on
-    the fact they justify; disputes_opened: new person questions; hypotheses: derived facts that are hypotheses at the
+    the fact they justify; retracted: facts of an earlier call taken back (chain_rules: a negative-stratum fact whose
+    condition ended); disputes_opened: new person questions; hypotheses: derived facts that are hypotheses at the
     end; per_round: [{"round", "proposed", "added", "refused", "circular"}]; seconds: wall time."""
     rounds: int = 0
     fixed_point: bool = True
@@ -73,6 +82,7 @@ class ChainReport:
     facts_added: int = 0
     refused: int = 0
     circular: int = 0
+    retracted: int = 0
     disputes_opened: int = 0
     hypotheses: int = 0
     per_round: list = field(default_factory=list)
@@ -106,7 +116,7 @@ def _rests_on(store, target, premises):
 
 
 def forward_chain(store, *, scope=None, rule_scope=None, rules="active", max_rounds=None, max_facts=None,
-                  by="relations:forward_chain") -> ChainReport:
+                  by="relations:forward_chain", multi=False, complements=None) -> ChainReport:
     """Derive the consequences of the pair facts in `store` under its composition rules, to a fixed point.
 
     scope: the facts to chain over (a scope pattern, store.find's; None: every scope) — facts join only within one
@@ -114,8 +124,10 @@ def forward_chain(store, *, scope=None, rule_scope=None, rules="active", max_rou
     same pattern as scope); rules: "active" (promoted rules only) or "any" (hypothesis rules too: what they derive is a
     hypothesis, by the store's own premise rule); max_rounds: stop after this many rounds (the report says
     fixed_point=False; a later call resumes); max_facts: a hard stop on new facts per scope (default |entities|² ×
-    |relations|; ChainLimit). Every write goes through store.add (the write gates). Idempotent: a second call
-    writes nothing. → ChainReport."""
+    |relations|; ChainLimit); multi: derived facts are multi pair facts (`pair_fact(..., multi=True)`: a pair carries
+    one fact per relation, and only relations of one family — `complements`: relation → the relation whose key it
+    shares — dispute). Facts of either form are read. Every write goes through store.add (the write gates).
+    Idempotent: a second call writes nothing. → ChainReport."""
     if rules not in RULE_STATUSES:
         raise ValueError('rules is "active" or "any"')
     if max_rounds is not None and int(max_rounds) < 1:
@@ -123,6 +135,7 @@ def forward_chain(store, *, scope=None, rule_scope=None, rules="active", max_rou
     from ...core.knowledge.gates import RANK
     from ...core.knowledge.store import item_id, plain_json
     by_rank = {v: k for k, v in RANK.items()}
+    comp = dict(complements or {})
     t0 = time.perf_counter()
     rep = ChainReport()
     questions0 = len(store.questions)
@@ -177,7 +190,8 @@ def forward_chain(store, *, scope=None, rule_scope=None, rules="active", max_rou
                     x, y, r1 = facts[f1]
                     _, z, r2 = facts[f2]
                     for rid, rel in table.get((r1, r2), ()):
-                        body = plain_json(pair_fact(x, z, rel))
+                        body = plain_json(pair_fact(x, z, rel, multi=True, family=comp.get(rel, rel)) if multi
+                                          else pair_fact(x, z, rel))
                         iid = item_id("fact", body, sc)
                         just = sorted({f1, f2, rid})
                         it = store.items.get(iid)
@@ -249,7 +263,9 @@ class Explanation:
     """What explain() returns. fact: the id explained; nodes: id → {"body", "status", "source", "original" (asserted
     without premises), "derivations": [{"rule", "cell": (r1, r2, relation), "premises": (left fact, right fact)}]},
     every fact the derivation reaches; facts: the original facts it rests on; rules: the rule ids used; cells: the
-    rule cells used, as (r1, r2, relation), sorted."""
+    rule cells used, as (r1, r2, relation), sorted. A guarded rule (`chain_rules`) gives "cell": (template, body
+    text, head), "premises" in body order with the unary guards among them, "stratum" (1 positive, 2 negative) and
+    "absent" (the negated relation of a negative-stratum fact, else None)."""
     fact: str
     nodes: dict
     facts: tuple
@@ -282,17 +298,27 @@ def explain(store, fact_id) -> Explanation:
         node = {"body": it.body, "status": store.status(i), "source": it.asserts[-1]["source"] if it.asserts else None,
                 "original": False, "derivations": []}
         nodes[i] = node
-        x, z = (it.body.get("s") or [None, None]) if isinstance(it.body, dict) else (None, None)
+        sv = it.body.get("s") if isinstance(it.body, dict) else None
+        x, z = sv if isinstance(sv, list) and len(sv) == 2 else (None, None)
         for a in _live(it):
             if not a["just"]:
                 node["original"] = True
                 continue
             if any(store.status(p) in (None, "retracted", "refuted") for p in a["just"]):
                 continue
-            rid = (a.get("evidence") or {}).get("rule")
-            via = (a.get("evidence") or {}).get("via")
+            ev = a.get("evidence") or {}
+            rid = ev.get("rule")
+            via = ev.get("via")
             rule = store.items.get(rid)
             prem = [p for p in a["just"] if p != rid]
+            if rule is not None and isinstance(rule.body, dict) and rule.body.get("kind") == "guarded":
+                rb = rule.body                                # a guarded rule: premises in body order, guards included
+                order = [p for p in ev.get("premises") or prem if p in prem] or prem
+                node["derivations"].append({"rule": rid, "cell": (rb["template"], rb["s"][0], rb["o"]),
+                                            "premises": tuple(order), "stratum": ev.get("stratum", 1),
+                                            "absent": ev.get("absent")})
+                todo += order
+                continue
             if rule is None or len(prem) not in (1, 2):
                 continue
             if len(prem) == 1:                                # x == via == z: one fact used twice

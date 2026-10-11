@@ -102,6 +102,14 @@ derived relations of one pair are a dispute, a retracted premise takes its conse
 answered dispute makes them facts without a re-run; `explain(store, id)` reads the derivation back (`ChainReport`,
 `Explanation`, `ChainLimit`). Measured by benchmarks/relations_chain.py.
 
+Guarded rules (`GuardedRules`, `chain_rules`): Datalog-lite over pair facts and the story's unary facts — bodies
+r ← s, r ← s ∧ u, r ← s1 ∘ s2, r ← s1 ∘ s2 ∧ u(z), r ← s(x,z) ∧ z ≠ y ∧ u(y) and a negative stratum
+r ← u1(x) ∧ u2(y) ∧ ¬s(x,y) — learned by exact counting on labelled query pairs whose label is a set of relations,
+rounds over the fixed point of the rules admitted so far, residual votes for chain bodies whose middle fact is not yet
+derivable, a check slice; `predict` answers a pair with its active relations (∅ = refusal), declared complements
+dispute; `chain_rules` applies the rules kept in a KnowledgeStore with every justification. Measured by
+benchmarks/relations_rules_toy.py.
+
 What is not done:
 - the enumeration grows as (terminals × operators)^size: with the twenty-odd relations of a grid window, programs of
   four or five nodes are the practical depth, and the behaviour cap bounds memory;
@@ -113,6 +121,9 @@ What is not done:
   concepts; library entries are never retired, and every entry makes the rules it does not help dearer;
 - forward chaining: composition of two relations over pair facts only (no general rules, negation or
   aggregation); a learned identity relation is chained as an ordinary relation;
+- guarded rules: two binary atoms per body, unary predicates only as given (none learned or invented); the store
+  path writes every justification and is slow on dense stories; a wrong rule admitted at a small support spreads
+  through the fixed point;
 - composition tables: one relation per cell; a cell that depends on something the chain does not carry (a gender)
   stays below the majority and its chains are refused, not split by that attribute;
 - the compiled atom of a state's graph allows complements (its domain, the window or the path's chain, is bounded);
@@ -123,6 +134,7 @@ from .. import warn_on_import
 from ._adapters import (CREATURES, MATERIALS, PATHS, PROPOSER_OPS, Egocentric, PathTree, RelAlgProposer, encode,
                         encode_paths, relational_atom)
 from ._chain import ChainLimit, ChainReport, Explanation, explain, forward_chain, pair_fact
+from ._rules import TEMPLATES, Closure, GuardedRule, GuardedRules, Story, chain_rules, unary_fact
 from ._algebra import (BINARY, OPS, UNARY, Relations, closure, complement, compose, converse, count_at_least,
                        evaluate, intersect, minus, readout, show, size, union, xor)
 from ._compile import (BACKENDS, RUNTIME, RUNTIME_ARRAYS, DenseAnswer, ProgramCheck, check_program, compile_ast,
@@ -134,12 +146,13 @@ from .library import HeldOut, RuleProposer, Rules, TargetRecord, find_rules
 
 warn_on_import(__name__)
 
-__all__ = ["BACKENDS", "BINARY", "CREATURES", "Cell", "ChainLimit", "ChainReport", "CompositionTable", "DenseAnswer",
-           "Derivation", "Egocentric", "Entry", "Enumerator", "Explanation", "Found", "HeldOut", "Library",
-           "MATERIALS", "OPS", "PATHS", "PROPOSER_OPS", "PathTree", "Program", "ProgramCheck", "RUNTIME",
-           "RUNTIME_ARRAYS", "RelAlgProposer", "Relations", "RuleProposer", "Rules", "Score", "Scored", "TargetRecord",
-           "UNARY", "base_rates", "check_program", "closure", "compile_ast", "compile_program", "complement",
-           "compose", "converse", "count_at_least", "encode", "encode_paths", "enumerate_programs", "evaluate",
-           "explain", "find_rules", "forward_chain", "from_keys", "intersect", "lower_bound", "minus", "pair_fact",
-           "rank", "readout", "relational_atom", "score", "show", "size", "sized_admit", "synthesize", "to_keys",
-           "top_programs", "union", "xor"]
+__all__ = ["BACKENDS", "BINARY", "CREATURES", "Cell", "ChainLimit", "ChainReport", "Closure", "CompositionTable",
+           "DenseAnswer", "Derivation", "Egocentric", "Entry", "Enumerator", "Explanation", "Found", "GuardedRule",
+           "GuardedRules", "HeldOut", "Library", "MATERIALS", "OPS", "PATHS", "PROPOSER_OPS", "PathTree", "Program",
+           "ProgramCheck", "RUNTIME", "RUNTIME_ARRAYS", "RelAlgProposer", "Relations", "RuleProposer", "Rules",
+           "Score", "Scored", "Story", "TEMPLATES", "TargetRecord", "UNARY", "base_rates", "chain_rules",
+           "check_program", "closure", "compile_ast", "compile_program", "complement", "compose", "converse",
+           "count_at_least", "encode", "encode_paths", "enumerate_programs", "evaluate", "explain", "find_rules",
+           "forward_chain", "from_keys", "intersect", "lower_bound", "minus", "pair_fact", "rank", "readout",
+           "relational_atom", "score", "show", "size", "sized_admit", "synthesize", "to_keys", "top_programs",
+           "unary_fact", "union", "xor"]
