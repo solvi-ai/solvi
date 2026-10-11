@@ -44,6 +44,24 @@ calibration files and served by `solvi serve`), so a build from it is not mistak
   for a relation with base rate ≤ 0.03), admitted 87 cells against 97, and answered more with lower precision (1,092
   answered, 10 wrong against 1,083, 7 wrong) because residual votes lifted three further cells over 0.9 (two
   gender-dependent, one correct) (`tests/test_relations_table.py`).
+- **Forward chaining over composition rules in the knowledge store (`solvi.experimental.relations.forward_chain`,
+  experimental).** The pair facts of a scope (`pair_fact(x, y, relation)`: the ordered pair is the store's key, the
+  relation its value) and the composition rules in the store (the cells `CompositionTable.to_knowledge` writes) derive
+  new pair facts in semi-naive rounds to a fixed point; each is written through `store.add` (the write gates) with its
+  two premises and the rule as `derived_from`, the source of the weaker premise and evidence (rule, the middle entity,
+  the round). The store does the rest: two derived relations of one pair from equal-rank derivations are a dispute —
+  the table's refusal by disagreement as a question for a person — a retracted premise takes its consequences along,
+  and a promoted rule or an answered dispute turns its consequences into facts without a re-run; disputed facts are
+  chained too, so both sides carry their consequences. `rules="any"` applies hypothesis rules (their consequences stay
+  hypotheses); a justification that would rest on itself (a cycle) is not written; `max_rounds` / `max_facts`
+  (`ChainLimit`) guard it; a second call writes nothing; `ChainReport` counts rounds, proposals, additions, refusals,
+  disputes and hypotheses. `explain(store, fact_id)` reads the derivation back down to the original facts and the
+  rule cells used — on a chain, the cells `CompositionTable.derive` gives. Measured on CLUTRR (Sinha et al., 2019), the clean split's training file only (the relation graph of each story, not its text): on 1,816 held-out stories (a fifth of the training file by a hash of the id, chains of 2 and 3 relations; the table fitted on the other four fifths, 111 cells) the store's reading of the query pair after chaining to the fixed point was compared with the table's derivation over the shortest paths: 1,675 equal (0.922), 11 disputed where the bracketings disagree (0.006), 130 with nothing derived where the table cannot derive (0.072), 0 differences; the fixed point took 0 rounds for 72 stories, 1 for 826 and 2 for 918; 2.6 s of chaining in all, 1.4 ms a story, on CPU; one run, the test file not read. On 120 random chains of 2–7 relations over 12 random tables whose bracketings can disagree: 0 differences (2 answers equal to the table's rest only on a disputed pair and stay hypotheses until a person answers it) (`benchmarks/relations_chain.py`,
+  `tests/test_relations_chain.py`).
+- **`KnowledgeStore.add(..., inferred=True)`: an assertion computed from its premises, not observed.** An "outcome"
+  assertion refutes the value a key holds (the world changed); an inferred one does not — it competes by rank like any
+  other source, so two inferences of different values from equal-rank premises are a dispute, and an inference never
+  refutes an observation by arriving later. It needs `derived_from`; journals without the flag replay unchanged.
 - **A call firewall in the guard (`Guard.firewall`).** Two deterministic checks of every call of the tools it names
   (or of every tool, also those declared later): the arguments validate against the tool's declared schema (as every
   guard checks; under the firewall a tool whose schema cannot be read is denied instead of escalated), and every slot

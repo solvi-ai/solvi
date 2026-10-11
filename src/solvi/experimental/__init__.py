@@ -75,7 +75,7 @@ STATUS: dict[str, dict] = {
                   "enumeration with a library (find_rules admits only what passes a held-out test and builds the next "
                   "rules on the admitted ones) and a fallback slot for a learned proposer; composition tables of relations "
                   "learned by exact counting (residual fill, derivation over every bracketing, refusal of what the "
-                  "table cannot derive)", "missing": "on a "
+                  "table cannot derive); forward chaining to a fixed point over the composition rules in the knowledge store (derived facts with their premises and the rule as their justification, two derived relations of one pair a dispute)", "missing": "on a "
                   "pre-registered battery of 28 random rules over three relations the enumerator found 22 within "
                   "seven nodes, every find exact on larger graphs of other families, and compiled rules matched "
                   "hand-written set code pair for pair on a forest of 100,000 nodes within twice its time; on two "
@@ -112,7 +112,7 @@ STATUS: dict[str, dict] = {
                   "arm's extra wrong answers (residual votes are not gated like direct votes); one relation per cell, "
                   "so a gender-dependent cell is refused, not split (no gender slot), and the opt-in identity relation,"
                   " with no gender slot, gave 9 wrong answers at lengths 4–10; the text setting (story → relation "
-                  "graph) and forward chaining over learned rules",
+                  "graph); forward chaining (forward_chain): on 1,816 held-out stories of the same split's training file (a fifth of it by a hash of the id, chains of 2 and 3 relations; the table fitted on the other four fifths, 111 cells), the store's reading of the query pair after chaining to the fixed point was compared with the table's derivation over the shortest paths: 1,675 equal (0.922), 11 disputed where the bracketings disagree (0.006), 130 with nothing derived where the table cannot derive (0.072), 0 differences; the fixed point took 0 rounds for 72 stories, 1 for 826 and 2 for 918; 2.6 s of chaining in all, 1.4 ms a story, on CPU; one run, the test file not read; on 120 random chains of 2–7 relations over 12 random tables whose bracketings can disagree, 0 differences (2 answers equal to the table's rest only on a disputed pair and stay hypotheses until a person answers it); still missing for it: rules other than the composition of two relations over pair facts (no general rules, negation or aggregation); a learned identity relation is chained as an ordinary relation, not as a neutral one; the stories of the training file need at most two rounds, so deeper fixed points are measured by the tests only",
                   "script": "benchmarks/relations_battery.py"},
     "skills": {"since": "1.1", "what": "learning in a world described by code: System 2 plans on an exact model (a "
                "copy of the environment), only plans the code verified are compiled into System 1 skills with "

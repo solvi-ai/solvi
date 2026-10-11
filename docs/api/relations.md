@@ -3,8 +3,9 @@
 Relations over a state and rules found over them (experimental): packed-bit `Relations`, the relation algebra, a
 bottom-up enumerator with observational equivalence (`enumerate_programs`, `synthesize`, `top_programs`), a `Library` of
 accepted programs, compilation into plain set code or index arrays with a differential check (`compile_program`,
-`check_program`), encoders (`encode`, `encode_paths`), `RelAlgProposer` for the laws' held-out test, and `CompositionTable` (a composition
-table of relations learned by counting, derivation over every bracketing, refusal of what it cannot derive).
+`check_program`), encoders (`encode`, `encode_paths`), `RelAlgProposer` for the laws' held-out test, `CompositionTable` (a composition
+table of relations learned by counting, derivation over every bracketing, refusal of what it cannot derive) and
+`forward_chain` (its rules applied to the facts of a knowledge store to a fixed point).
 
 ## Composites with a library
 
@@ -53,6 +54,53 @@ the table cannot derive.
 - **Admission hook.** `admit=(cell, relation, hits, support, tested) → bool` is an extra gate after the thresholds;
   `sized_admit(base_rates(examples), delta=0.1)` is the sized acceptance of `solvi.experimental.laws` with a base-rate
   null: P[Binomial(support, base_rate(r)) ≥ hits] ≤ δ / N, N the cells tested.
+
+## Forward chaining over the rules in a knowledge store
+
+`forward_chain(store, scope=..., rule_scope=...)` applies the composition rules kept in a `KnowledgeStore` (the cells
+`CompositionTable.to_knowledge` writes) to the store's pair facts until nothing new follows, and writes every derived
+fact through the store's gates.
+
+    from solvi.core.knowledge import KnowledgeStore
+    from solvi.experimental.relations import CompositionTable, explain, forward_chain, pair_fact
+
+    store = KnowledgeStore()
+    table.to_knowledge(store, {"domain": "kinship"})                       # the rules
+    for x, y, rel in edges:                                                # the story: who is what of whom
+        store.add("fact", pair_fact(x, y, rel), {"story": 7}, source="outcome")
+    rep = forward_chain(store, scope={"story": 7}, rule_scope={"domain": "kinship"})
+    rep.rounds, rep.facts_added, rep.disputes_opened, rep.hypotheses       # the fixed point and what it wrote
+    explain(store, fact_id).cells                                          # the rule cells the derivation used
+
+- **Facts are pairs.** `pair_fact(x, y, relation)` = `{"s": [x, y], "r": "relation", "o": relation}`: the store's key
+  is the ordered pair and its value the relation, so two different relations of one pair meet on one key.
+- **Chaining.** Semi-naive rounds: the facts new in one round are joined with every fact of the same scope; for
+  (x r1 y), (y r2 z) and a rule r1 ∘ r2 → r the fact (x r z) is proposed with `derived_from` = the two facts and the
+  rule, `inferred=True`, the source of the weaker premise and evidence `{"rule", "via", "depth"}`. Facts join only
+  within one exact scope; `scope=None` chains every scope apart.
+- **What the store does with it.** The same relation is one more justification; a different relation from an
+  equal-rank derivation makes the pair disputed — the table's refusal by disagreement, kept as a question for a
+  person (`store.disputes()`, `store.resolve`); a retracted or refuted premise takes its consequences along. Disputed
+  facts are chained too, so both sides carry their consequences as hypotheses, and a person's answer settles them
+  without a re-run. `rules="any"` also applies hypothesis rules: what they derive is a hypothesis until the rule is
+  promoted. A justification that would rest on the fact it justifies (a cycle in the graph) is not written.
+- **Guards.** `max_rounds=` stops early (`fixed_point=False`; a later call resumes); `max_facts=` (default |entities|²
+  × |relations| per scope) raises `ChainLimit`. A second call writes nothing.
+- **`explain(store, fact_id)`** → `Explanation`: every live justification of the fact, recursively down to the facts
+  asserted without premises (`facts`), the rules (`rules`) and their cells (`cells`); `tree()` gives one derivation as
+  a nested dict. On a chain it gives the cells `CompositionTable.derive(chain).cells` gives.
+- **Limits.** Composition of two relations over pair facts only — no general rules, negation or aggregation; a learned
+  identity relation is chained as an ordinary relation.
+
+Measured on CLUTRR (Sinha et al., 2019), the clean split's training file only (the relation graph of each story, not its text): on 1,816 held-out stories (a fifth of the training file by a hash of the id, chains of 2 and 3 relations; the table fitted on the other four fifths, 111 cells) the store's reading of the query pair after chaining to the fixed point was compared with the table's derivation over the shortest paths: 1,675 equal (0.922), 11 disputed where the bracketings disagree (0.006), 130 with nothing derived where the table cannot derive (0.072), 0 differences; the fixed point took 0 rounds for 72 stories, 1 for 826 and 2 for 918; 2.6 s of chaining in all, 1.4 ms a story, on CPU; one run, the test file not read. On 120 random chains of 2–7 relations over 12 random tables whose bracketings can disagree: 0 differences (2 answers equal to the table's rest only on a disputed pair and stay hypotheses until a person answers it) (`benchmarks/relations_chain.py`, `tests/test_relations_chain.py`).
+
+::: solvi.experimental.relations.forward_chain
+
+::: solvi.experimental.relations.ChainReport
+
+::: solvi.experimental.relations.explain
+
+::: solvi.experimental.relations.Explanation
 
 ::: solvi.experimental.relations.CompositionTable
 

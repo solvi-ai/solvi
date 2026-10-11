@@ -16,7 +16,9 @@ setting (SourceGate; solvi.core.sources.check_source).
 
 State is a function of the live journal entries (JTMS-style): an item is present while it has a live assertion whose
 premises (`derived_from`) are present and not refuted. Per key (scope, subject, relation) the live assertions are walked
-in time order: the same value confirms; an outcome refutes the current value (the world changed); a higher-ranked source
+in time order: the same value confirms; an outcome refutes the current value (the world changed) — unless the outcome
+assertion is `inferred` (a consequence computed from premises, not an observation: it competes by rank, so two inferences
+of different values from equal-rank premises are a dispute); a higher-ranked source
 (outcome > person > spec > verified) refutes a lower one; `supersedes` (a producer's own new version) refutes the version
 it names; any other contradiction makes every side "disputed" and asks a person — one question per dispute EVENT (the
 journal position it opened at): the same two items disputed again after a resolution are asked again. `resolve(key,
@@ -82,7 +84,8 @@ class _Item:
 
     def __init__(self, iid, kind, body, scope, key, value, reconfirm_after):
         self.id, self.kind, self.body, self.scope, self.key, self.value = iid, kind, body, scope, key, value
-        self.asserts = []           # [{"t", "clock", "source", "by", "just", "supersedes", "evidence", "valid", "level"}]
+        self.asserts = []           # [{"t", "clock", "source", "by", "just", "supersedes", "evidence", "valid", "level",
+        #                               "of", "inferred"}]
         self.promoted = []          # [t]
         self.retracted = []         # [t]
         self.retired = []           # [t]
@@ -297,16 +300,18 @@ class KnowledgeStore:
         it.asserts.append({"t": t, "clock": r.get("clock", 0), "source": r["source"], "by": r.get("by"),
                            "just": tuple(r.get("just") or ()), "supersedes": r.get("supersedes"),
                            "evidence": r.get("evidence"), "valid": r.get("valid"), "level": r.get("level"),
-                           "of": r.get("of")})
+                           "of": r.get("of"), "inferred": bool(r.get("inferred"))})
         for p in it.asserts[-1]["just"]:
             self.dependents[p].add(iid)
         self._touch(iid)
 
     def proposal(self, kind, body, scope=None, *, source, by=None, evidence=None, derived_from=(), supersedes=None,
-                 reconfirm_after=None, valid=None, level=None, of=None):
+                 reconfirm_after=None, valid=None, level=None, of=None, inferred=False):
         """A proposed item as the write gates see it (a dict with the record's fields; nothing is written)."""
         if kind not in KINDS:
             raise ValueError(f"kind is one of {KINDS}, not {kind!r}")
+        if inferred and not derived_from:
+            raise ValueError("an inferred assertion names the premises it is computed from (derived_from=)")
         body, scope = plain_json(body), plain_json(scope or {})
         if reconfirm_after is None:
             reconfirm_after = self.defaults.get((kind, source))
@@ -314,10 +319,10 @@ class KnowledgeStore:
                 "by": None if by is None else str(by), "evidence": plain_json(evidence) if evidence is not None else None,
                 "derived_from": sorted(set(derived_from)), "supersedes": supersedes, "reconfirm_after": reconfirm_after,
                 "valid": plain_json(list(valid)) if valid is not None else None, "level": level,
-                "of": None if of is None else str(of), "key": key_of(body, scope)}
+                "of": None if of is None else str(of), "key": key_of(body, scope), "inferred": bool(inferred)}
 
     def add(self, kind, body, scope=None, *, source, by=None, evidence=None, derived_from=(), supersedes=None,
-            reconfirm_after=None, valid=None, level=None, of=None, shadow=None):
+            reconfirm_after=None, valid=None, level=None, of=None, shadow=None, inferred=False):
         """Propose an item → its id, or None when a gate refused it (a "refused" entry in the journal says why).
 
         kind: one of KINDS; body: plain JSON (a fact: {"s", "r", "o"}); scope: a dict (a question, an environment);
@@ -326,12 +331,15 @@ class KnowledgeStore:
         supersedes: the id of the producer's previous version; reconfirm_after: clock units until it needs re-confirmation
         (default RECONFIRM_DEFAULTS); valid: (since, until) in the world, as you count time; level: a guarantee level
         (for "verified"); of: the stored decision a "verified" item is (checked in the store's TraceStorage); shadow:
-        passed to the write gates (a shadow measurement for a behaviour-changing item).
+        passed to the write gates (a shadow measurement for a behaviour-changing item); inferred: the assertion is a
+        consequence computed from `derived_from` (a rule applied to facts), not an observation — an inferred outcome
+        does not refute the current value as an observation does: it competes by rank, and equal ranks are a dispute.
 
         A fact or an episode the gates admit is present at once; a rule, skill or action the gates admit is promoted (its
         verdicts recorded); one a later gate holds stays a hypothesis (a "held" entry says why)."""
         prop = self.proposal(kind, body, scope, source=source, by=by, evidence=evidence, derived_from=derived_from,
-                             supersedes=supersedes, reconfirm_after=reconfirm_after, valid=valid, level=level, of=of)
+                             supersedes=supersedes, reconfirm_after=reconfirm_after, valid=valid, level=level, of=of,
+                             inferred=inferred)
         with self._lock:
             verdicts = []
             for g in self.gates:
@@ -345,7 +353,7 @@ class KnowledgeStore:
             rec = self._write("assert", item=prop["id"], item_kind=kind, body=prop["body"], scope=prop["scope"],
                               source=source, by=prop["by"], evidence=prop["evidence"], just=prop["derived_from"],
                               supersedes=supersedes, reconfirm_after=prop["reconfirm_after"], valid=prop["valid"],
-                              level=level, of=prop["of"])
+                              level=level, of=prop["of"], **({"inferred": True} if inferred else {}))
             with self.batch():
                 self._raw_assert(rec, rec["n"])
                 if kind in NEEDS_PROMOTION:
@@ -842,8 +850,9 @@ def _walk_key(ids, live, arank, values, res):
             continue
         t, _, i, a = e
         r, v = arank[(i, t)], values[i]
+        observed = a["source"] == "outcome" and not a.get("inferred")
         if disputed:
-            if a["source"] == "outcome":                # an observation ends a dispute
+            if observed:                                # an observation ends a dispute
                 for j in disputed:
                     if values[j] != v:
                         refuted[j] = (t, [i])
@@ -864,7 +873,7 @@ def _walk_key(ids, live, arank, values, res):
             hrank = max(hrank, r)
             refuted.pop(i, None)
             continue
-        if a.get("supersedes") in holders or a["source"] == "outcome" or r > hrank:
+        if a.get("supersedes") in holders or observed or r > hrank:
             for h in holders:
                 refuted[h] = (t, [i])
             holders, hval, hrank = {i}, v, r

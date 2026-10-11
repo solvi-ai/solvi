@@ -95,6 +95,13 @@ bracketings agree, refused with the reason ("underivable", "disagree") otherwise
 `to_knowledge` writes them as rule items, `admit=sized_admit(base_rates(examples))` gates cells by the laws' sized
 acceptance with a base-rate null.
 
+Forward chaining (`forward_chain(store, scope=, rule_scope=)`): the composition rules in a KnowledgeStore applied to its
+pair facts (`pair_fact(x, y, relation)`) in semi-naive rounds to a fixed point, every derived fact written through the
+store's gates with its two premises and the rule as `derived_from` (`inferred=True`, the weaker premise's source); two
+derived relations of one pair are a dispute, a retracted premise takes its consequences along, a promoted rule or an
+answered dispute makes them facts without a re-run; `explain(store, id)` reads the derivation back (`ChainReport`,
+`Explanation`, `ChainLimit`). Measured by benchmarks/relations_chain.py.
+
 What is not done:
 - the enumeration grows as (terminals × operators)^size: with the twenty-odd relations of a grid window, programs of
   four or five nodes are the practical depth, and the behaviour cap bounds memory;
@@ -104,6 +111,8 @@ What is not done:
 - relational atoms stay in the grammar once proposed (every row evaluates them); nothing prunes unused ones yet;
 - the library's intermediate concepts are given as targets; find_rules finds the order and the programs, not the
   concepts; library entries are never retired, and every entry makes the rules it does not help dearer;
+- forward chaining: composition of two relations over pair facts only (no general rules, negation or
+  aggregation); a learned identity relation is chained as an ordinary relation;
 - composition tables: one relation per cell; a cell that depends on something the chain does not carry (a gender)
   stays below the majority and its chains are refused, not split by that attribute;
 - the compiled atom of a state's graph allows complements (its domain, the window or the path's chain, is bounded);
@@ -113,6 +122,7 @@ from __future__ import annotations
 from .. import warn_on_import
 from ._adapters import (CREATURES, MATERIALS, PATHS, PROPOSER_OPS, Egocentric, PathTree, RelAlgProposer, encode,
                         encode_paths, relational_atom)
+from ._chain import ChainLimit, ChainReport, Explanation, explain, forward_chain, pair_fact
 from ._algebra import (BINARY, OPS, UNARY, Relations, closure, complement, compose, converse, count_at_least,
                        evaluate, intersect, minus, readout, show, size, union, xor)
 from ._compile import (BACKENDS, RUNTIME, RUNTIME_ARRAYS, DenseAnswer, ProgramCheck, check_program, compile_ast,
@@ -124,11 +134,12 @@ from .library import HeldOut, RuleProposer, Rules, TargetRecord, find_rules
 
 warn_on_import(__name__)
 
-__all__ = ["BACKENDS", "BINARY", "CREATURES", "Cell", "CompositionTable", "DenseAnswer", "Derivation", "Egocentric",
-           "Entry", "Enumerator", "Found", "HeldOut", "Library", "MATERIALS", "OPS", "PATHS", "PROPOSER_OPS",
-           "PathTree", "Program", "ProgramCheck", "RUNTIME", "RUNTIME_ARRAYS", "RelAlgProposer", "Relations",
-           "RuleProposer", "Rules", "Score", "Scored", "TargetRecord", "UNARY", "base_rates", "check_program",
-           "closure", "compile_ast", "compile_program", "complement", "compose", "converse", "count_at_least", "encode",
-           "encode_paths", "enumerate_programs", "evaluate", "find_rules", "from_keys", "intersect", "lower_bound",
-           "minus", "rank", "readout", "relational_atom", "score", "show", "size", "sized_admit", "synthesize",
-           "to_keys", "top_programs", "union", "xor"]
+__all__ = ["BACKENDS", "BINARY", "CREATURES", "Cell", "ChainLimit", "ChainReport", "CompositionTable", "DenseAnswer",
+           "Derivation", "Egocentric", "Entry", "Enumerator", "Explanation", "Found", "HeldOut", "Library",
+           "MATERIALS", "OPS", "PATHS", "PROPOSER_OPS", "PathTree", "Program", "ProgramCheck", "RUNTIME",
+           "RUNTIME_ARRAYS", "RelAlgProposer", "Relations", "RuleProposer", "Rules", "Score", "Scored", "TargetRecord",
+           "UNARY", "base_rates", "check_program", "closure", "compile_ast", "compile_program", "complement",
+           "compose", "converse", "count_at_least", "encode", "encode_paths", "enumerate_programs", "evaluate",
+           "explain", "find_rules", "forward_chain", "from_keys", "intersect", "lower_bound", "minus", "pair_fact",
+           "rank", "readout", "relational_atom", "score", "show", "size", "sized_admit", "synthesize", "to_keys",
+           "top_programs", "union", "xor"]

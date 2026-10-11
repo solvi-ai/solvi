@@ -4540,7 +4540,9 @@ that were wrong, a guarantee level), status, version and `supersedes`, and two t
 
 Contradictions resolve by rank: an observation refutes whatever it contradicts (the world changed), a higher-ranked
 source (outcome > person > spec > verified) refutes a lower one, a producer's new version (`supersedes=`) refutes the
-one it names. Anything else is a dispute: every side is `disputed`, none is given to System 1 as a fact, and one
+one it names. A consequence computed from premises (`add(..., derived_from=[...], inferred=True)`, as a rule engine
+writes it) is not an observation: it competes by rank only, so two inferences of different values from equal-rank
+premises are a dispute. Anything else is a dispute: every side is `disputed`, none is given to System 1 as a fact, and one
 person question is opened per dispute event — the same two items disputed again after a resolution are asked again;
 `ks.disputes()` lists the open ones and `ks.resolve(key, value, by=...)` is the answer.
 

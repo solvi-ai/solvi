@@ -477,6 +477,16 @@ Two settings to leave alone on a deterministic table: **keep `support=` explicit
 (`identity=`) where a cell depends on what the chain does not carry (a gender): the opt-in identity relation, with no gender slot, gave 9 wrong answers at lengths 4–10. Residual fill after a
 different table admits different cells; residual votes are not gated like direct votes yet.
 
+## Derive to a fixed point, let disputes refuse
+
+When the facts of a case and learned composition rules sit in one knowledge store, derive their consequences there
+(`relations.forward_chain`) rather than in a side computation: every derived fact names its two premises and the rule,
+is never ranked above the weaker premise, and leaves with a premise that is retracted. Do not pick a winner when two
+derivations of one pair disagree — the store makes the pair disputed, which is the table's refusal by disagreement kept
+as a question for a person; a person's answer (`store.resolve`) then settles the consequences of both sides without a
+re-run. Keep the rules promoted before you rely on what follows from them: `rules="any"` chains hypothesis rules too,
+and everything they derive stays a hypothesis until the rule is promoted. Measured on CLUTRR (Sinha et al., 2019), the clean split's training file only (the relation graph of each story, not its text): on 1,816 held-out stories (a fifth of the training file by a hash of the id, chains of 2 and 3 relations; the table fitted on the other four fifths, 111 cells) the store's reading of the query pair after chaining to the fixed point was compared with the table's derivation over the shortest paths: 1,675 equal (0.922), 11 disputed where the bracketings disagree (0.006), 130 with nothing derived where the table cannot derive (0.072), 0 differences; the fixed point took 0 rounds for 72 stories, 1 for 826 and 2 for 918; 2.6 s of chaining in all, 1.4 ms a story, on CPU; one run, the test file not read. On 120 random chains of 2–7 relations over 12 random tables whose bracketings can disagree: 0 differences (2 answers equal to the table's rest only on a disputed pair and stay hypotheses until a person answers it) (`benchmarks/relations_chain.py`).
+
 ## Storage and audit
 
 **One store, any number of writers — but check which backend.** SQLite and PostgreSQL take several processes;
