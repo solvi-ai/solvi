@@ -72,14 +72,16 @@ Knowledge. `to_knowledge(store, scope)` writes each law as a KnowledgeStore item
 evidence = support / hits / precision / net / the birth group / the ids of the held-out transitions it was accepted on;
 a retired law is retire()d with its reason; writing again writes nothing new; the store's journal verifies and replays.
 
-Measured (2026-10, two stands, one run each, fixed before the run): on a game simulator with written mechanics (20 fresh
-worlds, 4,731 transitions) the laws closed 94% of the gap between a learned map and the written mechanics (0.892 →
-0.988 against a ceiling of 0.994); random candidates from the same grammar with the same held-out test reached 0.977 —
-the test does the work, the mismatch is a compact way to propose (61 laws against 103); an LLM proposer under the same
-test ended 0.95 points below enumeration. On a real MCP filesystem server with a path policy the agent was not told,
-probes planned from each mismatch learned every denial class in one session: refusals 6 → 0 in the second session,
-no allowed call wrongly skipped, against 48 → 29 with random probes at the same budget. benchmarks/laws_toy.py
-reproduces both findings in miniature (tests/test_laws_toy.py, `pytest -m slow`).
+Measured (2026-10, two setups, one run each, fixed before the run): on a game simulator with written mechanics (20 fresh
+worlds, 4,731 transitions) the laws closed 94% of the gap between a learned map and the written mechanics (0.892 → 0.988
+against a ceiling of 0.994); random candidates from the same grammar with the same held-out test reached 0.977 — the
+laws' own gain over them is 1.1 points, and the pre-registered bar for that control (random candidates at most +2 points
+over the base) was missed by +8.4: the test does the work, the mismatch is a compact way to propose (61 laws against
+103); an LLM proposer under the same test ended 0.95 points below enumeration. On a real MCP filesystem server with a
+path policy the agent was not told, probes planned from each mismatch learned every denial class in one session:
+refusals 6 → 0 in the second session (200 calls per session), no allowed call wrongly skipped, against 48 → 29 with
+random probes at the same budget. benchmarks/laws_toy.py reproduces both findings in miniature (tests/test_laws_toy.py,
+`pytest -m slow`).
 
 Compiled laws. An atom may carry its code — `Atom(name, fn, feature=, code="s['front'] == 'tree'", defs=...)`, a
 Python expression over `s` and `a` that equals `fn`, with the module-level source it needs. `law.to_code(grammar)` is a
@@ -91,7 +93,7 @@ accepted only after the differential check: `check_compiled(module, buffer, laws
 (`grammar.add(atom)`, e.g. a relational atom a proposer invents); a buffer evaluates the new atom on its older rows the
 first time a condition names it.
 
-Sized acceptance. Fixed thresholds do not see how many candidates were tried on one buffer (a stand of ours tried about
+Sized acceptance. Fixed thresholds do not see how many candidates were tried on one buffer (a setup of ours tried about
 52,000 at support ≥ 5). By default (`sized=True`) a candidate passes only when its hits would be unlikely if it were no
 better than its null: P[Binomial(support, null) ≥ hits] ≤ δ_N, N = the candidates scored on this buffer so far
 (`buffer.tested`), δ_N = δ / (N·(N + 1)) — summing to below δ however long the stream runs — or δ / space when you
@@ -105,7 +107,7 @@ to beat 0.9 at tens of thousands of candidates. The need: a deterministic law ne
 base null in 0 of 100 (at 3%: 0 of 100 for both); a deterministic two-atom law at a base rate of 3% (1,000 rows) was
 accepted in 100 of 100 buffers with the base null on a median of 29 rows, in 0 of 100 with a fixed null of 0.9
 (tests/test_laws_w2.py). A buffer too small for its null accepts nothing — the rule working, not failing: declare
-`space=` or pass `sized=False` knowingly (the fixed thresholds; the measured stands above ran so, and their false
+`space=` or pass `sized=False` knowingly (the fixed thresholds; the measurements above ran so, and their false
 accepts are the known price). Each Law records `tested`, `null`, `need`, `level` and `admitted` ("test", "probes",
 "hand").
 
@@ -130,7 +132,7 @@ accepted, probes, simulated) and `Step.tested` — report it next to accuracy.
 What is not done:
 - no grammar that cannot be enumerated (where the mismatch should matter most) has been measured;
 - the sized rule, admission by probes and abstention are measured on synthetic worlds only: not yet on the game
-  simulator or the file server stands, and a stand that tests tens of thousands of candidates needs a buffer of a few
+  simulator or the file server, and a setup that tests tens of thousands of candidates needs a buffer of a few
   hundred rows per accepted law (a buffer of tens of rows needs `sized=False`, and then the fixed thresholds' false
   accepts are its price);
 - retirement is by precision only; a weak law no observation contradicts stays;

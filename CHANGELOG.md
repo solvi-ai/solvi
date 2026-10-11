@@ -92,7 +92,7 @@ calibration files and served by `solvi serve`), so a build from it is not mistak
   answer. Every answer names the path that answered (`who`: "rules" | "model" | None) and the rules' reason, is
   journal-ready (`to_record()`: the cells used or the model's output, the options, the confidence) and replays from its
   record (`replay`): the rules path by deriving again, the model path from the recorded output — the model is never
-  called on replay; `stats` counts the paths per reason. Measured once on the frozen test split of CLUTRR (Sinha et al., 2019), the clean split (the relation graph of each story, not its text; 1,146 queries, chains of 2–10 relations; the table fitted on the whole training file, the same 111 cells; the rules' answers byte-identical to the composition-table measurement above): the rules answered 1,087 with 0 wrong and refused 59 (21 disagreeing bracketings, 38 underivable). With a small hosted LLM (z-ai/glm-5.3-flash) as the fallback (temperature 0, reasoning effort low, 2,000 output tokens; the first of two drafts answers; the refused queries rendered in words with the 18 relation names as options), 50 of the 59 refused queries got a readable option and 39 were right; 8 replies were empty because the model's reasoning used the whole output budget (finish reason "length"), and 1 named a relation outside the option list: overall 0.983 at coverage 0.992 (1,126 right of 1,137 answered; 11 wrong, 10 of them one chain of three relations whose gold in this split is itself split between mother and mother-in-law), against 0.949 at coverage 0.949 and 0 wrong for the rules alone. On an equal-size sample of queries the rules answered, the same LLM gave a readable option to 42 of 59 and was right on 41; on chains of 4 or more relations its precision among readable replies was the same on the refused and on the answered queries (34 of 35 each), the loss being empty replies (9 of 44 and 17 of 52). solvi-base as the fallback answered all 59 and was right on 2 (11 of 59 on the sample): it does not compose relations. Every answer replayed from its record without the model (0 failures). One run; $0.017 after the proxy's cache; the pre-registered bar of coverage 1.0 was missed. A pilot before the test run, on the training file only (1,816 held-out stories, a fifth of it by a hash of the id, chains of 2 and 3 relations; the table fitted on the other four fifths): the table answered 1,675 (4 wrong) and refused 141 (11 disagreeing bracketings, 130 underivable); the same LLM got 137 of the 141 right and solvi-base 11 of 141; one run, secondary to the test numbers (`tests/test_relations_first.py`).
+  called on replay; `stats` counts the paths per reason. Measured once on the frozen test split of CLUTRR (Sinha et al., 2019), the clean split (the relation graph of each story, not its text; 1,146 queries, chains of 2–10 relations; the table fitted on the whole training file, the same 111 cells; the rules' answers byte-identical to the composition-table measurement above): the rules answered 1,087 with 0 wrong and refused 59 (21 disagreeing bracketings, 38 underivable). With a small hosted LLM (z-ai/glm-5.3-flash) as the fallback (temperature 0, reasoning effort low, 2,000 output tokens; the first of two drafts answers; the refused queries rendered in words with the 18 relation names as options), 50 of the 59 refused queries got a readable option and 39 were right; 8 replies were empty because the model's reasoning used the whole output budget (finish reason "length"), and 1 named a relation outside the option list: overall 0.983 at coverage 0.992 (1,126 right of 1,137 answered; 11 wrong, 10 of them one chain of three relations whose gold in this split is itself split between mother and mother-in-law), against 0.949 at coverage 0.949 and 0 wrong for the rules alone. On an equal-size sample of queries the rules answered, the same LLM gave a readable option to 42 of 59 and was right on 41; on chains of 4 or more relations its precision among readable replies was the same on the refused and on the answered queries (34 of 35 each), the loss being empty replies (9 of 44 and 17 of 52). solvi-base as the fallback answered all 59 and was right on 2 (11 of 59 on the sample): it does not compose relations. Every answer replayed from its record without the model (0 failures). One run; $0.017 after the proxy's cache; the pre-registered bar of coverage 1.0 was missed. A first run before the test run, on the training file only (1,816 held-out stories, a fifth of it by a hash of the id, chains of 2 and 3 relations; the table fitted on the other four fifths): the table answered 1,675 (4 wrong) and refused 141 (11 disagreeing bracketings, 130 underivable); the same LLM got 137 of the 141 right and solvi-base 11 of 141; one run, secondary to the test numbers (`tests/test_relations_first.py`).
 - **`KnowledgeStore.add(..., inferred=True)`: an assertion computed from its premises, not observed.** An "outcome"
   assertion refutes the value a key holds (the world changed); an inferred one does not — it competes by rank like any
   other source, so two inferences of different values from equal-rank premises are a dispute, and an inference never
@@ -128,7 +128,13 @@ calibration files and served by `solvi serve`), so a build from it is not mistak
   certificate=)` / `recompile(..., certificate=)` is an extra gate after the others: both accepted drafts must answer
   every fresh example correctly, twice in separate sandboxed processes with the same answers, examples that repeat a
   test or a labelled example do not count, and the count, the guard and every failure go into
-  `record["certificate"]`. Never shown to a writer and never sent back for a rewrite.
+  `record["certificate"]`. Never shown to a writer and never sent back for a rewrite. Measured once on 15 classes of
+  small pure functions over typed slots (a search over a bank of 137 operations, |H| up to 6.5·10⁸ programs of depth 2,
+  N = 314–452 fresh examples; a small hosted LLM writer at N = 60, two drafts): no accepted function was wrong on 200
+  hidden examples per class (21 accepted), the search found 6 of 15 classes and the writer 15 of 15 — but neither
+  proposer produced a false candidate, so whether the sized certificate refuses what a five-example certificate accepts
+  was not shown on that setup; it is shown only on a planted constant in a smoke test. Its necessity on a live stream of
+  drafts is not shown.
 - **`solvi.experimental.changes`: one change pipeline (experimental).** A document version, verified experience, a
   person's correction and a search proposal become candidates that pass the same pluggable stages (KnownFailures,
   Static, Consistency, Confirmation, CleanCases, Impact, FreshEnvironments, Approval, Canaries), are journaled in a
@@ -140,7 +146,7 @@ calibration files and served by `solvi serve`), so a build from it is not mistak
   and `Refused(reason, verdicts=, stage=)`. `benchmarks/changes_credit.py` runs the credit
   policy (two versions, 20 corrections, a rule that must be refused; the policy and corrections in
   `benchmarks/tasks/credit/`, the applications through `fetch.sh` / `prepare.py`) and exits 1 when a count differs.
-  Measured on two stands: on a credit policy the pipeline carried a document version (144 of 144 changed decisions traced to their clause), admitted 12 of 12 exact exceptions, held every widening one for a person and refused 8 of 8 exceptions that touched other decisions, 0 extraneous changes, 14 versions replayed; on a bank-request stream with a person's labels every one of 22 candidates passed every stage (`nogate` = `gate`), so the stages added nothing there — the module is journal, impact analysis, approval levels and rollback; still missing: the narrows / widens classifier over rule conditions, a regression-scenario stage, and a script for the bank-request stream (the credit numbers: benchmarks/changes_credit.py).
+  Measured on two setups: on a credit policy the pipeline carried a document version (144 of 144 changed decisions traced to their clause), admitted 12 of 12 exact exceptions, held every widening one for a person and refused 8 of 8 exceptions that touched other decisions, 0 extraneous changes, 14 versions replayed; on a bank-request stream with a person's labels every one of 22 candidates passed every stage — the run with the gates equals the run without them — so the stages added nothing there — the module is journal, impact analysis, approval levels and rollback; still missing: the narrows / widens classifier over rule conditions, a regression-scenario stage, and a script for the bank-request stream (the credit numbers: benchmarks/changes_credit.py).
 - **`solvi.experimental.laws`: laws of an environment from prediction mismatches (experimental).** A `Grammar` of
   boolean atoms you write (`Atom(name, fn, feature=)`, conjunctions of at most k, one atom per feature); a `LawSet`
   predicts with the most specific matching law (else your base predictor), turns a mismatch into candidates
@@ -169,11 +175,15 @@ calibration files and served by `solvi serve`), so a build from it is not mistak
   (none an exception of another) disagree, counted in `abstained`; most specific first stays the default. Skills do not
   abstain (two certified skills of one goal are both verified plans). `LawSet.cost`,
   `Step.tested` and the skill episodes' `cost` (`searched`, `verify_calls`) record the search cost.
-  Measured on two stands: on a game simulator with written mechanics the laws closed 94% of the gap between a learned
-  map and the written mechanics, with random candidates under the same test within 1.1 points; on a real MCP
-  filesystem server with a path policy, refusals 6 → 0 in one session (random probes: 48 → 29).
-  `benchmarks/laws_toy.py` reproduces both in miniature (a gridworld and a path policy, five seeds each;
-  `pytest -m slow`). A `slow` pytest marker: such tests run only with `-m slow`.
+  Measured on two setups: on a game simulator with written mechanics (20 fresh worlds, 4,731 transitions; one run) the
+  laws closed 94% of the gap between a learned map and the written mechanics (exact-effect accuracy 0.892 → 0.988
+  against a ceiling of 0.994), but random candidates from the same grammar under the same held-out test reached 0.977 —
+  the laws' own gain over them is 1.1 points, and the measurement's pre-registered bar for that control (random
+  candidates at most +2 points over the base) was missed by +8.4: the test does the work, the mismatch keeps the set
+  compact (61 laws against 103); on a real MCP filesystem server with a path policy, refusals 6 → 0 in one session (200
+  calls per session, one run; random probes: 48 → 29). `benchmarks/laws_toy.py` reproduces both in miniature (a
+  gridworld and a path policy, five seeds each; `pytest -m slow`). A `slow` pytest marker: such tests run only with `-m
+  slow`.
 - **`solvi.experimental.skills`: learning in a world described by code (experimental).** Where the world is code (a
   simulator, a file system, a service with a specification), System 2 plans on an exact model of it: `ExactModel(env)`
   forks the environment (a deep copy, or `clone(env, state)`), `plan(model, state, goal, horizon=, budget=)` searches
@@ -233,8 +243,11 @@ calibration files and served by `solvi serve`), so a build from it is not mistak
   FACE, materials and creatures as diagonals; the inventory stays flat) and `encode_paths` / `PathTree` (PARENT,
   SAME_DIR, IS_DIR, NAME=x). `RelAlgProposer` hands relational atoms ("rel:<program>", with their compiled code) to a
   law set's unchanged held-out test. `benchmarks/relations_battery.py` (`pytest -m slow`): on a pre-registered battery
-  of 28 random rules over three relations, 22 found within seven nodes, every find exact on larger graphs of other
-  families, peak memory 0.4 GB; a rule that needs four variables (a common 4-clique) is never accepted.
+  of 28 random rules over three relations (the rule file was written in the author's earlier research line before any
+  search ran and is not shipped — `relations_battery.py --rules` takes it; the bars were fixed from that line's
+  reference run, so this is a port-fidelity check, one deterministic run), 22 found within seven nodes, every find exact
+  on larger graphs of other families, peak memory 0.4 GB; a rule that needs four variables (a common 4-clique) is never
+  accepted.
 - **Compiled laws (`solvi.experimental.laws`).** `Atom(name, fn, feature=, code=, defs=)`: an atom may carry a Python
   expression that equals it; `law.to_code(grammar)` is a pure function for one law and `lawset.to_module()` one module
   that imports nothing from solvi (the laws most specific first, your base predictor as the fallback); atoms without
@@ -271,22 +284,23 @@ calibration files and served by `solvi serve`), so a build from it is not mistak
   entries) and programs are the package's tuples; `run(program, world, library=)` runs one on any world.
   `benchmarks/relations_library_toy.py` (five seeds, `pytest -m slow`): a path tree's "denied if an ancestor directory
   is named secret and the depth is at least 3" (three levels) found with 2,556 enumerated programs in all, kinship on
-  forests to depth 6 with 10,817, where flat search found neither top rule in 100,000; 0 false accepts on larger fresh
-  worlds. The kinship ladder misses the bar of a tenth of the flat budget (1.08×; with an earlier minimal enumerator
-  without U it cost 6,125); the bar was kept and that slow test is an expected failure. `include_universal=False`
-  (find_rules, `Enumerator`; opt-in, the default keeps U and the battery's search space) leaves U out of the terminals:
-  then paths 2,174 and kinship 7,889, which meets the bar — a measured option, tested apart. `library=` takes the
-  package's `Library` or a sequence of `Entry`. The flat budget was 60,000 in the first run (the kinship ladder then
-  cost the library 1.02 × a tenth of it) and was raised after it. On a synthetic five-level path-tree policy (denied if
-  an ancestor directory is named secret and the depth is at least three; the four intermediate relations given as named,
-  unordered targets) `find_rules` with the library found every level within 4,111–4,132 enumerated programs over five
-  seeds; without the library the top level was not found within the cap of 1,000,000 programs, so the budget ratio is at
-  most 0.0042 and its true value unknown. Per level the library is not free (90 vs 71 and 2,951 vs 1,898 programs on two
-  of the shared levels; cheaper only on one). Two controls — a rule no program of the grammar can express, and one that
-  needs a 56-node program — were never admitted (0 of 20 runs). On the kinship ladder (nine rungs up to second cousin
-  once removed) the library found all nine within 3,370–3,378 programs; without it eight of nine — the ninth needs a
-  program of at least 17 nodes where the no-library search exhausted size 15 at ≈ 500,000 programs. 0 false accepts on
-  held-out forests of the same generator at a larger size.
+  forests to depth 6 with 10,817 (the mean over seeds; 10,813–10,819 by seed), where flat search found neither top rule
+  in 100,000; 0 false accepts on larger fresh worlds. The kinship ladder misses the bar of a tenth of the flat budget
+  (1.08×; with an earlier minimal enumerator without U it cost 6,125); the bar was kept and that slow test is an
+  expected failure. `include_universal=False` (find_rules, `Enumerator`; opt-in, the default keeps U and the battery's
+  search space) leaves U out of the terminals: then paths 2,174 and kinship 7,889, which meets the bar — a measured
+  option, tested apart. `library=` takes the package's `Library` or a sequence of `Entry`. The flat budget was 60,000 in
+  the first run (the kinship ladder then cost the library 1.02 × a tenth of it) and was raised after it. On a synthetic
+  five-level path-tree policy (denied if an ancestor directory is named secret and the depth is at least three; the four
+  intermediate relations given as named, unordered targets) `find_rules` with the library found every level within
+  4,111–4,132 enumerated programs over five seeds; without the library the top level was not found within the cap of
+  1,000,000 programs, so the budget ratio is at most 0.0042 and its true value unknown. Per level the library is not
+  free (90 vs 71 and 2,951 vs 1,898 programs on two of the shared levels; cheaper only on one). Two controls — a rule no
+  program of the grammar can express, and one that needs a 56-node program — were never admitted (0 of 10 runs: five
+  seeds, with and without the library). On the kinship ladder (nine rungs up to second cousin once removed) the library
+  found all nine within 3,370–3,378 programs; without it eight of nine — the ninth needs a program of at least 17 nodes
+  where the no-library search exhausted size 15 at ≈ 500,000 programs. 0 false accepts on held-out forests of the same
+  generator at a larger size.
 - **`solvi.experimental.laws`: ranking candidates where each check is expensive.** `RankedProposer(inner, scorer,
   buffer)` reorders another proposer's candidates (never adds, drops or changes one), so a probe budget spends the
   likely hypotheses first; `atom_features` / `candidate_features` read precision, recall, Jaccard and anti-match of each
@@ -309,17 +323,17 @@ calibration files and served by `solvi serve`), so a build from it is not mistak
   atom; this scores the conjunction itself. With no logged rows every score is equal and the order is the blind one —
   the statistic needs rows. On three synthetic settings drawn from the library's own grammars, five seeds × 60 tasks
   each (`benchmarks/laws_rank_joint.py` runs one seed): the library test's grammar (k = 3, about 330 candidates per
-  task) 1.00 checks to the true condition on average (median 1) against 85 blind, 27 for the raw Jaccard and 2.1 for the
-  trained bag of atoms; deep conditions (3–5 atoms of k = 5, about 6,000 candidates per task, 5% label noise) 17 (median
-  1) against 2,182 / 1,310 / 591 (medians 1,480.5 / 823.5 / 86); correlated features (three feature pairs copied with
-  probability 0.8) 1.01 (median 1) against 126 / 47 / 7.7; a control scoring against the effect's rows shuffled was
-  worse than the blind order (112 / 2,434 / 166). On the deep setting with the buffer cut to its first 5 / 20 / 100 /
-  300 rows: 1,997 / 1,569 (median 522) / 534 (median 9.5) / 17 — the gain shows from about 20 rows and is full by 300.
-  The same law was accepted under every order in 894 of 900 tasks (by construction: the acceptance scores every
-  candidate; six exact ties); on the deep noisy setting nothing was accepted in 180 of 300 tasks at 300 rows —
-  acceptance needs more rows than ranking. The trained scorer it beats is the library's linear bag of atoms; in
-  distribution only. A trained scorer over the whole condition is a possible later extra, only if a multi-seed
-  measurement shows a gain over this one on deep conditions.
+  task) 1.00 checks to the true condition on average (median 1) against 85 blind (a different draw of tasks: five seeds
+  against the one seed above), 27 for the raw Jaccard and 2.1 for the trained bag of atoms; deep conditions (3–5 atoms
+  of k = 5, about 6,000 candidates per task, 5% label noise) 17 (median 1) against 2,182 / 1,310 / 591 (medians 1,480.5
+  / 823.5 / 86); correlated features (three feature pairs copied with probability 0.8) 1.01 (median 1) against 126 / 47
+  / 7.7; a control scoring against the effect's rows shuffled was worse than the blind order (112 / 2,434 / 166). On the
+  deep setting with the buffer cut to its first 5 / 20 / 100 / 300 rows: 1,997 / 1,569 (median 522) / 534 (median 9.5) /
+  17 — the gain shows from about 20 rows and is full by 300. The same law was accepted under every order in 894 of 900
+  tasks (by construction: the acceptance scores every candidate; six exact ties); on the deep noisy setting nothing was
+  accepted in 180 of 300 tasks at 300 rows — acceptance needs more rows than ranking. The trained scorer it beats is the
+  library's linear bag of atoms; in distribution only. A trained scorer over the whole condition is a possible later
+  extra, only if a multi-seed measurement shows a gain over this one on deep conditions.
 - **Sensitive fields: declared on the catalog, refused by `solvi check`.** `Catalog(sensitive={"age", "sex"})`,
   `lint(obj, sensitive=...)` and `solvi check module:system --sensitive age,sex` (the names add up) name given facts no
   part may read. A part that reads one (a fn, extract, check, rule, `then` function, alternative producer or
@@ -337,11 +351,11 @@ calibration files and served by `solvi serve`), so a build from it is not mistak
   clause `cite_outside_clause`; `require=True` makes an uncited part the warning `no_cite`; a correction cited as
   `clause="person:k07"` is checked against the text only. `solvi check module:system --text POLICY.md` runs it after
   the lint; `--spec FILE` splits a specification into clauses `c1`, `c2`, ... as `Spec(text)` does (also the text,
-  unless `--text` is given; `solvi.check.spec_clauses`, and `split_clauses` now lives in `solvi.check` — still
-  importable from `solvi.experimental.compile`; both now from `solvi.core.versions`), `--require-cites` adds the `no_cite` warnings. The causes of `solvi.core.store.diff.diff` carry `"cites"` ([{"clause", "quote"}]) when their part has
-  citations; `solvi.core.versions.decision_diff` also takes plain Systems (hand-written catalogs), whose
-  causes get their `clauses` from the citations; the changes pipeline's `Static(text=..., spec=...)` refuses a
-  candidate whose citations fail.
+  unless `--text` is given; `solvi.check.spec_clauses`; `split_clauses` lives in `solvi.core.versions` and stays
+  importable from `solvi.check` and `solvi.experimental.compile`), `--require-cites` adds the `no_cite` warnings. The
+  causes of `solvi.core.store.diff.diff` carry `"cites"` ([{"clause", "quote"}]) when their part has citations;
+  `solvi.core.versions.decision_diff` also takes plain Systems (hand-written catalogs), whose causes get their `clauses`
+  from the citations; the changes pipeline's `Static(text=..., spec=...)` refuses a candidate whose citations fail.
 
 - **Exact exceptions: `only=` in the diff.** `solvi.core.store.diff.diff(storage, system, ..., only=ids)` reports
   `DiffReport.extraneous` (the ids of the changed decisions outside `only`) and `DiffReport.exact` (`only` given,
@@ -390,7 +404,7 @@ calibration files and served by `solvi serve`), so a build from it is not mistak
   from a stored record (identical issues and bytes, or what differs); `replay_runs(storage, specialist, sources)` replays
   every stored run of a specialist. `solvi report --overview` counts the runs per specialist.
   `solvi.testing.conformance.check_specialist` adds the store path (`stored`, `store_replayed`, `edit_caught`).
-  Measured under the contract in 2026-10 (stands outside the repository, no script here): receipt OCR caught 84% of
+  Measured under the contract in 2026-10 (setups outside the repository, no script here): receipt OCR caught 84% of
   corruptions and speech to text 99.7%, both resting on two readers aligned by `align`; neither specialist ships, and
   charts (`ChartSpecialist(..., storage=)`) stays experimental until its accuracy is measured on real texts.
 
@@ -431,13 +445,22 @@ calibration files and served by `solvi serve`), so a build from it is not mistak
   then False and `Replay.note` says so; `Replay.output_sha256` is the re-rendered output's hash.
   `solvi.testing.conformance.check_specialist` gains the check "replays from its record without calling the proposer"
   (a tripwire proposer during every replay, and the same bytes) and `deterministic=False` to skip the two-run check for
-  a model proposer. On the charts stand's 50 texts with the LLM proposer (gpt-oss-120b, answers from the proxy's cache,
-  no new calls) every stored run replays byte for byte from its record, 50 of 50. The 0/50 of the pre-registered run was the
-  benchmark's: its "second run" used the rule proposer for every arm; `benchmarks/charts_real_texts.py` now checks
-  replay from the record (and a second run only for the rule arm) and has `--replay RUNS_JSONL`.
+  a model proposer. On the charts benchmark's 50 texts with the LLM proposer (gpt-oss-120b, answers from the proxy's
+  cache, no new calls) every stored run replays byte for byte from its record, 50 of 50. The 0/50 of the pre-registered
+  run was the benchmark's: its "second run" used the rule proposer for every arm; `benchmarks/charts_real_texts.py` now
+  checks replay from the record (and a second run only for the rule arm) and has `--replay RUNS_JSONL`. Measured on 50
+  paragraphs of US federal news releases against a hand reading written before any proposer ran
+  (`benchmarks/charts_real_texts.py`, one run): the rule-based proposer drew a chart for 50 of 50 texts with every
+  rendered value re-verified against the text (350 of 350 chart numbers), but only 33.3% of the drawn points agreed with
+  the hand reading in label and unit (the bar was 95%: labels 39, units 82 of 99 points); the LLM proposer
+  (gpt-oss-120b) drew a chart for 56% of the texts and agreed on 94.2% of the points, with 5 of 485 chart numbers not in
+  the text (a sign the proposer added); a changed digit and swapped values were caught 300 of 300 times by both, a
+  dropped point 74 (rules) and 109 (LLM) of 300; every run replays byte for byte (50 of 50). Still missing: a proposer
+  whose labels and units match a reader's on real texts.
 
 ### Changed
 
+- **The 0.9 import paths still resolve with a warning; they are removed in 1.2.**
 - **`solvi.experimental.charts.LLMProposer` returns the model's reply text as it came** (a dict before), and
   `ChartSpecialist.parse` reads a text leniently (the JSON object in it, a fence tolerated): the record keeps the text
   and replay parses it again. A reply that is not JSON is now an invalid proposal (`invalid_proposal`, its text

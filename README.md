@@ -382,6 +382,10 @@ a decision that used one records it, and each one graduates or is removed by 1.2
 - **Verified charts** (`solvi.experimental.charts`): every number quoted from the text and checked (unit, scale, a pie
   that adds up), as a deterministic SVG that replays to the same bytes
   ([examples/21_verified_chart.py](examples/21_verified_chart.py)).
+- **Learning where the world is code** (`solvi.experimental.laws`, `.skills`, `.relations`): laws of an environment
+  accepted only by a held-out test, plans verified on an exact model and compiled into skills under an outcome
+  certificate, relations and composition tables learned by counting with refusal, rules first and a model only for what
+  they refuse — each measured, the numbers and their limits in [docs/experimental.md](docs/experimental.md).
 - **Changes** (`solvi.experimental.changes`): one pipeline for a document version, a person's correction, verified
   experience and a labelled update — pluggable stages, a hash-chained journal, impact analysis, approval levels and
   rollback by version; an update from trusted corrections is promoted only when it passes held-out, honesty and
@@ -389,14 +393,19 @@ a decision that used one records it, and each one graduates or is removed by 1.2
 
 Graduated in 1.1 (stable now): the MCP proxy with a guard (`solvi serve --guard catalog.py:guard --upstream CMD`,
 `solvi.serve.run_proxy`), counterfactual explanations (`solvi.core.explain`: the smallest input change that flips an
-answer), the specialist contract (`solvi.core.specialist`) and document versions (`solvi.core.versions`).
+answer), the specialist contract (`solvi.core.specialist`) and document versions (`solvi.core.versions`). New and stable
+in 1.1: a call firewall in the guard (`Guard.firewall`: every slot value a tool call sends must be written in the
+request or given as a fact, and the arguments must validate against the tool's schema) and the answer contract
+(`solvi.core.contract`, `Catalog.contract(...)`: an answer whose type does not match the question, or that echoes the
+given fact, abstains).
 
 ## Coming from 0.9
 
-Every 0.9 import path still works in 1.0.x: it imports the same module and warns (`SolviDeprecationWarning`) with the
-path to use; 1.1 removes the old paths. `solvi migrate PATH` rewrites your code (imports and dotted paths in strings,
-in `.py` and `.md` files); `solvi migrate PATH --check` only reports. Stored decisions, calibration files and
-fingerprints do not change. The full table and what was removed: [CHANGELOG.md](CHANGELOG.md#breaking-changes-and-migration).
+Every 0.9 import path still works in 1.0.x and 1.1: it imports the same module and warns (`SolviDeprecationWarning`)
+with the path to use; 1.2 removes the old paths. `solvi migrate PATH` rewrites your code (imports and dotted paths in
+strings, in `.py` and `.md` files); `solvi migrate PATH --check` only reports. Stored decisions, calibration files and
+fingerprints do not change. The full table and what was removed:
+[CHANGELOG.md](CHANGELOG.md#breaking-changes-and-migration).
 
 ## Command line
 

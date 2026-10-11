@@ -40,8 +40,7 @@ solvi.core.store.diff.diff), FreshEnvironments (ported: paired selection, determ
 bootstrap lower bound > 0, rules never crash, progress not lower), Approval (new: a table (kind, source) → "gate" |
 "gate+person" | "person"), Canaries (wraps solvi.testing.honesty; a suspiciously perfect score holds), RefusalRegression
 (new, not switchable: the share refused on a held should-abstain set before and after the change; a change that answers
-what was refused before is refused — refusal is the first casualty of self-change: a chain of model merges has been
-reported to keep its skills and lose much of its refusal).
+what was refused before is refused — refusal is the first casualty of self-change).
 
 Refusal regression cannot be switched off. For every change whose target can answer (Pipeline(answer_of=...), or a
 target with `answerer(change or None, ctx)`: VersionsTarget, LearningTarget, a target of yours — an answerer, a
@@ -79,12 +78,12 @@ gates_of reads the active hazard items without writing; Static refuses a candida
 sensitive field (Static(sensitive=), Catalog(sensitive=)) or a citation not in the text (Static(text=, spec=)); Impact
 refuses an exception whose diff moves decisions outside expected["only"] and admits the exact one.
 
-Measured (2026-10, two stands; the credit one is benchmarks/changes_credit.py, the bank-request stream has no script in
+Measured (2026-10, two setups; the credit one is benchmarks/changes_credit.py, the bank-request stream has no script in
 the repository): on a credit
 policy the pipeline carried a document version (144 of 144 changed decisions traced to their clause), admitted 12 of 12
 exact exceptions, held every widening one for a person and refused 8 of 8 exceptions that touched other decisions, 0
 extraneous changes, 14 versions replayed; on a bank-request stream with a person's labels every one of 22 candidates
-passed every stage (`nogate` = `gate`), so the stages added nothing there. The module is journal, impact analysis,
+passed every stage — the run with the gates equals the run without them — so the stages added nothing there. The module is journal, impact analysis,
 approval levels and rollback — infrastructure, not a claim that its gates admit fewer harmful changes.
 
 What is not done:

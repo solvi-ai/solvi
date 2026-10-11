@@ -258,15 +258,16 @@ is that every step is checked, recorded and replayable, not that the model beats
 **Expect a second reader to buy exactness and cost half the coverage; let the arithmetic vouch where it can.** On receipts
 (SROIE and CORD v2 test sets, 1,923 gold fields) an open OCR model alone read 88% of the fields right; accepting a field only
 when a second OCR engine read the same digits in the same place and the receipt's sums held raised that to 96.4% with no
-accepted total failing its arithmetic, but 64% of the fields went to "needs review" or "conflict": the second engine confirmed
-39–60% of the first one's fields, and a sum can only vouch for a field that takes part in one (most item lines carry no unit
-price). Reading the second engine on the first one's word boxes (41% coverage on calibration) and dropping it for money fields
-with a passing sum (41%) moved coverage by a few points, not to the 70% we wanted. Budget for the review queue before promising
-coverage, and put the budget where the fields have no equation neighbours (names, dates). With a second engine that
-reads camera photos (PP-OCRv4 instead of Tesseract, on receipts no run had seen), agreement between the engines rose from
-36–60% to 81–94% of fields and acceptance from 36% to 55% at 95.7% exact — and the misses left were the rule-based field
-proposer picking the wrong line (a pre-rounding total, a card row as cash) with both engines reading the same digits. Measure
-which of the two is your bottleneck before swapping readers: agreement between readers tells you.
+accepted total failing its arithmetic, but 64% of the fields went to "needs review" or "conflict": the second engine
+confirmed 36–60% of the first one's fields, and a sum can only vouch for a field that takes part in one (most item lines
+carry no unit price). Reading the second engine on the first one's word boxes (41% coverage on calibration) and dropping
+it for money fields with a passing sum (41%) moved coverage by a few points, not to the 70% we wanted. Budget for the
+review queue before promising coverage, and put the budget where the fields have no equation neighbours (names, dates).
+With a second engine that reads camera photos (PP-OCRv4 instead of Tesseract, on receipts no run had seen), agreement
+between the engines rose from 36–60% to 63–94% of fields on the calibration receipts (81–94% on the blind sets) and
+acceptance from 36% to 55% at 95.7% exact — and the misses left were the rule-based field proposer picking the wrong
+line (a pre-rounding total, a card row as cash) with both engines reading the same digits. Measure which of the two is
+your bottleneck before swapping readers: agreement between readers tells you.
 
 **Normalise numbers the same way on both sides before judging a transcript, and look at what the two readers agreed on.**
 Two speech models of different families (faster-whisper small, a Kaldi model) aligned in time gave 0 false words on 400
@@ -324,21 +325,24 @@ values?", solvi-base said yes to calls it should have refused. Grounding and pol
 `solvi.experimental.laws` a wrong prediction proposes candidate laws ("for this action, under this condition, the effect
 is this"), and a candidate is accepted only when it removes errors on held-out transitions of other worlds, sessions or
 paths than the one that proposed it (`Buffer` keys rows by `group`; `test(..., exclude=group)`). On a game simulator
-with written mechanics the laws closed 94% of the gap between a learned map and the written mechanics — and random
-candidates from the same grammar under the same test came within 1.1 points: where the grammar can be enumerated, the
-test does the work and the mismatch only keeps the set of laws compact (61 laws against 103). Retire a law when its
-held-out precision falls (`retire_below`), and cap the set. Where each test is a call into a live system, plan the
-probes: on a real MCP filesystem server with a path policy, probes chosen to tell the mismatch's candidates apart
-(read-only calls first) learned every denial class in one session — refusals 6 → 0 in the next one, no allowed call
-skipped — where random probes at the same budget went 48 → 29. **An LLM may propose, never judge:** under the same
-test an LLM proposer ended 0.95 points below enumeration, and in the same study a model judged the truth of its own
-claims about the path policy wrongly 18 times out of 40. Both findings in miniature, with their bars:
-[laws_toy.py](../benchmarks/laws_toy.py) (`pytest -m slow tests/test_laws_toy.py`).
+with written mechanics (20 fresh worlds, 4,731 transitions; one run) the laws closed 94% of the gap between a learned
+map and the written mechanics (exact-effect accuracy 0.892 → 0.988 against a ceiling of 0.994), but random candidates
+from the same grammar under the same held-out test reached 0.977 — the laws' own gain over them is 1.1 points, and the
+measurement's pre-registered bar for that control (random candidates at most +2 points over the base) was missed by
++8.4: where the grammar can be enumerated, the test does the work and the mismatch only keeps the set of laws compact
+(61 laws against 103). Retire a law when its held-out precision falls (`retire_below`), and cap the set. Where each test
+is a call into a live system, plan the probes: on a real MCP filesystem server with a path policy, probes chosen to tell
+the mismatch's candidates apart (read-only calls first) learned every denial class in one session — refusals 6 → 0 in
+the next one (200 calls per session, one run), no allowed call skipped — where random probes at the same budget went 48
+→ 29. **An LLM may propose, never judge:** under the same test an LLM proposer ended 0.95 points below enumeration, and
+in the same study a model judged the truth of its own claims about the path policy wrongly 18 times out of 40. Both
+findings in miniature, with their bars: [laws_toy.py](../benchmarks/laws_toy.py) (`pytest -m slow
+tests/test_laws_toy.py`).
 
 ## Size the acceptance by the search; admit by probes; abstain when laws disagree
 
 **Size the acceptance by how many candidates you tested.** A fixed bar ("support ≥ 5, precision ≥ 0.9") does not know
-that a stand tried tens of thousands of candidates on the same buffer, and some random condition always passes it: on a
+that a setup tried tens of thousands of candidates on the same buffer, and some random condition always passes it: on a
 synthetic buffer with no law at all (2,000 rows, an effect at 70% independent of 40 sparse atoms, 821 conditions) the
 fixed bar accepted a law in 100 of 100 buffers. `LawSet(sized=True)` — the default — tests each candidate at the level
 δ / (N·(N + 1)), N the candidates scored on that buffer so far, so the chance of any false acceptance stays below δ:
@@ -346,19 +350,19 @@ fixed bar accepted a law in 100 of 100 buffers. `LawSet(sized=True)` — the def
 the buffer (`null="base"`: what a random condition achieves for that action and effect, floored at 0.05), with
 `min_precision` kept as a separate filter: a deterministic law at a base rate of 3% was accepted in 100 of 100 buffers
 on a median of 29 rows, where a fixed null of 0.9 (`null=0.9`) accepted it in none — beating 0.9 at tens of thousands of
-candidates takes hundreds of rows even for a law that is never wrong. **The need:** a deterministic law needs
+candidates takes hundreds of rows even for a deterministic law. **The need:** a deterministic law needs
 ⌈ln(1/δ_N) / ln(1/null)⌉ rows, δ_N = δ / (N·(N + 1)): at 52,000 candidates and δ = 0.1, about 9 rows at a base rate of
 3%, 68 at 70%, 228 against a fixed 0.9. **A buffer too small for its null accepts nothing — that is the rule working,
 not failing.** Collect more held-out rows, test fewer candidates, declare `space=`, or pass `sized=False` knowingly and
-treat the fixed bar's false accepts as the known price; the stands measured above ran with `sized=False`.
+treat the fixed bar's false accepts as the known price; the measurements above ran with `sized=False`.
 
-**Where the world answers questions, admit by discriminating probes, not by a random sample.** A neighbouring research
-line measured that a hypothesis "certified" on 8 random held-out examples is wrong more often the larger the space
-(0, 0.105, 0.193 at 17, 1,462, 124,287 hypotheses), and that 6 queries chosen to tell the survivors apart bring the
-largest case to 0.030. `LawSet.admit_by_probes(candidates, ask, probes=, safe=, budget=)` does that for laws: it asks
-the safe probe that splits the surviving classes most and accepts the shortest candidate only when one class is left;
-otherwise it returns "undetermined" with the classes. On a synthetic world at 8 checks: a random held-out sample with
-the shortest survivor accepted a wrong law in 0.593 of 300 trials, the probes in none (0.987 right, 0.013
+**Where the world answers questions, admit by discriminating probes, not by a random sample.** The author's earlier
+research line measured that a hypothesis "certified" on 8 random held-out examples is wrong more often the larger the
+space (0, 0.105, 0.193 at 17, 1,462, 124,287 hypotheses), and that 6 queries chosen to tell the survivors apart bring
+the largest case to 0.030. `LawSet.admit_by_probes(candidates, ask, probes=, safe=, budget=)` does that for laws: it
+asks the safe probe that splits the surviving classes most and accepts the shortest candidate only when one class is
+left; otherwise it returns "undetermined" with the classes. On a synthetic world at 8 checks: a random held-out sample
+with the shortest survivor accepted a wrong law in 0.593 of 300 trials, the probes in none (0.987 right, 0.013
 undetermined). Ask only where the rest of your law set and base are right, or a right candidate is refuted with them.
 
 **Abstain when consistent laws disagree.** Two laws that both passed their test, neither an exception of the other,
@@ -376,19 +380,22 @@ only: [tests/test_laws_w2.py](../tests/test_laws_w2.py).
 NAME=x; a grid seen from the player: EAST, SOUTH, AT, FACE and the cells' materials) and enumerates small
 relation-algebra programs bottom-up, one per behaviour. Two programs are one only when their full relations agree on
 every example — never when only the readout agrees, or what composes from them is lost. On a pre-registered battery of
-28 random rules over three relations it found 22 within seven nodes, each exact on larger graphs of other families, and
-a rule that needs four variables (a common 4-clique) was never accepted. `RelAlgProposer` hands the best programs to a
-law set as atoms and the law set's held-out test judges them: for a policy that denies reads under any directory named
-"secret" (files may be named so too), on a synthetic path tree with that policy (`benchmarks/relations_compile.py`) the
-found relational law was right on all 20,000 fresh rows, which the flat grammar's "the parent is named secret" cannot
-be. On an MCP filesystem server behind a written guard, laws with a relational atom (ancestor directory named secret)
-refused none of the 35 calls under a secret directory in the second session (the flat grammar refused all 35) and
-wrongly skipped none of 130 allowed calls; one unrelated refusal remained (a listing of a file link, mispredicted by
-both grammars), so the pre-registered bar of zero refusals was missed. On the game simulator +0.02 points (0.9882 vs
-0.9880). One layout, one run each. **Equivalence holds on the examples only**: the smallest program of a class may not
-generalise, so keep the held-out check on other groups, sizes or families. Expect programs of four or five nodes with
-twenty-odd relations; with many or large examples search a subset and re-check on all (`synthesize(..., check=)`), and
-with noisy labels rank by agreement (`top_programs`), not by an exact match.
+28 random rules over three relations (the rule file was written in the author's earlier research line before any search
+ran and is not shipped — `relations_battery.py --rules` takes it; the bars were fixed from that line's reference run, so
+this is a port-fidelity check, one deterministic run) it found 22 within seven nodes, each exact on larger graphs of
+other families, and a rule that needs four variables (a common 4-clique) was never accepted. `RelAlgProposer` hands the
+best programs to a law set as atoms and the law set's held-out test judges them: for a policy that denies reads under
+any directory named "secret" (files may be named so too), on a synthetic path tree with that policy
+(`benchmarks/relations_compile.py`) the found relational law was right on all 20,000 fresh rows, which the flat
+grammar's "the parent is named secret" cannot be. On an MCP filesystem server behind a written guard, laws with a
+relational atom (ancestor directory named secret) refused none of the 35 calls under a secret directory in the second
+session (the flat grammar refused all 35) and wrongly skipped none of 130 allowed calls; one unrelated refusal remained
+(a listing of a file link, mispredicted by both grammars), so the pre-registered bar of zero refusals was missed. On the
+game simulator +0.02 points (0.9882 vs 0.9880). One layout, one run each. **Equivalence holds on the examples only**:
+the smallest program of a class may not generalise, so keep the held-out check on other groups, sizes or families.
+Expect programs of four or five nodes with twenty-odd relations; with many or large examples search a subset and
+re-check on all (`synthesize(..., check=)`), and with noisy labels rank by agreement (`top_programs`), not by an exact
+match.
 
 **Compile a found rule, and accept the code only after the differential check.** Give atoms their code (`Atom(...,
 code=)`): `LawSet.to_module()` writes the laws as one module that imports nothing from solvi, and
@@ -419,19 +426,20 @@ that re-simulation, never because a model said it works: in the gridworld toy, s
 goal. **A skill is used alone only while its outcomes keep the certificate** (`Certificate`): before it is certified,
 System 2 re-verifies it on the exact model at every use, so every use has an outcome — a certificate fed only by the
 decisions the system made alone can certify what it never tested. Budget the need: a fresh certificate takes 50 clean
-outcomes at 5% and δ 0.1 (25 at 10%, 12 at 20%), so a skill used once per episode needs about fifty episodes before it
-acts alone; pool the certificate by goal or over the set (the promise is then the pool's) or accept a looser promise
-on short streams. In the toy (20 fresh layouts × 5 seeds) the set certified at 20% between the ninth and the thirteenth episode
-and System 1's share reached 0.81 in the last five with every goal still reached; per skill nothing certified within
-20 episodes.
-**Cases do not transfer, rules do:** replaying the sequence that worked from the same start state gave System 1 nothing
-on fresh layouts; a skill's condition keeps only the atoms its verified starts shared, so it reaches states no case has
-seen. On Crafter (written mechanics, symbolic state, hand-written survival reflexes shared by every arm), an action
-model learned from the agent's own attempts and carried across 30 worlds (10 independent runs) raised the unique
+outcomes at 5% and δ 0.1 (25 at 10%, 12 at 20%; with the default bet 0.9 — the count depends on it), so a skill used
+once per episode needs about fifty episodes before it acts alone; pool the certificate by goal or over the set (the
+promise is then the pool's) or accept a looser promise on short streams. In the toy (20 fresh layouts × 5 seeds) the set
+certified at 20% between the ninth and the thirteenth episode and System 1's share reached 0.81 in the last five with
+every goal still reached; per skill nothing certified within 20 episodes; the 20% promise pooled over the set was chosen
+after these runs — at 5% nothing certified within the toy's 20 episodes (as the changelog says). **Cases did not
+transfer, rules did (the gridworld toy):** replaying the sequence that worked from the same start state gave System 1
+nothing on fresh layouts; a skill's condition keeps only the atoms its verified starts shared, so it reaches states no
+case has seen. On Crafter (written mechanics, symbolic state, hand-written survival reflexes shared by every arm), an
+action model learned from the agent's own attempts and carried across 30 worlds (10 independent runs) raised the unique
 achievements unlocked per episode from 6.0 to 10.6 of 22 (+77%; the oracle 14.4) and System 1's share to 84% after about
 twenty worlds, part of it by living longer; with the written rules given to the agent as gates, the learned memory added
-nothing (−4.5%). Script for the gridworld:
-[skills_toy.py](../benchmarks/skills_toy.py) (`pytest -m slow tests/test_skills_toy.py`).
+nothing (−4.5%). Script for the gridworld: [skills_toy.py](../benchmarks/skills_toy.py) (`pytest -m slow
+tests/test_skills_toy.py`).
 
 **Measured on Crafter.** On Crafter (version 1.8.3; written mechanics as the exact model; symbolic state; hand-written
 survival reflexes shared by every arm, 60% of all steps; the planner reads the copy's full map while the game shows an
@@ -461,17 +469,16 @@ training steps).
 
 ## Self-change: guard refusal first
 
-**Refusal is the first casualty of self-change; the regression check cannot be switched off.** A chain of model merges
-has been reported to keep every skill and lose much of its refusal (a number from outside this repository, not
-reproduced here): each change looks fine on what it was meant to improve, and the inputs the system must refuse or
-hand over are answered a little more each time. In `solvi.experimental.changes` every
-change whose target can answer passes `RefusalRegression` — the share refused on a held should-abstain set before and
-after — and there is no flag to remove it. Declare the set (`Pipeline(refusals=...)`): outside or unknown inputs, the
-cases your policy hands to a person; without one the change is held for a person — a vacuous pass would be a switch in disguise. Keep the
-default tolerance (0: one input answered that was refused before refuses the change) unless your answerer is
-nondeterministic. The set follows the policy version: a document version may rightly redefine what goes to a person, so
-declare the set of the version in force, as `benchmarks/changes_credit.py` does: there a self-tuning threshold change that closed the review band
-answered 137 of 137 hand-overs and was refused, while 12 exact corrections passed.
+**Refusal is the first casualty of self-change; the regression check cannot be switched off.** Each change looks fine on
+what it was meant to improve, and the inputs the system must refuse or hand over are answered a little more each time.
+In `solvi.experimental.changes` every change whose target can answer passes `RefusalRegression` — the share refused on a
+held should-abstain set before and after — and there is no flag to remove it. Declare the set
+(`Pipeline(refusals=...)`): outside or unknown inputs, the cases your policy hands to a person; without one the change
+is held for a person — a vacuous pass would be a switch in disguise. Keep the default tolerance (0: one input answered
+that was refused before refuses the change) unless your answerer is nondeterministic. The set follows the policy
+version: a document version may rightly redefine what goes to a person, so declare the set of the version in force, as
+`benchmarks/changes_credit.py` does: there a self-tuning threshold change that closed the review band answered 137 of
+137 hand-overs and was refused, while 12 exact corrections passed.
 
 ## Rules over relations: enumerate with a library, rank only where a check is expensive
 
@@ -486,39 +493,40 @@ answered 137 of 137 hand-overs and was refused, while 12 exact corrections passe
 
 On two toys ([relations_library_toy.py](../benchmarks/relations_library_toy.py), five seeds each) the library found
 every level — a path tree's "denied if an ancestor directory is named secret and the depth is at least 3" (three levels)
-within 2,556 enumerated programs, kinship on forests to depth 6 (second cousin once removed) within 10,817 — where the
-same search without the library found neither top rule in 100,000, with 0 false accepts on larger fresh worlds. The
-kinship ladder misses the toy's bar of a tenth of that budget (1.08×): the universal relation U, a terminal of the
-package's enumerator, enlarges every level: with `include_universal=False` (U left out of the terminals of both arms)
-the ladder costs 7,889 and meets the bar, the path tree 2,174 (1,679 with the earlier minimal enumerator; the ladder
-6,125). Leave U out when no rule you look for needs "every pair". A library also has a cost: every entry is a terminal,
-so a rule it does not help gets dearer (sibling took 6,545 programs in its own round after grandparent and
-great-grandparent were admitted, 951 without the library). The intermediate concepts were given as targets: the search
-found which one was within reach and the programs, not the concepts. On a synthetic five-level path-tree policy (denied
-if an ancestor directory is named secret and the depth is at least three; the four intermediate relations given as
-named, unordered targets) `find_rules` with the library found every level within 4,111–4,132 enumerated programs over
-five seeds; without the library the top level was not found within the cap of 1,000,000 programs, so the budget ratio is
-at most 0.0042 and its true value unknown. Per level the library is not free (90 vs 71 and 2,951 vs 1,898 programs on
-two of the shared levels; cheaper only on one). Two controls — a rule no program of the grammar can express, and one
-that needs a 56-node program — were never admitted (0 of 20 runs). On the kinship ladder (nine rungs up to second cousin
-once removed) the library found all nine within 3,370–3,378 programs; without it eight of nine — the ninth needs a
-program of at least 17 nodes where the no-library search exhausted size 15 at ≈ 500,000 programs. 0 false accepts on
-held-out forests of the same generator at a larger size. **Hold out other families, not only other draws:** a rule the
-programs cannot express ("x and y share a 4-clique") was never admitted on graphs of density 0.3 or 0.5, exact or by
-precision; on dense graphs (0.7) almost every edge is in a 4-clique, and precision / recall acceptance with held-out
-graphs of the same density admitted the edge relation itself — held-out graphs of density 0.4, or exact acceptance,
-rejected it (`tests/test_relations_library.py`). **The caveat on step 4:** that one-step rules are learned by gradient
-is verified only on hand-picked rules over one relation; on random rules plain enumeration already finds every one-step
-rule in seconds, and rules of two steps or more did not hold when learned by gradient — no gradient learner ships with
-solvi. **On step 5:** a check on the logged rows is a few bit operations, so ranking pays only where each check is a
-live probe or a planner call. On synthetic tasks drawn from one grammar (30 atoms, k = 3) the trained bag-of-atoms
-ranker needed 2.1 checks to the true condition against 69.7 in the blind order (by length, then name), and the
-raw-feature control 24.6 (the best raw threshold picked after the fact: 12.8) — in distribution only; measure the
-control on your own grammar before trusting the trained one (`tests/test_laws_rank.py`). Measured once on a live file
-server (8 mismatches; candidates contradicted by logged rows skipped free): every order spent 29 probes in all, because
-1–5 candidates per mismatch were left to probe and the true conditions were single atoms — the shortest hypotheses,
-which the length-first order meets first. Ranking can pay only where many consistent hypotheses remain after the free
-checks; the control first.
+within 2,556 enumerated programs, kinship on forests to depth 6 (second cousin once removed) within 10,817 (the mean
+over seeds; 10,813–10,819 by seed) — where the same search without the library found neither top rule in 100,000, with 0
+false accepts on larger fresh worlds. The kinship ladder misses the toy's bar of a tenth of that budget (1.08×): the
+universal relation U, a terminal of the package's enumerator, enlarges every level: with `include_universal=False` (U
+left out of the terminals of both arms) the ladder costs 7,889 and meets the bar, the path tree 2,174 (1,679 with the
+earlier minimal enumerator; the ladder 6,125). Leave U out when no rule you look for needs "every pair". A library also
+has a cost: every entry is a terminal, so a rule it does not help gets dearer (sibling took 6,545 programs in its own
+round after grandparent and great-grandparent were admitted, 951 without the library). The intermediate concepts were
+given as targets: the search found which one was within reach and the programs, not the concepts. On a synthetic
+five-level path-tree policy (denied if an ancestor directory is named secret and the depth is at least three; the four
+intermediate relations given as named, unordered targets) `find_rules` with the library found every level within
+4,111–4,132 enumerated programs over five seeds; without the library the top level was not found within the cap of
+1,000,000 programs, so the budget ratio is at most 0.0042 and its true value unknown. Per level the library is not free
+(90 vs 71 and 2,951 vs 1,898 programs on two of the shared levels; cheaper only on one). Two controls — a rule no
+program of the grammar can express, and one that needs a 56-node program — were never admitted (0 of 10 runs: five
+seeds, with and without the library). On the kinship ladder (nine rungs up to second cousin once removed) the library
+found all nine within 3,370–3,378 programs; without it eight of nine — the ninth needs a program of at least 17 nodes
+where the no-library search exhausted size 15 at ≈ 500,000 programs. 0 false accepts on held-out forests of the same
+generator at a larger size. **Hold out other families, not only other draws:** a rule the programs cannot express ("x
+and y share a 4-clique") was never admitted on graphs of density 0.3 or 0.5, exact or by precision; on dense graphs
+(0.7) almost every edge is in a 4-clique, and precision / recall acceptance with held-out graphs of the same density
+admitted the edge relation itself — held-out graphs of density 0.4, or exact acceptance, rejected it
+(`tests/test_relations_library.py`). **The caveat on step 4:** that one-step rules are learned by gradient is verified
+only on hand-picked rules over one relation; on random rules plain enumeration already finds every one-step rule in
+seconds, and rules of two steps or more did not hold when learned by gradient — no gradient learner ships with solvi.
+**On step 5:** a check on the logged rows is a few bit operations, so ranking pays only where each check is a live probe
+or a planner call. On synthetic tasks drawn from one grammar (30 atoms, k = 3) the trained bag-of-atoms ranker needed
+2.1 checks to the true condition against 69.7 in the blind order (by length, then name; another draw of the same grammar
+— over five seeds the blind order needed 85), and the raw-feature control 24.6 (the best raw threshold picked after the
+fact: 12.8) — in distribution only; measure the control on your own grammar before trusting the trained one
+(`tests/test_laws_rank.py`). Measured once on a live file server (8 mismatches; candidates contradicted by logged rows
+skipped free): every order spent 29 probes in all, because 1–5 candidates per mismatch were left to probe and the true
+conditions were single atoms — the shortest hypotheses, which the length-first order meets first. Ranking can pay only
+where many consistent hypotheses remain after the free checks; the control first.
 
 **Rank by the joint statistic of the whole condition.** `JointRanker` ranks candidate conditions by the joint statistic
 of the whole condition over the logged rows — the Jaccard between the rows the whole condition matches and the rows
@@ -527,25 +535,25 @@ where its effect predicts right, equal Jaccard → fewer atoms — with no train
 only together, or a correlated twin of a true atom. On three synthetic settings drawn from the library's own grammars
 (five seeds × 60 tasks each, 300 logged rows per task; [laws_rank_joint.py](../benchmarks/laws_rank_joint.py) runs one
 seed): on the grammar above (about 330 candidates per task) 1.00 checks to the true condition on average (median 1)
-against 85 in the blind order, 27 for the raw per-atom Jaccard and 2.1 for the trained bag of atoms; on deep conditions
-(3–5 atoms of k = 5, about 6,000 candidates per task, 5% label noise) 17 (median 1) against 2,182 / 1,310 / 591 (medians
-1,480.5 / 823.5 / 86); on correlated features (three feature pairs copied with probability 0.8, about 350 candidates)
-1.01 (median 1) against 126 / 47 / 7.7. The mean on the deep setting hides a tail: single tasks took up to 836 checks
-(17 of 300 above 50, five above 170), and in 112 of 300 tasks a condition with a strictly higher Jaccard under the label
-noise came before the true one — the only room a trained scorer over the whole condition could have, and it is not
-measured. A control scoring against the effect's rows shuffled among the allowed rows (the count kept) was worse than
-the blind order (112 / 2,434 / 166): the gain is in which rows the whole condition shares with the effect, not in how
-many. It is a statistic over the logged rows: with no logged rows every score is equal and the order is the blind one —
-the statistic needs rows; on the deep setting with the buffer cut to its first 5 / 20 / 100 / 300 rows it needed 1,997 /
-1,569 (median 522) / 534 (median 9.5) / 17 checks against 2,182 blind (at 5 rows the trained bag of atoms was worse than
-the blind order, 2,224), so the gain shows from about 20 rows and is full by 300 (`--curve`). Ranking does not change
-what is accepted: the held-out test accepted the same law under every order in 894 of 900 tasks (by construction: the
-acceptance scores every candidate; six exact ties), and on the deep noisy setting it accepted nothing in 180 of 300
-tasks at 300 rows — acceptance needs more rows than ranking does. The trained scorer it beats is the library's linear
-bag of atoms above, which sums per-atom scores and so cannot represent two atoms that matter only together; in
-distribution only — the tasks come from the same generators as the settings. Use it where the journal has rows; a
-trained scorer over the whole condition is a possible later extra, only if a multi-seed measurement on deep conditions
-shows a gain over it.
+against 85 in the blind order (a different draw of tasks: five seeds against the one seed above), 27 for the raw
+per-atom Jaccard and 2.1 for the trained bag of atoms; on deep conditions (3–5 atoms of k = 5, about 6,000 candidates
+per task, 5% label noise) 17 (median 1) against 2,182 / 1,310 / 591 (medians 1,480.5 / 823.5 / 86); on correlated
+features (three feature pairs copied with probability 0.8, about 350 candidates) 1.01 (median 1) against 126 / 47 / 7.7.
+The mean on the deep setting hides a tail: single tasks took up to 836 checks (17 of 300 above 50, five above 170), and
+in 112 of 300 tasks a condition with a strictly higher Jaccard under the label noise came before the true one — the only
+room a trained scorer over the whole condition could have, and it is not measured. A control scoring against the
+effect's rows shuffled among the allowed rows (the count kept) was worse than the blind order (112 / 2,434 / 166): the
+gain is in which rows the whole condition shares with the effect, not in how many. It is a statistic over the logged
+rows: with no logged rows every score is equal and the order is the blind one — the statistic needs rows; on the deep
+setting with the buffer cut to its first 5 / 20 / 100 / 300 rows it needed 1,997 / 1,569 (median 522) / 534 (median 9.5)
+/ 17 checks against 2,182 blind (at 5 rows the trained bag of atoms was worse than the blind order, 2,224), so the gain
+shows from about 20 rows and is full by 300 (`--curve`). Ranking does not change what is accepted: the held-out test
+accepted the same law under every order in 894 of 900 tasks (by construction: the acceptance scores every candidate; six
+exact ties), and on the deep noisy setting it accepted nothing in 180 of 300 tasks at 300 rows — acceptance needs more
+rows than ranking does. The trained scorer it beats is the library's linear bag of atoms above, which sums per-atom
+scores and so cannot represent two atoms that matter only together; in distribution only — the tasks come from the same
+generators as the settings. Use it where the journal has rows; a trained scorer over the whole condition is a possible
+later extra, only if a multi-seed measurement on deep conditions shows a gain over it.
 
 ## Learn composition tables by exact counting, derive by composition, refuse what the table cannot derive
 
@@ -573,7 +581,7 @@ and everything they derive stays a hypothesis until the rule is promoted. Measur
 
 ## Rules first, a model second
 
-Where rules derive most answers exactly and refuse the rest, let the rules answer first and ask a model only what they refuse (`relations.RulesFirst(table, fallback=...)`): the rules' share keeps its precision and costs no call, the refused share goes to the fallback, which answers or refuses, and every answer says which path gave it (`who`). The rules answer every query they derive and the model is not called for it; only a refusal (disagreeing bracketings or an underivable chain) goes to the fallback, with the question rendered in words and the list of options; every answer records which path gave it and what it used (the cells, or the model's output); a replay derives the rules' answers again and re-reads the recorded model output through the same option check without calling the model. Measure the fallback on the refused queries and on a sample of the ones the rules answered: the two shares can differ: here the refused ones held a chain whose gold is itself split, and long chains where the model returned nothing. Pick the fallback by that measurement, not by its size — solvi-base, a decider over options, did not compose relations here. The fallback must be able to do the task and to return an answer in the required form: a decider over options that cannot compose relations gives coverage without accuracy, and a reasoning model whose output budget runs out on long chains returns no answer at all; the dispatcher records both as what they are (a model path with a wrong answer; a refusal) and repairs neither. Measure the fallback on the refused queries and on a sample of the answered ones before trusting it, and check the finish reason of every reply. Measured once on the frozen test split of CLUTRR (Sinha et al., 2019), the clean split (the relation graph of each story, not its text; 1,146 queries, chains of 2–10 relations; the table fitted on the whole training file, the same 111 cells; the rules' answers byte-identical to the composition-table measurement above): the rules answered 1,087 with 0 wrong and refused 59 (21 disagreeing bracketings, 38 underivable). With a small hosted LLM (z-ai/glm-5.3-flash) as the fallback (temperature 0, reasoning effort low, 2,000 output tokens; the first of two drafts answers; the refused queries rendered in words with the 18 relation names as options), 50 of the 59 refused queries got a readable option and 39 were right; 8 replies were empty because the model's reasoning used the whole output budget (finish reason "length"), and 1 named a relation outside the option list: overall 0.983 at coverage 0.992 (1,126 right of 1,137 answered; 11 wrong, 10 of them one chain of three relations whose gold in this split is itself split between mother and mother-in-law), against 0.949 at coverage 0.949 and 0 wrong for the rules alone. On an equal-size sample of queries the rules answered, the same LLM gave a readable option to 42 of 59 and was right on 41; on chains of 4 or more relations its precision among readable replies was the same on the refused and on the answered queries (34 of 35 each), the loss being empty replies (9 of 44 and 17 of 52). solvi-base as the fallback answered all 59 and was right on 2 (11 of 59 on the sample): it does not compose relations. Every answer replayed from its record without the model (0 failures). One run; $0.017 after the proxy's cache; the pre-registered bar of coverage 1.0 was missed. A pilot before the test run, on the training file only (1,816 held-out stories, a fifth of it by a hash of the id, chains of 2 and 3 relations; the table fitted on the other four fifths): the table answered 1,675 (4 wrong) and refused 141 (11 disagreeing bracketings, 130 underivable); the same LLM got 137 of the 141 right and solvi-base 11 of 141; one run, secondary to the test numbers.
+Where rules derive most answers exactly and refuse the rest, let the rules answer first and ask a model only what they refuse (`relations.RulesFirst(table, fallback=...)`): the rules' share keeps its precision and costs no call, the refused share goes to the fallback, which answers or refuses, and every answer says which path gave it (`who`). The rules answer every query they derive and the model is not called for it; only a refusal (disagreeing bracketings or an underivable chain) goes to the fallback, with the question rendered in words and the list of options; every answer records which path gave it and what it used (the cells, or the model's output); a replay derives the rules' answers again and re-reads the recorded model output through the same option check without calling the model. Measure the fallback on the refused queries and on a sample of the ones the rules answered: the two shares can differ: here the refused ones held a chain whose gold is itself split, and long chains where the model returned nothing. Pick the fallback by that measurement, not by its size — solvi-base, a decider over options, did not compose relations here. The fallback must be able to do the task and to return an answer in the required form: a decider over options that cannot compose relations gives coverage without accuracy, and a reasoning model whose output budget runs out on long chains returns no answer at all; the dispatcher records both as what they are (a model path with a wrong answer; a refusal) and repairs neither. Measure the fallback on the refused queries and on a sample of the answered ones before trusting it, and check the finish reason of every reply. Measured once on the frozen test split of CLUTRR (Sinha et al., 2019), the clean split (the relation graph of each story, not its text; 1,146 queries, chains of 2–10 relations; the table fitted on the whole training file, the same 111 cells; the rules' answers byte-identical to the composition-table measurement above): the rules answered 1,087 with 0 wrong and refused 59 (21 disagreeing bracketings, 38 underivable). With a small hosted LLM (z-ai/glm-5.3-flash) as the fallback (temperature 0, reasoning effort low, 2,000 output tokens; the first of two drafts answers; the refused queries rendered in words with the 18 relation names as options), 50 of the 59 refused queries got a readable option and 39 were right; 8 replies were empty because the model's reasoning used the whole output budget (finish reason "length"), and 1 named a relation outside the option list: overall 0.983 at coverage 0.992 (1,126 right of 1,137 answered; 11 wrong, 10 of them one chain of three relations whose gold in this split is itself split between mother and mother-in-law), against 0.949 at coverage 0.949 and 0 wrong for the rules alone. On an equal-size sample of queries the rules answered, the same LLM gave a readable option to 42 of 59 and was right on 41; on chains of 4 or more relations its precision among readable replies was the same on the refused and on the answered queries (34 of 35 each), the loss being empty replies (9 of 44 and 17 of 52). solvi-base as the fallback answered all 59 and was right on 2 (11 of 59 on the sample): it does not compose relations. Every answer replayed from its record without the model (0 failures). One run; $0.017 after the proxy's cache; the pre-registered bar of coverage 1.0 was missed. A first run before the test run, on the training file only (1,816 held-out stories, a fifth of it by a hash of the id, chains of 2 and 3 relations; the table fitted on the other four fifths): the table answered 1,675 (4 wrong) and refused 141 (11 disagreeing bracketings, 130 underivable); the same LLM got 137 of the 141 right and solvi-base 11 of 141; one run, secondary to the test numbers.
 
 ## Synthesise chains by residuals first, enumerate second
 

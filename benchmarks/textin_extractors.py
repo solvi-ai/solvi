@@ -285,7 +285,7 @@ def judge(fr, gold):
     return "missed" if gold is not None else "absent"
 
 
-PREREGISTERED = ("strings",)     # counted apart: "all" stays the repository's texts
+PRE_REGISTERED_BARS = ("strings",)     # counted apart: "all" stays the repository's texts
 
 
 def run(system, rows, extractor, decider):
@@ -322,7 +322,7 @@ def main():
         out["sets"][name] = {}
         for label, ex in extractors.items():
             c, per = run(system, rows, ex, m)
-            (total_str if name in PREREGISTERED else total)[label].update(c)
+            (total_str if name in PRE_REGISTERED_BARS else total)[label].update(c)
             out["sets"][name][label] = {"total": dict(c), "per_field": {f: dict(v) for f, v in per.items()}}
             print(f"{name:10} {label:18} {c['right']:6} {c['wrong']:6} {c['missed']:7} {c['absent']:7}")
     print()

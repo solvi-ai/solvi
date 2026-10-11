@@ -109,6 +109,6 @@ and calibrate it on your own labelled stream before acting on its answers: the g
 
 ## Coming from 0.9
 
-Every 0.9 import path still works in 1.0.x with a `SolviDeprecationWarning` naming the new path; 1.1 removes them.
-`solvi migrate PATH` rewrites your code (`--check` only reports). The table of moves is in the
+Every 0.9 import path still works in 1.0.x and 1.1 with a `SolviDeprecationWarning` naming the new path; 1.2 removes
+them. `solvi migrate PATH` rewrites your code (`--check` only reports). The table of moves is in the
 [changelog](../CHANGELOG.md#breaking-changes-and-migration).

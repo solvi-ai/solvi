@@ -490,7 +490,7 @@ class LawSet:
     acceptance is ≤ delta — on the same null buffers: 0 of 100. With the base null that statement is "better than
     chance", not "precision above min_precision" (the filter adds that on the observed rows). The bound assumes the
     held-out rows are independent draws and the candidates were not chosen by looking at them. sized=False: the
-    fixed thresholds (the measured stands ran so). Each accepted Law records `tested` (N), `null`, `need` and
+    fixed thresholds (the measurements ran so). Each accepted Law records `tested` (N), `null`, `need` and
     `level`.
 
     disagree: "first" (default: the most specific matching law, ties to the earlier) or "abstain" (`predict` returns
