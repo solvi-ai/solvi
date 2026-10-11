@@ -28,7 +28,10 @@ OPEC-na 0.093; see docs/api/relations.md); this script does not open them.
 rules). Measured (2026-10, one run per split): --salt nora 0.337 / 0.684 / 0.492, rows holding Not_living_in answered
 exactly 17 of 590 (0 without), other rows answered wrongly 307 (303 without); --salt nora-b 0.674 / 0.798 / 0.844,
 373 of 588, 301 (296 without). The stratum needs a known living_in for the subject, here always derived through the
-living_in chain rule, which the strict setting keeps on nora-b and not on nora."""
+living_in chain rule, which the strict setting keeps on nora-b and not on nora. Measured once more on the three no-ambiguity test files, whole, with the declaration (the same 493 rules of the
+third hash split; one run; the bars pre-registered): D-na 0.914 / 0.979 / 0.933 against 0.477 / 0.961 / 0.496 without it
+(1,463 closed answers, all right, all from a derived home), BL-na and OPEC-na unchanged row for row, 0 new wrong answers
+of 70,943 other rows."""
 from __future__ import annotations
 
 import argparse
