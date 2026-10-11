@@ -111,6 +111,12 @@ dispute; `chain_rules` applies the rules kept in a KnowledgeStore with every jus
 relation functional for a subject type (one object at most): a closed-world stratum then gives the complement on every
 other candidate object of a subject with one known positive (the declaration a "spec" item and a premise in the store;
 `why_not(rules, story, x, y, relation)` names a missing positive). Measured by benchmarks/relations_rules_toy.py.
+Text frontend (`TextFrontend(relations=KINSHIP, genders=None, check=True)`): a kinship story's text read into a
+relation graph by code — five sentence patterns (`PATTERNS`), the owner of «his / her REL [Y]» the nearest earlier
+name of the pronoun's gender that is not itself the object of a relation phrase, every edge with its inverse by the
+relation table, gender facts with their source; `GraphCheck` drops a gender contradiction, two relations on one pair or
+a second father / mother / husband / wife and names it (`check=False` keeps the raw edges); `read(text)` → `TextGraph`
+(`edges`, `genders`, `dropped`, `paths(x, y)` for `CompositionTable.derive_paths`, `story()` for `GuardedRules`).
 Rules first, a model second (`RulesFirst(table, fallback=, render=)`): the table answers the queries it derives and
 the model is never called for them; a refusal ("disagree", "underivable") goes to the fallback with the question
 rendered in words from the chains and the options, or stays a refusal without one; every answer names the path that
@@ -145,6 +151,8 @@ What is not done:
   through the fixed point;
 - residual synthesis: chains only (atoms, converses, ∖ I on segments) — no union, intersection, closure or counts,
   and two masked segments side by side only through a library entry;
+- the text frontend: English kinship phrasings of five patterns; a miss is a refusal, never a guess; not a general
+  relation extractor; the owner of «his / her» is an earlier name of the sentence, never one in another sentence;
 - composition tables: one relation per cell; a cell that depends on something the chain does not carry (a gender)
   stays below the majority and its chains are refused, not split by that attribute;
 - the compiled atom of a state's graph allows complements (its domain, the window or the path's chain, is bounded);
@@ -165,17 +173,20 @@ from ._enumerate import (Entry, Enumerator, Found, Library, Program, Score, Scor
                          rank, score, synthesize, top_programs)
 from ._residual import ResidualFound, synthesize_residual
 from ._table import Cell, CompositionTable, Derivation, base_rates, sized_admit
+from ._text import (FUNCTIONAL, KINSHIP, PATTERNS, Dropped, GenderFact, GraphCheck, TextEdge, TextFrontend,
+                    TextGraph)
 from ._why_not import Gap, WhyNot, first_missing_step, rule_schema, why_not
 from .library import HeldOut, RuleProposer, Rules, TargetRecord, find_rules
 
 warn_on_import(__name__)
 
 __all__ = ["BACKENDS", "BINARY", "CREATURES", "Cell", "ChainLimit", "ChainReport", "Closure", "CompositionTable",
-           "DenseAnswer", "Derivation", "Egocentric", "Entry", "Enumerator", "Explanation", "Found", "Gap",
-           "GuardedRule", "GuardedRules", "HeldOut", "Library", "MATERIALS", "OPS", "PATHS", "PROPOSER_OPS",
+           "DenseAnswer", "Derivation", "Dropped", "Egocentric", "Entry", "Enumerator", "Explanation", "FUNCTIONAL",
+           "Found", "Gap", "GenderFact", "GraphCheck", "GuardedRule", "GuardedRules", "HeldOut", "KINSHIP", "Library",
+           "MATERIALS", "OPS", "PATHS", "PATTERNS", "PROPOSER_OPS",
            "PathTree", "Program", "ProgramCheck", "RUNTIME", "RUNTIME_ARRAYS", "RelAlgProposer", "Relations",
            "ResidualFound", "RuleProposer", "Rules", "RulesFirst", "RulesFirstAnswer", "Score", "Scored", "Story",
-           "TEMPLATES", "TargetRecord", "UNARY", "WhyNot", "base_rates", "chain_rules", "check_program", "closure",
+           "TEMPLATES", "TargetRecord", "TextEdge", "TextFrontend", "TextGraph", "UNARY", "WhyNot", "base_rates", "chain_rules", "check_program", "closure",
            "compile_ast", "compile_program", "complement", "compose", "converse", "count_at_least", "decider_fallback",
            "encode", "encode_paths", "enumerate_programs", "evaluate", "explain", "find_rules", "first_missing_step",
            "forward_chain", "from_keys", "intersect", "lower_bound", "minus", "pair_fact", "rank", "readout",
