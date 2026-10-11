@@ -524,16 +524,28 @@ checks; the control first.
 of the whole condition over the logged rows — the Jaccard between the rows the whole condition matches and the rows
 where its effect predicts right, equal Jaccard → fewer atoms — with no training. A per-atom scorer (the raw
 `FeatureRanker`, the trained `BagOfAtomsRanker`) adds atom scores, so it cannot see two atoms that pick out the effect
-only together, or a correlated twin of a true atom. On three synthetic settings at one seed (60 tasks each,
-[laws_rank_joint.py](../benchmarks/laws_rank_joint.py)): on the grammar above 1.00 checks to the true condition against
-96.3 blind, 30.7 for the raw Jaccard and 1.68 for the trained bag of atoms; on deep conditions (3–5 atoms of k = 5,
-5,598 candidates per task, 5% label noise) 9.08 (median 1.5) against 2,174 / 1,303 / 693; on correlated features (three
-pairs copied with probability 0.8) 1.05 against 129 / 43.7 / 10.2. A control scoring against the effect's rows
-shuffled stayed at the blind order's level (97.8 / 2,109 / 166). It is a statistic over the logged rows: with no rows it
-is the blind order, and on the deep setting it needed 2,075 checks at 5 rows, 1,920 at 20, 650 (median 11.5) at 100
-and 9.08 at 300 (`--curve`). Use it where the journal has rows; a trained scorer over the whole condition is a possible
-later extra, only if a multi-seed measurement on deep conditions shows a gain over it. One seed: a five-seed
-measurement is pending.
+only together, or a correlated twin of a true atom. On three synthetic settings drawn from the library's own grammars
+(five seeds × 60 tasks each, 300 logged rows per task; [laws_rank_joint.py](../benchmarks/laws_rank_joint.py) runs one
+seed): on the grammar above (about 330 candidates per task) 1.00 checks to the true condition on average (median 1)
+against 85 in the blind order, 27 for the raw per-atom Jaccard and 2.1 for the trained bag of atoms; on deep conditions
+(3–5 atoms of k = 5, about 6,000 candidates per task, 5% label noise) 17 (median 1) against 2,182 / 1,310 / 591 (medians
+1,480.5 / 823.5 / 86); on correlated features (three feature pairs copied with probability 0.8, about 350 candidates)
+1.01 (median 1) against 126 / 47 / 7.7. The mean on the deep setting hides a tail: single tasks took up to 836 checks
+(17 of 300 above 50, five above 170), and in 112 of 300 tasks a condition with a strictly higher Jaccard under the label
+noise came before the true one — the only room a trained scorer over the whole condition could have, and it is not
+measured. A control scoring against the effect's rows shuffled among the allowed rows (the count kept) was worse than
+the blind order (112 / 2,434 / 166): the gain is in which rows the whole condition shares with the effect, not in how
+many. It is a statistic over the logged rows: with no logged rows every score is equal and the order is the blind one —
+the statistic needs rows; on the deep setting with the buffer cut to its first 5 / 20 / 100 / 300 rows it needed 1,997 /
+1,569 (median 522) / 534 (median 9.5) / 17 checks against 2,182 blind (at 5 rows the trained bag of atoms was worse than
+the blind order, 2,224), so the gain shows from about 20 rows and is full by 300 (`--curve`). Ranking does not change
+what is accepted: the held-out test accepted the same law under every order in 894 of 900 tasks (by construction: the
+acceptance scores every candidate; six exact ties), and on the deep noisy setting it accepted nothing in 180 of 300
+tasks at 300 rows — acceptance needs more rows than ranking does. The trained scorer it beats is the library's linear
+bag of atoms above, which sums per-atom scores and so cannot represent two atoms that matter only together; in
+distribution only — the tasks come from the same generators as the settings. Use it where the journal has rows; a
+trained scorer over the whole condition is a possible later extra, only if a multi-seed measurement on deep conditions
+shows a gain over it.
 
 ## Learn composition tables by exact counting, derive by composition, refuse what the table cannot derive
 

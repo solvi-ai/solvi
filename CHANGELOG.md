@@ -302,18 +302,24 @@ calibration files and served by `solvi serve`), so a build from it is not mistak
   checks; the control first.
 - **`solvi.experimental.laws.JointRanker`: rank by the joint statistic of the whole condition.** A scorer for
   `RankedProposer` with no training: it ranks candidate conditions by the joint statistic of the whole condition over
-  the logged rows — the Jaccard between the rows the whole condition matches (`buffer.match(action, condition)`,
-  without the group `exclude`) and the rows where its effect predicts right; equal Jaccard → fewer atoms, then the
-  inner order. `jaccard(...)` gives the statistic itself, `effect_mask(...)` the rows it compares against (override it
-  for a control). A sum over atoms cannot see two atoms that pick out the effect only together, or a correlated twin of
-  a true atom; this scores the conjunction itself. With no rows it is the blind order. On three synthetic settings at
-  one seed, 60 tasks each (`benchmarks/laws_rank_joint.py`): the library test's grammar (k = 3) 1.00 checks to the
-  true condition against 96.3 blind, 30.7 for the raw Jaccard and 1.68 for the trained bag of atoms; deep conditions
-  (3–5 atoms of k = 5, 5,598 candidates per task, 5% label noise) 9.08 (median 1.5) against 2,174 / 1,303 / 693;
-  correlated features 1.05 against 129 / 43.7 / 10.2; a control scoring against the effect's rows shuffled stayed at
-  the blind level (97.8 / 2,109 / 166). On the deep setting with the buffer cut to its first 5 / 20 / 100 / 300 rows:
-  2,075 / 1,920 / 650 (median 11.5) / 9.08. A five-seed measurement is pending; a trained scorer over the whole
-  condition is a possible later extra, only if it shows a gain over this one on deep conditions.
+  the logged rows — the Jaccard between the rows the whole condition matches (`buffer.match(action, condition)`, without
+  the group `exclude`) and the rows where its effect predicts right; equal Jaccard → fewer atoms, then the inner order.
+  `jaccard(...)` gives the statistic itself, `effect_mask(...)` the rows it compares against (override it for a
+  control). A sum over atoms cannot see two atoms that pick out the effect only together, or a correlated twin of a true
+  atom; this scores the conjunction itself. With no logged rows every score is equal and the order is the blind one —
+  the statistic needs rows. On three synthetic settings drawn from the library's own grammars, five seeds × 60 tasks
+  each (`benchmarks/laws_rank_joint.py` runs one seed): the library test's grammar (k = 3, about 330 candidates per
+  task) 1.00 checks to the true condition on average (median 1) against 85 blind, 27 for the raw Jaccard and 2.1 for the
+  trained bag of atoms; deep conditions (3–5 atoms of k = 5, about 6,000 candidates per task, 5% label noise) 17 (median
+  1) against 2,182 / 1,310 / 591 (medians 1,480.5 / 823.5 / 86); correlated features (three feature pairs copied with
+  probability 0.8) 1.01 (median 1) against 126 / 47 / 7.7; a control scoring against the effect's rows shuffled was
+  worse than the blind order (112 / 2,434 / 166). On the deep setting with the buffer cut to its first 5 / 20 / 100 /
+  300 rows: 1,997 / 1,569 (median 522) / 534 (median 9.5) / 17 — the gain shows from about 20 rows and is full by 300.
+  The same law was accepted under every order in 894 of 900 tasks (by construction: the acceptance scores every
+  candidate; six exact ties); on the deep noisy setting nothing was accepted in 180 of 300 tasks at 300 rows —
+  acceptance needs more rows than ranking. The trained scorer it beats is the library's linear bag of atoms; in
+  distribution only. A trained scorer over the whole condition is a possible later extra, only if a multi-seed
+  measurement shows a gain over this one on deep conditions.
 - **Sensitive fields: declared on the catalog, refused by `solvi check`.** `Catalog(sensitive={"age", "sex"})`,
   `lint(obj, sensitive=...)` and `solvi check module:system --sensitive age,sex` (the names add up) name given facts no
   part may read. A part that reads one (a fn, extract, check, rule, `then` function, alternative producer or

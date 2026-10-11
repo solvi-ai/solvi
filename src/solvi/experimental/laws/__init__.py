@@ -51,12 +51,17 @@ with the raw Jaccard / recall / precision (the best raw threshold picked after t
 In distribution only on the synthetic tasks. `JointRanker()` ranks candidate conditions by the joint statistic of the
 whole condition over the logged rows — the Jaccard between the rows the whole condition matches and the rows where the
 effect predicts right, equal Jaccard → fewer atoms — with no training: a sum over atoms cannot see two atoms that pick
-out the effect only together, or a correlated twin of a true atom. With no rows it is the blind order. On three
-synthetic settings at one seed (60 tasks each; benchmarks/laws_rank_joint.py) — the grammar above; deep conditions of
-3–5 atoms of k = 5 with 5,598 candidates per task and 5% label noise; correlated features — it needed 1.00 / 9.08 /
-1.05 checks to the true condition against 96.3 / 2,174 / 129 blind, 30.7 / 1,303 / 43.7 for the raw Jaccard and
-1.68 / 693 / 10.2 for the trained bag of atoms; a control scoring against the effect's rows shuffled stayed at the
-blind level (97.8 / 2,109 / 166). A five-seed measurement is pending.
+out the effect only together, or a correlated twin of a true atom. With no logged rows every score is equal and the
+order is the blind one — the statistic needs rows. On three synthetic settings of the library's own grammars (five seeds
+× 60 tasks each; benchmarks/laws_rank_joint.py runs one seed) — the grammar above; deep conditions of 3–5 atoms of k = 5
+with about 6,000 candidates per task and 5% label noise; correlated features (three feature pairs copied with p = 0.8) —
+it needed 1.00 / 17 / 1.01 checks to the true condition (medians 1 / 1 / 1) against 85 / 2,182 / 126 blind, 27 / 1,310 /
+47 for the raw Jaccard and 2.1 / 591 / 7.7 for the trained bag of atoms; a control scoring against the effect's rows
+shuffled was worse than the blind order (112 / 2,434 / 166). On the deep setting the gain shows from about 20 logged
+rows and is full by 300. The same law was accepted under every order in 894 of 900 tasks (by construction: the
+acceptance scores every candidate; six exact ties); nothing was accepted in 180 of 300 deep noisy tasks at 300 rows —
+acceptance needs more rows than ranking. The trained scorer it beats is the library's linear bag of atoms; in
+distribution only.
 Measured once on a live file server (8 mismatches; candidates contradicted by logged rows skipped free): every order
 spent 29 probes in all, because 1–5 candidates per mismatch were left to probe and the true conditions were single atoms
 — the shortest hypotheses, which the length-first order meets first. Ranking can pay only where many consistent
