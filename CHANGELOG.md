@@ -17,6 +17,31 @@ calibration files and served by `solvi serve`), so a build from it is not mistak
 
 ### New
 
+- **Residual synthesis of relation programs (`solvi.experimental.relations.synthesize_residual`, experimental).** The
+  shortest chain program equal to a target on every example, found top-down: a subgoal Lo ⊆ X ⊆ Up, the step
+  X = A ∘ Y through the residual ¬(Aᵀ ∘ ¬Up) and the pairs with a single witness, X = Y ∖ I, a step pruned when a pair
+  has no witness left, iterative deepening on the number of atoms. The same inputs as `synthesize` (Relations) and
+  `find_rules` (worlds, a target as a function of a world), library entries as atoms; a candidate is accepted only when
+  the package's evaluator gives the target exactly on the examples, on `check=` worlds and by `test=` (a `HeldOut`) —
+  a failed one is counted (`rejected`) and the search goes on; a hard stop in steps (`budget`) and seconds;
+  deterministic. `ResidualFound(program, steps, seconds, atoms, stopped, rejected)`. `synthesize(method=
+  "residual-first")` runs it before the enumerator (`"residual"`: alone); `Found` gains `by` ("enumerate" |
+  "residual") and `steps`, with defaults, so code that builds a `Found` keeps working (code that unpacks it into
+  four names does not). The grammar is chains of atoms and converses with ∖ I on segments; union, intersection,
+  closure, counts and two masked segments side by side are out. Measured without a library
+  (`benchmarks/relations_residual.py`, five seeds): on the kinship ladder all nine rungs on every seed (45 of 45; second
+  cousin once removed in 0.40–0.55 s) with 0 false accepts on check worlds, against 20 of 45 for the enumerator at
+  100,000 behaviours (size 12, U left out); on a five-level path-tree policy only the one chain level is found, and the
+  levels that need a count or an intersection are ruled out in 0.04 s, nothing false accepted. Ported from the author's
+  earlier research line, which reported the same 45 of 45 against 20 of 45.
+- **Why a relation was not derived (`solvi.experimental.relations.why_not`, experimental).** The mirror of `explain`:
+  over every path between two entities through the pair facts, a composition table's status — derivable, disputed
+  (two readings), another relation, a missing cell r1 ∘ r2 → ? ranked by the paths one cell would unblock, or no path
+  (a missing fact). `CompositionTable.derive` / `derive_paths` refusals now carry the blocking cells
+  (`Derivation.missing`); `WhyNot.agenda_items()` gives the refusal as learning targets and `to_agenda(agenda, table)`
+  declares a goal «learn cell r1 ∘ r2» per gap, done when the table has the cell. `first_missing_step` / `rule_schema`
+  name the first step of a reference derivation that was not derived. Tested with a positive control (a cell removed
+  from a fitted table is named exactly); not measured on a real split yet.
 - **Composition tables of relations (`solvi.experimental.relations.CompositionTable`, experimental).** Which relation a
   chain of two relations composes to (kinship chains: father ∘ sister → aunt), learned by exact counting from labelled
   chains of length 2 — a cell is admitted when its majority relation has a share ≥ `majority` (0.9) and at least

@@ -270,18 +270,46 @@ def enumerate_programs(base, size: int = 5, library=(), **kw) -> Enumerator:
 
 class Found(NamedTuple):
     """The first program whose relation equals the target on every example (None if none within the size or caps),
-    with the evaluations and the distinct behaviours the search took."""
+    with the evaluations and the distinct behaviours the search took; by: the search that found it (or ran last) —
+    "enumerate" or "residual"; steps: residual steps spent (`method="residual-first"` / "residual"; another unit than
+    evaluations)."""
     ast: tuple | None
     evals: int
     behaviours: int
     stopped: str
+    by: str = "enumerate"
+    steps: int = 0
 
 
-def synthesize(base, target, size: int = 7, library=(), *, check=None, **kw) -> Found:
+METHODS = ("enumerate", "residual-first", "residual")
+
+
+def synthesize(base, target, size: int = 7, library=(), *, check=None, method: str = "enumerate",
+               residual_budget: int = 100_000, **kw) -> Found:
     """The first (smallest, in enumeration order) program equal to `target` — per-example (n_b, n_b) matrices or one
     padded (B, n, n) array — on every example: exact equality, byte for byte. check=(examples, targets): search on
     `base` (e.g. a subset, to bound memory) and accept a match only if it is also exact on these; a failed re-check
-    continues the search."""
+    continues the search.
+
+    method: "enumerate" (default: the bottom-up enumerator), "residual-first" (`synthesize_residual` first — chains of
+    at most `size` atoms, `residual_budget` steps, the same `check`; the enumerator only when it finds nothing) or
+    "residual" (residuals only). Residuals use converses and ∖ I only when "T" and "MINUS" are among `ops`, and run
+    only when "COMP" is; `seconds` caps each search."""
+    if method not in METHODS:
+        raise ValueError(f"method is one of {METHODS}, not {method!r}")
+    steps = 0
+    if method != "enumerate":
+        from ._residual import synthesize_residual
+        ops = kw.get("ops", OPS)
+        if "COMP" in ops:
+            r = synthesize_residual(base, target, depth=size, budget=residual_budget, seconds=kw.get("seconds"),
+                                    library=library, names=kw.get("names"), check=check, converses="T" in ops,
+                                    masks="MINUS" in ops)
+            if r.program is not None or method == "residual":
+                return Found(r.program, 0, 0, r.stopped, "residual", r.steps)
+            steps = r.steps
+        elif method == "residual":
+            return Found(None, 0, 0, "exhausted", "residual", 0)
     en = Enumerator(base, size, library, **kw)
     t = en.batch.pad(target)
     en._target = (_digest(np.packbits(t.reshape(-1))), t)
@@ -294,7 +322,7 @@ def synthesize(base, target, size: int = 7, library=(), *, check=None, **kw) -> 
             if full is None or np.array_equal(_eval(en.found, full[0], en.library), full[1]):
                 break
             en.found, en.stopped, en.rechecked = None, None, getattr(en, "rechecked", 0) + 1
-    return Found(en.found, en.evals, en.behaviours, en.stopped or "exhausted")
+    return Found(en.found, en.evals, en.behaviours, en.stopped or "exhausted", "enumerate", steps)
 
 
 # ───────────────────────────────────────────── scoring a readout
@@ -373,5 +401,5 @@ def top_programs(examples, y, *, size: int = 4, k: int = 20, library=(), ops: Se
     return rank(en, [y], k=k, per_readout=per_readout, must=must, min_support=min_support)[0]
 
 
-__all__ = ["Entry", "Enumerator", "Found", "Library", "Program", "Score", "Scored", "enumerate_programs",
+__all__ = ["METHODS", "Entry", "Enumerator", "Found", "Library", "Program", "Score", "Scored", "enumerate_programs",
            "lower_bound", "rank", "score", "synthesize", "top_programs"]

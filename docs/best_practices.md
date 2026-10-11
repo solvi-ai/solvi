@@ -547,6 +547,38 @@ and everything they derive stays a hypothesis until the rule is promoted. Measur
 
 Where rules derive most answers exactly and refuse the rest, let the rules answer first and ask a model only what they refuse (`relations.RulesFirst(table, fallback=...)`): the rules' share keeps its precision and costs no call, the refused share goes to the fallback, which answers or refuses, and every answer says which path gave it (`who`). The rules answer every query they derive and the model is not called for it; only a refusal (disagreeing bracketings or an underivable chain) goes to the fallback, with the question rendered in words and the list of options; every answer records which path gave it and what it used (the cells, or the model's output); a replay derives the rules' answers again and re-reads the recorded model output through the same option check without calling the model. Measure the fallback on the refused queries and on a sample of the ones the rules answered: the two shares can differ: here the refused ones held a chain whose gold is itself split, and long chains where the model returned nothing. Pick the fallback by that measurement, not by its size — solvi-base, a decider over options, did not compose relations here. The fallback must be able to do the task and to return an answer in the required form: a decider over options that cannot compose relations gives coverage without accuracy, and a reasoning model whose output budget runs out on long chains returns no answer at all; the dispatcher records both as what they are (a model path with a wrong answer; a refusal) and repairs neither. Measure the fallback on the refused queries and on a sample of the answered ones before trusting it, and check the finish reason of every reply. Measured once on the frozen test split of CLUTRR (Sinha et al., 2019), the clean split (the relation graph of each story, not its text; 1,146 queries, chains of 2–10 relations; the table fitted on the whole training file, the same 111 cells; the rules' answers byte-identical to the composition-table measurement above): the rules answered 1,087 with 0 wrong and refused 59 (21 disagreeing bracketings, 38 underivable). With a small hosted LLM (z-ai/glm-5.3-flash) as the fallback (temperature 0, reasoning effort low, 2,000 output tokens; the first of two drafts answers; the refused queries rendered in words with the 18 relation names as options), 50 of the 59 refused queries got a readable option and 39 were right; 8 replies were empty because the model's reasoning used the whole output budget (finish reason "length"), and 1 named a relation outside the option list: overall 0.983 at coverage 0.992 (1,126 right of 1,137 answered; 11 wrong, 10 of them one chain of three relations whose gold in this split is itself split between mother and mother-in-law), against 0.949 at coverage 0.949 and 0 wrong for the rules alone. On an equal-size sample of queries the rules answered, the same LLM gave a readable option to 42 of 59 and was right on 41; on chains of 4 or more relations its precision among readable replies was the same on the refused and on the answered queries (34 of 35 each), the loss being empty replies (9 of 44 and 17 of 52). solvi-base as the fallback answered all 59 and was right on 2 (11 of 59 on the sample): it does not compose relations. Every answer replayed from its record without the model (0 failures). One run; $0.017 after the proxy's cache; the pre-registered bar of coverage 1.0 was missed. A pilot before the test run, on the training file only (1,816 held-out stories, a fifth of it by a hash of the id, chains of 2 and 3 relations; the table fitted on the other four fifths): the table answered 1,675 (4 wrong) and refused 141 (11 disagreeing bracketings, 130 underivable); the same LLM got 137 of the 141 right and solvi-base 11 of 141; one run, secondary to the test numbers.
 
+## Synthesise chains by residuals first, enumerate second
+
+When the rule you look for may be a chain of relations — kinship degrees, «the parent of the sibling of», a path of
+fixed shape — search it top-down from the target first (`relations.synthesize_residual`, or
+`synthesize(method="residual-first")`) and leave the enumerator for what a chain cannot express. Bottom-up enumeration
+pays for every program of the size whether or not it could lead to the target; residuals prune a step as soon as a
+pair of the target has no witness left. Measured without a library on the kinship ladder of
+[relations_library_toy.py](../benchmarks/relations_library_toy.py) ([relations_residual.py](../benchmarks/relations_residual.py),
+five seeds): residuals found all nine rungs on every seed (45 of 45; second cousin once removed in 0.40–0.55 s, 3 s for
+all 45), the enumerator at 100,000 behaviours (size 12, U left out) found the four rungs up to great-grandparent and
+none above (20 of 45, ≈ 6 s per rung at the cap); 0 false accepts in both on check worlds of another shape. The two
+searches count different things (residual steps, distinct behaviours): compare what is found and the time. **Give the
+search a held-out test** (`test=HeldOut(...)`): a candidate that fits the examples and fails it is counted and the search
+goes on — on a path-tree policy the enumerator, without one, returned a program exact on three example trees and wrong
+on the check trees. **Know the limit:** only chains (atoms and converses, ∖ I on segments); union, intersection,
+closure and counts are out, so on the five-level path-tree policy the residuals found the one chain level and ruled
+the count and intersection levels out in 0.04 s — there the enumerator with a library is the search (previous
+section). Two masked segments side by side are out too, unless one of them is a library entry, which residuals take as
+an atom.
+
+## Ask why a rule did not derive, and learn what is missing
+
+A refusal of a composition table says *that* the table cannot derive an answer; `relations.why_not(table, facts, x,
+y, relation)` says *why*, over every path between the two: a missing cell r1 ∘ r2 → ? (ranked by the paths one cell
+would unblock), a dispute between paths, another relation derived, or no path at all — a missing fact, not a missing
+rule. Use the reason as the learning target: `Derivation.missing` carries the blocking cells on every "underivable"
+refusal, and `WhyNot.to_agenda(agenda, table)` turns each gap into a goal «learn cell father ∘ sister» whose done check
+reads the table, so the goal closes when the cell is observed and the table refitted. Keep a dispute where it already
+is — a person question in the knowledge store — and a missing fact as a question about the story, not the rules. The
+positive control is in the tests: remove one cell from a fitted table and `why_not` names exactly that cell; it has
+not yet been measured on the refusals of a real split.
+
 ## Storage and audit
 
 **One store, any number of writers — but check which backend.** SQLite and PostgreSQL take several processes;
