@@ -120,6 +120,12 @@ on it — or the empty set, a refusal.
   leaves when its unguarded generalisation is admitted. Rounds recount the votes on the fixed point of the rules
   admitted so far; the rule set only grows, so the rounds stop at its fixed point (or `rounds=`). `check=`: an
   independent labelled slice where a rule's share must also reach `majority` (and `check_min=` hits).
+- **Rules wrong together** (`verify=True`). Each rule is counted on the fixed point of the rules before it, but rules
+  admitted in one round can be wrong together: one right at the labelled pairs and wrong elsewhere derives facts that
+  make others fire wrongly. After each round the new rules are recounted on the fixed point of the whole new set (on
+  the check slice when given); the worse half of those it contradicts is retracted for good (`retracted`), and the
+  recount repeats until none falls. When labels exist only on query pairs, a loose admission (a small support) admits
+  many such rules and this recount then retracts most of a round, so prefer a support well above 2 there.
 - **Residual votes** (`residual=True`, the composition table's residual fill generalised): within a round, the rules
   admitted on the direct votes are applied to the length-3 walks of each labelled pair; where one gives a middle fact
   that is not yet in the fixed point, the body that needs it gets the pair's vote. In the measurements so far this
@@ -155,7 +161,7 @@ colleagues; every ordered pair labelled by an independent oracle; 8 fit stories 
 test stories = 4,992 pairs): 242 rules in 4 rounds (3.0 s on CPU), exact set match 1.000 on the test pairs, all 8
 planted rules found (a guard over a derived relation, a chain through a derived relation, the «elsewhere» rule, the
 negative stratum); without residual votes the same 242 rules; one round without them 35 rules, exact 0.975,
-precision 0.941; the store path on 3 more stories (1,568 pairs, 2,960 facts) 0 differences from the in-memory fixed
+precision 0.941; the store path on 3 more stories (1,568 pairs, 3,110 facts) 0 differences from the in-memory fixed
 point. One deterministic run.
 
 ::: solvi.experimental.relations.GuardedRules

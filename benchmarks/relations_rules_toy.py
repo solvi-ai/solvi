@@ -23,7 +23,7 @@ B2 201, B2z 8, BNE 1, NEG 3) in 4 rounds, 3.0 s; exact set match 1.000 on the 4,
 answered 1.000, coverage 0.431 = every pair that holds a relation; the rest correctly empty); all 8 planted rules
 found. Without residual votes: the same 242 rules (the rounds reach them; 1.4 s). One round without residual votes
 (bodies over the story's own facts only): 35 rules, exact 0.975, precision 0.941, 7 of 8 planted rules (the guarded
-rule over a derived relation needs a second round). The store path on 3 more stories: 1,568 pairs, 2,960 facts
+rule over a derived relation needs a second round). The store path on 3 more stories: 1,568 pairs, 3,110 facts
 written, 0 differences from the in-memory fixed point, 1.1 s."""
 from __future__ import annotations
 
