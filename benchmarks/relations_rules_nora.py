@@ -20,8 +20,15 @@ Measured (2026-10, this machine, CPU, one run per split; exact / precision among
                 default 0.274 / 0.568 / 0.482, 720 rules (9 rounds, 2,889 s); control 0.335.
   --salt nora-b (fit 9,300, check 1,971, held-out 1,973): strict 0.485 / 0.743 / 0.652, 436 rules (7 rounds, 581 s);
                 default 0.398 / 0.609 / 0.653, 838 rules (12 rounds, 3,451 s); control 0.341.
-The «elsewhere» relation (Not_living_in, about a third of the rows) is refused by every setting; the strict setting
-varies with the split (whether the living_in chain rule survives)."""
+The «elsewhere» relation (Not_living_in, about a third of the rows) is refused by every setting without a declaration;
+the strict setting varies with the split (whether the living_in chain rule survives).
+The test files were scored once in a separate pre-registered run (strict: BL-na 0.734, D-na 0.477 at coverage 0.496,
+OPEC-na 0.093; see docs/api/relations.md); this script does not open them.
+--settings strict-closed: the strict setting with functional={"living_in": "person"} (the closed-world stratum; the same
+rules). Measured (2026-10, one run per split): --salt nora 0.337 / 0.684 / 0.492, rows holding Not_living_in answered
+exactly 17 of 590 (0 without), other rows answered wrongly 307 (303 without); --salt nora-b 0.674 / 0.798 / 0.844,
+373 of 588, 301 (296 without). The stratum needs a known living_in for the subject, here always derived through the
+living_in chain rule, which the strict setting keeps on nora-b and not on nora."""
 from __future__ import annotations
 
 import argparse
@@ -41,7 +48,8 @@ with warnings.catch_warnings():
 
 csv.field_size_limit(sys.maxsize)
 FILE = "training_data_allNoAmb.csv"
-SETTINGS = {"strict": dict(majority=1.0, support=10), "default": dict(majority=0.9, support=2)}
+SETTINGS = {"strict": dict(majority=1.0, support=10), "default": dict(majority=0.9, support=2),
+            "strict-closed": dict(majority=1.0, support=10, functional={"living_in": "person"})}
 
 
 def part(i: int, salt: str = "nora") -> str:
@@ -77,7 +85,8 @@ def score(preds, held):
 def main(argv=None):
     ap = argparse.ArgumentParser()
     ap.add_argument("--data", default=os.environ.get("SOLVI_NORA"))
-    ap.add_argument("--settings", default="strict,default")
+    ap.add_argument("--settings", default="strict,default", help="strict, default, strict-closed (strict + "
+                    "functional={'living_in': 'person'}: the closed-world stratum)")
     ap.add_argument("--salt", default="nora", help="the split: sha256('<salt>:<row index>')")
     a = ap.parse_args(argv)
     if not a.data:
@@ -97,8 +106,12 @@ def main(argv=None):
         g = GuardedRules(**SETTINGS[name], complements=comp, check_min=2, rounds=12).fit(fit, check=check)
         preds = [g.predict(st, q) for st, q, _ in held]
         ex, pr, cov = score(preds, held)
+        nl = [(p, y) for p, (_, _, y) in zip(preds, held) if "Not_living_in" in y]
+        other = [(p, y) for p, (_, _, y) in zip(preds, held) if "Not_living_in" not in y]
         print(f"{name}: exact {ex:.3f}, precision {pr:.3f}, coverage {cov:.3f}; {len(g)} rules {g.by_template()}, "
-              f"{g.rounds} rounds, {time.time() - t0:.0f} s", flush=True)
+              f"{g.rounds} rounds, {time.time() - t0:.0f} s; rows holding Not_living_in {len(nl)}, answered exactly "
+              f"{sum(p == y for p, y in nl)}; other rows {len(other)}, answered wrongly "
+              f"{sum(bool(p) and p != y for p, y in other)}", flush=True)
     return 0
 
 

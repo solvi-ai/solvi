@@ -107,8 +107,10 @@ r ← s, r ← s ∧ u, r ← s1 ∘ s2, r ← s1 ∘ s2 ∧ u(z), r ← s(x,z) 
 r ← u1(x) ∧ u2(y) ∧ ¬s(x,y) — learned by exact counting on labelled query pairs whose label is a set of relations,
 rounds over the fixed point of the rules admitted so far, residual votes for chain bodies whose middle fact is not yet
 derivable, a check slice; `predict` answers a pair with its active relations (∅ = refusal), declared complements
-dispute; `chain_rules` applies the rules kept in a KnowledgeStore with every justification. Measured by
-benchmarks/relations_rules_toy.py.
+dispute; `chain_rules` applies the rules kept in a KnowledgeStore with every justification. `functional=` declares a
+relation functional for a subject type (one object at most): a closed-world stratum then gives the complement on every
+other candidate object of a subject with one known positive (the declaration a "spec" item and a premise in the store;
+`why_not(rules, story, x, y, relation)` names a missing positive). Measured by benchmarks/relations_rules_toy.py.
 Rules first, a model second (`RulesFirst(table, fallback=, render=)`): the table answers the queries it derives and
 the model is never called for them; a refusal ("disagree", "underivable") goes to the fallback with the question
 rendered in words from the chains and the options, or stays a refusal without one; every answer names the path that

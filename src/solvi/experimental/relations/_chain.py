@@ -73,7 +73,9 @@ class ChainReport:
     derivation that would refute its own premise); circular: justifications not written because they would rest on
     the fact they justify; retracted: facts of an earlier call taken back (chain_rules: a negative-stratum fact whose
     condition ended); disputes_opened: new person questions; hypotheses: derived facts that are hypotheses at the
-    end; per_round: [{"round", "proposed", "added", "refused", "circular"}]; seconds: wall time."""
+    end; closed_conflicts: subjects with several known positives of a declared functional relation (chain_rules: the
+    closed world is not applied to them); per_round: [{"round", "proposed", "added", "refused", "circular"}];
+    seconds: wall time."""
     rounds: int = 0
     fixed_point: bool = True
     facts_read: int = 0
@@ -85,6 +87,7 @@ class ChainReport:
     retracted: int = 0
     disputes_opened: int = 0
     hypotheses: int = 0
+    closed_conflicts: int = 0
     per_round: list = field(default_factory=list)
     seconds: float = 0.0
 
@@ -265,7 +268,9 @@ class Explanation:
     every fact the derivation reaches; facts: the original facts it rests on; rules: the rule ids used; cells: the
     rule cells used, as (r1, r2, relation), sorted. A guarded rule (`chain_rules`) gives "cell": (template, body
     text, head), "premises" in body order with the unary guards among them, "stratum" (1 positive, 2 negative) and
-    "absent" (the negated relation of a negative-stratum fact, else None)."""
+    "absent" (the negated relation of a negative-stratum fact, else None); a closed-world fact gives "cell":
+    ("closed", "<relation> functional for <subject unary>", head), "premises" (the known positive, the declaration —
+    a spec item, shown as a premise), "stratum" 3."""
     fact: str
     nodes: dict
     facts: tuple
@@ -311,6 +316,15 @@ def explain(store, fact_id) -> Explanation:
             via = ev.get("via")
             rule = store.items.get(rid)
             prem = [p for p in a["just"] if p != rid]
+            if rule is not None and isinstance(rule.body, dict) and rule.body.get("kind") == "functional":
+                rb = rule.body                                # the closed-world stratum: the positive, the declaration
+                order = [p for p in ev.get("premises") or a["just"] if p in a["just"]] or list(a["just"])
+                node["derivations"].append({"rule": rid, "cell": ("closed", f"{rb['s'][0]} functional for "
+                                                                            f"{rb['s'][1]}", it.body.get("o")),
+                                            "premises": tuple(order), "stratum": ev.get("stratum", 3),
+                                            "absent": None})
+                todo += order                                 # the declaration is a leaf of the derivation
+                continue
             if rule is not None and isinstance(rule.body, dict) and rule.body.get("kind") == "guarded":
                 rb = rule.body                                # a guarded rule: premises in body order, guards included
                 order = [p for p in ev.get("premises") or prem if p in prem] or prem

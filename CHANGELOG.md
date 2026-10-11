@@ -43,6 +43,9 @@
   the two are different scales.
 - **An ExperimentalWarning once per process.** An experimental module imported again (a package walk, a module dropped
   from `sys.modules`) warned every time; it now warns once per module per process, with the first warning's text.
+- **`chain_rules`: `ChainReport.facts_added` counted a fact item once per justification written in the same batch**
+  (the store resolves a batch at its end, so an item written earlier in the batch still read as new): on a planted
+  story 806 «added» for 212 new items. Each new item now counts once; `facts_proposed` is unchanged. The planted-world store path of 1.1.0 («3,110 facts written» on 1,568 pairs) now reads 723 new fact items; its 0 differences stand.
 
 ### New
 
@@ -59,6 +62,31 @@
   the buffer has and the support the sized acceptance needs at this N (`sized_need` against the action's least base
   null; `need_at_precision` for a law right on min_precision of its rows), and the actions with too few rows — so «0
   laws accepted» reads as «too few rows» where that is why. `LawSet.need_at(tested, null, precision)`.
+- **A closed world by declaration in guarded rules (`relations.GuardedRules(functional=...)`, experimental).**
+  `functional={"living_in": "person"}` states that a subject of type person has at most one object for `living_in`
+  (`("person", "place")` names the object type too); each declared relation needs a declared complement. Never
+  inferred: a wrong declaration makes false negatives, so it is the caller's statement. A third stratum after the
+  positive fixed point and the negative stratum gives the complement r̄(x, y) on every other candidate object of a
+  subject with one known positive r(x, z) — given or derived, active; a subject with no known positive stays open, one
+  with two or more contradicts the declaration and stays open too (`Closure.closed_conflicts`), and a closed fact on a
+  pair holding a hypothesis r(x, y) is a dispute (`Closure.closed_disputes`). Closed facts feed no rule. Statuses carry
+  the stratum (`Closure.info`, `GuardedRules.statuses`: "given" | "positive" | "negative" | "closed"; `Closure.closed`
+  lists the positive each closed fact rests on; `templates_on` names "closed"). Learning is untouched unless
+  `closed_world_in_rounds=True`. `why_not(rules, story, x, y, relation)` reads a refusal of guarded rules:
+  "no_known_positive" (the agenda item is the fact to learn), "functional_conflict", "disputed", "hypothesis",
+  "underivable". `to_knowledge` writes each declaration as a "rule" item of source "spec"; `chain_rules` (and its new
+  `functional=`) writes the closed facts last with the positive and the declaration as premises (the positive's source),
+  `explain` shows the declaration as a premise, and retracting it takes the closed facts along;
+  `ChainReport.closed_conflicts` counts the contradicted subjects. The two engines and the store path agree on the tests
+  (`tests/test_relations_closed_world.py`). Measured: on the planted world with only the positive templates the
+  declaration answers 340 test pairs, all right, exact 0.983 against 0.915 without it (`benchmarks/relations_rules_toy.py`,
+  one deterministic run); on the held-out part of the benchmark's training file (NoRA, the two hash splits of 1.1.0,
+  one run each; `benchmarks/relations_rules_nora.py --settings strict-closed`), the strict setting with the declaration
+  0.337 / 0.684 / 0.492 and 0.674 / 0.798 / 0.844 (exact set match / precision among answered / coverage) against
+  0.328 / 0.681 / 0.482 and 0.485 / 0.743 / 0.652 without it — the rows holding Not_living_in answered exactly 17 of 590
+  and 373 of 588, wrong answers on the other rows 307 against 303 and 301 against 296. The stratum needs a known home:
+  the stories never state it for a queried person, so it comes from the living_in chain rule, which the strict setting
+  keeps on one split and not on the other. The test files have not been scored with the declaration.
 
 ### Docs
 
@@ -67,6 +95,11 @@
 - **Best practices: if the zero-shot decider does not separate the classes, `fit` cannot help** — it only moves the
   priors; a LoRA adapter is needed (a user's short interface texts: 8 answers given alone of 375 before an adapter,
   257 after); and split by source with `groups=` when examples share one.
+- The guarded-rules numbers on the test files, replacing «the test files are not scored yet — their numbers follow»
+  (API page, best practices, experimental STATUS, ROADMAP, the NoRA script's docstring): Measured once on the benchmark's three no-ambiguity test files, whole (NoRA, Das et al., NeurIPS 2025; D-na 3,345, OPEC-na 1,683 and BL-na 67,549 query pairs), with the rules learned on a third hash split of the training file (9,238 fit / 2,033 check; the strict setting — majority 1.0, support 10, two confirmations on the check slice — chosen on that split's held-out part, 1,973 pairs, before the test files were read; the bars pre-registered before the run); exact set match / precision among answered / coverage: BL-na (reasoning off the query path) 0.734 / 0.734 / 0.999; D-na (depth beyond the training depth) 0.477 / 0.961 / 0.496 — the rules refuse half of the queries, and the most frequent label set per entity kinds answers 0.491 there, more than the rules by exact match; OPEC-na 0.093 / 0.093 / 0.999; the held-out part of the training file 0.501 / 0.759 / 0.659. The default counting setting (majority 0.9, support 2) gave 0.593 / 0.603 / 0.984 on BL-na, 0.007 / 0.293 / 0.022 on D-na and 0.032 on OPEC-na. The benchmark paper reports, for its best model trained without ambiguity (an Edge Transformer, single-edge), 0.104 on BL-na, 0.822 on D-na and 0.110 on OPEC-na; models trained with ambiguity reach 0.785 on the ambiguous BL split, which was not measured here. The pre-registered bars (BL-na ≥ 0.50 and OPEC-na ≥ 0.20; D-na and held-out ≥ 0.80; precision among answered ≥ 0.95 on every split; the control ≤ 0.30) were not met — none of the four. What the test shows: labels exist only on the query pairs, so a derived fact cannot be checked where it lands, and the looser admission admits rules right on the labelled pairs and wrong elsewhere (0.593 against 0.734 on BL-na); which chain rules the strict setting keeps depends on the split of the training file (held-out 0.328 / 0.485 / 0.501 on three splits; the test numbers are from the third, one run); the «elsewhere» relation (Not_living_in, about a third of the depth split's rows) is refused by every setting, so the depth split is answered on half of its pairs; the OPEC split needs a gender guard on the middle entity of a chain (maternal / paternal), which no template carries. Next, each with its own bar: a closed-world default per entity type for near-functional relations (the partial-completeness rule of knowledge-base rule mining), a gender guard on the middle entity, and labels or a structural check on intermediate facts. The ground truth of this benchmark is computed from published rules, so an exact rule set exists by construction; what is measured is how much of it counting on query-pair labels recovers. The dataset is released under CC BY-NC 2.0: the script reads the files in place; no data and no learned rules ship with the library.
+- The strict first-run numbers of 1.1.0 on the `nora` split (0.328 / 0.681 / 0.482, 469 rules) were re-run once
+  (7 rounds, 531 s on CPU): the same numbers.
+
 
 ## 1.1.0 — 2026-10-11 — learning from code and outcomes
 
