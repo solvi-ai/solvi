@@ -1,4 +1,4 @@
-"""benchmarks/charts_real_texts.py (PREREG X3): the script's own logic on the gallery texts of tests/test_charts.py —
+"""benchmarks/charts_real_texts.py (the pre-registered charts-on-real-texts stand): the script's own logic on the gallery texts of tests/test_charts.py —
 the re-verification of rendered values against a text (X3-1), the matching of drawn points against a hand reading
 (X3-2), the refusal-reason tally (X3-3), the proposal reduced to its verified points (X3-4) and the logged loader.
 The measured set (benchmarks/datasets/charts_texts) is not read here."""

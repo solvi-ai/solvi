@@ -181,42 +181,66 @@ calibration files and served by `solvi serve`), so a build from it is not mistak
   that imports nothing from solvi (the laws most specific first, your base predictor as the fallback); atoms without
   code are refused by name. `check_compiled(module, buffer, lawset)` runs the module against `LawSet.predict` on every
   row — the bar is 0 differences. `Grammar.add` lets a proposer invent atoms (a buffer evaluates a late atom on its
-  older rows on first use). `benchmarks/relations_compile.py` (`pytest -m slow`): a learned law set compiled and checked
-  on 100,000 rows with 0 differences; closure, grandparent and sibling on a forest of 100,000 nodes pair for pair equal
-  to hand-written set code within twice its time.
+  older rows on first use). `benchmarks/relations_compile.py` (`pytest -m slow`): a law set learned on the toy grid
+  compiled and checked on 100,000 rows with 0 differences; closure, grandparent and sibling on a forest of 100,000 nodes
+  equal pair for pair; the index-array backend within 0.7–1.3× of hand code over a parent array (output conversion
+  excluded); the plain set-code backend 2–3× slower than hand-written set code over the same pairs. On five law sets
+  learned on a game simulator with written mechanics (61–103 laws each; one with 64 relational atoms over a 3×3 window
+  compiled as a bounded domain), `LawSet.to_module` + `check_compiled` agreed with `LawSet.predict` on every one of
+  308,510 logged transitions (training, validation and test worlds), no atom refused. A differential check on logged
+  rows certifies the module on those rows, not equivalence in general — run it on your own rows. The compiled law part
+  ran ≈ 14× (flat atoms) and ≈ 120–165× (64 relational atoms) faster than the library's own row-by-row interpreter on
+  100,000 rows (single runs; the interpreter evaluates every atom of the grammar per row, the compiled module only the
+  atoms of each law's condition and stops at the first hit). That is a speedup over the interpreter, not over
+  hand-written code: on a forest of 100,000 nodes the index-array backend was within 0.7–1.3× of hand code over a parent
+  array, and the set-code backend 2–3× slower than hand-written set code over the same pairs.
 - **`solvi.experimental.relations.library`: rules over relations, composites by enumeration with a library
   (experimental).** `find_rules(examples, targets, base=, size=, budget=, library=(), test=HeldOut(other_worlds,
   targets))` enumerates small programs over the base relations of example worlds (each a mapping name → an (n, n)
   boolean matrix; unary predicates as diagonals) bottom-up with observational equivalence (a hash of the packed relation
   over all examples), hands a program that matches a target on the examples to the held-out test (`HeldOut`: exact, or
   support / precision / recall / net for noisy labels; a target with no true pair there never passes), admits what
-  passes as an `Entry(program, name, examples, test)` (`test` = the held-out record) and enumerates again with it as a terminal; a
-  program that only fits the examples is counted as rejected, never admitted. `budget` caps the enumerated programs over
-  all rounds; `grow=False` is the flat control; `tolerance=` admits near-matches on noisy examples to the test;
-  `proposer=` is a fallback slot for a learned proposer (none ships), its programs checked the same way; `search_on=k`
-  enumerates on the first k examples and re-checks a match on all of them before the test (`recheck_failed`). An
-  inexpressible-rule control ("x and y share a 4-clique") is never admitted at densities 0.3 / 0.5; at 0.7 precision
-  acceptance with same-density held-out graphs admits the edge relation, other-density held-out graphs reject it. The search is
-  the package's relation enumerator (by default converse, closure, "at least one successor" — the new opt-in operator
-  `CNT1` —, composition, ∩, ∪, ∖ over the base relations, I, U and the library entries) and programs are the package's
-  tuples; `run(program, world, library=)` runs one on any world. `benchmarks/relations_library_toy.py` (five seeds,
-  `pytest -m slow`): a path tree's "denied if an ancestor directory is named secret and the depth is at least 3"
-  (three levels) found with 2,556 enumerated programs in all, kinship on forests to depth 6 with 10,817, where flat
-  search found neither top rule in 100,000; 0 false accepts on larger fresh worlds. The kinship ladder misses the bar
-  of a tenth of the flat budget (1.08×; with an earlier minimal enumerator without U it cost 6,125); the bar was kept
-  and that slow test is an expected failure. `include_universal=False` (find_rules, `Enumerator`; opt-in, the default
-  keeps U and the battery's search space) leaves U out of the terminals: then paths 2,174 and kinship 7,889, which
-  meets the bar — a measured option, tested apart. `library=` takes the package's `Library` or a sequence of `Entry`. The flat budget
-  was 60,000 in the first run (the kinship ladder then cost the library 1.02 × a tenth of it) and was raised after it.
+  passes as an `Entry(program, name, examples, test)` (`test` = the held-out record) and enumerates again with it as a
+  terminal; a program that only fits the examples is counted as rejected, never admitted. `budget` caps the enumerated
+  programs over all rounds; `grow=False` is the flat control; `tolerance=` admits near-matches on noisy examples to the
+  test; `proposer=` is a fallback slot for a learned proposer (none ships), its programs checked the same way;
+  `search_on=k` enumerates on the first k examples and re-checks a match on all of them before the test
+  (`recheck_failed`). An inexpressible-rule control ("x and y share a 4-clique") is never admitted at densities 0.3 /
+  0.5; at 0.7 precision acceptance with same-density held-out graphs admits the edge relation, other-density held-out
+  graphs reject it. The search is the package's relation enumerator (by default converse, closure, "at least one
+  successor" — the new opt-in operator `CNT1` —, composition, ∩, ∪, ∖ over the base relations, I, U and the library
+  entries) and programs are the package's tuples; `run(program, world, library=)` runs one on any world.
+  `benchmarks/relations_library_toy.py` (five seeds, `pytest -m slow`): a path tree's "denied if an ancestor directory
+  is named secret and the depth is at least 3" (three levels) found with 2,556 enumerated programs in all, kinship on
+  forests to depth 6 with 10,817, where flat search found neither top rule in 100,000; 0 false accepts on larger fresh
+  worlds. The kinship ladder misses the bar of a tenth of the flat budget (1.08×; with an earlier minimal enumerator
+  without U it cost 6,125); the bar was kept and that slow test is an expected failure. `include_universal=False`
+  (find_rules, `Enumerator`; opt-in, the default keeps U and the battery's search space) leaves U out of the terminals:
+  then paths 2,174 and kinship 7,889, which meets the bar — a measured option, tested apart. `library=` takes the
+  package's `Library` or a sequence of `Entry`. The flat budget was 60,000 in the first run (the kinship ladder then
+  cost the library 1.02 × a tenth of it) and was raised after it. On a synthetic five-level path-tree policy (denied if
+  an ancestor directory is named secret and the depth is at least three; the four intermediate relations given as named,
+  unordered targets) `find_rules` with the library found every level within 4,111–4,132 enumerated programs over five
+  seeds; without the library the top level was not found within the cap of 1,000,000 programs, so the budget ratio is at
+  most 0.0042 and its true value unknown. Per level the library is not free (90 vs 71 and 2,951 vs 1,898 programs on two
+  of the shared levels; cheaper only on one). Two controls — a rule no program of the grammar can express, and one that
+  needs a 56-node program — were never admitted (0 of 20 runs). On the kinship ladder (nine rungs up to second cousin
+  once removed) the library found all nine within 3,370–3,378 programs; without it eight of nine — the ninth needs a
+  program of at least 17 nodes where the no-library search exhausted size 15 at ≈ 500,000 programs. 0 false accepts on
+  held-out forests of the same generator at a larger size.
 - **`solvi.experimental.laws`: ranking candidates where each check is expensive.** `RankedProposer(inner, scorer,
-  buffer)` reorders another proposer's candidates (never adds, drops or changes one), so a probe budget spends the likely
-  hypotheses first; `atom_features` / `candidate_features` read precision, recall, Jaccard and anti-match of each atom
-  and of the best pairs among the top atoms against the effect off the buffer's bitsets (a fixed length);
-  `BagOfAtomsRanker(seed).fit(grammar, sample)` — a numpy logistic regression over per-atom features, a condition
-  scored by the sum of its atoms' log-odds, trained on `synthetic_task`s drawn from the grammar, seeded and
-  deterministic; `FeatureRanker(stat)` — the raw statistic, no training, the control to measure first. On synthetic
-  tasks of one grammar (`tests/test_laws_rank.py`): 2.1 checks to the true condition against 69.7 in the blind order,
-  the raw Jaccard 24.6 (the best raw threshold picked after the fact: 12.8); in distribution only.
+  buffer)` reorders another proposer's candidates (never adds, drops or changes one), so a probe budget spends the
+  likely hypotheses first; `atom_features` / `candidate_features` read precision, recall, Jaccard and anti-match of each
+  atom and of the best pairs among the top atoms against the effect off the buffer's bitsets (a fixed length);
+  `BagOfAtomsRanker(seed).fit(grammar, sample)` — a numpy logistic regression over per-atom features, a condition scored
+  by the sum of its atoms' log-odds, trained on `synthetic_task`s drawn from the grammar, seeded and deterministic;
+  `FeatureRanker(stat)` — the raw statistic, no training, the control to measure first. On synthetic tasks of one
+  grammar (`tests/test_laws_rank.py`): 2.1 checks to the true condition against 69.7 in the blind order, the raw Jaccard
+  24.6 (the best raw threshold picked after the fact: 12.8); in distribution only. Measured once on a live file server
+  (8 mismatches; candidates contradicted by logged rows skipped free): every order spent 29 probes in all, because 1–5
+  candidates per mismatch were left to probe and the true conditions were single atoms — the shortest hypotheses, which
+  the length-first order meets first. Ranking can pay only where many consistent hypotheses remain after the free
+  checks; the control first.
 - **Sensitive fields: declared on the catalog, refused by `solvi check`.** `Catalog(sensitive={"age", "sex"})`,
   `lint(obj, sensitive=...)` and `solvi check module:system --sensitive age,sex` (the names add up) name given facts no
   part may read. A part that reads one (a fn, extract, check, rule, `then` function, alternative producer or
