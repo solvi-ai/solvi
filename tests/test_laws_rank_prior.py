@@ -8,8 +8,12 @@ sampler favours some features, at 0 rows it needs at most half the blind checks.
 on shuffled labels is not better than the blind order. Fallback: a fit whose held-out checks are not 5% below both the
 blind order's and the shuffled-label fit's on its own training tasks records learned=False and scores as the blind
 order — on a family whose true condition is any candidate with equal chance it falls back, on the planted grammar it
-does not; on the rank test's grammar (drawn uniformly, a small signal left) it is not worse than blind by more than 5%. HandoverRanker scores by the prior below `min_rows` logged rows of
-the action and by JointRanker from there on, and says which one scored. Deterministic for a seed."""
+does not; on the rank test's grammar (drawn uniformly, a small signal left) it is not worse than blind by more than 5%.
+HandoverRanker blends by default: the joint Jaccard plus w(rows) = n0 / (n0 + rows) times the prior's rank among the
+candidates mapped to [0, 1] — at 0 rows the prior's order, at many rows the joint statistic's, and on a planted family
+where the prior is strong never worse than the better of the two by more than 10% in between; a prior that did not learn
+leaves the joint statistic alone. mode="switch" is the fixed switch at `min_rows`, saying which one scored.
+Deterministic for a seed."""
 import importlib.util
 import random
 import warnings
@@ -153,7 +157,7 @@ def test_at_zero_rows_the_prior_needs_at_most_half_the_blind_checks_and_the_shuf
 def test_the_hand_over_happens_at_min_rows_and_says_who_scored(prior):
     t = fav_tasks(7, 1)[0]
     cands = Enumerate().propose(t.lawset, t.state, t.action, t.observed)
-    h = HandoverRanker(prior, JointRanker(), min_rows=20)
+    h = HandoverRanker(prior, JointRanker(), mode="switch", min_rows=20)
     assert h.last is None
     rows = t.buffer.rows()
     for n, who in ((0, "prior"), (5, "prior"), (19, "prior"), (20, "joint"), (100, "joint")):
@@ -173,7 +177,11 @@ def test_the_hand_over_happens_at_min_rows_and_says_who_scored(prior):
     assert h.last == "prior"
     assert h.score([], t.lawset, b) == []
     with pytest.raises(ValueError):
-        HandoverRanker(prior, JointRanker(), min_rows=-1)
+        HandoverRanker(prior, JointRanker(), mode="switch", min_rows=-1)
+    with pytest.raises(ValueError):
+        HandoverRanker(prior, mode="mix")
+    with pytest.raises(ValueError):
+        HandoverRanker(prior, n0=0)
     # rows of another action do not count
     b2 = Buffer(FAV)
     b2.extend(Transition(r.state, "other", r.observed, group=r.group) for r in rows[:50])
@@ -183,15 +191,18 @@ def test_the_hand_over_happens_at_min_rows_and_says_who_scored(prior):
 
 def test_the_ranked_proposer_takes_either_and_reports_who_scored(prior):
     t = fav_tasks(9, 1)[0]
-    p = RankedProposer(Enumerate(), HandoverRanker(prior), Buffer(FAV))
+    p = RankedProposer(Enumerate(), HandoverRanker(prior, mode="switch"), Buffer(FAV))
     p.propose(t.lawset, t.state, t.action, t.observed)
     assert p.scored_by == "prior"
-    p2 = RankedProposer(Enumerate(), HandoverRanker(prior), t.buffer)
+    p2 = RankedProposer(Enumerate(), HandoverRanker(prior, mode="switch"), t.buffer)
     p2.propose(t.lawset, t.state, t.action, t.observed)
     assert p2.scored_by == "joint"
     p3 = RankedProposer(Enumerate(), prior, t.buffer)
     p3.propose(t.lawset, t.state, t.action, t.observed)
     assert p3.scored_by == "PriorRanker"
+    p4 = RankedProposer(Enumerate(), HandoverRanker(prior), t.buffer)
+    p4.propose(t.lawset, t.state, t.action, t.observed)
+    assert p4.scored_by == "blend"
     # inside the law loop: the acceptance stays the held-out test
     laws = LawSet(FAV, base=lambda s, a: "off", proposer=RankedProposer(Enumerate(), HandoverRanker(prior), t.buffer))
     held = Buffer(FAV)
@@ -222,9 +233,9 @@ def test_fit_with_sizes_and_from_tasks():
 
 @pytest.mark.slow
 def test_the_benchmark_curve_has_the_prior_and_the_hand_over():
-    """benchmarks/laws_rank_joint.py --curve on 10 tasks of B (one seed): the prior and the hand-over are in every cut;
-    at 0 rows every row-statistic order is the blind order; the hand-over equals the prior below 20 rows and the
-    joint statistic from 20 rows on."""
+    """benchmarks/laws_rank_joint.py --curve on 10 tasks of B (one seed): the prior and both hand-overs are in every cut;
+    at 0 rows every row-statistic order is the blind order; the switch equals the prior below 20 rows and the joint
+    statistic from 20 rows on; the blend at 0 rows is the prior (when it learned)."""
     spec = importlib.util.spec_from_file_location(
         "laws_rank_joint", Path(__file__).resolve().parents[1] / "benchmarks" / "laws_rank_joint.py")
     assert spec is not None and spec.loader is not None
@@ -232,11 +243,13 @@ def test_the_benchmark_curve_has_the_prior_and_the_hand_over():
     spec.loader.exec_module(mod)
     r = mod.run("B", seed=0, tasks=10, train=30, curve=True)
     c = r["curve"]
-    for o in ("prior", "handover", "prior_shuffled"):
+    for o in ("prior", "handover", "switch", "prior_shuffled"):
         assert all(o in c[n] for n in c)
     assert c["0"]["joint"]["mean"] == c["0"]["blind"]["mean"]
-    assert c["5"]["handover"] == c["5"]["prior"] and c["20"]["handover"] == c["20"]["joint"]
-    assert c["300"]["handover"] == c["300"]["joint"]
+    assert c["5"]["switch"] == c["5"]["prior"] and c["20"]["switch"] == c["20"]["joint"]
+    assert c["300"]["switch"] == c["300"]["joint"]
+    if r["prior"]["learned"]:
+        assert c["0"]["handover"] == c["0"]["prior"]
 
 
 def test_the_fallback_keeps_a_prior_that_learned_something_and_drops_one_that_did_not(prior, shuffled):
@@ -277,3 +290,55 @@ def test_the_fallback_keeps_a_prior_that_learned_something_and_drops_one_that_di
     assert np.mean(q) <= 1.05 * np.mean(b)
     with pytest.raises(ValueError):
         PriorRanker(margin=1.0)
+
+
+def blend_tasks(seed, n, rows=300):
+    rng = random.Random(seed)
+    return [synthetic_task(FAV, sample, rng, rows=rows, noise=0.02) for _ in range(n)]
+
+
+def test_the_blend_is_the_prior_at_zero_rows_and_the_joint_statistic_at_many(prior):
+    h = HandoverRanker(prior)
+    assert h.mode == "blend" and h.weight(0) == 1.0 and h.weight(20) == 0.5 and h.weight(300) == 20 / 320
+    for t in blend_tasks(31, 5):
+        empty = Buffer(FAV)
+        assert [c.condition for c in order(t, h, empty)] == [c.condition for c in order(t, prior, empty)]
+        assert h.last == "blend"
+    got: dict = {"blend": [], "joint": []}
+    for t in blend_tasks(32, 40):
+        got["blend"].append(checks_to(order(t, h), t.condition))
+        got["joint"].append(checks_to(order(t, JointRanker()), t.condition))
+    assert np.mean(got["blend"]) <= 1.05 * np.mean(got["joint"])
+    assert h.score([], t.lawset, t.buffer) == []
+
+
+def test_where_the_prior_is_strong_the_blend_is_never_much_worse_than_the_better_part(prior, capsys):
+    tasks = blend_tasks(33, 40)
+    line = []
+    for n in (5, 20, 100):
+        got: dict = {"blend": [], "prior": [], "joint": []}
+        for t in tasks:
+            b = Buffer(FAV)
+            b.extend(t.buffer.rows()[:n])
+            for name, sc in (("blend", HandoverRanker(prior)), ("prior", prior), ("joint", JointRanker())):
+                got[name].append(checks_to(order(t, sc, b), t.condition))
+        m = {k: float(np.mean(v)) for k, v in got.items()}
+        line.append(f"{n} rows: " + ", ".join(f"{k} {v:.2f}" for k, v in m.items()))
+        assert m["blend"] <= 1.1 * min(m["prior"], m["joint"]), (n, m)
+    with capsys.disabled():
+        print("\n[rank blend] planted grammar, mean checks over 40 tasks: " + "; ".join(line))
+
+
+def test_a_prior_that_did_not_learn_leaves_the_joint_statistic_alone_and_the_blend_is_deterministic(prior):
+    fell = PriorRanker(seed=0, shuffle_labels=True).fit(FAV, sample, tasks=150, rows=200, noise=0.02)
+    assert fell.learned is False
+    t = blend_tasks(34, 1)[0]
+    b = Buffer(FAV)
+    b.extend(t.buffer.rows()[:20])
+    cands = Enumerate().propose(t.lawset, t.state, t.action, t.observed)
+    h = HandoverRanker(fell)
+    assert h.score(cands, t.lawset, b) == JointRanker().score(cands, t.lawset, b) and h.last == "joint"
+    assert [c.condition for c in order(t, h, Buffer(FAV))] == [c.condition for c in cands]   # 0 rows: blind
+    s1 = HandoverRanker(prior).score(cands, t.lawset, b)
+    assert s1 == HandoverRanker(prior).score(cands, t.lawset, b)
+    assert Counter(order(t, HandoverRanker(prior), b)) == Counter(cands)
