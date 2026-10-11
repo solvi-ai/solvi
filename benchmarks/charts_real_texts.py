@@ -1,5 +1,6 @@
-"""PREREG X3: verified charts on real texts — `solvi.experimental.charts` on 50 paragraphs of US federal news releases
-(benchmarks/datasets/charts_texts), against a hand reading of every number written before any proposer saw the texts.
+"""Verified charts on real texts, a pre-registered stand — `solvi.experimental.charts` on 50 paragraphs of US federal
+news releases (benchmarks/datasets/charts_texts), against a hand reading of every number written before any proposer
+saw the texts.
 
     python benchmarks/charts_real_texts.py --dry                 # the 3 gallery texts of tests/test_charts.py
     python benchmarks/charts_real_texts.py --run --out out/x3    # the measured run on the 50 texts (one run)
@@ -554,7 +555,7 @@ def summarise(recs, texts, labels):
 
 
 def bars(rep):
-    """The numbers each bar of PREREG X3 is read on (the verdict is the coordinator's)."""
+    """The numbers each pre-registered bar of the stand is read on (the verdict is the coordinator's)."""
     x1, x2, x3, x4, x5 = rep["x3_1"], rep["x3_2"], rep["x3_3"], rep["x3_4"]["recorded"], rep["x3_5"]
     return {
         "X3-1": {"bar": "0 numbers on the charts not in the text; every rendered value re-verified (texts drawn)",

@@ -1,7 +1,7 @@
 """Counterfactual explanations (solvi.experimental.counterfactual) on the credit policy v2: for every application v2
 refuses or sends to review, the smallest change of its declared fields that makes it "approve" — checked against the
 policy itself (validity), against a brute-force scan of the integer domain (minimality), for coverage and for
-determinism. The measurement X1 of stuff/libadd/PREREG_X.md; no LLM, no network.
+determinism. A pre-registered measurement; no LLM, no network.
 
     benchmarks/tasks/fetch.sh credit && python benchmarks/tasks/prepare.py      # the German Credit applications, once
     python benchmarks/counterfactual_credit.py --dry                             # 20 applications by hash (development)

@@ -48,8 +48,11 @@ condition labels sampled states); a condition's score is the sum of its atoms' l
 and 3 counter features, 30 atoms, k = 3; 60 fresh tasks with 2% label noise, trained on 150) the checks to the true
 condition were 69.7 in the blind order (by length, then name), 2.1 with the trained ranker, and 24.6 / 30.4 / 42.8
 with the raw Jaccard / recall / precision (the best raw threshold picked after the fact: 12.8; tests/test_laws_rank.py).
-In distribution only:
-never measured on a live system or a grammar the ranker was not trained on.
+In distribution only on the synthetic tasks.
+Measured once on a live file server (8 mismatches; candidates contradicted by logged rows skipped free): every order
+spent 29 probes in all, because 1–5 candidates per mismatch were left to probe and the true conditions were single atoms
+— the shortest hypotheses, which the length-first order meets first. Ranking can pay only where many consistent
+hypotheses remain after the free checks; the control first.
 
 Knowledge. `to_knowledge(store, scope)` writes each law as a KnowledgeStore item of kind "rule" with body {"kind":
 "law", "action", "if", "then"} (the sub-kind in the body, as the change pipeline's hazard rules), source "outcome",
