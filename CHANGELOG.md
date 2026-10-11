@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.1.1 (unreleased)
+## 1.1.1 — 2026-10-11 — fixes from use, and four learning items with their measurements
 
 ### Fixed
 
