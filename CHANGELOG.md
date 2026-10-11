@@ -154,16 +154,20 @@
   co-occurrence in true conditions beyond their own rates — a linear softmax over each synthetic task's candidates
   fitted by Newton's method; seeded and deterministic; it reads no rows. `fit(grammar, sample, tasks=, rows=, noise=)`
   has `BagOfAtomsRanker.fit`'s signature plus `sizes=(lo, hi)`; `fit_tasks(grammar, tasks)` fits on given tasks;
-  `shuffle_labels=True` is the control (each task's target a random candidate). `HandoverRanker(prior, joint=None,
+  `shuffle_labels=True` is the control (each task's target a random candidate). **Fallback:** unless the prior's
+  held-out checks on its own training tasks (weights fitted on the other half) are `margin` (5%) below both the blind
+  order's and a shuffled-label fit's, `learned` is False and every score is 0 — the blind order; `cv` holds the three
+  numbers; `fallback=False` keeps the raw fit (the control). `HandoverRanker(prior, joint=None,
   min_rows=20)` scores by the prior below `min_rows` logged rows of the candidates' action (without the group `exclude`)
   and by `JointRanker` from there on; `last` and the Counter `scored` say which one scored. `RankedProposer` takes
   either; its new `scored_by` names the scorer of the last call. On a planted grammar whose condition sampler draws three
   features 30 times as often: 10.3 checks to the true condition at 0 rows against 43.1 blind, the shuffled-label prior
-  206 (`tests/test_laws_rank_prior.py`). On the three settings of `benchmarks/laws_rank_joint.py`, whose conditions are
-  drawn uniformly from the grammar, at 0 rows 98 / 2,034 / 123 against 96 / 2,174 / 129 blind (one seed; a Bayes-optimal
-  prior from the exact sampler 95 / 1,943 / 109): a uniform grammar leaves a prior little to learn — fit it on tasks
-  like yours. Five-seed measurement pending. The benchmark's `--curve` now covers every setting and the prior, the
-  hand-over and the shuffled-label prior.
+  206 (`tests/test_laws_rank_prior.py`). In `benchmarks/laws_rank_joint.py` (one seed, five-seed measurement pending):
+  on a new skewed setting D (the deep setting's grammar, three features drawn 8 times and one comparison type 4 times as
+  often) 163 at 0 rows against 1,086 blind, still ahead of the joint statistic at 100 rows (163 against 263: a fixed
+  hand-over at 20 rows is early there); on A / B / C, whose conditions are drawn uniformly from the grammar, 96 (fell
+  back) / 2,034 / 123 against 96 / 2,174 / 129 blind. The benchmark's `--curve` now covers every setting and the prior,
+  the hand-over and the shuffled-label prior.
 
 ## 1.1.0 — 2026-10-11 — learning from code and outcomes
 

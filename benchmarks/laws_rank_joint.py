@@ -4,16 +4,20 @@ order, the raw per-atom control (`FeatureRanker`), the trained bag of atoms (`Ba
 control fitted on shuffled labels) and the hand-over from the prior to the joint statistic at 20 rows
 (`HandoverRanker`), on synthetic tasks drawn from three grammars:
 
-    python benchmarks/laws_rank_joint.py                  # A, B, C at seed 0, as JSON (a few minutes on a laptop CPU)
+    python benchmarks/laws_rank_joint.py                  # A, B, C, D at seed 0, as JSON (a few minutes on a laptop CPU)
     python benchmarks/laws_rank_joint.py --settings A --tasks 20 --train 50
     python benchmarks/laws_rank_joint.py --settings B --curve     # + the rows curve: 0 / 5 / 20 / 100 / 300 rows
-    python benchmarks/laws_rank_joint.py --curve --tasks 20       # the rows curve on A, B and C
+    python benchmarks/laws_rank_joint.py --curve --tasks 20       # the rows curve on every setting
 
 A — 7 categorical features (3 values) and 3 counters (thresholds 1, 2, 3): 30 atoms, k = 3, conditions of 1–3 atoms,
     2% label noise (the grammar of tests/test_laws_rank.py).
 B — deep conditions: 10 categorical features and 3 counters, k = 5, conditions of 3–5 atoms, 5% label noise.
 C — correlated features: the grammar of A, but c1 copies c0, c3 copies c2 and c5 copies c4 with probability 0.8 (a twin of
     a true atom looks almost as good atom by atom); conditions of 2–3 atoms, 2% label noise.
+D — a skewed task family: the grammar of B, conditions of 3–5 atoms, 5% label noise, but the true conditions draw the
+    features c0, c3 and c8 8 times as often and the features of comparison type "=" 4 times as often (one by one without
+    replacement, then one atom per feature uniformly); no scorer is told — the prior learns it from its training tasks.
+A, B and C draw conditions uniformly from the grammar: a prior has little to learn there.
 
 Per task: the candidates of `Enumerate` for the mismatch, reordered by each scorer through `RankedProposer` (the same
 set, checked), and `checks_to` the true condition — its 1-based position among the distinct conditions. The bag of atoms
@@ -38,7 +42,7 @@ with warnings.catch_warnings():
     warnings.simplefilter("ignore")
     from solvi.experimental.laws import (Atom, BagOfAtomsRanker, Buffer, Enumerate, FeatureRanker, Grammar,
                                          HandoverRanker, JointRanker, PriorRanker, RankedProposer, atom_features,
-                                         checks_to, synthetic_task)
+                                         atom_kind, checks_to, synthetic_task)
 
 ORDERS = ("blind", "feature", "bag", "joint", "joint_shuffled", "prior", "handover", "prior_shuffled")
 CUTS = (0, 5, 20, 100, 300)
@@ -64,13 +68,37 @@ def sampler(cats, counters, corr: float = 0.0):
     return sample
 
 
+class Skewed(Grammar):
+    """Setting D's grammar: its condition sampler draws the `favoured` features ×8 and the features of comparison type
+    `kind` ×4 (one by one without replacement), then one atom of each feature uniformly."""
+
+    def __init__(self, atoms, k, favoured=("c0", "c3", "c8"), kind="="):
+        super().__init__(atoms, k=k)
+        self.favoured, self.kind = tuple(favoured), kind
+        self.feature_kind = {a.feature: atom_kind(a.name) for a in self.atoms}
+
+    def weight(self, f: str) -> int:
+        return (8 if f in self.favoured else 1) * (4 if self.feature_kind[f] == self.kind else 1)
+
+    def random_condition(self, rng, size):
+        by: dict = {}
+        for a in self.atoms:
+            by.setdefault(a.feature, []).append(a.name)
+        feats, chosen = sorted(by), []
+        while len(chosen) < min(size, len(feats)):
+            rest = [f for f in feats if f not in chosen]
+            chosen.append(rng.choices(rest, weights=[self.weight(f) for f in rest])[0])
+        return tuple(sorted(rng.choice(by[f]) for f in chosen))
+
+
 def settings():
     """name → (grammar, sample, noise, condition sizes or None for uniform 1..k)."""
     ga, ca, na = grammar(7, 3, 3)
     gb, cb, nb = grammar(10, 3, 5)
     return {"A": (ga, sampler(ca, na), 0.02, None),
             "B": (gb, sampler(cb, nb), 0.05, (3, 5)),
-            "C": (ga, sampler(ca, na, corr=0.8), 0.02, (2, 3))}
+            "C": (ga, sampler(ca, na, corr=0.8), 0.02, (2, 3)),
+            "D": (Skewed(gb.atoms, 5), sampler(cb, nb), 0.05, (3, 5))}
 
 
 class ShuffledMask(JointRanker):
@@ -128,8 +156,8 @@ def run(name: str, seed: int = 0, tasks: int = 60, train: int = 150, rows: int =
     scorers = {"feature": FeatureRanker("jaccard"), "bag": train_bag(g, sample, noise, sizes, train, seed, rows),
                "joint": JointRanker(), "joint_shuffled": ShuffledMask(seed), "prior": prior,
                "handover": HandoverRanker(prior, JointRanker(), min_rows=20),
-               "prior_shuffled": PriorRanker(seed=seed, shuffle_labels=True).fit(g, sample, tasks=train, rows=rows,
-                                                                               noise=noise, sizes=sizes)}
+               "prior_shuffled": PriorRanker(seed=seed, shuffle_labels=True, fallback=False).fit(
+                   g, sample, tasks=train, rows=rows, noise=noise, sizes=sizes)}
     rng = random.Random(10_000 + seed)
     got = {o: [] for o in ORDERS}
     cut = {n: {o: [] for o in ORDERS} for n in CUTS} if curve else {}
@@ -152,7 +180,8 @@ def run(name: str, seed: int = 0, tasks: int = 60, train: int = 150, rows: int =
                 order = RankedProposer(Enumerate(), scorer, b).propose(t.lawset, t.state, t.action, t.observed)
                 cut[n][o].append(checks_to(order, t.condition))
     out = {"setting": name, "seed": seed, "tasks": tasks, "train": train, "candidates": float(np.mean(ncand)),
-           "seconds": round(time.time() - t0, 1), "orders": _summary(got)}
+           "seconds": round(time.time() - t0, 1), "orders": _summary(got),
+           "prior": {"learned": prior.learned, "cv": prior.cv}}
     if curve:
         out["curve"] = {str(n): _summary(v) for n, v in cut.items()}
     return out
@@ -160,7 +189,7 @@ def run(name: str, seed: int = 0, tasks: int = 60, train: int = 150, rows: int =
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    ap.add_argument("--settings", default="ABC")
+    ap.add_argument("--settings", default="ABCD")
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--tasks", type=int, default=60)
     ap.add_argument("--train", type=int, default=150)

@@ -331,12 +331,23 @@ class PriorRanker:
     from the other half (so a task's own condition never feeds its features), the final rates from all tasks. Seeded
     and deterministic. `shuffle_labels=True` is the control: each task's target replaced by one of its candidates drawn
     at random (seeded) — a prior that learns nothing should do no better than the blind order. Unfitted: every score
-    0 (the inner order)."""
+    0 (the inner order).
+
+    The fallback (`fallback=True`, the default): a prior that learned nothing must never be worse than the blind order.
+    `fit` measures, on its own training tasks, the mean checks to the true condition under weights fitted on the other
+    half of the tasks (`cv["prior"]`), under a fit on shuffled labels measured the same way (`cv["shuffled"]`) and in
+    the blind order (`cv["blind"]`: the grammar's order, by length then name); unless the first is at least `margin`
+    (5%) below both others, `learned` is False and every score is 0 — the inner order. `learned` is None with
+    `fallback=False` (the raw control)."""
 
     def __init__(self, seed: int = 0, *, l2: float = 1e-3, steps: int = 50, smoothing: float = 2.0,
-                 shuffle_labels: bool = False):
+                 shuffle_labels: bool = False, fallback: bool = True, margin: float = 0.05):
+        if not 0.0 <= float(margin) < 1.0:
+            raise ValueError("margin must be in [0, 1)")
         self.seed, self.l2, self.steps, self.smoothing = int(seed), float(l2), int(steps), float(smoothing)
-        self.shuffle_labels = bool(shuffle_labels)
+        self.shuffle_labels, self.fallback, self.margin = bool(shuffle_labels), bool(fallback), float(margin)
+        self.learned: bool | None = None
+        self.cv: dict[str, float] = {}
         self.grammar: Grammar | None = None
         self.k = 0
         self.feature_names: list[str] = []
@@ -362,33 +373,75 @@ class PriorRanker:
     def fit_tasks(self, grammar: Grammar, tasks: Sequence[Any]) -> "PriorRanker":
         """Train on given tasks: anything with `state`, `action` and `condition` (a SyntheticTask, a logged mismatch
         whose law is known). ValueError for none."""
-        examples = []
+        examples, truths = [], []
         rng = random.Random(self.seed * 7919 + 1)
         for t in tasks:
             true = grammar.true(t.state, t.action)
             conds = grammar.conditions(true)
-            target = tuple(sorted(t.condition))
-            if self.shuffle_labels:
-                target = rng.choice([c for c in conds if c] or conds)
+            truth = tuple(sorted(t.condition))
+            target = rng.choice([c for c in conds if c] or conds) if self.shuffle_labels else truth
             examples.append((true, conds, target))
+            truths.append(truth)
         if not examples:
             raise ValueError("PriorRanker needs at least one task")
         self.grammar, self.k = grammar, grammar.k
         self.feature_names = [f"atoms={i}" for i in range(self.k + 1)] + ["atom", "feature", "kind", "pair"]
-        folds = [examples[0::2], examples[1::2]]
-        X, seg, y = [], [], []
-        for i, fold in enumerate(folds):
-            other = folds[1 - i] or fold
+        folds = self._design(grammar, examples, truths)
+        X = np.concatenate([f[0] for f in folds])
+        seg = np.concatenate([folds[0][1], folds[1][1] + len(folds[0][0])]) if len(folds[1][1]) else folds[0][1]
+        y = np.concatenate([f[2] for f in folds])
+        self.weights, self.mean, self.scale = self._fit_softmax(X, seg, y)
+        self.learned = None
+        self.cv = {}
+        if self.fallback:
+            ref = random.Random(self.seed * 7919 + 2)
+            shuffled = [(tr, cs, ref.choice([c for c in cs if c] or cs)) for tr, cs, _ in examples]
+            blind = [cs.index(tt) + 1 if tt in cs else len(cs) + 1 for (_, cs, _), tt in zip(examples, truths)]
+            self.cv = {"prior": self._cv_checks(folds), "shuffled": self._cv_checks(self._design(grammar, shuffled, truths)),
+                       "blind": float(np.mean(blind))}
+            self.learned = bool(self.cv["prior"] <= (1 - self.margin) * min(self.cv["blind"], self.cv["shuffled"]))
+        self._set_rates(grammar, examples)
+        self.trained_on = len(examples)
+        return self
+
+    def _design(self, grammar, examples, truths):
+        """Per fold (the tasks at even / odd positions): the candidates' features with the rates read from the other
+        fold, segment starts, the target indicator and the index of the true condition per task."""
+        parts = [list(zip(examples, truths))[0::2], list(zip(examples, truths))[1::2]]
+        out = []
+        for i, part in enumerate(parts):
+            other = [e for e, _ in (parts[1 - i] or part)]
             self._set_rates(grammar, other)
-            for true, conds, target in fold:
+            X, seg, y, idx = [], [], [], []
+            for (true, conds, target), truth in part:
                 seg.append(len(X))
+                idx.append(conds.index(truth) if truth in conds else -1)
                 for c in conds:
                     X.append(self._phi(c))
                     y.append(1.0 if c == target else 0.0)
-        self._set_rates(grammar, examples)
-        self._fit_softmax(np.array(X), np.array(seg), np.array(y))
-        self.trained_on = len(examples)
-        return self
+            out.append((np.array(X).reshape(len(X), len(self.feature_names)), np.array(seg, dtype=int), np.array(y),
+                        idx))
+        return out
+
+    def _cv_checks(self, folds):
+        """Mean checks to the true condition on each fold under the weights fitted on the other fold (ties in the
+        candidates' order)."""
+        checks = []
+        for i in (0, 1):
+            Xt, st, yt, _ = folds[1 - i] if len(folds[1 - i][1]) else folds[i]
+            Xe, se, _, idx = folds[i]
+            if not len(se):
+                continue
+            w, mean, scale = self._fit_softmax(Xt, st, yt)
+            z = ((Xe - mean) / scale) @ w
+            ends = list(se[1:]) + [len(Xe)]
+            for start, end, j in zip(se, ends, idx):
+                if j < 0:
+                    checks.append(end - start + 1)
+                    continue
+                s = z[start:end]
+                checks.append(1 + int((s > s[j]).sum()) + int((s[:j] == s[j]).sum()))
+        return float(np.mean(checks))
 
     def _set_rates(self, grammar, examples):
         n = _Counts()
@@ -425,10 +478,10 @@ class PriorRanker:
         return size + [atom, feat, kind, pair]
 
     def _fit_softmax(self, X, seg, y):
-        self.mean = X.mean(0)
+        mean = X.mean(0)
         sd = X.std(0)
-        self.scale = np.where(sd > 1e-12, sd, 1.0)
-        Z = (X - self.mean) / self.scale
+        scale = np.where(sd > 1e-12, sd, 1.0)
+        Z = (X - mean) / scale
         ids = np.repeat(np.arange(len(seg)), np.diff(np.append(seg, len(Z))))
         n = len(seg)
 
@@ -459,7 +512,7 @@ class PriorRanker:
             w, f, g, H = w2, f2, g2, H2
             if done:
                 break
-        self.weights = w
+        return w, mean, scale
 
     # scoring
     def score(self, candidates: Sequence[Candidate], lawset: LawSet | None, buffer: Buffer, exclude=None) -> list[float]:
@@ -467,7 +520,7 @@ class PriorRanker:
         atoms added after the fit)."""
         if not candidates:
             return []
-        if self.grammar is None or not len(self.weights):
+        if self.grammar is None or not len(self.weights) or self.learned is False:
             return [0.0] * len(candidates)
         for x, f in buffer.grammar.feature.items():
             self._feat.setdefault(x, f)
