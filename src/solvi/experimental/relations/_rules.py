@@ -458,27 +458,43 @@ def _fast(story: Story, rules, complements=None, *, neg=True, statuses=True, obs
                 continue
             F[k][i] |= 1 << j
             B[k][j] |= 1 << i
-        comp = []
+        groups = {}                                      # one body, every head it gives: evaluated once
         for r in pos:
-            a = [(rel[t], v) for t, v in r.atoms]
+            a = tuple((rel[t], v) for t, v in r.atoms)
             u = um.get(r.unary[0][0], 0) if r.unary else 0
             side = r.unary[0][1] if r.unary else None
-            comp.append((r.template, rel[r.head], a, u, side, {t for t, _ in a}))
-        changed, it = set(range(R)), 0
-        while changed:                                   # Gauss-Seidel: an update is visible to the next rule
+            groups.setdefault((r.template, a, u, side), []).append(rel[r.head])
+        comp = [(t, a, u, side, heads) for (t, a, u, side), heads in groups.items()]
+        full = (1 << n) - 1
+        drow, dcol = [full] * R, [full] * R              # rows / columns changed in the last sweep (all, at first)
+        it, more = 0, True
+        while more:                                      # Gauss-Seidel sweeps, semi-naive by row
             it += 1
-            now = set()
-            for t, h, a, u, side, deps in comp:
-                if not (deps & changed or deps & now):
-                    continue
-                A1 = F[a[0][0]] if a[0][1] == 0 else B[a[0][0]]
-                Fh, Bh = F[h], B[h]
-                bh = block[h] if block is not None else None
-                for x in range(n):
+            nrow, ncol = [0] * R, [0] * R
+            more = False
+            for t, a, u, side, heads in comp:
+                k1, i1 = a[0]
+                A1 = F[k1] if i1 == 0 else B[k1]
+                d1 = drow[k1] if i1 == 0 else dcol[k1]
+                if t == "B2" or t == "B2z":
+                    k2, i2 = a[1]
+                    A2 = F[k2] if i2 == 0 else B[k2]
+                    d2 = drow[k2] if i2 == 0 else dcol[k2]
+                    xs = d1
+                    if d2:
+                        for x in range(n):
+                            if A1[x] & d2:
+                                xs |= 1 << x
+                else:
+                    xs = d1
+                while xs:
+                    lowx = xs & -xs
+                    x = lowx.bit_length() - 1
+                    xs ^= lowx
                     zs = A1[x]
                     if not zs:
                         continue
-                    bx = 1 << x
+                    bx = lowx
                     if t == "B1" or t == "B1u":
                         m = zs
                         if t == "B1u":
@@ -496,27 +512,33 @@ def _fast(story: Story, rules, complements=None, *, neg=True, statuses=True, obs
                         zs &= ~bx
                         if t == "B2z":
                             zs &= u
-                        A2 = F[a[1][0]] if a[1][1] == 0 else B[a[1][0]]
                         m = 0
                         while zs:
                             low = zs & -zs
                             m |= A2[low.bit_length() - 1] & ~low
                             zs ^= low
-                    m &= ~bx & ~Fh[x]
-                    if bh is not None:
-                        m &= ~bh[x]
+                    m &= ~bx
                     if not m:
                         continue
-                    Fh[x] |= m
-                    dd = D.setdefault((h, x), {})
-                    while m:
-                        low = m & -m
-                        y = low.bit_length() - 1
-                        Bh[y] |= bx
-                        dd[y] = it
-                        m ^= low
-                    now.add(h)
-            changed = now
+                    for h in heads:
+                        mh = m & ~F[h][x]
+                        if block is not None:
+                            mh &= ~block[h][x]
+                        if not mh:
+                            continue
+                        F[h][x] |= mh
+                        nrow[h] |= bx
+                        ncol[h] |= mh
+                        more = True
+                        dd = D.setdefault((h, x), {})
+                        Bh = B[h]
+                        while mh:
+                            low = mh & -mh
+                            y = low.bit_length() - 1
+                            Bh[y] |= bx
+                            dd[y] = it
+                            mh ^= low
+            drow, dcol = nrow, ncol
         return F, D
 
     F, D = run(None)
