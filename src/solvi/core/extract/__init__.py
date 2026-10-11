@@ -12,6 +12,7 @@ import time
 
 import numpy as np
 
+from .._torchopt import adamw
 from ..catalog import Quote
 
 CACHE = 2000                                     # (text, description) predictions kept (then the cache starts again)
@@ -93,12 +94,14 @@ class LongSpanExtractor:
         return out
 
     def fit(self, items, epochs=3, lr=3e-5, bs=8, seed=0, neg_per_item=3, log=print):
+        """Fine-tune on [(text, description, (start, end) | None[, neg])]. Fitting on the CPU creates no CUDA context, so it
+        works beside a GPU that is busy or full."""
         torch = self.torch
         random.seed(seed)
         torch.manual_seed(seed)
         ex = self.make_examples(items, neg_per_item, seed)
-        opt = torch.optim.AdamW([{"params": list(self.enc.parameters()), "lr": lr}, {"params": list(self.head.parameters()), "lr": lr * 10}],
-                                weight_decay=0.01)
+        opt = adamw([{"params": list(self.enc.parameters()), "lr": lr}, {"params": list(self.head.parameters()), "lr": lr * 10}],
+                    self.device, weight_decay=0.01)
         total = epochs * math.ceil(len(ex) / bs)
         sched = torch.optim.lr_scheduler.LambdaLR(opt, lambda s: min(1.0, (s + 1) / max(1, total // 10)) * max(0.0, 1 - s / total))
         params = list(self.enc.parameters()) + list(self.head.parameters())

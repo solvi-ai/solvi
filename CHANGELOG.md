@@ -493,11 +493,12 @@ ModuleNotFoundError.
 
 ### Fixed
 
-- **LoRA training on the CPU no longer touches the GPU.** `solvi.experimental.lora.adapt_lora(..., device="cpu")`
-  (and `train`) failed with `torch.AcceleratorError: out of memory` on a machine whose GPU was busy with another job:
-  torch's AdamW asks the accelerator for its current stream at every `step()` (a check for graph capture), and that
-  creates a CUDA context even for CPU parameters. On the CPU the check is now skipped (CPU parameters cannot be
-  graph-captured), so no CUDA context is created; training on a GPU is unchanged.
+- **LoRA training and extractor fitting on the CPU no longer touch the GPU.**
+  `solvi.experimental.lora.adapt_lora(..., device="cpu")` (and `train`) and `LongSpanExtractor.fit` on a CPU device
+  failed with `torch.AcceleratorError: out of memory` on a machine whose GPU was busy with another job: torch's AdamW
+  asks the accelerator for its current stream at every `step()` (a check for graph capture), and that creates a CUDA
+  context even for CPU parameters. On the CPU the check is now skipped (CPU parameters cannot be graph-captured), so
+  no CUDA context is created; training on a GPU is unchanged.
 
 - **The nine-task stand's RAGTruth keys.** `benchmarks/tasks/ragtruth/reply_format.py` printed its label after the module's
   1.0 move (`solvi.core.deciders.llm, …`), and `stand.py check` keyed six published numbers by the old label — every
