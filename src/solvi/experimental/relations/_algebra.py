@@ -294,7 +294,7 @@ def readout(value) -> bool | np.ndarray:
     v = np.asarray(value, dtype=bool)
     if v.ndim == 2:
         return bool(v[0].any()) if v.size else False
-    return v[..., 0, :].any(-1)
+    return np.asarray(v[..., 0, :].any(-1), dtype=bool)
 
 
 __all__ = ["BINARY", "COMMUTATIVE", "OPS", "Relations", "UNARY", "closure", "complement", "compose", "converse",

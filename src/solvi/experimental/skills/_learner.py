@@ -131,7 +131,7 @@ class SkillLearner:
             state = out.state
             if out.done:
                 break
-        ep = self._ep
+        ep = self._ep if self._ep is not None else {}
         self._close()
         self._ep = None
         return ep
