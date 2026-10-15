@@ -137,6 +137,10 @@ class DecisionSystem:
                 lines.append(f"All answers given alone together: {c['dispatch_promise']}.")
                 lines.append(f"Woken by: {', '.join(c['wake'])}; held back by the open-set gate → a person; after a drift "
                              "flag System 1's answers are checked by the slow path and a disagreement goes to a person.")
+            elif c["split"].get("to calibrate the dispatcher") == 0 and "drift" != c["wake"][0]:
+                lines.append(f"Woken by: {', '.join(c['wake'])}: the slow path's accepted answer is given, uncalibrated; "
+                             "after a drift flag System 1's answers are checked by the slow path and a disagreement goes "
+                             "to a person.")
             else:
                 lines.append("Every input System 1 does not answer alone goes to a person; after a drift flag System 1's "
                              "answers are checked by the slow path and a disagreement goes to a person.")
@@ -349,7 +353,8 @@ def build(question, examples, *, catalog=None, learner=None, slow=None, reads=No
     that says "right" / "wrong" of System 1's answer, a quote that overlaps). novel: "auto", True or False. budget /
     total: solvi.core.dispatch.Budget per decision / for the dispatcher's life; price: dollars per million input and output
     tokens (needed for dollars). storage: a path or a TraceStorage — every decision and the policy, hash-chained.
-    split: (fit, guarantee, dispatch) shares. seed: the shuffle and the open-set simulation. delta: learn-then-test's
+    split: (fit, guarantee, dispatch) shares (with slow=, a dispatch share of 0 calibrates System 1 on all the rest and
+    leaves the slow path uncalibrated). seed: the shuffle and the open-set simulation. delta: learn-then-test's
     confidence. min_slice: a slice of the slow path with fewer calibration examples goes to a person. writer, inputs:
     gone in 1.0 (they compiled a Spec here): a TypeError says to compile it first. knowledge: a solvi.Knowledge (or a
     function state → snapshot) — every decision, and every example at build time, is given its snapshot as the fact
@@ -482,8 +487,10 @@ def build(question, examples, *, catalog=None, learner=None, slow=None, reads=No
                 choose_on = []                  # counted as the fit share
     k = _edge(rest_g, int(round(len(rest) * g_ratio)))
     g_ex, d_ex = rest[:k], rest[k:]
-    if has_slow and not d_ex:
-        raise ValueError("a slow path is calibrated on examples System 1's guarantee did not see: none are left")
+    no_dispatch = has_slow and split is not None and split[2] == 0       # asked for: the slow path is not calibrated
+    if has_slow and not d_ex and not no_dispatch:
+        raise ValueError("a slow path is calibrated on examples System 1's guarantee did not see: none are left "
+                         "(split=(fit, guarantee, 0) leaves the slow path uncalibrated)")
     if not g_ex:
         raise ValueError("no examples are left to calibrate System 1's guarantee on")
 
@@ -535,7 +542,11 @@ def build(question, examples, *, catalog=None, learner=None, slow=None, reads=No
     novel_on = gate is not None
     wake = tuple(s for s in SIGNALS if s != "openset")
     slice_open, probe_desc = True, None
-    if has_slow:
+    if no_dispatch:
+        probe_desc = ("split= gave the dispatcher no examples: the slow path answers every slice System 1 hands over as "
+                      "it is (its own checks and guarantee decide what it gives), and no promise is calibrated on the "
+                      "dispatcher's answers as a whole")
+    elif has_slow:
         # a dev-only probe: does System 1 hand the slow path anything? Its share of the examples goes through System 1 as
         # calibrated; the inputs it holds back on a signal that wakes the slow path are counted. Fewer than min_slice: no
         # slice is open to the slow path, and that share calibrates System 1 instead.
@@ -591,7 +602,7 @@ def build(question, examples, *, catalog=None, learner=None, slow=None, reads=No
         side = {"fit": len({sg[i] for i in range(len(fit_ex))}) if mode != "given" else 0}
         choices["groups"] = {"n": len(set(sg)), "by": _group_desc(groups), "fit": side["fit"],
                              "calibrate": len(set(sg)) - side["fit"]}
-    if has_slow and slice_open:
+    if has_slow and slice_open and d_ex:
         rep = d.calibrate(d_ex, max_risk=max_risk, max_error=max_error, delta=delta, min_slice=min_slice,
                           correct=None if correct is None else (lambda ans, label, res: correct(ans, label)))
         calib["dispatch"] = rep
