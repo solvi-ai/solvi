@@ -767,3 +767,23 @@ def test_act_guard_and_calibrate_for_take_span_answers_compared_by_their_text():
     maybe = model(FakeLLM(reply=reply)).decision("o", "Order number?", "email", Maybe[Span[str]])
     info = maybe.act_guard(ex + [("Hello, nothing to report.", Unknown)] * 20, max_risk=0.10)
     assert info["base_error"] == pytest.approx(10 / 70)
+
+
+def test_a_server_that_does_not_answer_is_counted_as_no_answer_not_as_the_models_escalation():
+    from solvi.core.provenance import classify
+    down = FakeLLM(fail=[503] * 10)
+    cat = Catalog()
+    model(down, retries=1).decision("team", "Which team?", "email", TEAMS).question(cat, "route")
+    s = System(cat, [Question("route", "Route", Answer.choice(list(TEAMS)))])
+    r = s.ask({"email": "I was charged twice"})
+    assert r["route"].status == "abstain" and r["route"].guard == "no_answer"
+    assert r["route"].why.startswith("model escalated: the LLM server did not answer after 2 attempts")
+    assert s.stats["no_answer"] == 1 and s.stats["model_escalated"] == 0
+    assert "server did not answer" in str(r.audit()) and "server did not answer" in s.safeguard_summary()
+    bad = FakeLLM(reply='{"answer": "legal", "confidence": 0.99, "quote": ""}')
+    cat2 = Catalog()
+    model(bad, retries=1).decision("team", "Which team?", "email", TEAMS).question(cat2, "route")
+    s2 = System(cat2, [Question("route", "Route", Answer.choice(list(TEAMS)))])
+    assert s2.ask({"email": "I was charged twice"})["route"].guard == "escalated" and s2.stats["no_answer"] == 0
+    assert classify("model escalated: every model of the cascade escalated (model escalated: the LLM server did not "
+                    "answer after 3 attempts: HTTP 503)") == "escalated"

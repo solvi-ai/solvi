@@ -36,9 +36,11 @@ def _input(row):
 
 def measure(model, rows, task, options, kind=None):
     """Decide every labelled row one at a time → {"n", "accuracy", "escalated", "answered_alone", "accuracy_alone",
-    "first_ms", "ms_p50", "ms_p95", "ms_mean"}."""
+    "no_answer", "first_ms", "ms_p50", "ms_p95", "ms_mean"}. no_answer: the share of rows whose server did not answer
+    (counted in "escalated", and as not right in "accuracy" — "accuracy_alone" is over the answered rows only)."""
     part = model.decision("check", task, "input", options, kind=kind)
-    ms, right, alone, alone_right = [], 0, 0, 0
+    from ..core.provenance import classify
+    ms, right, alone, alone_right, silent = [], 0, 0, 0, 0
     first = None
     for i, r in enumerate(rows):
         x = _input(r)
@@ -59,10 +61,12 @@ def measure(model, rows, task, options, kind=None):
         if d.escalate is None:
             alone += 1
             alone_right += ok
+        elif classify(d.escalate) == "no_answer":
+            silent += 1
     n = len(rows)
     q = sorted(ms or [first])
     return {"n": n, "accuracy": right / n, "escalated": 1 - alone / n, "answered_alone": alone / n,
-            "accuracy_alone": alone_right / alone if alone else None, "first_ms": first,
+            "accuracy_alone": alone_right / alone if alone else None, "no_answer": silent / n, "first_ms": first,
             "ms_p50": statistics.median(q), "ms_p95": q[min(len(q) - 1, int(0.95 * len(q)))], "ms_mean": statistics.fmean(q)}
 
 
@@ -184,7 +188,8 @@ def _report(out, as_json):
         alone = "—" if ex["accuracy_alone"] is None else f"{100 * ex['accuracy_alone']:.1f}%"
         print(f"examples     {ex['n']} from {ex['file']}  ({ex['task']!r}: {', '.join(map(str, ex['options']))})")
         print(f"accuracy     {100 * ex['accuracy']:.1f}%; answered alone {100 * ex['answered_alone']:.1f}% "
-              f"(accuracy {alone}), escalated {100 * ex['escalated']:.1f}%")
+              f"(accuracy {alone}), escalated {100 * ex['escalated']:.1f}%"
+              + (f" (server did not answer {100 * ex['no_answer']:.1f}%)" if ex.get("no_answer") else ""))
         print(f"latency      first {ex['first_ms']:.1f} ms; then p50 {ex['ms_p50']:.1f} ms, p95 {ex['ms_p95']:.1f} ms, "
               f"mean {ex['ms_mean']:.1f} ms per decision")
         if out.get("below_min_accuracy") is not None:

@@ -34,13 +34,19 @@ TYPE_REJECTED = "type rejected"               # a typed fact failed its type (so
 #                                               event is "type_rejected" (solvi.core.primitives.GUARD_TYPE_REJECTED)
 ESCALATED = "model escalated"                 # a decider's own act / escalate signal said "hand it to a person" (solvi.core.deciders)
 TIMED_OUT = "timed out"                       # a part did not finish within its timeout (System.aask)
+NO_ANSWER = "did not answer after"            # a remote model's server gave no reply within its retries (the words of
+#                                               solvi.core.deciders._remote.NoAnswer): "model escalated: the LLM server
+#                                               did not answer after 3 attempts: TimeoutError ..." — not the model's doubt
+_NO_ANSWER = re.compile(re.escape(ESCALATED) + r": [^:(]* " + re.escape(NO_ANSWER) + r" \d+ attempts")
 INSTRUCTION = "answer depends on an instruction-like sentence"   # perturb=k: the answer changed without such a sentence
 MEMORY = "memory of corrections disagrees"    # solvi.core.knowledge.memory: similar corrected cases say another answer
 
 
 def classify(reason):
     """A rejection reason → the safeguard that fired (grounding, type_rejected, outside_options, low_confidence, escalated,
-    validator, timeout, instruction, memory) or None."""
+    validator, timeout, no_answer, instruction, memory) or None. A remote model whose server did not answer (a timeout,
+    5xx, 429 after the retries) is "no_answer", not "escalated": the model gave no answer, neither a wrong one nor a
+    doubt."""
     if not reason:
         return None
     if reason.startswith(INSTRUCTION):
@@ -48,7 +54,7 @@ def classify(reason):
     if reason.startswith(MEMORY):
         return "memory"
     if reason.startswith(ESCALATED):
-        return "escalated"
+        return "no_answer" if _NO_ANSWER.match(reason) else "escalated"
     if reason.startswith((QUOTE_OUTSIDE, NOT_GROUNDED)):
         return "grounding"
     if reason.startswith(TYPE_REJECTED):

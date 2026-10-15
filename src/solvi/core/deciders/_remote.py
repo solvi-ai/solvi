@@ -172,7 +172,7 @@ class RemoteClient:
                 last = f"{type(e).__name__}: {getattr(e, 'reason', e)}"
             attempt += 1
             if attempt > self.retries:
-                raise NoAnswer(f"{self.service} did not answer after {attempt} attempts: {last}")
+                raise NoAnswer(f"{self.service} did not answer after {attempt} attempts: {last}")   # provenance.NO_ANSWER
             self.sleep(self.backoff * 2 ** (attempt - 1))
 
     def count(self, usage):
