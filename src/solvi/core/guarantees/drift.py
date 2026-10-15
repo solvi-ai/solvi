@@ -41,7 +41,10 @@ It is a signal, not a verdict: what to do — recalibrate, escalate, ask for lab
 independent decisions (benchmarks/drift_simulation.py): 6 of 1,152 unchanged streams were flagged within 1,000
 decisions; a fall of the share answered alone from 73% to 13% was flagged 23–27 decisions later whatever the window; a
 change of the mix of three answers from 1:1:1 to 1:8:1, which only the window tests see, 67 / 80 / 110 decisions later
-with window 50 / 100 / 200. More in docs/guide.md, "Drift"."""
+with window 50 / 100 / 200. More in docs/guide.md, "Drift".
+
+NumericDrift is the same sequential test on any numeric stream (forecast residuals, latencies): a rise and a fall of
+its level against a reference, h from Cusum.calibrate(ref_n=) with the reference's own sampling error simulated."""
 from __future__ import annotations
 
 import math
@@ -191,10 +194,22 @@ class Cusum:
         return self.names[j], float(self.S[j]), int(self.since[j])
 
     @classmethod
-    def calibrate(cls, names, make_null, alpha=0.01, horizon=1000, sims=None, seed=0):
+    def calibrate(cls, names, make_null=None, alpha=0.01, horizon=1000, sims=None, seed=0, *, ref_n=None, allowance=0.5):
         """make_null(rng, sims) → a function giving one step's increments of `sims` null streams, an array (sims,
         channels). sims: at least 2,000 and 20 / alpha. → a Cusum with h such that at most alpha of the simulated
-        streams reach h within `horizon` steps; .rate is that share."""
+        streams reach h within `horizon` steps; .rate is that share.
+
+        Without make_null: two channels (a rise and a fall) over values standardized by a reference — the null is
+        independent N(0, 1) values, increments ±z − allowance. ref_n: the reference's size; its own error of mean and
+        spread is simulated (each null stream standardized by a reference of ref_n values drawn from the same null),
+        which raises h for a short reference; None: a known mean and spread. (With make_null, put the reference's
+        error into it: ref_n= is refused there.)"""
+        if make_null is None:
+            if len(names) != 2:
+                raise ValueError("without make_null the null is a rise and a fall of one standardized value: two names")
+            make_null = _standardized_null(ref_n, float(allowance))
+        elif ref_n is not None:
+            raise ValueError("ref_n= is for the built-in null; a make_null of your own simulates its reference itself")
         if not 1e-4 <= float(alpha) < 1:
             raise ValueError(f"alpha {alpha:g}: a level set by simulation needs alpha between 1e-4 and 1 (rarer false "
                              "flags cannot be certified by it)")
@@ -211,6 +226,26 @@ class Cusum:
         c = cls(names, float(np.nextafter(top[sims - allowed - 1], math.inf)))
         c.rate, c.sims, c.alpha, c.horizon = float((top >= c.h).mean()), sims, float(alpha), int(horizon)
         return c
+
+
+def _standardized_null(ref_n, k):
+    """Cusum.calibrate's built-in null: N(0, 1) values standardized by a simulated reference of ref_n values (None: a
+    known one) → increments (z − k, −z − k)."""
+    if ref_n is not None and int(ref_n) < 2:
+        raise ValueError("ref_n: a reference has at least two values")
+
+    def make_null(rng, sims):
+        if ref_n:
+            ref = rng.normal(0.0, 1.0, size=(sims, int(ref_n)))
+            m, s = ref.mean(1), np.maximum(ref.std(1), 1e-9)
+        else:
+            m, s = np.zeros(sims), np.ones(sims)
+
+        def nxt():
+            z = (rng.normal(0.0, 1.0, size=sims) - m) / s
+            return np.stack([z - k, -z - k], axis=1)
+        return nxt
+    return make_null
 
 
 SCALARS = ("answered", "confidence", "act")       # the signals the sequential test follows, one value per decision
@@ -525,4 +560,110 @@ class DriftMonitor:
         return (ge + 1) / (rounds + 1), (gc + 1) / (rounds + 1)
 
 
-__all__ = ["Cusum", "DriftMonitor", "Observation", "window_stats"]
+class NumericDrift:
+    """A Monitor over a numeric stream (forecast residuals, latencies, a cost per decision): has its level moved away
+    from a reference? Each value is standardized by the reference's mean and spread; two one-sided CUSUMs (a rise:
+    z − allowance, a fall: −z − allowance) share one threshold h from Cusum.calibrate(ref_n=), so that an unchanged
+    stream of independent, roughly Gaussian values is flagged within `horizon` values with chance at most alpha — the
+    reference's own sampling error included.
+
+        mon = NumericDrift(value=lambda res: res.values["latency"]).set_reference(calibration_latencies)
+        Dispatcher(system, slow, monitor=mon)              # or build(..., monitor=mon)
+        rep = mon.observe(3.2)                             # → {"drift", "why", "value", "state", "S", "h"}
+
+    The reference: set_reference(values) (the calibration data — better than the stream's start, which may already have
+    moved), else the first ref_n values observed (after `settle`). A flag is latched until reset() (the CUSUMs and the
+    flag cleared, the reference kept) or adapted() (the system changed: the next ref_n values, after `settle`, are the
+    new reference). value: decision → number for decisions that are not numbers (a Response, a dict); a value that is
+    not finite is skipped. A reference of fewer than 20 values warns: its spread is too noisy for the bound.
+    Limits: autocorrelated values (raw residuals of a time series) flag more often than alpha — whiten or aggregate
+    them first; the bound is per `horizon` values, not for an unbounded stream."""
+
+    def __init__(self, *, alpha=0.01, horizon=1000, allowance=0.5, ref_n=50, settle=0, min_sd=1e-9, value=None, seed=0):
+        if int(ref_n) < 2:
+            raise ValueError("ref_n: a reference has at least two values")
+        if value is not None and not callable(value):
+            raise TypeError("value= is a function decision → number")
+        self.alpha, self.horizon, self.allowance = float(alpha), int(horizon), float(allowance)
+        self.ref_n, self.settle, self.min_sd, self.value, self.seed = int(ref_n), int(settle), float(min_sd), value, seed
+        self.mean = self.sd = self.n_ref = None
+        self.cusum, self.h = None, None
+        self._ref, self._skip = [], self.settle
+        self._flagged, self._why = False, []
+        self.seen, self.alarms = 0, []
+
+    @property
+    def flagged(self):
+        return self._flagged
+
+    def set_reference(self, values):
+        """The reference: these values' mean and spread (and their number, for the threshold) → self."""
+        vals = [float(v) for v in values if math.isfinite(float(v))]
+        if len(vals) < 2:
+            raise ValueError("a reference needs at least two finite values")
+        if len(vals) < 20:
+            warnings.warn(f"a reference of {len(vals)} values: its spread is too noisy for the false-alarm bound to "
+                          "hold (20 or more)", UserWarning, stacklevel=2)
+        self.mean, self.sd, self.n_ref = float(np.mean(vals)), max(self.min_sd, float(np.std(vals))), len(vals)
+        self.cusum = Cusum.calibrate(["up", "down"], alpha=self.alpha, horizon=self.horizon, seed=self.seed,
+                                     ref_n=len(vals), allowance=self.allowance)
+        self.h = self.cusum.h
+        self._ref = []
+        self.reset()
+        return self
+
+    def adapted(self):
+        """The system changed (retrained, re-tuned): the next ref_n values (after `settle`) become the new reference."""
+        self.mean = self.sd = self.n_ref = self.cusum = self.h = None
+        self._ref, self._skip = [], self.settle
+        self._flagged, self._why = False, []
+
+    def reset(self):
+        """The stream starts again: the CUSUMs and the flag are cleared; the reference is kept."""
+        if self.cusum is not None:
+            self.cusum.reset()
+        self._flagged, self._why = False, []
+
+    def _number(self, decision):
+        x = self.value(decision) if self.value is not None else decision
+        if isinstance(x, bool) or not isinstance(x, (int, float, np.integer, np.floating)):
+            raise TypeError(f"NumericDrift reads numbers, not {type(x).__name__}: give value= (decision → number)")
+        return float(x)
+
+    def observe(self, decision, label=None, question=None):
+        """One value (or a decision, read through value=) → {"drift", "why", "value", "state", "S", "h"}."""
+        x = self._number(decision)
+        self.seen += 1
+        rep = {"drift": self._flagged, "why": list(self._why), "value": x, "S": None, "h": self.h}
+        if not math.isfinite(x):
+            rep["state"] = "skipped"
+            return rep
+        if self.cusum is None:                       # collecting the reference from the stream
+            if self._skip > 0:
+                self._skip -= 1
+                rep["state"] = "settling"
+                return rep
+            self._ref.append(x)
+            if len(self._ref) >= self.ref_n:
+                with warnings.catch_warnings():
+                    warnings.simplefilter("ignore")
+                    self.set_reference(self._ref)
+            rep.update(state="collecting", h=self.h)
+            return rep
+        rep["state"] = "watching"
+        if self._flagged:
+            return rep
+        z = (x - self.mean) / self.sd
+        self.cusum.step([z - self.allowance, -z - self.allowance])
+        name, S, since = self.cusum.top()
+        rep["S"] = S
+        if S >= self.h:
+            self._flagged = True
+            self._why = [f"the numeric stream moved {name}: CUSUM {S:.3g} ≥ h {self.h:.3g} over the last {since} values "
+                         f"(reference mean {self.mean:.4g}, sd {self.sd:.4g}, {self.n_ref} values)"]
+            self.alarms.append({"at": self.seen, "direction": name, "S": S, "since": since})
+            rep.update(drift=True, why=list(self._why))
+        return rep
+
+
+__all__ = ["Cusum", "DriftMonitor", "NumericDrift", "Observation", "window_stats"]

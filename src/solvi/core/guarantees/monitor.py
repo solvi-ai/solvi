@@ -2,8 +2,8 @@
 
     from solvi.core import Monitor
 
-The built-in is `solvi.core.guarantees.drift.DriftMonitor`; `solvi.testing.conformance.check_monitor` checks a
-monitor of your own."""
+The built-ins are `solvi.core.guarantees.drift.DriftMonitor` (decisions) and `solvi.core.guarantees.drift.NumericDrift`
+(any numeric stream: residuals, latencies); `solvi.testing.conformance.check_monitor` checks a monitor of your own."""
 from __future__ import annotations
 
 from typing import Any, Protocol, runtime_checkable
