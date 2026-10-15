@@ -460,8 +460,10 @@ class Admission:
     not the set without a law) or "undetermined"; law: the accepted law (the shortest candidate of the surviving
     class) or None; classes: the surviving candidates grouped by what they predict on every probe offered (shortest
     first in each, classes by their shortest); asked: the probes asked, as Transitions (group "probe"); refuted: the
-    candidates the logged rows and the probes refuted; null: the set without any new law still survives; why: the
-    reason."""
+    candidates the logged rows and the probes refuted (a count); null: the set without any new law still survives;
+    why: the reason; witnesses: the candidates refuted only as too narrow that are right wherever they were applied and
+    predict otherwise than the surviving class where they apply — while any is left nothing is accepted (several laws
+    may be missing)."""
     status: str
     law: Law | None
     classes: list
@@ -469,6 +471,7 @@ class Admission:
     refuted: int
     null: bool
     why: str
+    witnesses: list = field(default_factory=list)
 
 
 # ───────────────────────────────────────────── the law set
@@ -494,9 +497,9 @@ class LawSet:
     support_on: the rows a candidate's support, hits and precision are counted on — "applied" (the default): where it
     would be the applied law, its condition's rows less those a more specific (or, at equal length, one `ties` puts
     first) active law already claims, the rows its net is counted on too; "matched": every row its condition matches
-    (before 1.2). A default whose exceptions are already laws is judged on the rows they leave it: a default right on 45 of its 45 rows
-    with 10 rows of a known exception under it is 45 / 45, not 45 / 55 (refused at min_precision 0.9 under "matched"),
-    and its precision at acceptance is the precision its first `check` recounts.
+    (before 1.2). A default whose exceptions are already laws is judged on the rows they leave it: a default right on
+    45 of its 45 rows with 10 rows of a known exception under it is 45 / 45, not 45 / 55 (refused at min_precision 0.9
+    under "matched"), and its precision at acceptance is the precision its first `check` recounts.
     readmit: "any" (the default) — a retired law may be accepted again by the next test; "grown" — not on a buffer
     that has not grown since its retirement (the same evidence that retired it; refusals counted in
     `refused_readmit`). A retirement from `observe` outside `step` does not see the buffer: it is stamped with the
@@ -875,7 +878,7 @@ class LawSet:
                         budget: int = 8, buffer: Buffer | None = None, exclude=None,
                         read_only: Callable[..., bool] | None = None, cost: Callable[[Any, Any], Any] | None = None,
                         order: str = "split", unique: bool = True, seed: int = 0, tol: float | None = None,
-                        same: Callable[[Any, Any], bool] | None = None) -> Admission:
+                        same: Callable[[Any, Any], bool] | None = None, assume_one_law: bool = False) -> Admission:
         """Admit one of `candidates` by asking the world where they disagree (CEGIS-style), not by a random held-out
         sample. ask(state, action) → the observation (the environment, or an exact model of it); probes: the (state,
         action) pairs you may ask about (a finite pool; also what the equivalence classes are computed on); safe:
@@ -896,11 +899,25 @@ class LawSet:
         for refutation, for the classes and for the probe choice (`split`) — with exact equality a measurement noise of
         1e-6 refuted every candidate of y = c·x; with tol=1e-4 the right c is admitted.
 
+        The "too narrow" refutation is sound only when exactly one law is missing. Where two are (the world x0 ∨ x1,
+        a base that says False, 10 binary atoms, k = 2, a pool of 200 random states, 8 checks), each right law is too
+        narrow where the other fires, both were refuted, and a wrong survivor — the empty condition, or an unrelated
+        atom that held by chance where it was asked — was accepted as the last class: 29 of 100 trials accepted a law
+        false on some state. So a candidate refuted only as too narrow and never wrong where it applied is a witness,
+        and the set with every witness added is the several-laws alternative: while it is right on every row seen and
+        predicts otherwise than the surviving class somewhere on the pool where the class would apply, the probes go
+        on to tell the two apart (within the budget) and nothing is accepted before — on that world 6 of 100 wrong
+        (77 accepted, 23 undetermined; the same at 20 checks: in the 6 the witnesses together cover the wrong survivor
+        wherever it applies on the pool, so no probe tells them apart). assume_one_law=True: the narrow refutation is
+        final (before 1.2).
+
         Measured on a synthetic world (10 binary features, 20 atoms, k = 3; the hidden law a random conjunction of two
         atoms; the 176 candidates Enumerate proposes from one state where it fires; a pool of 200 random states; 300
         trials; a wrong law = one that differs from the hidden law on any of the 1,024 states): at 8 checks a random
         held-out sample with the shortest survivor accepted took a wrong law in 0.593 of the trials (0.407 right); the
-        active admission asked 7.45 probes on average and accepted 0.987 right, 0.000 wrong, 0.013 undetermined. The
+        active admission asked 7.56 probes on average and accepted 0.897 right, 0.000 wrong, 0.103 undetermined (at
+        10 checks: 1.000 right in 7.66 asks; with assume_one_law=True at 8: 0.987 right, 0.013 undetermined, 7.45
+        asks — the check against the several-laws alternative costs about one probe). The
         uniqueness rule alone on 8 random probes: 0.000 wrong but 0.893 undetermined; 20 random probes with the
         shortest survivor: 0.037 wrong (tests/test_laws_w2.py reruns the 8-check comparison on 150 trials). The
         accepted law records admitted="probes", tested = the number of candidates, support = the rows where it
@@ -942,29 +959,81 @@ class LawSet:
             return (self.apply(c.effect, x) if applied else cur), applied, hold
 
         def refutes(c, x, a, obs, inf):
-            if c is None:
-                return not E(inf[1], obs)
+            """None, "applied" (it is the applied law and its effect is wrong) or "narrow" (it does not hold, the set
+            is wrong and its effect is what was observed)."""
             p, applied, hold = pred(c, x, a, inf)
             if _key(c.action) != _key(a):
-                return False
+                return None
             if applied:
-                return not E(p, obs)
-            return (not hold) and not E(inf[1], obs) and E(self.apply(c.effect, x), obs)
+                return "applied" if not E(p, obs) else None
+            return "narrow" if (not hold) and not E(inf[1], obs) and E(self.apply(c.effect, x), obs) else None
 
         acts = {_key(c.action): c.action for c in cands}
         alive = list(range(len(cands)))
         null = True
         refuted = 0
+        narrow: set[int] = set()        # refuted only as too narrow, never wrong where applied: the witnesses' pool
+
+        seen: list = []                 # (state, action, observation, info) of every logged row and asked probe
+
+        def see(x, a, obs, inf):
+            nonlocal alive, refuted, null
+            if not assume_one_law:
+                seen.append((x, a, obs, inf))
+            keep = []
+            for j in alive:
+                k = refutes(cands[j], x, a, obs, inf)
+                if k is None:
+                    keep.append(j)
+                elif k == "narrow" and not assume_one_law:
+                    narrow.add(j)
+            refuted += len(alive) - len(keep)
+            alive = keep
+            for j in [j for j in narrow if refutes(cands[j], x, a, obs, inf) == "applied"]:
+                narrow.discard(j)
+            if null and not E(inf[1], obs):
+                null = False
+
         if buffer is not None:
             for a in acts.values():
                 for row in buffer.rows(a, exclude):
-                    inf = info(row.state, row.action)
-                    keep = [j for j in alive if not refutes(cands[j], row.state, row.action, row.observed, inf)]
-                    refuted += len(alive) - len(keep)
-                    alive = keep
-                    if null and refutes(None, row.state, row.action, row.observed, inf):
-                        null = False
+                    see(row.state, row.action, row.observed, info(row.state, row.action))
         vec: dict[int, tuple] = {}
+        acting: dict[int, tuple] = {}
+        pe = (lambda u, v: u == v) if eq is None else eq
+
+        def applies(j):
+            if j not in acting:
+                acting[j] = tuple(pred(cands[j], pool[i][0], pool[i][1], pinfo(i))[1] for i in range(len(pool)))
+            return acting[j]
+
+        def spoken(ds, applied, value, default):
+            """The several-laws alternative at one point: the most specific witness applied there, else `default`."""
+            best = None
+            for d in ds:
+                if applied(d) and (best is None or len(cands[d].condition) > len(cands[best].condition)):
+                    best = d
+            return default if best is None else value(best)
+
+        def witnesses(j0):
+            """The several-laws alternative to candidate j0: the set with every witness (`narrow`) added. → (the
+            witnesses, the probe target) while it is right on every row seen and predicts otherwise than j0 somewhere
+            on the pool where j0 would apply (only there is j0's own claim at stake; the target is the alternative
+            there, j0's own prediction elsewhere), else ([], None)."""
+            ds = sorted(narrow)
+            if not ds:
+                return [], None
+            for x, a, obs, inf in seen:
+                p = spoken(ds, lambda d: pred(cands[d], x, a, inf)[1], lambda d: self.apply(cands[d].effect, x), inf[1])
+                if not E(p, obs):
+                    return [], None
+            v = tuple(spoken(ds, lambda d: applies(d)[i], lambda d: vector(d)[i], vector(-1)[i])
+                      for i in range(len(pool)))
+            v0, ap0 = vector(j0), applies(j0)
+            inside = tuple(x if ap else y for x, y, ap in zip(v, v0, ap0))
+            if not all(pe(x, y) for x, y in zip(inside, v0)):
+                return ds, inside
+            return [], None
         kf = _key if eq is None else (lambda x: x)               # with a tolerance the raw predictions are compared
 
         def vector(j):
@@ -988,8 +1057,13 @@ class LawSet:
         while True:
             gs = groups()
             if order == "split" and len(gs) <= 1:
-                why = "one class left"
-                break
+                ws, alt = witnesses(gs[0][0]) if gs and gs[0][0] >= 0 and len(gs[0]) == len(alive) else ([], None)
+                if not ws:
+                    why = "one class left"
+                    break
+                vec[-2] = alt                                    # tell the class apart from the several-laws one
+                gs = [gs[0], [-2]]
+                why = "one class left, a several-laws alternative too"
             if len(asked) >= int(budget):
                 why = f"the budget of {int(budget)} probes is spent"
                 break
@@ -1010,19 +1084,16 @@ class LawSet:
                 pr = split(reps, lambda st, ac: ok_safe(st), [(i, pool[i][1]) for i in range(len(pool))
                                                              if i not in done], read_only=ro, cost=cs, same=eq)
                 if pr is None:
-                    why = "no safe probe tells the classes apart (they differ only where it is unsafe to ask)"
+                    why = ("no safe probe tells the classes apart (they differ only where it is unsafe to ask)"
+                           if len(gs) > 2 or gs[-1] != [-2] else
+                           "no safe probe tells the class apart from the several-laws alternative")
                     break
                 i = pr.state
             done.add(i)
             x, a = pool[i]
             obs = ask(x, a)
             asked.append(Transition(x, a, obs, group="probe", id=f"probe-{len(asked) + 1}-{i}"))
-            inf = pinfo(i)
-            keep = [j for j in alive if not refutes(cands[j], x, a, obs, inf)]
-            refuted += len(alive) - len(keep)
-            alive = keep
-            if null and refutes(None, x, a, obs, inf):
-                null = False
+            see(x, a, obs, pinfo(i))
         self.cost["probes"] += len(asked)
         order_key = (lambda j: (len(cands[j].condition), j))
         cls = sorted((sorted(g, key=order_key) for g in classes_of(alive)), key=lambda g: order_key(g[0]))
@@ -1030,8 +1101,8 @@ class LawSet:
         same_vec = veq or (lambda u, v: u == v)
         null_with = null and bool(cls) and any(same_vec(vector(g[0]), vector(-1)) for g in cls)
 
-        def undetermined(reason):
-            return Admission("undetermined", None, classes, asked, refuted, null, reason)
+        def undetermined(reason, ws=()):
+            return Admission("undetermined", None, classes, asked, refuted, null, reason, [cands[d] for d in ws])
 
         if not alive:
             return undetermined("no candidate survived" + (f" ({why})" if why else ""))
@@ -1044,6 +1115,11 @@ class LawSet:
             if null:
                 return undetermined(f"the set without a new law survives too: {why}")
             j = cls[0][0]
+            ws, _ = witnesses(j)
+            if ws:
+                return undetermined(f"{len(ws)} candidate(s) refuted only as too narrow are right wherever they were "
+                                    f"applied and predict otherwise than the surviving class — more than one law may "
+                                    f"be missing: {why}", ws)
         else:
             j = min(alive, key=order_key)
         if len(self.laws) >= self.cap:
