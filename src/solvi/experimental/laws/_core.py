@@ -874,7 +874,8 @@ class LawSet:
                         probes: Iterable[tuple[Any, Any]], safe: Callable[[Any, Any], bool] | None = None,
                         budget: int = 8, buffer: Buffer | None = None, exclude=None,
                         read_only: Callable[..., bool] | None = None, cost: Callable[[Any, Any], Any] | None = None,
-                        order: str = "split", unique: bool = True, seed: int = 0) -> Admission:
+                        order: str = "split", unique: bool = True, seed: int = 0, tol: float | None = None,
+                        same: Callable[[Any, Any], bool] | None = None) -> Admission:
         """Admit one of `candidates` by asking the world where they disagree (CEGIS-style), not by a random held-out
         sample. ask(state, action) → the observation (the environment, or an exact model of it); probes: the (state,
         action) pairs you may ask about (a finite pool; also what the equivalence classes are computed on); safe:
@@ -890,7 +891,10 @@ class LawSet:
         the lower cost), drop the refuted. Accept the shortest candidate (fewest atoms, then the order given) only when
         one group of candidates is left and the null is not in it or alive (identifiability); otherwise
         "undetermined" with the surviving groups — never a guess. order="random", unique=False: the control — `budget`
-        random safe probes, the shortest survivor accepted (a held-out sample of that size).
+        random safe probes, the shortest survivor accepted (a held-out sample of that size). tol / same: predictions
+        and observations compared within an absolute tolerance (numbers; tuples element by element) or by `same(a, b)`,
+        for refutation, for the classes and for the probe choice (`split`) — with exact equality a measurement noise of
+        1e-6 refuted every candidate of y = c·x; with tol=1e-4 the right c is admitted.
 
         Measured on a synthetic world (10 binary features, 20 atoms, k = 3; the hidden law a random conjunction of two
         atoms; the 176 candidates Enumerate proposes from one state where it fires; a pool of 200 random states; 300
@@ -903,7 +907,10 @@ class LawSet:
         applied, born = "probe"."""
         if order not in ("split", "random"):
             raise ValueError(f"order is 'split' or 'random', not {order!r}")
-        from ._probes import split
+        from ._probes import groups_of, sameness, split
+        eq = sameness(tol, same)
+        E = eq or (lambda u, v: u == v)
+        veq = None if eq is None else (lambda u, v: len(u) == len(v) and all(eq(x, y) for x, y in zip(u, v)))
         cands: list[Candidate] = []
         seen = set()
         for c in candidates:
@@ -936,13 +943,13 @@ class LawSet:
 
         def refutes(c, x, a, obs, inf):
             if c is None:
-                return inf[1] != obs
+                return not E(inf[1], obs)
             p, applied, hold = pred(c, x, a, inf)
             if _key(c.action) != _key(a):
                 return False
             if applied:
-                return p != obs
-            return (not hold) and inf[1] != obs and self.apply(c.effect, x) == obs
+                return not E(p, obs)
+            return (not hold) and not E(inf[1], obs) and E(self.apply(c.effect, x), obs)
 
         acts = {_key(c.action): c.action for c in cands}
         alive = list(range(len(cands)))
@@ -958,20 +965,21 @@ class LawSet:
                     if null and refutes(None, row.state, row.action, row.observed, inf):
                         null = False
         vec: dict[int, tuple] = {}
+        kf = _key if eq is None else (lambda x: x)               # with a tolerance the raw predictions are compared
 
         def vector(j):
             if j not in vec:
                 if j < 0:
-                    vec[j] = tuple(_key(pinfo(i)[1]) for i in range(len(pool)))
+                    vec[j] = tuple(kf(pinfo(i)[1]) for i in range(len(pool)))
                 else:
-                    vec[j] = tuple(_key(pred(cands[j], pool[i][0], pool[i][1], pinfo(i))[0]) for i in range(len(pool)))
+                    vec[j] = tuple(kf(pred(cands[j], pool[i][0], pool[i][1], pinfo(i))[0]) for i in range(len(pool)))
             return vec[j]
 
+        def classes_of(ids):
+            return [[ids[i] for i in g] for g in groups_of([vector(j) for j in ids], veq)]
+
         def groups():
-            out: dict = {}
-            for j in alive + ([-1] if null else []):
-                out.setdefault(vector(j), []).append(j)
-            return list(out.values())
+            return classes_of(alive + ([-1] if null else []))
 
         asked: list[Transition] = []
         done: set[int] = set()
@@ -1000,7 +1008,7 @@ class LawSet:
                                                      else read_only(pool[st][1]))
                 cs = None if cost is None else (lambda st, ac: cost(*pool[st]))
                 pr = split(reps, lambda st, ac: ok_safe(st), [(i, pool[i][1]) for i in range(len(pool))
-                                                             if i not in done], read_only=ro, cost=cs)
+                                                             if i not in done], read_only=ro, cost=cs, same=eq)
                 if pr is None:
                     why = "no safe probe tells the classes apart (they differ only where it is unsafe to ask)"
                     break
@@ -1016,13 +1024,11 @@ class LawSet:
             if null and refutes(None, x, a, obs, inf):
                 null = False
         self.cost["probes"] += len(asked)
-        by_vec: dict = {}
-        for j in alive:
-            by_vec.setdefault(vector(j), []).append(j)
         order_key = (lambda j: (len(cands[j].condition), j))
-        cls = sorted((sorted(g, key=order_key) for g in by_vec.values()), key=lambda g: order_key(g[0]))
+        cls = sorted((sorted(g, key=order_key) for g in classes_of(alive)), key=lambda g: order_key(g[0]))
         classes = [[cands[j] for j in g] for g in cls]
-        null_with = null and bool(cls) and vector(-1) in by_vec
+        same_vec = veq or (lambda u, v: u == v)
+        null_with = null and bool(cls) and any(same_vec(vector(g[0]), vector(-1)) for g in cls)
 
         def undetermined(reason):
             return Admission("undetermined", None, classes, asked, refuted, null, reason)
@@ -1048,9 +1054,9 @@ class LawSet:
         if buffer is not None:
             rows = [r for a in acts.values() for r in buffer.rows(a, exclude)] + rows
         sup = [r for r in rows if pred(c, r.state, r.action, info(r.state, r.action))[1]]
-        hits = sum(1 for r in sup if self.apply(c.effect, r.state) == r.observed)
-        net = sum(1 for r in sup if self.apply(c.effect, r.state) == r.observed
-                  and self.predict(r.state, r.action, disagree="first") != r.observed)
+        hits = sum(1 for r in sup if E(self.apply(c.effect, r.state), r.observed))
+        net = sum(1 for r in sup if E(self.apply(c.effect, r.state), r.observed)
+                  and not E(self.predict(r.state, r.action, disagree="first"), r.observed))
         law = self._accept(c, born="probe", support=len(sup), hits=hits, net=net,
                            sources=tuple(r.id for r in sup))
         law.admitted, law.tested = "probes", len(cands)
