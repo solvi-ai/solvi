@@ -62,6 +62,7 @@ from __future__ import annotations
 import copy
 import math
 import random
+import warnings
 
 from ..core.catalog import Answer, Catalog, Question
 
@@ -336,7 +337,7 @@ def _slow_path(slow, q, reads, novel_on, writer, inputs):
 # ------------------------------------------------------------------------------------------------ build
 def build(question, examples, *, catalog=None, learner=None, slow=None, reads=None, max_risk=None, max_error=None,
           signal=None, correct=None, novel="auto", budget=None, total=None, price=None, storage=None, split=None,
-          seed=0, delta=0.10, min_slice=20, writer=None, inputs=None, knowledge=None, groups=None):
+          seed=0, delta=0.10, min_slice=20, writer=None, inputs=None, knowledge=None, groups=None, strict=False):
     """Fit System 1, calibrate its guarantee and the dispatcher, wire the store → a DecisionSystem (see the module docs).
 
     question: a Question, or the name of one a rule of `catalog` (or learner=) answers. examples: [(state, correct
@@ -354,7 +355,10 @@ def build(question, examples, *, catalog=None, learner=None, slow=None, reads=No
     function state → snapshot) — every decision, and every example at build time, is given its snapshot as the fact
     "knowledge", which System 1's rules read like any fact (`Knowledge.value(knowledge, s, r)`). groups: split by
     group (module docs) — a key of the state, a function state → group, or a list with one group per example; every
-    share then holds whole groups (at least two groups); None: the random split."""
+    share then holds whole groups (at least two groups); None: the random split. strict: when the dispatcher's
+    calibration measures System 1's own answers breaking the promise on its examples (every slice then goes to a
+    person, but System 1 still answers alone above its threshold), raise a ValueError instead of the default
+    GuaranteeWarning."""
     from ..core.dispatch import SIGNALS, THINK, Dispatcher
     from ..core.guarantees.guarantee import promise_text
     from ..core.store import open_storage
@@ -608,6 +612,15 @@ def build(question, examples, *, catalog=None, learner=None, slow=None, reads=No
         choices["dispatch_promise"] = (f"{promise_text(rep['method'], rep['level'], rep['delta'])}; on the {rep['n']} "
                                        f"calibration examples: answered alone {rep['answered']:.1%}, P(alone and wrong) "
                                        f"{rep['risk']:.2%}" + (f" ({rep['why']})" if rep.get("why") else ""))
+        if rep.get("why"):
+            msg = (f"the dispatcher's calibration measured a broken promise: on its {rep['n']} examples System 1 answered "
+                   f"{rep['s1_answered']} alone with {rep['s1_wrong']} wrong ({rep['why']}); "
+                   "System 1 still answers alone above its own threshold — more examples, a stricter System 1, or "
+                   "another split")
+            if strict:
+                raise ValueError(msg + " (strict=True)")
+            from ..core.guarantees.guarantee import GuaranteeWarning
+            warnings.warn(msg, GuaranteeWarning, stacklevel=2)
     return DecisionSystem(qname, system, d, gate, slow_path, choices, calib, knowledge=snap_of)
 
 
