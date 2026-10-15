@@ -329,7 +329,7 @@ class KnowledgeStore:
                 if it is not None:
                     it.uses[0] += 1
                     it.uses[1] += bool(r.get("wrong"))
-        elif op in ("refused", "held", "note", "observe", "agenda", "rollback"):
+        elif op in ("refused", "held", "note", "observe", "agenda", "rollback", "forget"):
             pass
         else:
             raise ValueError(f"unknown knowledge journal op {op!r}")
@@ -474,6 +474,37 @@ class KnowledgeStore:
                     self._apply(rec)
             after = self._statuses(before)
             return {i: (before[i], after[i]) for i in before if before[i] != after[i]}
+
+    def forget(self, writer, storage=None, decide=None, *, by=None, why=None, fact="knowledge"):
+        """Forget a source in one call: what `writer` told is taken back, the stored decisions that rested on it are
+        re-decided on the journal as it is now, and one "forget" journal entry records what was taken back and which
+        decisions changed. The three steps are the public calls
+
+            changed = store.retract_source(writer, by=by, why=why)          # its items, and what was derived from them
+            gone = [i for i, (_, now) in changed.items() if now != "active"]
+            answer_changes, same = store.redecide(storage, gone, decide, fact=fact, upto="now")
+
+        then the entry. storage: the decisions' TraceStorage (None: only the retraction and the entry); decide: what
+        re-decides an input (a System, or init_state → {question: answer}; needed with storage); fact: the given fact
+        the snapshots were passed as. Nothing is erased: the journal keeps the source's entries (retracted) and the
+        decision records keep their inputs — erasing personal data in a record is `TraceStorage.redact(id)`, kept
+        explicit (`where_is` finds the records holding a value). → {"source", "retracted" ({id: (status before, status
+        after)}), "decisions" (the ids of the stored decisions whose snapshot changed), "changed" / "same" (as
+        redecide: {"id", "old", "new"}; the first are for a reviewer), "entry" (the forget entry's journal position)}."""
+        if storage is not None and decide is None:
+            raise ValueError("forget(writer, storage, decide): give decide= (a System, or init_state → {question: "
+                             "answer}) to re-decide the stored decisions, or no storage")
+        writer = str(writer)
+        retracted = self.retract_source(writer, by=by, why=why)
+        gone = sorted(i for i, (_, now) in retracted.items() if now != "active")
+        changed, same = ([], []) if storage is None or not gone else self.redecide(storage, gone, decide, fact=fact,
+                                                                                   upto="now")
+        with self._lock:
+            rec = self._write("forget", source=writer, by=None if by is None else str(by), why=why, retracted=gone,
+                              changed=[c["id"] for c in changed], same=[c["id"] for c in same])
+            self._apply(rec)
+        return {"source": writer, "retracted": retracted, "decisions": [c["id"] for c in changed + same],
+                "changed": changed, "same": same, "entry": rec["n"]}
 
     def retest(self, iid, *, ok, by=None, why=None):
         """The re-test of an item pending one (re-asserted after a retraction, or resting on one that was): ok=True — it

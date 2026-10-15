@@ -47,6 +47,7 @@ nav:
       - using.md
       - Agents and knowledge: agent.md
       - Best practices: best_practices.md
+      - Forgetting a source: forgetting_a_source.md
       - Guide: guide-part:Using solvi        # the guide's chapters of this part, one page each (tools/mkdocs_hooks.py)
       - Regression tests: testing.md
       - Honesty suite: honesty.md
