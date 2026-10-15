@@ -675,7 +675,7 @@ def edit_system(rules, change, model=None, instructions=True):
     matches), each rule's checks as hard checks of the question `edit`, deny checks first."""
     from ..core.catalog import Answer, Catalog, Question
     from ..core.system import System
-    cat = Catalog()
+    cat = Catalog(combine="first")      # the first failed check declared decides: a deny wins
     deny, ask, used = [], [], []
     for r in rules:
         if not r.applies(change.path):
