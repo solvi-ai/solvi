@@ -86,6 +86,17 @@ and rollback (`solvi.experimental.changes.Pipeline(stages, storage, store=...)`)
   answer"): every pipeline whose target can answer declares `refusals=` (directly, through CleanCases / Confirmation,
   or on the stage). The set follows the policy version — the credit benchmark declares it once version 2 is in force. An
   item change is checked only with `answer_of=`.
+- **Post-ship watch (`ShipWatch`, `pipe.watch(version, promise)`) and `Pipeline.revert(version)`.** Per declared slice
+  the watch keeps a test martingale against that slice's promised failure rate on the promoted change's own (alone)
+  outcomes; when one slice's evidence reaches slices/α it reverts the watched version, and only it
+  (`pipe.revert(v)`; `rollback(v)` undoes every version after v). By construction a change that keeps every slice's
+  promise is reverted with probability at most α, at any time (Bonferroni over slices). Measured on a synthetic stand
+  only (not in the repo; four slices at 60/25/10/5 % of traffic, pre-ship failure 5 %, promise 10 %, α 0.05, 4,000
+  outcomes): a 5 % slice raised to 30 % failure was reverted in 60 of 60 rollouts; 0 of 60 clean rollouts were
+  reverted, and 14 of 600 at exactly the promise (within α). It is not faster than a mean-with-tolerance rule checked
+  after every outcome — its gain is the bounded false-revert rate, not detection delay. `outcome="loss"` takes a
+  numeric loss in [0, 1] per outcome instead of a failure (also `EProcess.update(..., loss=)` / `loss_refuted` in
+  `experimental.skills`); not measured on a stand.
 - **Script:** `benchmarks/changes_credit.py` (the credit policy; needs the German Credit applications:
   `benchmarks/tasks/fetch.sh credit` and `prepare.py`). **Deadline:** 1.2.
 - Guide: [The change pipeline](guide.md#the-change-pipeline-solviexperimentalchanges); design and API: the module
