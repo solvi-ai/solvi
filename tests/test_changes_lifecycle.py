@@ -156,3 +156,19 @@ def test_evaluator_lock_create_takes_a_seed_list_and_refuses_a_bad_n_clearly(tmp
     assert not (tmp_path / "c.json").exists()
     with pytest.raises(TypeError, match="not both"):
         EvaluatorLock.create(tmp_path / "c.json", 5, seeds=[1])
+
+
+# ───────────────────────────────────────────── the failure memory's identity: an extra body key is not a new candidate
+def test_an_extra_key_in_a_rejected_rule_body_does_not_make_it_new(tmp_path):
+    pipe = Pipeline([KnownFailures(), Deny()], None, store=KnowledgeStore(), approval={"rule": "gate"})
+    b = hazard_body("lava", {"next": "lava"}, ["step"])
+    rule = lambda body, **kw: Change("person", payload={"kind": "rule", "body": body, **kw})  # noqa: E731
+    assert pipe.propose(rule(b)).stage == "deny"
+    assert pipe.propose(rule(b)).stage == "failure_memory"
+    r = pipe.propose(rule({**b, "nonce": 7}))
+    assert r.stage == "failure_memory" and "same subject" in r.reason, str(r)
+    assert pipe.propose(rule(hazard_body("lava", {"next": "lava"}, ["step"], why="again"))).stage == "failure_memory"
+    # what the rule says is its identity: another condition, another scope, another kind is a new candidate
+    assert pipe.propose(rule(hazard_body("lava", {"next": "pit"}, ["step"]))).stage == "deny"
+    assert pipe.propose(rule(b, scope={"x": 1})).stage == "deny"
+    assert pipe.propose(Change("person", payload={"kind": "fact", "body": b})).stage == "deny"
