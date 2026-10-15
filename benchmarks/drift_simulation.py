@@ -53,13 +53,15 @@ def stationary(part, parts=4):
     return out
 
 
-def delays():
+def delays(windows=(50, 100, 200), streams=50):
+    """The decisions after a change until the first flag, per window and kind (the published run: the defaults;
+    tests/test_benchmark_bars.py runs fewer streams)."""
     rng = np.random.default_rng(7)
     out = {}
-    for window in (50, 100, 200):
+    for window in windows:
         for kind in ("answered", "mix"):
             d = []
-            for _ in range(50):
+            for _ in range(streams):
                 mon = DriftMonitor(window=window)
                 if kind == "answered":       # beta(5,2) > 0.5 answers ~89%; these thresholds make it 73% → 13%
                     pre = iid(rng, 500 + window, 3, (5, 2), alone_at=0.62)

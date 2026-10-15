@@ -1,0 +1,22 @@
+{
+  "_doc": "The published numbers of the benchmark scripts no other test asserts, and the bars tests/test_benchmark_bars.py holds them to (run with -m slow). Speed is read as ratios between settings in one run, never as milliseconds.",
+  "drift_simulation": {
+    "published": {"stationary_flagged": "6 of 1,152 streams (0.5%; promise at most 1%)",
+                  "answered_median": {"50": 23, "100": 27, "200": 25}, "mix_median": {"50": 67, "100": 80, "200": 110},
+                  "source": "docs/guide.md (drift), docs/best_practices.md (Watch for drift)"},
+    "bars": {"stationary_streams": 36, "stationary_max_flagged": 2,
+             "delay_window": 100, "delay_streams": 10, "answered_median_max": 40, "mix_median_max": 120,
+             "missed_max": 0, "false_max": 1}
+  },
+  "journal_size": {
+    "published": {"game_full_bytes": 10200, "game_compact_bytes": 3700, "gallery_full_median_bytes": 12400,
+                  "gallery_compact_median_bytes": 3200, "source": "docs/guide.md (Compact records and rotation)"},
+    "bars": {"tolerance": 0.2, "min_full_over_compact": 2.0, "replay_failed_max": 0}
+  },
+  "ask_overhead": {
+    "published": {"gallery": {"0.5.0-style": 1.15, "0.7 default": 1.17, "+ store jsonl": 2.40},
+                  "decider": {"0.5.0-style": 0.57, "0.7 default": 0.59, "+ guarantee": 0.61, "+ store jsonl": 1.24},
+                  "source": "docs/benchmarks.md (Overhead per ask), ms on the machine of that run"},
+    "bars": {"default_over_050_max": 1.25, "guarantee_over_default_max": 1.25, "store_jsonl_over_default_max": 3.5}
+  }
+}
