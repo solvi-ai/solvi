@@ -139,3 +139,20 @@ def test_the_cache_follows_another_writer_on_the_same_file(tmp_path):
     assert a2.propose(update("s9")).stage == "deny"
     assert b.propose(update("s9")).stage == "failure_memory"       # b sees a2's rejection
     assert b.rollback(1) == [3, 2] and a.current == 1
+
+
+# ───────────────────────────────────────────── EvaluatorLock.create
+def test_evaluator_lock_create_takes_a_seed_list_and_refuses_a_bad_n_clearly(tmp_path):
+    import json
+    from solvi.experimental.changes import EvaluatorLock
+    pin = EvaluatorLock.create(tmp_path / "a.json", [3, 1, 2])
+    assert json.loads((tmp_path / "a.json").read_text())["seeds"] == [1, 2, 3] and len(pin) == 64
+    EvaluatorLock.create(tmp_path / "b.json", seeds=range(10))
+    assert json.loads((tmp_path / "b.json").read_text())["n"] == 10
+    for bad, err in ((0, ValueError), (-3, ValueError), (2.5, TypeError), (True, TypeError), ("7", TypeError),
+                     ([1, 1], ValueError), ([1, "x"], TypeError), ([], ValueError)):
+        with pytest.raises(err, match="seeds|n is"):
+            EvaluatorLock.create(tmp_path / "c.json", bad)
+    assert not (tmp_path / "c.json").exists()
+    with pytest.raises(TypeError, match="not both"):
+        EvaluatorLock.create(tmp_path / "c.json", 5, seeds=[1])
