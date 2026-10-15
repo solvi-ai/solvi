@@ -176,3 +176,46 @@ def test_redecide_on_the_current_journal_gives_the_corrected_answer(tmp_path):
     assert [(c["old"], c["new"]) for c in ch] == [("40mg", "unknown")]   # the default: the journal at the decision
     ch, _ = km.store.redecide(st, {wrong}, ans, upto="now")
     assert [(c["old"], c["new"]) for c in ch] == [("40mg", "20mg")]
+
+
+# --- the cost of a load
+def test_a_write_re_resolves_only_what_it_can_change(monkeypatch):
+    import solvi.core.knowledge.store as store_mod
+    sizes, real = [], store_mod._resolve
+    monkeypatch.setattr(store_mod, "_resolve", lambda items, comp, *a, **k: sizes.append(len(comp)) or real(items, comp, *a, **k))
+    ks, prev = KnowledgeStore(), None
+    for i in range(300):                                 # one connected chain: each add used to re-resolve all of it
+        prev = ks.add("fact", fact(f"s{i}", i), source="spec", derived_from=[prev] if prev else ())
+    assert max(sizes) == 1 and ks.verify()
+    t0 = time.perf_counter()
+    for i in range(300, 2000):
+        prev = ks.add("fact", fact(f"s{i}", i), source="spec", derived_from=[prev])
+    assert time.perf_counter() - t0 < 5.0                # 2,000 chained facts: ~15 s before, ~0.1 s now
+
+
+def test_incremental_resolution_equals_the_rebuilt_store():
+    import random
+    rng = random.Random(3)
+    ks, ids = KnowledgeStore(), []
+    for step in range(600):
+        op = rng.random()
+        if op < 0.7 or not ids:
+            prem = rng.sample(ids, min(len(ids), rng.choice([0, 0, 1, 2])))
+            i = ks.add("fact", fact(f"e{rng.randrange(40)}", rng.randrange(3)),
+                       source=rng.choice(["person", "outcome", "spec"]), by=rng.choice("ab"), derived_from=prem,
+                       valid=rng.choice([None, None, (rng.randrange(5), None)]))
+            if i:
+                ids.append(i)
+        elif op < 0.8:
+            ks.retract(rng.choice(ids))
+        elif op < 0.85:
+            x = rng.choice(ids)
+            ks.retest(x, ok=True)
+        elif op < 0.9 and ks.disputes():
+            d = ks.disputes()[0]
+            ks.resolve(d["key"], ks.items[d["items"][0]].value, by="ann")
+        elif op < 0.95:
+            ks.reconfirm(rng.choice(ids))
+        if step % 50 == 0:
+            assert ks.fingerprint() == ks.rebuild().fingerprint()
+    assert ks.verify()
