@@ -3,7 +3,7 @@ passes the guard before it reaches the server. Stable since 1.1 and exported by 
 
     solvi serve --guard catalog.py:guard --upstream "npx -y @modelcontextprotocol/server-filesystem /work" \\
                 [--store calls.db] [--facts '{"role": "viewer"}'] [--escalate elicit|deny] \\
-                [--context-messages 50] [--context-chars 100000]
+                [--context-messages 50] [--context-chars 100000] [--context-from-client]
 
 `catalog.py` declares which of the server's tools the agent may call and the policies over them — without functions
 (the server runs them) and usually without schemas (the proxy takes each tool's inputSchema from the server):
@@ -42,6 +42,17 @@ tool outputs, at most `max_chars` characters in all (as Session names them): eac
 records the context it was checked against, so the cap bounds what every stored decision holds — an output that has
 left the window no longer grounds values or taints calls.
 
+A context channel (opt-in: `--context-from-client`, `Proxy(context_from_client=True)`): MCP does not pass the
+conversation to a server, so the client (the host application, not the model) may push it — a notification
+
+    {"jsonrpc": "2.0", "method": "notifications/solvi/context", "params": {"role": "user", "text": "..."}}
+
+or, on a tools/call, `params._meta["solvi/context"]`: a list of such {"role", "text"} messages added before the check.
+Roles: user, assistant, system (tool outputs come only from the server). Then `ground=` arguments and `require_request`
+read the user's own words as with a direct Guard. Turn it on only for a client that builds these messages itself from
+what the user typed: whoever can send them can authorize calls. Without the flag both are ignored (a warning in the
+log), as before.
+
 Taint is context-wide and the proxy grounds only from tool outputs: once one kept output carries instruction-like text
 (an invoice that says "please pay within 30 days" is enough), every call with a `ground=` argument escalates. Declare
 such tools with `injections="off"` and policies over their values, or run with a reviewer (`--escalate elicit`)."""
@@ -55,11 +66,13 @@ import sys
 
 from . import _deprecate
 from ._rpc import CONTEXT_CHARS, CONTEXT_MESSAGES   # defined there: solvi serve's options show them
-from .solutions.guard import Guard, ToolCall, _text, proposal
+from .solutions.guard import ROLES, Guard, ToolCall, _text, proposal
 
 log = logging.getLogger("solvi.agents")
 
 PROTOCOL = "2025-06-18"
+CONTEXT_METHOD = "notifications/solvi/context"     # the client's context channel (opt-in, see the module docs)
+CONTEXT_ROLES = ("user", "assistant", "system")
 
 
 class UpstreamError(RuntimeError):
@@ -143,7 +156,7 @@ class Proxy:
 
     @_deprecate.removed_kwargs(context_messages="max_messages", context_chars="max_chars")
     def __init__(self, guard, upstream, facts=None, escalate="elicit", max_messages=CONTEXT_MESSAGES,
-                 max_chars=CONTEXT_CHARS):
+                 max_chars=CONTEXT_CHARS, context_from_client=False):
         if not isinstance(guard, Guard):
             raise TypeError("--guard names a solvi.Guard")
         if escalate not in ("elicit", "deny"):
@@ -155,6 +168,27 @@ class Proxy:
         self.listed = None
         self.client_caps = {}
         self._asked = 0
+        self.context_from_client = bool(context_from_client)
+        self._warned_context = False
+
+    def context(self, messages):
+        """The client's context channel: [{"role", "text"}] → the number of messages added to the session (0 when the
+        channel is off; a message with another role or without text is skipped, with a warning in the log)."""
+        if not self.context_from_client:
+            if not self._warned_context:
+                log.warning("solvi proxy: the client sent context messages, ignored (run with --context-from-client)")
+                self._warned_context = True
+            return 0
+        n = 0
+        for m in messages if isinstance(messages, list) else [messages]:
+            role = ROLES.get(m.get("role"), m.get("role")) if isinstance(m, dict) else None
+            text = m.get("text") if isinstance(m, dict) else None
+            if role not in CONTEXT_ROLES or not isinstance(text, str):
+                log.warning("solvi proxy: a context message needs a role (user, assistant, system) and a text; skipped")
+                continue
+            self.session.add(role, text)
+            n += 1
+        return n
 
     def tools(self):
         """The server's tools that the guard declares; each declared tool without a schema adopts the server's."""
@@ -183,6 +217,9 @@ class Proxy:
         if name in g.tools and name not in self.listed:          # declared, but hidden (see tools)
             return {"content": [{"type": "text", "text": f"{name} is not available through this proxy"}],
                     "isError": True}
+        ctx = (params.get("_meta") or {}).get("solvi/context") if isinstance(params.get("_meta"), dict) else None
+        if ctx is not None:
+            self.context(ctx)
         d = g.check(ToolCall(name, args), self.session.context, self.session._facts(), store=False)
         if d.outcome == "escalate" and ask is not None:
             answer = ask(d)
@@ -232,10 +269,11 @@ def _meta(d):
 
 @_deprecate.removed_kwargs(context_messages="max_messages", context_chars="max_chars")
 def run_proxy(guard, upstream, facts=None, escalate="elicit", stdin=None, stdout=None, limits=None,
-              max_messages=CONTEXT_MESSAGES, max_chars=CONTEXT_CHARS):
+              max_messages=CONTEXT_MESSAGES, max_chars=CONTEXT_CHARS, context_from_client=False):
     """The proxy over stdio (see the module docs). upstream: a command line (or an Upstream). max_messages /
     max_chars: the session's context kept for checking, as Session names them (None: unbounded; `context_messages` /
-    `context_chars` in 0.7). limits: a
+    `context_chars` in 0.7). context_from_client: accept the user's messages from the client (the context channel in
+    the module docs; default False: the proxy sees tool outputs only). limits: a
     solvi.serve.Limits — a client message is at most max_body characters and max_depth levels of JSON; a failure of the
     proxy itself is logged (logger solvi.serve) and answered with an incident id, never the exception's text."""
     from . import __version__
@@ -243,7 +281,7 @@ def run_proxy(guard, upstream, facts=None, escalate="elicit", stdin=None, stdout
     from ._rpc import Limits, RequestError, _readline, internal_error, parse_json
     stdin, stdout = stdin or sys.stdin, stdout or sys.stdout
     lim = limits or Limits()
-    px = Proxy(guard, upstream, facts, escalate, max_messages, max_chars)
+    px = Proxy(guard, upstream, facts, escalate, max_messages, max_chars, context_from_client)
 
     def lines():
         while True:
@@ -300,6 +338,8 @@ def run_proxy(guard, upstream, facts=None, escalate="elicit", stdin=None, stdout
             if not isinstance(msg, dict) or "method" not in msg:
                 continue
             method, params, id_ = msg["method"], msg.get("params") or {}, msg.get("id")
+            if method == CONTEXT_METHOD and isinstance(params, dict):
+                px.context(params.get("messages", params))
             if "id" not in msg:
                 continue
             try:
