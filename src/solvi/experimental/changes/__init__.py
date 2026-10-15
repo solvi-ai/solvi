@@ -109,7 +109,7 @@ from typing import Any, Callable
 
 from ...core.runtime import vhash
 from .. import warn_on_import
-from ._journal import ChangeJournal, EvalLocked, EvaluatorLock
+from ._journal import ChangeJournal, EvalLocked, EvaluatorLock, MemoryStorage
 from ._paired import paired_bootstrap, run_episode
 from ._stages import (DEFAULT_APPROVAL, LEVELS, REFUSAL_WORDS, Approval, Canaries, CleanCases, catalog_of, Confirmation,
                      Consistency, Context, FreshEnvironments, Impact, KnownFailures, RefusalRegression, SOURCES, Stage,
@@ -250,7 +250,7 @@ def _ruling(r):
 
 class Pipeline:
     """The change pipeline (see the module docstring). stages: Stage objects run in order; storage: the journal's
-    TraceStorage (a path or a store); store: the KnowledgeStore items go into; approval: an Approval, or its table
+    TraceStorage (a path or a store; None or ":memory:": a MemoryStorage, kept in this process only); store: the KnowledgeStore items go into; approval: an Approval, or its table
     (appended as the last stage when no Approval is among the stages); targets: extra targets (VersionsTarget,
     LearningTarget) — a KnowledgeTarget on `store` is added by itself; refusals: the held should-abstain inputs (a list,
     or `refusals(change, ctx)` → inputs) RefusalRegression checks every answering change on; answer_of: `answer_of(change
@@ -420,14 +420,16 @@ class Pipeline:
         return self.journal.records(action)
 
     def _state(self):
-        in_force, promoted = [], {}
-        for d in self.journal.records():
+        """(the versions in force in order, {version: its "promoted" record}) — kept up to date by the journal's fold."""
+        def step(st, d):
             if d["action"] == "promoted":
-                promoted[d["version"]] = d
-                in_force.append(d["version"])
+                st[1][d["version"]] = d
+                st[0].append(d["version"])
             elif d["action"] == "rollback":
-                in_force = [v for v in in_force if v not in set(d["undone"])]
-        return in_force, promoted
+                undone = set(d["undone"])
+                st[0][:] = [v for v in st[0] if v not in undone]
+        in_force, promoted = self.journal.fold("versions", lambda: ([], {}), step)
+        return list(in_force), promoted
 
     def _next_version(self):
         _, promoted = self._state()
@@ -491,5 +493,5 @@ __all__ = ["allowed", "Approval", "ARTIFACTS", "Canaries", "catalog_of", "Change
            "Confirmation", "Consistency", "Context", "DEFAULT_APPROVAL", "EvalLocked", "EvaluatorLock",
            "FreshEnvironments", "gate_of", "gates_of", "hazard_body", "hazard_gate", "Impact", "is_refusal", "KnowledgeTarget",
            "KnownFailures", "REFUSAL_WORDS", "RefusalRegression",
-           "LearningTarget", "LEVELS", "paired_bootstrap", "Pipeline", "Promoted", "Refused", "Result", "run_episode", "SOURCES",
+           "LearningTarget", "LEVELS", "MemoryStorage", "paired_bootstrap", "Pipeline", "Promoted", "Refused", "Result", "run_episode", "SOURCES",
            "Stage", "Static", "STORE_SOURCE", "StageVerdict", "VersionsTarget"]

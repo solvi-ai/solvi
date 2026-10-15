@@ -98,3 +98,44 @@ def test_a_rollback_without_a_reason_or_with_failed_false_is_not_a_failure(tmp_p
     pipe.rollback(0, why="observed loss")
     p2 = Pipeline([KnownFailures(rollbacks=False)], pipe.journal.storage, targets=[Target()], approval=A)
     assert p2.propose(update("s1")).promoted                       # rollbacks=False: only rejections count
+
+
+# ───────────────────────────────────────────── the in-memory journal and the cached version state
+def test_the_in_memory_journal_is_a_conforming_storage_and_none_or_memory_selects_it(tmp_path):
+    from solvi.experimental.changes import MemoryStorage
+    from solvi.testing.conformance import check_storage
+    assert check_storage(MemoryStorage)["verify"]
+    for where in (None, ":memory:"):
+        pipe = Pipeline([KnownFailures()], where, targets=[Target()], approval=A)
+        assert isinstance(pipe.journal.storage, MemoryStorage)
+        assert pipe.propose(update("s1")).promoted and pipe.current == 1 and pipe.journal.verify()["ok"]
+    assert not list(tmp_path.iterdir()) and not (tmp_path.parent / ":memory:").exists()
+
+
+def test_proposals_do_not_reread_the_journal(tmp_path):
+    from solvi.experimental.changes import MemoryStorage
+
+    class Counting(MemoryStorage):
+        reads = 0
+
+        def _raw(self, snap=None):
+            Counting.reads += 1
+            return super()._raw(snap)
+    pipe = Pipeline([KnownFailures()], Counting(), targets=[Target()], approval=A)
+    for i in range(60):
+        assert pipe.propose(update(f"x{i}")).promoted
+    assert pipe.current == 60 and len(pipe.versions()) == 60
+    assert Counting.reads <= 2, Counting.reads                      # read once, then kept up to date on write
+
+
+def test_the_cache_follows_another_writer_on_the_same_file(tmp_path):
+    path = str(tmp_path / "shared.jsonl")
+    a = Pipeline([KnownFailures()], path, targets=[Target()], approval=A)
+    b = Pipeline([KnownFailures()], path, targets=[Target()], approval=A)
+    assert a.propose(update("s1")).version == 1 and a.current == 1
+    assert b.current == 1 and b.propose(update("s2")).version == 2
+    assert a.current == 2 and a.propose(update("s3")).version == 3
+    a2 = Pipeline([KnownFailures(), Deny()], path, targets=[Target()], approval=A)
+    assert a2.propose(update("s9")).stage == "deny"
+    assert b.propose(update("s9")).stage == "failure_memory"       # b sees a2's rejection
+    assert b.rollback(1) == [3, 2] and a.current == 1
