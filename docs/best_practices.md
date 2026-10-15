@@ -750,7 +750,17 @@ model each make old decisions non-reproducible; `solvi diff` shows which stored 
 **A check from the same model call is not a check.** In the review's measurement a check made by the same call
 agreed with the answer in 260 of 260 cases, every error included; three checks by one model were no better than one
 answer. Declare `Catalog.check(shares_call_with=...)` and `family=` so `solvi check` flags it, and put a check of
-another family, or executed code, next to a model.
+another family, or executed code, next to a model. Copies of one model as a "jury" let 18–38 % errors through among
+accepted answers at a promised ≤ 2 %. A weak check of another family is still worth having when it is weighted rather
+than given a veto: weighting raised its AUROC from 0.667 to 0.793, while "any one check against refuses" dropped
+precision from 1.0 to 0.14.
+
+**A re-derivation is a slow path, not a boolean check.** Wire it as the `Dispatcher`'s `slow=` path so it can take its answer;
+on competition maths (AIME) "always answer slowly" beat every answer-or-abstain policy at every cost of error tried.
+
+**A calibration does not survive a new error regime.** A calibrator fitted on other sets lost 0.28 of utility at an
+error cost of 30 on a new year of AIME; an agent gate calibrated on reference traces had AUROC 0.69 on new ones.
+Recalibrate on a few of your own labelled cases; watch the agreement rate when labels are absent.
 
 **Drift on numbers:** `NumericDrift` with a reference of at least ~50 values from calibration data, not the stream's
 start; under 20 values the false-alarm bound does not hold (it warns). Whiten autocorrelated residuals first.
@@ -785,4 +795,41 @@ already leaves out inputs whose answers differ when asked twice.
 
 **Paid checks pay only when a wrong accept is dear, the check is cheap and independent, and wrong answers occur.**
 Where a check costs more than the error, or every check is the same model, deciding without checks did as well or
-better in the review's stands.
+better in the review's stands. Where the error was cheap, an agent without checks beat the full layer by +0.032 [+0.024, +0.041];
+"don't know" paid only when a miss cost more than 1.5–1.7× an escalation; a cost of error given as a point estimate
+inside the noise failed, and a cost prior without exploration never tried anything.
+
+**A hard veto without a cost of error costs more than it saves.** A game advisor's 428 vetoes cost 10.25 points
+[−16, −4.5]; a gate that can only stop lowered a cautious agent's utility by 0.031 (a prompt penalty took refusals
+from 0 to 8 %). Give the gate a "check" or "ask" action.
+
+**A budget holds the price, not the risk:** the average cost was held at 12.9–14.4 of 15 with utility unchanged.
+
+**Calibrate novelty on real out-of-scope examples, not perturbations.** Imitated novelty gave 28 % coverage, mixing
+it with real cases 30 %; about 100 real cases were needed for 60 %. `OpenSetGate.calibrate(novel_scores=)` takes them.
+
+**For detection, restart the test.** An e-process started once adapts slowly after a long quiet prefix (detected in
+0 of 200 seeds, a delay of 185 of 187 steps); `DriftMonitor`'s CUSUM restarts — use it, or a Shiryaev–Roberts
+detector with an ARL bound.
+
+**Wrap a strong agent only at the decision points where it is unsure; without evidence the agent's action stands.**
+The full layer over a tuned classic policy passed 0 of 22 primary checks; the parts chosen on a pilot, 7 of 22.
+
+**Taint on the whole context costs honest tasks.** On AgentDojo utility fell from 0.97 to 0.70 (−0.27 [−0.43,
+−0.14]), 62 of 92 interventions coming from context-wide taint, at an attack rate the agent itself held at 0 of 190.
+Scope injections per tool (`injections="off"` with policies over the values) where the outputs are trusted.
+
+**The change pipeline pays where a wrong change is dear; where labels are cheap, relabel.** A pipeline on an
+agent's own strategy cost −0.011 [−0.015, −0.007]; fresh labels were 12.7 % cheaper over 40 epochs; with no owner of
+the shipped version there were 0 rollbacks in 40 epochs.
+
+**The knowledge store is for retraction and provenance, not retrieval.** A strong RAG scored 1.000 on the same facts;
+a bitemporal journal writes about 1,000× dearer. A signature proves the sender, not the truth (112 forged readings per
+run passed with a stolen key); disagreement with outcomes should down-weight a source, and only evidence of tampering
+make it a forger (a rule on outcomes accused an honest lab in 52 % of runs).
+
+**Laws cover little where outcomes are stochastic** (about 2 % coverage in Crafter; in Freeciv 0.576 / 0.860 against
+0.963 for a lookup table), and short matches (30 steps or fewer) give no laws at all. The gain of "measure until
+resolved" comes in the first ~20 measurements. `learn_order` saved 7 % of the cost at 2.9× the time on cheap checks —
+use it only where parts are expensive. A `RuleList` as the compiler's System 1 took 0–12 % of the traffic, against
+48–81 % for a distilled logistic head.

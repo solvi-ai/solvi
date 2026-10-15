@@ -634,7 +634,8 @@ class TraceStorage(abc.ABC):
     the system report, diff). `solvi.testing.conformance.check_storage(MyStorage)` checks a backend. Stability:
     stable; the record format is stable (stores of 0.7 to 0.9 read and verify).
 
-    save(response, meta=None) → id; get(id) → Response; record(id) → the stored dict; iter() / query(...) → [Stored];
+    save(response, meta=None) → id; save_many(responses, metas=None) → [id]; batch() (a context: the saves inside it
+    share one lock, one head write / one commit); get(id) → Response; record(id) → the stored dict; iter() / query(...) → [Stored];
     corrections() → the teach records; head() → {"count", "hash"}; signature(); verify(anchor=None, signature=None);
     replay_all(system);
     quarantine(fact, value=...); where_is(fact, value=...).
@@ -709,6 +710,25 @@ class TraceStorage(abc.ABC):
         rec = self._append(entry(response, meta, mode))
         response.stored_id = rec["id"]
         return rec["id"]
+
+    @contextlib.contextmanager
+    def batch(self):
+        """A batch of writes: `with store.batch(): for r in responses: store.save(r)`. JSONLStorage takes its locks
+        once and writes the head (and, with fsync=True, syncs) once at the end, not per record; the SQL stores run the
+        batch as one transaction — one commit, and an exception inside rolls the whole batch back (JSONL keeps the
+        records written before it, with their head). Other threads and processes wait for the batch to end. Inside a
+        batch only save, save_correction and reads that need no lock (get, iter, query, head) are for this thread;
+        verify and redact raise. A backend without its own batch saves one record at a time, as outside one."""
+        yield self
+
+    def save_many(self, responses, metas=None):
+        """save() each response in one batch() → their ids. metas: None or one meta (or None) per response."""
+        responses = list(responses)
+        metas = [None] * len(responses) if metas is None else list(metas)
+        if len(metas) != len(responses):
+            raise ValueError(f"save_many: {len(responses)} responses, {len(metas)} metas")
+        with self.batch():
+            return [self.save(r, m) for r, m in zip(responses, metas)]
 
     @_deprecate.removed_kwargs(source="label_source")
     def save_correction(self, question, init_state, answer, meta=None, *, label_source="human", by=None, of=None,
@@ -1223,7 +1243,8 @@ class JSONLStorage(TraceStorage):
             if v is not None and (isinstance(v, bool) or not isinstance(v, int) or v < 1):
                 raise ValueError(f"{k} is a positive int or None, not {v!r}")
         self.rotate_bytes, self.rotate_records = rotate_bytes, rotate_records
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
+        self._batch = None                            # while batch() runs: {"tid", "fh", "stack"} of the writing thread
         self._reset()
         with self._lock:
             if index or not self._open_from_head():
@@ -1247,9 +1268,15 @@ class JSONLStorage(TraceStorage):
         self._count, self._last, self._n_legacy, self._size = 0, GENESIS, 0, 0
         self._ino = None
 
+    def _in_batch(self):
+        b = self._batch
+        return b is not None and b["tid"] == threading.get_ident()
+
     def _refresh(self):
         """Catch up with the file (another process, or another store object on the same path, may have appended): under
         a shared lock, so no line is read half-written."""
+        if self._in_batch():                          # this thread holds the file's lock: nobody else appended
+            return
         if os.path.exists(self.path):
             with open(self.path, "rb") as fh, _flock(fh, shared=True):
                 self._sync(fh)
@@ -1292,6 +1319,8 @@ class JSONLStorage(TraceStorage):
     def _writing(self):
         """The data file open for appending, under the thread lock and the file locks (with rotation also `<path>.lock`,
         which is never moved, so a writer never appends to a file another writer has just rotated away)."""
+        if self._in_batch():
+            raise RuntimeError("not inside store.batch(): only saves and reads (see TraceStorage.batch)")
         with self._lock, contextlib.ExitStack() as stack:
             if self.rotates:
                 lk = stack.enter_context(open(self.path + ".lock", "a+b"))
@@ -1355,7 +1384,45 @@ class JSONLStorage(TraceStorage):
         self._reset()
         return link
 
+    @contextlib.contextmanager
+    def batch(self):
+        """See TraceStorage.batch: the thread lock and the file locks are taken once, the head is written (and, with
+        fsync=True, the file synced) once at the end — also when the batch ends with an exception."""
+        if self._in_batch():                          # nested: part of the outer batch
+            yield self
+            return
+        with contextlib.ExitStack() as stack:
+            stack.enter_context(self._lock)
+            if self.rotates:
+                stack.enter_context(_flock(stack.enter_context(open(self.path + ".lock", "a+b"))))
+            fh = stack.enter_context(open(self.path, "a+b"))
+            stack.enter_context(_flock(fh))
+            self._sync(fh)
+            self._batch = {"tid": threading.get_ident(), "fh": fh, "stack": stack, "dirty": False}
+            try:
+                yield self
+            finally:
+                b, self._batch = self._batch, None
+                if b["dirty"]:
+                    if self.fsync:
+                        os.fsync(b["fh"].fileno())
+                    self._write_head()
+
     def _append(self, body):
+        if self._in_batch():
+            b = self._batch
+            if self.rotates and self._due() and body.get("kind") != "redaction":
+                if self.fsync:
+                    os.fsync(b["fh"].fileno())
+                self._write_head()                    # the closed segment keeps its head
+                link = self._rotate()
+                nf = b["stack"].enter_context(open(self.path, "a+b"))
+                b["stack"].enter_context(_flock(nf))
+                self._sync(nf)
+                b["fh"] = nf
+                self._write(nf, {"v": FORMAT, "kind": "segment", "segment": link}, head=False)
+            b["dirty"] = True
+            return self._write(b["fh"], body, head=False)
         with self._writing() as fh:
             self._sync(fh)                            # what other writers appended: the chain goes on from their last
             if self.rotates and self._due() and body.get("kind") != "redaction":   # an erasure stays in the file of
@@ -1367,8 +1434,9 @@ class JSONLStorage(TraceStorage):
                     return self._write(nf, body)
             return self._write(fh, body)
 
-    def _write(self, fh, body):
-        """Append one record to the open, locked file → the record (seq, time, prev, hash, id assigned)."""
+    def _write(self, fh, body, head=True):
+        """Append one record to the open, locked file → the record (seq, time, prev, hash, id assigned). head=False (in a
+        batch): the head and the fsync wait for the batch's end."""
         rec = dict(body, seq=self._count, time=float(self.clock()), prev=self._last)
         rec["hash"] = record_hash(rec)
         rec["id"] = rec["hash"][:16]
@@ -1381,15 +1449,19 @@ class JSONLStorage(TraceStorage):
                 off += 1
         fh.write(line)
         fh.flush()
-        if self.fsync:
+        if self.fsync and head:
             os.fsync(fh.fileno())
         self._offsets[rec["id"]] = off
         self._count, self._last, self._size = self._count + 1, rec["hash"], off + len(line)
+        if head:
+            self._write_head()
+        return rec
+
+    def _write_head(self):
         tmp = self.head_path + ".tmp"             # still under the file's lock: one writer of the head at a time
         with open(tmp, "w") as hf:
             json.dump({"count": self._count, "hash": self._last}, hf)
         os.replace(tmp, self.head_path)
-        return rec
 
     def head(self):
         with self._lock:
@@ -1399,6 +1471,8 @@ class JSONLStorage(TraceStorage):
     def _rewrite(self, rec):
         """In place, under the append lock: other writers hold this very file open, so it is not swapped for a new one.
         The new content is first written whole to `<path>.rewrite` (a crash while copying it back leaves that file)."""
+        if self._in_batch():
+            raise RuntimeError("not inside store.batch(): only saves and reads (see TraceStorage.batch)")
         with self._lock, contextlib.ExitStack() as stack:
             if self.rotates:                          # the lock every writer of a rotated store takes
                 stack.enter_context(_flock(stack.enter_context(open(self.path + ".lock", "a+b"))))
@@ -1429,6 +1503,8 @@ class JSONLStorage(TraceStorage):
 
     def _snapshot(self):
         """The file's size and the stored head at one moment (under the locks an append holds while it writes both)."""
+        if self._in_batch():
+            raise RuntimeError("not inside store.batch(): only saves and reads (see TraceStorage.batch)")
         with self._lock:
             if not os.path.exists(self.path):
                 return {"size": 0, "head": self._read_head()}
@@ -1597,7 +1673,8 @@ class _SQLStorage(TraceStorage):
         if not isinstance(prefix, str) or not all(c.isalnum() or c == "_" for c in prefix):
             raise ValueError(f"prefix must be letters, digits and _, not {prefix!r}")
         self.db, self.prefix = db, prefix
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
+        self._batch = None                            # the thread whose batch() transaction is open
         with self._lock:
             for stmt in _SCHEMA.format(p=prefix, **self.types).split(";"):
                 if stmt.strip():
@@ -1622,25 +1699,53 @@ class _SQLStorage(TraceStorage):
         with self._lock:
             return self._head()
 
+    @contextlib.contextmanager
+    def batch(self):
+        """See TraceStorage.batch: one transaction (one commit) for every save inside; an exception rolls it back."""
+        if self._batch == threading.get_ident():      # nested: part of the outer batch
+            yield self
+            return
+        with self._lock:
+            self._x(self.begin)
+            self._batch = threading.get_ident()
+            try:
+                if self.lock:
+                    self._x(self.lock)
+                yield self
+            except BaseException:
+                self._batch = None
+                self._x("ROLLBACK")
+                raise
+            self._batch = None
+            self._x("COMMIT")
+
     def _append(self, body):
+        if self._batch == threading.get_ident():
+            with self._lock:
+                return self._append_row(body)
         with self._lock:
             self._x(self.begin)
             try:
                 if self.lock:
                     self._x(self.lock)
-                h = self._head()
-                rec = dict(body, seq=h["count"], time=float(self.clock()), prev=h["hash"])
-                rec["hash"] = record_hash(rec)
-                rec["id"] = rec["hash"][:16]
-                self._insert(rec)
-                self._x("INSERT INTO {p}meta (\"key\", \"value\") VALUES ('head', ?) "
-                        "ON CONFLICT (\"key\") DO UPDATE SET \"value\" = excluded.\"value\"",
-                        (json.dumps({"count": rec["seq"] + 1, "hash": rec["hash"]}),))
+                rec = self._append_row(body)
                 self._x("COMMIT")
             except BaseException:
                 self._x("ROLLBACK")
                 raise
             return rec
+
+    def _append_row(self, body):
+        """Inside an open transaction: the record after the stored head, its index rows and the new head → the record."""
+        h = self._head()
+        rec = dict(body, seq=h["count"], time=float(self.clock()), prev=h["hash"])
+        rec["hash"] = record_hash(rec)
+        rec["id"] = rec["hash"][:16]
+        self._insert(rec)
+        self._x("INSERT INTO {p}meta (\"key\", \"value\") VALUES ('head', ?) "
+                "ON CONFLICT (\"key\") DO UPDATE SET \"value\" = excluded.\"value\"",
+                (json.dumps({"count": rec["seq"] + 1, "hash": rec["hash"]}),))
+        return rec
 
     def _insert(self, rec):
         s = rec["seq"]
