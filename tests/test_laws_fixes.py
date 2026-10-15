@@ -75,3 +75,28 @@ def test_readmission_waits_for_the_buffer_to_grow_and_an_observe_retirement_is_s
     assert plain.test([c], b, exclude=0)                               # the default re-admits at once, as before
     with pytest.raises(ValueError):
         LawSet(g, readmit="never")
+
+
+# ───────────────────────────────────────────── retirements inside the test reach the step
+def churn():
+    g = Grammar([Atom("a", lambda s: s["a"], feature="a")], k=1)
+    b = Buffer(g)
+    rng = random.Random(0)
+    for grp in range(4):
+        for i in range(50):
+            b.add(Transition({"a": True, "i": i}, "go", 1 if rng.random() < 0.77 else 0, group=grp))
+    return g, b
+
+
+def test_a_law_its_own_check_retires_is_in_step_retired_and_the_bars_are_warned():
+    g, b = churn()
+    with pytest.warns(UserWarning, match="retire_below"):
+        ls = LawSet(g, base=lambda s, a: 0, sized=False, min_precision=0.75, retire_below=0.8)
+    steps = [ls.step(Transition({"a": True, "i": -j}, "go", 1, group=f"new{j}"), b) for j in range(3)]
+    assert [len(st.accepted) for st in steps] == [1, 1, 1]
+    assert [len(st.retired) for st in steps] == [1, 1, 1]                # was [0, 0, 0]
+    assert steps[0].retired[0] is steps[0].accepted[0] and steps[0].accepted[0].status == "retired"
+    assert ls.last_retired == steps[-1].retired
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        LawSet(g, min_precision=0.9, retire_below=0.8)                   # the defaults: no warning

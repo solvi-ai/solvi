@@ -7,6 +7,7 @@ import inspect
 import json
 import math
 import random
+import warnings
 from dataclasses import dataclass, field
 from functools import lru_cache
 from itertools import combinations
@@ -321,7 +322,8 @@ class Law:
 class Step:
     """One transition of the loop: what was predicted (and by which law), whether it was a mismatch, how many
     candidates were proposed and how many of them were scored on the buffer (tested), which laws were accepted and
-    which retired."""
+    which retired — by this transition's observation, or by the check the test runs after an acceptance (a law accepted
+    and retired by that check is in both lists)."""
     transition: Transition
     predicted: Any
     law: Law | None
@@ -474,7 +476,8 @@ class LawSet:
     variants an observation supports (default: [observed]). proposer: default Enumerate(). The acceptance: support ≥
     min_support, precision ≥ min_precision and a net error reduction > 0 on the held-out rows, and — sized=True, the
     default — the sized rule below; retirement: running held-out precision < retire_below over at least retire_min
-    cases; at most `cap` active laws.
+    cases; at most `cap` active laws. min_precision below retire_below is warned at construction: a law that passes
+    with a precision between the two is retired by the check its own test runs, and the next mismatch accepts it again.
 
     support_on: the rows a candidate's support, hits and precision are counted on — "applied" (the default): where it
     would be the applied law, its condition's rows less those a more specific (or, at equal length, an earlier) active
@@ -529,6 +532,10 @@ class LawSet:
         self.proposer = proposer if proposer is not None else Enumerate()
         self.min_support, self.min_precision = int(min_support), float(min_precision)
         self.retire_below, self.retire_min, self.cap = float(retire_below), int(retire_min), int(cap)
+        if self.min_precision < self.retire_below:
+            warnings.warn(f"LawSet: min_precision {self.min_precision} < retire_below {self.retire_below} — a law "
+                          f"accepted at a precision between the two is retired by its own check and accepted again "
+                          f"on the next mismatch", UserWarning, stacklevel=2)
         self.sized, self.delta = bool(sized), float(delta)
         self.space = int(space) if space is not None else None
         if isinstance(null, str):
@@ -552,6 +559,7 @@ class LawSet:
         self.laws: list[Law] = []          # active, priority order
         self.retired: list[Law] = []
         self.capped = 0                    # tests refused because the cap was reached
+        self.last_retired: list[Law] = []  # the laws the check after the last test's acceptances retired
         self.transition: Transition | None = None   # the transition `step` is proposing for (a proposer may read it)
         self._seq = 0
         self._last_tested = 0
@@ -733,8 +741,10 @@ class LawSet:
         `exclude` (the proposing transition's): `passes(support, hits, N)` — support ≥ min_support, precision ≥
         min_precision and, sized, the binomial bound at N = the candidates scored on this buffer so far, this call's
         included — and net > 0. Best: the largest net, then fewer atoms, then the higher precision, then the earlier
-        candidate. → the accepted laws."""
+        candidate. → the accepted laws. The check after each acceptance may retire laws (the accepted one too):
+        they are in `last_retired` (and in `Step.retired` when `step` ran the test)."""
         candidates = list(candidates)
+        self.last_retired = []
         if self.readmit == "grown" and self._retired_at:
             candidates = self._not_readmitted(candidates, len(buffer))
         if not candidates:
@@ -783,7 +793,7 @@ class LawSet:
                 law.null = nl
                 law.need = sized_need(n_tested, self.delta, nl, self.space)
             out.append(law)
-            self.check(buffer, c.action)
+            self.last_retired += self.check(buffer, c.action)
         return out
 
     def _not_readmitted(self, candidates, size):
@@ -1080,6 +1090,8 @@ class LawSet:
             self._last_tested = 0
             st.accepted = self.test(cands, buffer, exclude=t.group) if cands else []
             st.tested = self._last_tested
+            if cands:
+                st.retired = st.retired + self.last_retired
         if remember:
             buffer.add(t)
         return st
