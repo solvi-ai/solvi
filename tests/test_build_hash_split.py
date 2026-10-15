@@ -1,7 +1,6 @@
 """build(split="hash"): each example's share is set by a hash of its state (salted by seed=), not by its place in a
 shuffled list — adding examples keeps every old example in its share, and the order of the examples does not matter.
 The default (the seeded shuffle) is unchanged."""
-import random
 
 import pytest
 
