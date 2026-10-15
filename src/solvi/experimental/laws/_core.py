@@ -460,10 +460,11 @@ class Admission:
     not the set without a law) or "undetermined"; law: the accepted law (the shortest candidate of the surviving
     class) or None; classes: the surviving candidates grouped by what they predict on every probe offered (shortest
     first in each, classes by their shortest); asked: the probes asked, as Transitions (group "probe"); refuted: the
-    candidates the logged rows and the probes refuted (a count); null: the set without any new law still survives;
-    why: the reason; witnesses: the candidates refuted only as too narrow that are right wherever they were applied and
-    predict otherwise than the surviving class where they apply — while any is left nothing is accepted (several laws
-    may be missing)."""
+    candidates the logged rows and the probes refuted (a count — the candidates themselves are `refuted_list`); null:
+    the set without any new law still survives; why: the reason; witnesses: the candidates refuted only as too narrow
+    that are right wherever they were applied and predict otherwise than the surviving class where they apply — while
+    any is left nothing is accepted (several laws may be missing); refuted_list: the refuted candidates, in the order
+    they fell."""
     status: str
     law: Law | None
     classes: list
@@ -472,6 +473,7 @@ class Admission:
     null: bool
     why: str
     witnesses: list = field(default_factory=list)
+    refuted_list: list = field(default_factory=list)
 
 
 # ───────────────────────────────────────────── the law set
@@ -665,6 +667,15 @@ class LawSet:
             return self.apply(law.effect, state)
         b = base if base is not None else self.base
         return b(state, action) if b is not None else None
+
+    def explain(self, state, action, base: Callable | None = None, *, disagree: str | None = None) -> tuple:
+        """`predict` with its ground → (value, law): the law that gave the value, or None where no law applies and the
+        value is the base predictor's (None without one) — so "a law says 0" and "no law, the base says 0" are told
+        apart. Where `disagree="abstain"` abstains, (the Undetermined, None)."""
+        value = self.predict(state, action, base, disagree=disagree)
+        if isinstance(value, Undetermined):
+            return value, None
+        return value, self.applied(state, action)
 
     def hypothesis(self, candidate: Candidate) -> Callable:
         """The predictor this set would be with `candidate` accepted (nothing is changed): for the probe planner."""
@@ -972,6 +983,7 @@ class LawSet:
         alive = list(range(len(cands)))
         null = True
         refuted = 0
+        fell: list[int] = []            # the refuted candidates, in the order they fell
         narrow: set[int] = set()        # refuted only as too narrow, never wrong where applied: the witnesses' pool
 
         seen: list = []                 # (state, action, observation, info) of every logged row and asked probe
@@ -988,6 +1000,8 @@ class LawSet:
                 elif k == "narrow" and not assume_one_law:
                     narrow.add(j)
             refuted += len(alive) - len(keep)
+            kept = set(keep)
+            fell.extend(j for j in alive if j not in kept)
             alive = keep
             for j in [j for j in narrow if refutes(cands[j], x, a, obs, inf) == "applied"]:
                 narrow.discard(j)
@@ -1101,8 +1115,10 @@ class LawSet:
         same_vec = veq or (lambda u, v: u == v)
         null_with = null and bool(cls) and any(same_vec(vector(g[0]), vector(-1)) for g in cls)
 
+        out = [cands[j] for j in fell]
+
         def undetermined(reason, ws=()):
-            return Admission("undetermined", None, classes, asked, refuted, null, reason, [cands[d] for d in ws])
+            return Admission("undetermined", None, classes, asked, refuted, null, reason, [cands[d] for d in ws], out)
 
         if not alive:
             return undetermined("no candidate survived" + (f" ({why})" if why else ""))
@@ -1137,7 +1153,7 @@ class LawSet:
                            sources=tuple(r.id for r in sup))
         law.admitted, law.tested = "probes", len(cands)
         self.cost["accepted"] += 1
-        return Admission("accepted", law, classes, asked, refuted, null, why or "one class left")
+        return Admission("accepted", law, classes, asked, refuted, null, why or "one class left", [], out)
 
     def _accept(self, c, *, born, support=0, hits=0, net=0, sources=()):
         self._seq += 1
