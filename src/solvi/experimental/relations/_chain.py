@@ -97,8 +97,8 @@ def _scope_key(scope):
 
 
 def _live(it):
-    cut = max(it.retracted, default=-1)
-    return [a for a in it.asserts if a["t"] > cut]
+    from ...core.knowledge.store import _live as live    # standing assertions (retractions, a writer's retraction)
+    return live(it)
 
 
 def _rests_on(store, target, premises):
