@@ -5423,7 +5423,9 @@ lets an LLM write those parts from the text and accepts them only after checks t
    and every clause is cited by a part or declared not normative with a reason;
 2. the module is **pure functions** checked by `solvi.experimental.compile.sandbox` (an `ast` allowlist of standard-library imports, no
    files, reflection or dunders) and run there — in a subprocess with memory and time limits — before anything of it
-   enters your process;
+   enters your process (`sandbox.run_many(sources, driver, payload)` runs many modules in one subprocess, each with
+   its own CPU and wall-time limit and its own result — about 5 ms a module instead of about 110 ms for one `run` each;
+   a module that ends the process is reported and the rest go on in a fresh one);
 3. **two drafts are written independently** and must give the same answer to every question on every input of a pool:
    inputs drawn from the values you declare (`Inputs`), boundary values around every number of the text and of both
    drafts, your unlabelled samples, and the tests' inputs. Every input must get an answer: a draft that abstains or
