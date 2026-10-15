@@ -1016,7 +1016,7 @@ def _serve_guard(a, _fail, load_object):
     for k in ("context_messages", "context_chars"):
         if getattr(a, k) < 0:
             _fail(f"serve --{k.replace('_', '-')}: must be at least 0 (0: no limit)")
-    run_proxy(guard, a.upstream, facts=facts, escalate=a.escalate,
+    run_proxy(guard, a.upstream, facts=facts, escalate=a.escalate, context_from_client=a.context_from_client,
               limits=_limits(a), max_messages=a.context_messages or None, max_chars=a.context_chars or None)
     return 0
 
@@ -1074,6 +1074,10 @@ def add_parser(sub):
                    help=f"with --guard: the tool outputs the session keeps for checking (default {CONTEXT_MESSAGES}; 0: all)")
     s.add_argument("--context-chars", type=int, default=CONTEXT_CHARS, metavar="N",
                    help=f"with --guard: their characters in all (default {CONTEXT_CHARS}; 0: no limit)")
+    s.add_argument("--context-from-client", action="store_true",
+                   help="with --guard: accept the user's messages from the client (notifications/solvi/context or "
+                        "_meta[\"solvi/context\"] on tools/call), so ground= arguments can come from the user; only for "
+                        "a client that sends what the user typed")
     SERVE_DEFAULTS.update({x.dest: x.default for x in s._actions if x.dest != "help"})
     return s
 

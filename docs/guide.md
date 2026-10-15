@@ -1201,7 +1201,7 @@ answer comes from the probabilities). The scorer (`model.scorer`) keeps the tota
 
 | What happens | Result |
 |---|---|
-| no answer after the retries (network, timeout, 408 / 409 / 429 / 5xx) | the decision escalates ("did not answer after N attempts: …"); not cached, asked again next time |
+| no answer after the retries (network, timeout, 408 / 409 / 429 / 5xx) | the decision escalates ("did not answer after N attempts: …"); not cached, asked again next time; the audit and `system.stats` count it as `no_answer` ("server did not answer"), not `model_escalated` |
 | HTTP 400 / 413 / 422 | the decision escalates with the service's error text (and a gateway's wrapped cause, OpenRouter's `error.metadata.raw`) |
 | 401, 403, 404 and any other 4xx (a wrong key, model or URL) | `SystemOneError` is raised |
 | a reply that is not a JSON object, lacks a question's answer or a probability, or gives a number outside [0, 1] | the decision escalates ("invalid System One output — …"); never a guess |
@@ -1242,7 +1242,8 @@ A reply that is not a choice — a query, a plan, a JSON extraction — is `solv
 
 Everything is checked, and what fails escalates — `model escalated: invalid LLM output — ...` — instead of being turned
 into a guess: an answer that is not one of the options, probabilities that are not numbers in [0, 1] or disagree with
-the answer, a reply that is not JSON, is cut off or refused. Such a decision (and one whose server did not answer) has
+the answer, a reply that is not JSON, is cut off or refused. Such a decision (and one whose server did not answer —
+counted apart as `no_answer` in the audit and `system.stats`, since no answer is not a wrong one) has
 no value (`d.value is None`), no probabilities (`d.probs == {}`) and confidence 0, so code that reads the value or
 p(yes) without looking at `d.escalate` cannot take it for an answer. The quote (and a span answer) is looked up
 literally, up to typographic quotes and apostrophes (’ ‘ “ ” as ' "), dashes (– — as -), runs of whitespace and — when
@@ -1283,8 +1284,10 @@ reasoning — no reasoning text and no reasoning tokens counted — when it was 
 `extra["llm"]["reasoning"] = "none"` and is warned about once (with `response_format="json_schema"` set by hand, that
 is how you see it); `extra["llm"]["reasoning_tokens"]` records the count when the server reports one. Without the
 grammar gpt-oss now and then writes a decimal as `0. nine`: that exact form is read as 0.9 and recorded in
-`extra["llm"]["repaired"]`; anything else that is not JSON escalates as before. Raise `timeout` (default 60 s) with
-reasoning on: the thinking counts against `max_tokens` on most servers, and a reply cut off there escalates ("the
+`extra["llm"]["repaired"]`; anything else that is not JSON escalates as before. A slow or local backend (a queue, a
+proxy in front of a CLI model) that answers in 30–300 s needs a larger `timeout` (default 60 s) and fewer `retries`
+(default 2: each sends the same request again) — otherwise every question becomes `no_answer`. Raise `timeout` with
+reasoning on too: the thinking counts against `max_tokens` on most servers, and a reply cut off there escalates ("the
 reply was cut off (max_tokens)"). Under `long="retrieve"` an LLM reads 512 tokens per request by
 default; `max_len=` widens that (see "A larger budget").
 
@@ -2728,8 +2731,14 @@ The proxy (stable since 1.1: `solvi.serve.run_proxy`, `Proxy`, `Upstream`; until
 passes the guard before it is forwarded. A denied call is an error result with the reasons; an escalated one asks the
 user through the client when it supports MCP elicitation (an approve yes / no form; `--escalate deny` turns that off),
 else it is an error result. Each result's `_meta.solvi` has the outcome, the stored id and the trace hash; `--facts
-'{"role": "viewer"}'` gives the policies their facts. The proxy does not see the user's messages: grounded arguments are
-looked up in the tool outputs of the session. An allowed call is forwarded with the arguments as the guard validated
+'{"role": "viewer"}'` gives the policies their facts. MCP does not pass the conversation to a server, so by default the proxy
+does not see the user's messages: grounded arguments are looked up in the tool outputs of the session (on a benchmark of
+agent tool calls that refused most legitimate calls whose values the user had typed). `--context-from-client`
+(`run_proxy(context_from_client=True)`) opens a channel for them: the client sends a notification
+`notifications/solvi/context` with `{"role": "user", "text": "..."}` (or `{"messages": [...]}`), or puts such messages
+in `_meta["solvi/context"]` of a `tools/call`; roles user, assistant and system (tool outputs come only from the
+server). Turn it on only for a client that builds these messages from what the user typed — whoever sends them can
+authorize calls. An allowed call is forwarded with the arguments as the guard validated
 them (coerced to the schema's types — `"no"` for a boolean is sent as `false`, so what the checks read is what the
 server gets; arguments the client did not send are not added). The session keeps the last `--context-messages` (50) tool
 outputs, at most `--context-chars` (100 000) characters in all (0: no limit): each decision's trace records the context
@@ -3500,7 +3509,12 @@ records (the chain stays verifiable up to them) — `JSONLStorage(path, fsync=Tr
 returns, at the cost of one disk sync per decision. `SQLiteStorage` commits a transaction per record (the record, its
 index rows and the new head): durable once `save` returns, and slower than an unsynced JSON line (a disk sync per commit).
 `DuckDBStorage` and `PostgresStorage` commit per record too; with PostgreSQL the cost is mostly the round trip to the
-server. Measure on your machine before storing every decision of a high-volume stream.
+server. Measure on your machine before storing every decision of a high-volume stream. For a burst of decisions, `with store.batch():` (or
+`store.save_many(responses, metas=None)`) shares the cost: `JSONLStorage` takes its locks once and writes the head
+(and, with `fsync=True`, syncs) once at the end; the SQL stores run the batch as one transaction — one commit, and an
+exception inside rolls it back. Other threads and processes wait for the batch; inside it only saves and reads, not
+`verify` or `redact`. On a laptop SSD with small records (1,000 asks of a one-rule system): JSONL 2,496 → 3,048 asks
+per second, SQLite 1,853 → 2,687.
 
 #### Compact records and rotation
 
@@ -3956,11 +3970,12 @@ by a hard check, and 600 and 400 decisions under the two catalog fingerprints.
 parts, answer heads and learned rules), `grounding_rejected`, `type_rejected`, `outside_options`, `rule_abstained`,
 `low_confidence`, `validator_rejected`,
 `forced_by_hard_check`, `constraint_repairs`, `fallbacks`, `model_escalated`, `evidence_missing`, `timeouts`,
-`instruction_flips`, `memory_disagreements`, `contract_refused` (answers that broke their question's contract:
+`no_answer` (a remote model's server did not answer after its retries — the question abstains, as for an escalation,
+but it is not the model's doubt), `instruction_flips`, `memory_disagreements`, `contract_refused` (answers that broke their question's contract:
 a wrong type or an echo of the input, see `Catalog.contract`) and `not_applicable` (questions whose contract's
 precondition did not hold, so they were not computed).
-`system.safeguard_summary()` prints them (`evidence missing`, `contract_refused` and `not_applicable` once they have
-fired).
+`system.safeguard_summary()` prints them (`evidence missing`, `timeouts`, `no_answer`, `contract_refused` and
+`not_applicable` once they have fired).
 [examples/12_grounded_audit.py](../examples/12_grounded_audit.py) runs one catalog with and without models,
 with a hallucinating extractor and a classifier answering outside its options.
 
