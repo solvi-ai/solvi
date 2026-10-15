@@ -9,7 +9,7 @@ into what already holds that kind of knowledge, and can be rolled back.
                 expected={"failures": "-1 per 10 episodes"}, change_type="rule")
     pipe = Pipeline([KnownFailures(), Static(), Consistency(), CleanCases(successes), FreshEnvironments(...)],
                     storage="changes.jsonl", store=ks, approval={("rule", "outcome"): "gate"})
-    res = pipe.propose(ch)              # → Result: "promoted" (with a version) | "rejected" (the stage) | "held"
+    res = pipe.propose(ch)              # → Result: "promoted" (with a version) | "rejected" (the stage) | "held" | "error"
     pipe.rule(res.change_id, True, by="ann")    # a person's ruling for a held change (or a compile Ruling keep / drop)
     pipe.versions(); pipe.current; pipe.rollback(0); pipe.lineage(res.change_id); pipe.observe(res.change_id, {...})
 
@@ -64,10 +64,15 @@ equality of state keys (hazard_gate) is the placeholder.
 
 The journal (_journal.py): records of kind "change" in a TraceStorage — "propose" (the change, its fingerprint, parent),
 one "verdict" per stage, then "promoted" (version, target reference), "rejected" (the stage and reason), "held",
-"ruling", "rollback" and "observed"; promoted / rejected / held carry the approval level ("level"). The storage's hash chain covers them (a tampered record fails verify()); with
+"error" (a stage raised: the stage and the exception), "ruling", "rollback" and "observed"; promoted / rejected / held carry the approval level ("level"). The storage's hash chain covers them (a tampered record fails verify()); with
 the decisions' store they share one chain. Versions: version 0 is the state before the first change; each promotion is
 the next number with the version in force as its parent; rollback(v) undoes every version after v through its target
-(KnowledgeStore.rollback for items) and is itself a record. EvaluatorLock (ported): held-out seeds pinned by SHA-256,
+(KnowledgeStore.rollback for items) and is itself a record; a rollback with a reason (why=) records the undone changes
+as failed, and KnownFailures refuses them as it refuses a rejected one (failed=False: a rollback that is not a verdict on
+the change, e.g. moving to another branch). A stage that raises is not a verdict on the change either: the proposal
+ends with status "error" (an "error" record with the stage and the exception), the failure memory does not keep it,
+and the same candidate runs again once the stage is fixed (Pipeline(raise_stage_errors=True): journaled, then raised).
+EvaluatorLock (ported): held-out seeds pinned by SHA-256,
 the evaluator's code pinned, an access log, lock_out() for proposer processes, leak_scan.
 
 What is checked: tests/test_changes.py — the chain verifies and a tampered record is caught; a hazard rule from
@@ -96,7 +101,7 @@ What is not done:
 - no validity periods in compile Versions (nor the change-type classifier in the compiler);
 - the research harness's untrusted-code process sandbox is not ported (Static uses the compiler's sandbox check);
 - a held change lives only in this process's memory until it is ruled on (its journal records survive, the Change
-  object does not)."""
+  object does not); Pipeline.expire_held(max_age) rules on the ones that waited too long."""
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -104,10 +109,10 @@ from typing import Any, Callable
 
 from ...core.runtime import vhash
 from .. import warn_on_import
-from ._journal import ChangeJournal, EvalLocked, EvaluatorLock
+from ._journal import ChangeJournal, EvalLocked, EvaluatorLock, MemoryStorage
 from ._paired import paired_bootstrap, run_episode
 from ._stages import (DEFAULT_APPROVAL, LEVELS, REFUSAL_WORDS, Approval, Canaries, CleanCases, catalog_of, Confirmation,
-                     Consistency, Context, FreshEnvironments, Impact, KnownFailures, RefusalRegression, SOURCES, Stage,
+                     Consistency, Context, FreshEnvironments, identity, IDENTITY_KEYS, Impact, KnownFailures, RefusalRegression, SOURCES, Stage,
                      Static, StageVerdict, allowed, gate_of, gates_of, hazard_body, hazard_gate, is_refusal)
 from ._targets import KnowledgeTarget, LearningTarget, Promoted, Refused, VersionsTarget
 
@@ -197,8 +202,9 @@ class Change:
 
 @dataclass
 class Result:
-    """What one proposal (or ruling) came to: status "promoted" | "rejected" | "held"; the version for a promotion; the
-    stage that refused or held it; every verdict."""
+    """What one proposal (or ruling) came to: status "promoted" | "rejected" | "held" | "error" (a stage raised: not a
+    verdict on the change, which may be proposed again); the version for a promotion; the stage that refused, held or
+    raised; every verdict."""
     change_id: str
     status: str
     version: int | None = None
@@ -214,7 +220,8 @@ class Result:
     def __str__(self):
         head = {"promoted": f"change {self.change_id}: promoted as version {self.version}",
                 "rejected": f"change {self.change_id}: rejected by {self.stage}: {self.reason}",
-                "held": f"change {self.change_id}: held at {self.stage}: {self.reason}"}[self.status]
+                "held": f"change {self.change_id}: held at {self.stage}: {self.reason}",
+                "error": f"change {self.change_id}: error in {self.stage}: {self.reason}"}[self.status]
         return "\n".join([head] + [f"  {'✓' if v.ok else '…' if v.decision == 'hold' else '✗'} {v.stage}"
                                    + (f": {v.reason}" if v.reason else "") for v in self.verdicts])
 
@@ -243,19 +250,22 @@ def _ruling(r):
 
 class Pipeline:
     """The change pipeline (see the module docstring). stages: Stage objects run in order; storage: the journal's
-    TraceStorage (a path or a store); store: the KnowledgeStore items go into; approval: an Approval, or its table
+    TraceStorage (a path or a store; None or ":memory:": a MemoryStorage, kept in this process only); store: the KnowledgeStore items go into; approval: an Approval, or its table
     (appended as the last stage when no Approval is among the stages); targets: extra targets (VersionsTarget,
     LearningTarget) — a KnowledgeTarget on `store` is added by itself; refusals: the held should-abstain inputs (a list,
     or `refusals(change, ctx)` → inputs) RefusalRegression checks every answering change on; answer_of: `answer_of(change
     or None, ctx)` → a callable input → answer (None: the answerer in force), which makes every change answering (else
-    a change answers when its target has `answerer(change or None, ctx)`).
+    a change answers when its target has `answerer(change or None, ctx)`); raise_stage_errors: a stage that raises ends the
+    proposal with status "error" (journaled; not a rejection, so the failure memory does not keep it) — True: journaled,
+    then the exception is raised.
 
     RefusalRegression is not switchable: for every change whose target can answer it runs (inserted before Approval
     when it is not among the stages; yours is used in its place) and is journaled; there is no argument to remove it."""
 
     experimental = True
 
-    def __init__(self, stages, storage, *, store=None, approval=None, targets=(), refusals=(), answer_of=None):
+    def __init__(self, stages, storage, *, store=None, approval=None, targets=(), refusals=(), answer_of=None,
+                 raise_stage_errors=False):
         self.stages = list(stages)
         for s in self.stages:
             if not callable(getattr(s, "run", None)) or not getattr(s, "name", None):
@@ -270,6 +280,7 @@ class Pipeline:
         for t in targets:
             self.targets[t.artifact] = t
         self.refusals, self.answer_of = refusals, answer_of
+        self.raise_stage_errors = bool(raise_stage_errors)
         self._refusal = RefusalRegression()           # run for every answering change (see the class docstring)
         self._held = {}                               # change id → (change, stage index, verdicts)
 
@@ -336,8 +347,13 @@ class Pipeline:
             st = stages[i]
             try:
                 v = StageVerdict.of(st.run(change, ctx), st.name)
-            except Exception as e:  # noqa: BLE001 — a stage that raises refuses (recorded), the pipeline goes on
-                v = StageVerdict.refuse(f"the stage raised {type(e).__name__}: {e}")
+            except Exception as e:  # noqa: BLE001 — a stage that raises is an error (recorded), not a verdict
+                why = f"the stage raised {type(e).__name__}: {e}"
+                self.journal.write("error", change=cid, fingerprint=change.fingerprint(), stage=st.name, reason=why,
+                                   level=level)
+                if self.raise_stage_errors:
+                    raise
+                return Result(cid, "error", stage=st.name, reason=why, verdicts=list(ctx.verdicts.values()))
             v.stage = st.name
             advisory = (v.decision == "refuse" and level == "person" and st.name not in FINAL)
             self.journal.write("verdict", change=cid, **v.to_dict(), advisory=advisory)
@@ -404,14 +420,16 @@ class Pipeline:
         return self.journal.records(action)
 
     def _state(self):
-        in_force, promoted = [], {}
-        for d in self.journal.records():
+        """(the versions in force in order, {version: its "promoted" record}) — kept up to date by the journal's fold."""
+        def step(st, d):
             if d["action"] == "promoted":
-                promoted[d["version"]] = d
-                in_force.append(d["version"])
+                st[1][d["version"]] = d
+                st[0].append(d["version"])
             elif d["action"] == "rollback":
-                in_force = [v for v in in_force if v not in set(d["undone"])]
-        return in_force, promoted
+                undone = set(d["undone"])
+                st[0][:] = [v for v in st[0] if v not in undone]
+        in_force, promoted = self.journal.fold("versions", lambda: ([], {}), step)
+        return list(in_force), promoted
 
     def _next_version(self):
         _, promoted = self._state()
@@ -429,9 +447,10 @@ class Pipeline:
         return [{"version": v, "change": d["change"], "parent": d["parent"], "artifact": d["artifact"], "ref": d["ref"],
                  "in_force": v in in_force, "id": d["id"]} for v, d in sorted(promoted.items())]
 
-    def rollback(self, version, *, by=None, why=None):
+    def rollback(self, version, *, by=None, why=None, failed=None):
         """Undo every version in force after `version` (newest first) through its target; recorded. → the undone
-        version numbers."""
+        version numbers. failed: are the undone changes failures (KnownFailures refuses them when proposed again)?
+        None (default): when a reason is given (why=)."""
         in_force, promoted = self._state()
         if version != 0 and version not in in_force:
             raise KeyError(f"version {version} is not in force (in force: {in_force})")
@@ -439,7 +458,9 @@ class Pipeline:
         for v in undone:
             d = promoted[v]
             self.targets[d["artifact"]].rollback(d["ref"], by=by, why=why or f"rollback to version {version}")
-        self.journal.write("rollback", to=version, undone=undone, by=None if by is None else str(by), why=why)
+        failed = why is not None if failed is None else bool(failed)
+        self.journal.write("rollback", to=version, undone=undone, by=None if by is None else str(by), why=why,
+                           failed=failed, changes=[promoted[v]["change"] for v in undone])
         return undone
 
     def lineage(self, change_id):
@@ -467,10 +488,21 @@ class Pipeline:
         """The ids of the changes held in this pipeline, waiting for a ruling."""
         return sorted(self._held)
 
+    def expire_held(self, max_age, *, approve=False, by="expiry", now=None):
+        """Rule on every change held for max_age seconds or longer (since its "held" record; `now` default: the
+        journal storage's clock) — rejected by default (approve=True: approved), the ruling journaled as by `by`; a
+        held change without a person no longer waits for ever. → the Results."""
+        if isinstance(max_age, bool) or not isinstance(max_age, (int, float)) or max_age < 0:
+            raise ValueError(f"max_age is a number of seconds >= 0, not {max_age!r}")
+        now = self.journal.storage.clock() if now is None else now
+        held_at = {d["change"]: d.get("time") for d in self.journal.records("held")}
+        return [self.rule(cid, bool(approve), by=by) for cid in self.held()
+                if held_at.get(cid) is not None and now - float(held_at[cid]) >= max_age]
+
 
 __all__ = ["allowed", "Approval", "ARTIFACTS", "Canaries", "catalog_of", "Change", "CHANGE_TYPES", "ChangeJournal", "CleanCases",
            "Confirmation", "Consistency", "Context", "DEFAULT_APPROVAL", "EvalLocked", "EvaluatorLock",
-           "FreshEnvironments", "gate_of", "gates_of", "hazard_body", "hazard_gate", "Impact", "is_refusal", "KnowledgeTarget",
+           "FreshEnvironments", "gate_of", "gates_of", "hazard_body", "hazard_gate", "identity", "IDENTITY_KEYS", "Impact", "is_refusal", "KnowledgeTarget",
            "KnownFailures", "REFUSAL_WORDS", "RefusalRegression",
-           "LearningTarget", "LEVELS", "paired_bootstrap", "Pipeline", "Promoted", "Refused", "Result", "run_episode", "SOURCES",
+           "LearningTarget", "LEVELS", "MemoryStorage", "paired_bootstrap", "Pipeline", "Promoted", "Refused", "Result", "run_episode", "SOURCES",
            "Stage", "Static", "STORE_SOURCE", "StageVerdict", "VersionsTarget"]

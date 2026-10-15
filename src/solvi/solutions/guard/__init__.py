@@ -786,6 +786,7 @@ def _slot_grounding(spec, with_facts):
         from decimal import Decimal
         rules = json.loads(spec)
         sources, exempt, enums, match = set(rules["sources"]), set(rules["exempt"]), set(rules["enums"]), rules["match"]
+        locale = rules.get("locale")
         texts = [(x[0], x[1]) for x in conversation_roles if x[2] in sources]
         facts = sorted((request_facts or {}).items()) if with_facts else []
         leaves = [x for k, v in facts for x in _fact_leaves(v, k)]
@@ -804,7 +805,7 @@ def _slot_grounding(spec, with_facts):
                     continue
                 at = None
                 for s, e in texts:
-                    occ = _occurrences(v, conversation[s:e], match)
+                    occ = _occurrences(v, conversation[s:e], match, locale)
                     if occ:
                         at = ["request", s + occ[0][0], s + occ[0][1]]
                         break
@@ -814,7 +815,7 @@ def _slot_grounding(spec, with_facts):
                             continue
                         hit = (isinstance(f, (int, float, Decimal)) and isinstance(v, (int, float, Decimal))
                                and _same_number(v, Decimal(repr(f)) if isinstance(f, float) else Decimal(f))) or \
-                            (isinstance(f, str) and bool(_occurrences(v, f, match)))
+                            (isinstance(f, str) and bool(_occurrences(v, f, match, locale)))
                         if hit:
                             at = [where]
                             break
@@ -1036,8 +1037,26 @@ def _glued(text, a, b):
     return False
 
 
-def _bounded(text, a, b, s, match):
-    """Does the occurrence text[a:b] of the string s stand on its own under the matcher?"""
+_SLASH_WORDS = re.compile(r"[^\W\d_]+(?:-[^\W\d_]+)*/[^\W\d_]+(?:-[^\W\d_]+)*")
+
+
+def _word_slash(text, i):
+    """Is the "/" at text[i] a separator between two words ("personal/address", "and/or") — the whitespace-delimited
+    token holding it is two words of letters with one "/" between them — not part of a path or a web address
+    ("/home/x", "docs/v2/x", "x.org/a", "a/b.txt")?"""
+    lo, hi = i, i + 1
+    while lo > 0 and not text[lo - 1].isspace():
+        lo -= 1
+    while hi < len(text) and not text[hi].isspace():
+        hi += 1
+    tok = text[lo:hi].strip("\"'`()[]{}<>,;:!?")
+    tok = tok[:-1] if tok.endswith(".") else tok
+    return bool(_SLASH_WORDS.fullmatch(tok))
+
+
+def _bounded(text, a, b, s, match, words_slash=False):
+    """Does the occurrence text[a:b] of the string s stand on its own under the matcher? words_slash ("nocase"): a "/"
+    between two words separates them (_word_slash)."""
     if match == "substring":
         return True
     before, after = text[a - 1] if a > 0 else "", text[b] if b < len(text) else ""
@@ -1048,9 +1067,11 @@ def _bounded(text, a, b, s, match):
     word = re.compile(r"\w")                                 # "token": not inside a longer word or address
     if (word.match(s[0]) and before and word.match(before)) or (word.match(s[-1]) and after and word.match(after)):
         return False
-    if before in _JOIN and a >= 2 and word.match(text[a - 2]):        # "evil.bob@x.org", "x-acct"
+    if before in _JOIN and a >= 2 and word.match(text[a - 2]) and \
+            not (words_slash and before == "/" and _word_slash(text, a - 1)):   # "evil.bob@x.org", "x-acct"
         return False
-    if after in _JOIN and b + 1 < len(text) and word.match(text[b + 1]):   # "bob@x.org.evil", "acct-12"
+    if after in _JOIN and b + 1 < len(text) and word.match(text[b + 1]) and \
+            not (words_slash and after == "/" and _word_slash(text, b)):        # "bob@x.org.evil", "acct-12"
         return False
     return not (s.isdigit() and _glued(text, a, b))          # a digit string: not a group of a longer identifier
 
@@ -1124,6 +1145,7 @@ def _occurrences(v, text, match="token", locale=None):
         if not s.strip():
             return []
         needles = [s]
+        words_slash = match == "nocase"
         if match in ("nocase", "id"):
             text, needles = _lower(text), [_lower(s)]
             if match == "id" and s.startswith("#") and s[1:].strip():
@@ -1132,7 +1154,7 @@ def _occurrences(v, text, match="token", locale=None):
         for n in needles:
             i = text.find(n)
             while i >= 0:
-                if _bounded(text, i, i + len(n), n, match) and not any(a <= i and i + len(n) <= b for a, b in out):
+                if _bounded(text, i, i + len(n), n, match, words_slash) and not any(a <= i and i + len(n) <= b for a, b in out):
                     out.append((i, i + len(n)))
                 i = text.find(n, i + 1)
         out.sort()
@@ -1437,12 +1459,20 @@ class Guard:
     the blocks are given facts of the decision (`action_prediction`, `agenda_blocks`), so it replays; a prediction of
     "unknown", or no action model, leaves the call to the other checks. `guard.observe(decision, accepted, effect)`
     tells the knowledge what the environment did. lang: "en" or "ru" — the language of a decision's `message()` and
-    `audit()`; its `reasons` stay as recorded (English), since they are stored and hashed with the decision."""
+    `audit()`; its `reasons` stay as recorded (English), since they are stored and hashed with the decision.
+    user_verifier: binds a person's approval to who gave it and to this very call — `user_verifier(approval,
+    decision)` → the verified identity (raise PermissionError, or return a falsy value, to refuse); `resolve(...,
+    approve=True)` then needs `approval=` (a token) that verifies, and the store records the verified identity. None
+    (default): any truthy approve with any reviewer name is taken, as before. `approval_verifier(keys)` is a verifier
+    over HMAC tokens from `sign_approval(decision, reviewer, key)`, bound to the decision's approval_key."""
 
     @_deprecate.removed_kwargs(facts="fact_names")
     def __init__(self, storage=None, authorizer=None, fact_names=None, lang="en", scan_user=False, tool_values="deny",
-                 knowledge=None):
+                 knowledge=None, user_verifier=None):
         from ...core.store import open_storage
+        if user_verifier is not None and not callable(user_verifier):
+            raise TypeError("user_verifier is a function (approval, decision) → the verified identity, or None")
+        self.user_verifier = user_verifier
         self.storage = open_storage(storage)
         self.tools: dict[str, Tool] = {}
         facts = fact_names                   # the names (and types) of the facts the app gives (`facts=` in 0.7); their
@@ -1577,7 +1607,7 @@ class Guard:
         return t
 
     def firewall(self, tools=None, *, grounded=True, sources=("user",), facts=True, exempt=(), match="nocase",
-                 on_ungrounded="escalate"):
+                 on_ungrounded="escalate", locale="tool"):
         """A call firewall over tools (a name, a list of names, or None — every tool, also those declared later): two
         deterministic checks of every call.
 
@@ -1593,7 +1623,11 @@ class Guard:
         facts=False: the text only). A string is found as a whole word after normalisation (`match`: "nocase" —
         letters without their case, typographic dashes and quotes as plain ones, Unicode spaces as spaces; "token",
         "whole" or "substring" — see `tool`), a number as a number token of exactly its value written in digits
-        ("two" does not ground 2). Exempt by declaration: an argument declared as an enumeration (Literal, an Enum, a
+        ("two" does not ground 2); a number written with one separator and one group of three digits ("3,000",
+        "1.500") is read under `locale` — "tool" (default): the tool's own `tool(locale=)`, a key of LOCALES ("en",
+        "de", "fr", "ch") for every tool, None: no locale, so such a number grounds nothing. In "nocase" a "/" between
+        two words separates them ("personal/address" holds "address"), not inside a path or a web address. Exempt by
+        declaration: an argument declared as an enumeration (Literal, an Enum, a
         JSON-schema enum / const), a boolean, null, an empty string, and the arguments named in `exempt` (dotted for
         nested fields, "legs[].city" for list items). An argument the call does not send (its default) is not a slot.
         A call with a slot found nowhere fails `slots_grounded` → on_ungrounded: "escalate" (default: a person
@@ -1608,13 +1642,15 @@ class Guard:
             raise ValueError('on_ungrounded must be "deny" or "escalate"')
         if match not in _FIREWALL_MATCHERS:
             raise ValueError(f"match is one of {', '.join(_FIREWALL_MATCHERS)}, not {match!r}")
+        if locale is not None and locale != "tool" and locale not in LOCALES:
+            raise ValueError(f'locale is "tool", one of {", ".join(LOCALES)} or None, not {locale!r}')
         roles = tuple(ROLES.get(r, r) for r in ((sources,) if isinstance(sources, str) else sources))
         bad = [r for r in roles if r not in ROLES.values()]
         if bad or not roles:
             raise ValueError(f"sources are roles among {', '.join(sorted(set(ROLES.values())))}, not {bad or 'none'}")
         spec = {"grounded": bool(grounded), "sources": sorted(set(roles)), "facts": bool(facts),
                 "exempt": sorted({exempt} if isinstance(exempt, str) else set(exempt)), "match": match,
-                "on_ungrounded": on_ungrounded}
+                "on_ungrounded": on_ungrounded, "locale": locale}
         self._firewalls.append((_names(tools), spec))
         for t in self.tools.values():
             t.firewall = self._firewall_of(t.name)
@@ -1845,6 +1881,9 @@ class Guard:
         if fw is not None and fw["grounded"]:
             spec = {k: fw[k] for k in ("sources", "exempt", "match")}
             spec["enums"] = sorted(_enum_paths(t.model.model_json_schema()))
+            loc = t.locale if fw.get("locale", "tool") == "tool" else fw["locale"]
+            if loc is not None:                       # (absent when None: the declaration's fingerprint is as before)
+                spec["locale"] = loc
             cat.fn(_slot_grounding(json.dumps(spec, sort_keys=True), fw["facts"]))
             check(slots_grounded, fw["on_ungrounded"])
         if t.ground:
@@ -2080,20 +2119,35 @@ class Guard:
         except Exception as e:  # noqa: BLE001
             d.error = f"{type(e).__name__}: {e}"
 
-    def resolve(self, decision, approve, reviewer=None, note=None, execute=True):
+    def resolve(self, decision, approve, reviewer=None, note=None, execute=True, approval=None):
         """A person's answer to an escalated call: recorded in the store as a correction of its verdict (who, the
         stored decision it answers, a note) and, when approved, the call is made (execute=False: not made — the
         framework makes it; the stored resolution then says executed: false, and the framework's result is not
         recorded by the guard). → the decision, with outcome "allow" (approved_by) or "deny".
 
         An escalation is resolved once: a second resolve of the same decision (or, with a store, of a stored decision
-        that already has a resolution) raises ValueError — so an approved call is never made twice."""
+        that already has a resolution) raises ValueError — so an approved call is never made twice.
+
+        With Guard(user_verifier=) an approval needs `approval` (a token, e.g. from sign_approval) that the verifier
+        accepts for this decision: else PermissionError and the escalation stays open. The verified identity is the
+        reviewer (a different `reviewer` name raises) and is recorded (meta "verified"). A rejection needs no token."""
         if decision.outcome != "escalate":
             raise ValueError(f"only an escalated call is resolved by a person; this one is {decision.outcome!r}")
         if decision.resolved or (self.storage is not None and decision.stored_id is not None and any(
                 c["question"] == "verdict" and c["of"] == decision.stored_id for c in self.storage.corrections())):
             raise ValueError(f"this escalation of {decision.tool} was already resolved"
                              + (f" (stored decision {decision.stored_id})" if decision.stored_id else ""))
+        verified = None
+        if approve and self.user_verifier is not None:
+            if approval is None:
+                raise PermissionError("this guard binds approvals to a person: resolve(..., approve=True, "
+                                      "approval=<token>) with a token its user_verifier accepts")
+            who = self.user_verifier(approval, decision)
+            if not who:
+                raise PermissionError(f"the approval of {decision.tool} did not verify")
+            if reviewer is not None and str(reviewer) != str(who):
+                raise PermissionError(f"the approval was given by {who!r}, not by the reviewer {reviewer!r}")
+            reviewer = verified = str(who)
         decision.resolved = True
         d = dataclasses.replace(decision, outcome="allow" if approve else "deny", approved_by=reviewer if approve else None,
                                 reasons=list(decision.reasons) + ([f"approved by {reviewer or 'a person'}"] if approve
@@ -2103,6 +2157,8 @@ class Guard:
             self._run(d)
         if self.storage is not None:
             meta = {"tool": d.tool, "reviewer": reviewer, "note": note, "of": decision.stored_id, "executed": d.executed}
+            if verified is not None:
+                meta["verified"] = verified
             meta.update(_outcome_meta(d))
             self.storage.save_correction("verdict", decision.response.trace.init, d.outcome, meta={"guard": meta},
                                          by=reviewer, of=decision.stored_id)
@@ -2384,12 +2440,56 @@ def _clip(text, n):
     return text[:max(0, n - len(tail))] + tail
 
 
+# ------------------------------------------------------------------------------------------------ signed approvals
+def sign_approval(decision, reviewer, key, *, now=None) -> str:
+    """A person's approval of one escalated call as a token for Guard(user_verifier=approval_verifier(...)):
+    "<reviewer>.<unix time>.<HMAC-SHA256 hex>" over the decision's approval_key(), the reviewer and the time, with the
+    reviewer's secret `key` (bytes or str). It covers this call only: another call, other arguments or new reasons have
+    another approval_key. Sign where the person is (the approval UI's server), not in the agent's process."""
+    import hashlib
+    import hmac
+    import time
+    t = int(time.time() if now is None else now)
+    k = key.encode() if isinstance(key, str) else bytes(key)
+    msg = f"{decision.approval_key()}|{reviewer}|{t}".encode()
+    return f"{reviewer}.{t}.{hmac.new(k, msg, hashlib.sha256).hexdigest()}"
+
+
+def approval_verifier(keys, *, max_age=300, clock=None):
+    """A user_verifier over sign_approval tokens: keys {reviewer: secret}; a token verifies when its reviewer has a key,
+    its HMAC matches this decision's approval_key, and it is at most max_age seconds old (clock(): default time.time)
+    and not from the future → the reviewer; else PermissionError saying why."""
+    import hashlib
+    import hmac
+    import time
+    clock = clock or time.time
+    keys = {str(r): (k.encode() if isinstance(k, str) else bytes(k)) for r, k in dict(keys).items()}
+
+    def verify(approval, decision):
+        parts = approval.rsplit(".", 2) if isinstance(approval, str) else []
+        if len(parts) != 3 or not parts[1].isdigit():
+            raise PermissionError("the approval is not a signed token (reviewer.time.signature)")
+        who, t, sig = parts[0], int(parts[1]), parts[2]
+        if who not in keys:
+            raise PermissionError(f"the approval names an unknown reviewer {who!r}")
+        want = hmac.new(keys[who], f"{decision.approval_key()}|{who}|{t}".encode(), hashlib.sha256).hexdigest()
+        if not hmac.compare_digest(want, sig):
+            raise PermissionError(f"the approval's signature does not match this call (or {who!r}'s key)")
+        age = clock() - t
+        if age > max_age:
+            raise PermissionError(f"the approval is {age:.0f}s old (max_age {max_age}s)")
+        if age < -30:
+            raise PermissionError("the approval is dated in the future")
+        return who
+    return verify
+
+
 # the rest of the guard: the confirmation step and the intents of a user's words (they import this module's names, so
 # they come after them)
 from .confirm import accepted_proposals, accepts  # noqa: E402
-from .intents import INTENTS  # noqa: E402
+from .intents import INTENTS, register_intent  # noqa: E402
 
-__all__ = ["action_model_allows", "slots_grounded", "agenda_allows", "accepted_proposals", "accepts", "INTENTS", "model_from_json_schema", "arguments_from_user", "arguments_grounded", "arguments_model", "arguments_valid", "AUTHORIZE_TASK",
+__all__ = ["action_model_allows", "slots_grounded", "agenda_allows", "accepted_proposals", "accepts", "INTENTS", "register_intent", "approval_verifier", "sign_approval", "model_from_json_schema", "arguments_from_user", "arguments_grounded", "arguments_model", "arguments_valid", "AUTHORIZE_TASK",
            "conversation", "Guard", "GuardDecision", "MATCHERS", "Message", "messages", "no_injected_arguments",
            "no_instructions_in_tool_outputs", "proposal", "request_authorizes", "same_url", "Session", "Tool",
            "ToolCall", "url_parts", "VERDICTS"]
