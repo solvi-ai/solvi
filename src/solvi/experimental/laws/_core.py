@@ -266,7 +266,8 @@ class Candidate:
 @dataclass(eq=False)
 class Law:
     """An accepted law (see the package docstring). support / hits / precision / net: on the held-out buffer at
-    acceptance (rows of every group but `born`), counted; sources: the ids of the rows it was accepted on; n / hits_after:
+    acceptance (rows of every group but `born`), counted on the rows where it would be the applied law (the set's
+    `support_on`); sources: the ids of the rows it was accepted on (the same rows); n / hits_after:
     observations from other groups since, while it was the law applied; held: (hits, n) on the buffer rows where it is
     the applied law, from the last test; status: "active" | "retired"; why: the retirement's reason. tested: the
     candidates scored on the buffer when it was accepted (with the sized acceptance, the N of its bound; admitted by
@@ -475,6 +476,17 @@ class LawSet:
     default — the sized rule below; retirement: running held-out precision < retire_below over at least retire_min
     cases; at most `cap` active laws.
 
+    support_on: the rows a candidate's support, hits and precision are counted on — "applied" (the default): where it
+    would be the applied law, its condition's rows less those a more specific (or, at equal length, an earlier) active
+    law already claims, the rows its net is counted on too; "matched": every row its condition matches (before 1.2). A
+    default whose exceptions are already laws is judged on the rows they leave it: a default right on 45 of its 45 rows
+    with 10 rows of a known exception under it is 45 / 45, not 45 / 55 (refused at min_precision 0.9 under "matched"),
+    and its precision at acceptance is the precision its first `check` recounts.
+    readmit: "any" (the default) — a retired law may be accepted again by the next test; "grown" — not on a buffer
+    that has not grown since its retirement (the same evidence that retired it; refusals counted in
+    `refused_readmit`). A retirement from `observe` outside `step` does not see the buffer: it is stamped with the
+    buffer's size at the next `test`, which errs toward waiting.
+
     The sized acceptance (sized=True). Fixed thresholds do not see how many candidates were tried on one buffer: on a
     buffer with no law at all (2,000 rows, an effect at 70% independent of 40 sparse atoms) the 821 conditions of at
     most two atoms passed support ≥ 5 and precision ≥ 0.9 in 100 of 100 buffers. The sized rule tests each candidate
@@ -504,7 +516,8 @@ class LawSet:
                  effects: Callable | None = None, proposer: Proposer | None = None, min_support: int = 5,
                  min_precision: float = 0.9, retire_below: float = 0.8, retire_min: int = 5, cap: int = 300,
                  sized: bool = True, delta: float = 0.1, space: int | None = None,
-                 null: str | float = "base", disagree: str = "first"):
+                 null: str | float = "base", disagree: str = "first", support_on: str = "applied",
+                 readmit: str = "any"):
         if disagree not in ("first", "abstain"):
             raise ValueError(f"disagree is 'first' or 'abstain', not {disagree!r}")
         if not 0.0 < float(delta) < 1.0:
@@ -527,6 +540,13 @@ class LawSet:
             null = float(null)
         self.null = null
         self.disagree = disagree
+        if support_on not in ("applied", "matched"):
+            raise ValueError(f"support_on is 'applied' or 'matched', not {support_on!r}")
+        if readmit not in ("any", "grown"):
+            raise ValueError(f"readmit is 'any' or 'grown', not {readmit!r}")
+        self.support_on, self.readmit = support_on, readmit
+        self.refused_readmit = 0           # candidates refused because they were retired on a buffer of this size
+        self._retired_at: dict = {}        # (action, condition, effect) → buffer size at retirement (None: not seen)
         self.abstained = 0                 # predictions that abstained (disagree="abstain")
         self.cost = {"candidates": 0, "tests": 0, "accepted": 0, "probes": 0, "simulated": 0}
         self.laws: list[Law] = []          # active, priority order
@@ -651,15 +671,22 @@ class LawSet:
             ok |= rem & buffer.where(action, self._base_key, None, lambda t: base(t.state, t.action) == t.observed)
         return allowed, cov, ok, take
 
-    def score(self, candidate: Candidate, buffer: Buffer, exclude=None, _view=None) -> tuple[int, int, int]:
-        """(support, hits, net) of a candidate on the held-out rows (every group but `exclude`): the rows its condition
-        matches, those its effect predicts right, and the errors it removes minus the errors it adds where it would be
-        the applied law."""
+    def _rows_of(self, candidate, buffer, exclude=None, _view=None):
+        """(counted, take, E, ok): the rows support is counted on (`support_on`), the rows where the candidate would be
+        the applied law, the rows its effect predicts right, the rows the set predicts right now."""
         allowed, cov, ok, _ = _view or self._view(buffer, candidate.action, exclude)
         cond = tuple(candidate.condition)
         m = buffer.match(candidate.action, cond) & allowed
         E = self._effect_mask(buffer, candidate.action, candidate.effect)
         take = m & ~cov[min(len(cond), self.grammar.k + 1)]
+        return (take if self.support_on == "applied" else m), take, E, ok
+
+    def score(self, candidate: Candidate, buffer: Buffer, exclude=None, _view=None) -> tuple[int, int, int]:
+        """(support, hits, net) of a candidate on the held-out rows (every group but `exclude`): the rows it is counted
+        on — where it would be the applied law (support_on="applied", the default), or every row its condition matches
+        ("matched") — those of them its effect predicts right, and the errors it removes minus the errors it adds where
+        it would be the applied law."""
+        m, take, E, ok = self._rows_of(candidate, buffer, exclude, _view)
         return m.bit_count(), (m & E).bit_count(), (take & E).bit_count() - (take & ok).bit_count()
 
     NULL_FLOOR = 0.05
@@ -708,6 +735,8 @@ class LawSet:
         included — and net > 0. Best: the largest net, then fewer atoms, then the higher precision, then the earlier
         candidate. → the accepted laws."""
         candidates = list(candidates)
+        if self.readmit == "grown" and self._retired_at:
+            candidates = self._not_readmitted(candidates, len(buffer))
         if not candidates:
             return []
         if len(self.laws) >= self.cap:
@@ -744,7 +773,7 @@ class LawSet:
             if best is None or len(self.laws) >= self.cap:
                 break
             _, c, sup, hits, net, nl = best
-            m = buffer.match(c.action, tuple(c.condition)) & views[_key(c.action)][0]
+            m = self._rows_of(c, buffer, exclude, views[_key(c.action)])[0]
             law = self._accept(c, born=exclude, support=sup, hits=hits, net=net,
                                sources=tuple(buffer.ids(c.action, m)))
             law.tested = n_tested
@@ -756,6 +785,26 @@ class LawSet:
             out.append(law)
             self.check(buffer, c.action)
         return out
+
+    def _not_readmitted(self, candidates, size):
+        """The candidates without the laws retired on a buffer of this size or larger (readmit="grown"); retirements
+        not yet stamped are stamped with `size`."""
+        for k, at in self._retired_at.items():
+            if at is None:
+                self._retired_at[k] = size
+        out = []
+        for c in candidates:
+            at = self._retired_at.get((_key(c.action), tuple(c.condition), _key(c.effect)))
+            if at is not None and size <= at:
+                self.refused_readmit += 1
+                continue
+            out.append(c)
+        return out
+
+    def _stamp(self, laws, size):
+        if self.readmit == "grown":
+            for law in laws:
+                self._retired_at[(_key(law.action), law.condition, _key(law.effect))] = size
 
     def add(self, candidate: Candidate, *, born=None) -> Law:
         """Put a law in without the test (a person's law, a written rule, a test fixture) → the law."""
@@ -982,6 +1031,7 @@ class LawSet:
                 h, n = gone.running()
                 self.retire(gone, why=f"held-out precision {h}/{n} below {self.retire_below}")
                 retired.append(gone)
+        self._stamp(retired, len(buffer))
         return retired
 
     def _falls(self, law):
@@ -1008,6 +1058,7 @@ class LawSet:
             self.laws.remove(law)
             law.status, law.why = "retired", why
             self.retired.append(law)
+            self._stamp([law], None)
 
     # ----------------------------------------------------------------------------------- the loop
     def step(self, t: Transition, buffer: Buffer, *, remember: bool = False) -> Step:
@@ -1016,6 +1067,7 @@ class LawSet:
         law = self.applied(t.state, t.action)
         predicted = self.predict(t.state, t.action, disagree="first")
         retired = self.observe(t)
+        self._stamp(retired, len(buffer))
         miss = predicted != t.observed
         st = Step(t, predicted, law, miss, retired=retired)
         if miss:
