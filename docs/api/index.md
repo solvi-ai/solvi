@@ -68,6 +68,7 @@ internal and have no page.
 | [`solvi.core.slow.generate`](generate.md) | generation by an LLM: a text or validated JSON, quotes checked in a text, recorded as a model's output |
 | [`solvi.core.slow.agree`](agree.md) | agreement of generated candidates under a key: the chosen one, its share as a fact, the tally |
 | [`solvi.core.slow.refine`](refine.md) | a check that says why (`Fail`); the loop propose → check → re-ask with the reasons → escalate |
+| [`solvi.core.slow.proposals`](proposals.md) | one proposed / dropped / refuted / admitted count for laws, refine and compile |
 | [`solvi.core.slow.search`](search.md) | search over alternatives: candidates through the System's checks, the best by an objective, pruned, recorded |
 | [`solvi.core.dispatch`](dispatch.md) | who answers: System 1 within its guarantee, a slow path (a System, refine or search) or a person — one recorded decision per input, with a budget |
 | [`solvi.core.environment`](environment.md) | the `Environment` protocol and `Outcome`: a world an agent acts in |

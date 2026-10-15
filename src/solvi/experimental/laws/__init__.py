@@ -152,7 +152,9 @@ and a compiled module dispatches most specific first. The search cost: `lawset.c
 accepted, probes, simulated) and `Step.tested` — report it next to accuracy. `lawset.report(buffer, steps)` sums a
 run up and states per action the rows the buffer has and the support the sized acceptance needs at this N
 (`sized_need` against the action's least base null; `need_at_precision` for a law right on min_precision of its rows):
-an action with fewer rows than that cannot get a law on this buffer — «too few rows», not «no law».
+an action with fewer rows than that cannot get a law on this buffer — «too few rows», not «no law». For one candidate,
+`lawset.why_not(candidate, buffer)` names the first test it fails, in `test`'s order (active, readmit, cap, net,
+min_support, min_precision, exact, sized_need, sized_bound), and by how many rows — without touching the buffer's N.
 
 What is not done:
 - no grammar that cannot be enumerated (where the mismatch should matter most) has been measured;
