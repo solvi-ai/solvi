@@ -503,7 +503,13 @@ class KnowledgeStore:
         return seen
 
     def _statuses(self, ids):
-        return {i: self.status(i) for i in ids}
+        return {i: self._status(i) for i in ids}
+
+    def _status(self, iid):                              # the resolved state as it stands (no flush)
+        st = self.state.get(iid)
+        if st is not None:
+            return st["status"]
+        return "retracted" if iid in self.items else None
 
     def _pending_flags(self):
         out = []
@@ -576,11 +582,16 @@ class KnowledgeStore:
 
     # ------------------------------------------------------------------------------------------------ reading
     def status(self, iid):
-        """The item's status (STATUSES); "retracted" for an item with no live support (retracted, or derived from one)."""
-        st = self.state.get(iid)
-        if st is not None:
-            return st["status"]
-        return "retracted" if iid in self.items else None
+        """The item's status (STATUSES); "retracted" for an item with no live support (retracted, or derived from one).
+        Inside a batch the writes so far are resolved first: an item added in the batch reads as what it is, not as
+        absent (a premise added earlier in the same batch passes the consistency gate)."""
+        self._settle()
+        return self._status(iid)
+
+    def _settle(self):                                   # resolve the writes a batch has deferred, before a read
+        if self._touched or self._tick_dirty:
+            with self._lock:
+                self._flush()
 
     def stale(self, iid):
         """Must this item be re-confirmed before System 1 answers on it alone? Reads the pending flags (and the clock's
@@ -659,6 +670,7 @@ class KnowledgeStore:
         `relation`; `scope`; `kinds`, default every kind) — "facts" (active and not stale) and "hints" (hypotheses,
         expired or stale items, with why) — the ids they rest on, the store's fingerprint and journal position, and the
         query (so redecide can rebuild it). Disputed, refuted and retracted items are not given."""
+        self._settle()
         q = {"about": about, "relation": relation, "scope": scope, "kinds": None if kinds is None else list(kinds)}
         subjects = None if about is None else ({about} if isinstance(about, str) else set(about))
         facts, hints = [], []
