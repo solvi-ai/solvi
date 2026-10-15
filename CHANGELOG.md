@@ -59,6 +59,25 @@ started from a failing test built on the reproduction; the numbers are before �
 - **experimental.changes: a proposal no longer re-reads the whole journal** — 1.0 → 12.3 ms per proposal over 400
   proposals before, 0.3 ms flat after. New in-memory `MemoryStorage` (`Pipeline(stages, ":memory:")`).
 - **experimental.changes: `EvaluatorLock.create` takes `seeds=[...]`** and refuses a bad `n` with a clear error.
+- **experimental.changes: `Pipeline.revert(version)` undoes one version in force and only it**; `rollback(v)` undid
+  every version after v. A snapshot target (not `independent`) can revert only its newest version in force.
+- **Models: a remote model whose server did not answer is counted apart.** After its retries (timeout, network error,
+  429, 5xx) the question still abstains, but the audit, `System.stats["no_answer"]` and `safeguard_summary()`
+  («server did not answer») count it apart from `model_escalated`: no answer is not a wrong answer and not the model's
+  doubt (the question's guard is `"no_answer"`; the reason still starts with «model escalated: ... did not answer»).
+  Defaults unchanged (`timeout=60`, `retries=2`); `solvi models` examples report the no-answer share. **Behaviour
+  change** for readers of `stats["model_escalated"]`.
+- **Laws: `admit_by_probes` warns when the accepted law may be too general.** When an atom that a longer candidate of
+  the surviving class adds never varied on the pool where the accepted (shortest) law holds, the law is still accepted,
+  the atoms are listed in `Admission.untested` and a `UserWarning` says so; `coverage="undetermined"` refuses instead,
+  `coverage="ignore"` is the old silent behaviour. **Behaviour change** (a new warning; the decision is unchanged).
+- **testing: `boundary()` makes more kinds of edge input and spreads them over input shapes** — None where a field has
+  shown None, a value of another type the field has shown (the value itself converted when it converts cleanly, 7 →
+  "7", the str / int confusion of states loaded from JSON), accented text decomposed (NFD) and a compatibility ligature
+  ("ﬁß"); within each kind of change cases are taken one per input shape (field → type) first, then the shortest and
+  longest, then the rest, so many cases of one shape no longer crowd out the others at small `n`. Still deterministic;
+  round-robin by kind, dedupe and pinning unchanged. **Behaviour change:** the same cases give a different list;
+  case files generated earlier stay valid, regenerating them gives new ones.
 
 ### Added
 
@@ -87,6 +106,86 @@ started from a failing test built on the reproduction; the numbers are before �
 - experimental.changes: `KnownFailures(context=, ttl=, key=, clock=)`, `Pipeline.expire_held(max_age)`.
 - Guard: `Guard(user_verifier=)` binds an approval to who gave it and to the call (`sign_approval`,
   `approval_verifier`).
+- `store.diff.Shadow` takes labels (opt-in): `shadow.ask(state, rid=...)` remembers both answers and
+  `shadow.label(rid, truth)` feeds a paired, anytime-valid harm stop — among labelled answers where exactly one of
+  current / candidate is right, a test martingale tests «the candidate is the wrong one at most half the time», overall
+  at alpha/2 and per slice (`slice_of=`, `max_slices=`) at alpha/(2·max_slices). The first to reach its level sets
+  `shadow.halted` (`scope` "overall" or "slice"); the shadow keeps answering with the current system (no traffic
+  splitting, no automatic switch). New `Shadow(slice_of=, alpha=0.05, max_slices=20, correct=, max_pending=10_000)`,
+  `shadow.labels`, `shadow.harm`. A candidate wrong on every discordant pair is halted after 10 of them; harm confined to
+  one of two slices (overall e-value 0.03) is halted in that slice; under the null 3.1 % of 2,000 runs × 1,000 pairs
+  halt (bound 5 %).
+- `experimental.changes.ShipWatch` / `pipe.watch(version, promise)` (opt-in): a post-ship watch keeps, per declared
+  slice, a test martingale against that slice's promised failure rate on the change's own outcomes and reverts only the
+  watched version when one slice's evidence reaches slices/α; a change that keeps every promise is reverted with
+  probability at most α, at any time. Synthetic stand (four slices, a 5 % slice raised from 5 % to 30 % failure, promise
+  10 %, α 0.05): 60 of 60 harmful rollouts reverted, 0 of 60 clean ones, 14 of 600 at exactly the promise; no
+  detection-delay edge over a mean-with-tolerance rule checked after every outcome (which reverted 22 of 60 clean
+  rollouts). `outcome="loss"` for a numeric loss in [0, 1].
+- `experimental.changes.SliceGuard(measure, original=None, tol=0.02, cumulative_tol=None, alpha=0.05, min_n=30,
+  on_small="hold")`: a stage that judges a change per slice on paired per-case losses, against the version in force and
+  against the original version (pinned at the guard's first run, or given), so harm in a small slice under an overall
+  gain and a chain of small changes each harmless on its own are refused. Bonferroni over slices and references; a
+  small or unmeasured slice holds for a person by default. Toy target: eight steps of +0.012 on a 40-case slice all pass
+  against the version in force (+0.084 in total); against the original the chain stops at +0.036.
+- `testing.conformance.check_pipeline(make_pipeline, make_change, attacks=ATTACKS, steps=None, control=True,
+  strict=True)`: attack fixtures on a change pipeline — a harmful change replayed under new seeds, salami, harm in a
+  slice under an overall gain, a refusal bypass, a nonce on a rejected change, a stage that raises — each on a fresh
+  pipeline, plus a benign control; the report names the stage that caught each proposal, and `strict` fails on a passed
+  attack or a refused control.
+- `testing.conformance.check_environment(make, clone=)` checks a snapshot / restore hook (the one `ExactModel(clone=)`
+  takes): a clone at a state gives the original's outcome for the same action, and stepping it leaves the original
+  unchanged. `ExactModel` without `clone=` warns once when its fork deep-copies a torch module or more than 8 MB.
+- `System(..., cache=N)` (opt-in): a pure-decision cache for catalogs without models — a repeated input (same catalog
+  and questions, `early_exit`, facts) is served as a copy of the first decision, `res.cached == {"of": <its stored
+  id>}`; stored, it is a compact record with `meta={"cache_of": id}`, so `verify()` checks it and `replay_all` re-runs
+  it and compares every step hash. A model-backed catalog refuses `cache=`; learning systems, answer heads, stateful
+  guarantees, another `order` and a strategist of your own bypass it. Median time per ask, hit ÷ no cache: 0.12–0.17×
+  on the quickstart, 0.05–0.10× on catalogs of 50 / 1,000 parts, 0.43–0.74× on a 3.7k-float input (hashing the input is
+  most of a hit), 0.27–0.65× with a SQLite store; a miss 1.0–1.2×. `TraceStorage.save(..., record=)` overrides the
+  store's mode for one response.
+- Stores: `with store.batch():` and `store.save_many(responses, metas=None)` — `JSONLStorage` takes its locks and
+  writes the head (and, with `fsync=True`, syncs) once per batch; the SQL stores commit once per batch and roll it back
+  on an exception. 1,000 small asks: JSONL 2,496 → 3,048 asks/s, SQLite 1,853 → 2,687. Single saves unchanged; the
+  stores' thread locks are reentrant.
+- `Dispatcher(audit=rate)` (opt-in) marks a random share of decisions for labelling (`Dispatched.audit`, `"audit":
+  true` in the record); `teach` / `save_correction(label_source="audit", of=)` stores a label of a marked decision only;
+  `corrections(label_source=)` filters by source; the system report shows the audited sample and each promise's verdict
+  on it. Default 0: records and the dispatcher's config are unchanged.
+- `build(split="hash")` (opt-in): each example's share is set by a hash of its state (or group), salted by `seed=`, so
+  examples added later leave every old example in its share and the order of examples does not matter;
+  `choices["split_by"]` says which split was used.
+- `KnowledgeStore.forget(source, storage, decide)`: takes back what a source told, re-decides the stored decisions
+  that rested on it on the current journal, and writes one «forget» journal entry; new docs page «Forgetting a source»
+  (with `where_is` + `redact` for erasing personal data in decision records). A release before this one cannot read a
+  journal with a «forget» entry.
+- Laws: relative tolerance — `split`, `discriminate` and `admit_by_probes` take `rtol=` (|a − b| ≤ tol +
+  rtol·max(|a|, |b|)), and `LawSet(tol=, rtol=, same=)` compares predictions with observations within it in `step`,
+  `mismatch`, `test`, `observe`, `check`, `conflict` and `admit_by_probes`; `LawSet.agrees(predicted, observed)`.
+  Default: exact equality. On y = 2.5·x over x from 1 to 1e5 with relative noise 1e-7, exact equality learned no law in
+  60 steps; `rtol=1e-5` learned it with no mismatch after.
+- Laws: `Admission.refuted_list` (the refuted candidates; `refuted` stays their count); `LawSet.explain(state,
+  action)` → `(value, law)`, so «a law says 0» and «no law» are told apart; `LawSet.why_not(candidate, buffer)` names
+  the first acceptance test a candidate fails and by how many rows.
+- `solvi.core.slow.proposals`: one count `Proposals(proposed, dropped, refuted, admitted)` for laws
+  (`proposals_of(lawset)`), the refine loop (`Refinement.proposals`) and compiled specifications
+  (`Compiled.proposals`).
+- experimental.skills: `EProcess.update(..., loss=x)` / `loss_refuted` — a bounded betting e-process against «the
+  mean loss is at most the promise»; a statement, it does not move certification or the alarm.
+- MCP proxy: an opt-in context channel — with `solvi serve --guard ... --context-from-client`
+  (`run_proxy(context_from_client=True)`) the client may send the user's messages (`notifications/solvi/context`, or
+  `_meta["solvi/context"]` on a `tools/call`), so `ground=` arguments and `require_request` read the user's own words;
+  roles user / assistant / system only. Off by default; the channel trusts the client.
+- `experimental.compile.sandbox.run_many(sources, driver, payload)` runs many modules in one subprocess, each with its
+  own CPU and wall-time limit and result; a module that ends the process is reported as a crash and the rest run in a
+  fresh subprocess. 20 trivial modules: 5.1 ms a module vs 106 ms for one `run` each.
+- `benchmarks/baseline.json` and `tests/test_benchmark_bars.py` (`-m slow`): bars for `drift_simulation.py`,
+  `journal_size.py` and `ask_overhead.py` (speed as ratios within one run).
+- Docs: best practices gain the remaining notes of the review (weighted checks of another family, re-derivation as a
+  slow path, calibration under a new error regime, cost of checks and of «don't know», hard vetoes, budgets, novelty
+  calibration, restarting a detector, wrapping a strong agent, context-wide taint, the change pipeline vs relabelling,
+  the knowledge store, laws on stochastic worlds, deterministic copies of an environment) and notes on the new parts
+  (cache, Shadow, audit labels, hash split, clone hooks, change-pipeline attacks, slow backends).
 
 ## 1.1.1 — 2026-10-11 — fixes from use, and four learning items with their measurements
 
