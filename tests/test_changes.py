@@ -111,7 +111,7 @@ def test_a_hazard_rule_from_outcomes_is_promoted_listed_and_rolled_back(tmp_path
     gates = gates_of(ks)
     assert len(gates) == 1 and not allowed({"next": "lava"}, "step", gates) and allowed({"next": "floor"}, "step", gates)
     assert len(ks.find(kind="rule")) == 1                     # the view wrote nothing
-    assert pipe.rollback(0, by="ann", why="test") == [1]
+    assert pipe.rollback(0, by="ann", why="test", failed=False) == [1]
     assert gates_of(ks) == []
     assert ks.status(iid) == "retracted" and pipe.current == 0 and not pipe.versions()[0]["in_force"]
     assert pipe.journal.verify()["ok"] and ks.verify()

@@ -6,7 +6,8 @@
 
 Built in, in the order the pipeline usually runs them (what each one wraps, ports, or adds):
 
-  KnownFailures      a candidate identical to one rejected before is refused (reads the change journal)          new
+  KnownFailures      a candidate identical to one rejected (or rolled back with a reason) before is refused; in a
+                     context, for a ttl, when given (reads the change journal)                                  new
   Static             the source and the artifact are well-formed; the store's SourceGate; rule code passes the
                      compiler's sandbox check; evidence exists; a parse callback                                 wraps
   Consistency        the store's ConsistencyGate on the proposed item; conflicts on its key; narrows / widens   wraps
@@ -105,19 +106,97 @@ def _call(fn, change, ctx):
 
 
 # ───────────────────────────────────────────────────────────── 9. failure memory (new)
+IDENTITY_KEYS = ("s", "r", "o", "kind", "change")   # what a keyed item body says; its other keys are not its identity
+
+
+def identity(content):
+    """What the failure memory compares: Change.content() (or a journaled change dict) without the body keys of a keyed
+    item (a body with a subject "s" and a relation "r") other than IDENTITY_KEYS — an added "nonce" or note does not
+    make a rejected rule new. Other candidates: their whole content, as Change.fingerprint."""
+    from ...core.runtime import vhash
+    c = content.get("content")
+    if content.get("artifact") == "item" and isinstance(c, dict):
+        body = c.get("body")
+        if isinstance(body, dict) and "s" in body and "r" in body:
+            c = {**c, "body": {k: body[k] for k in IDENTITY_KEYS if k in body}}
+    return vhash({**{k: content.get(k) for k in ("source", "artifact", "code", "check")}, "content": c})[:24]
+
+
 class KnownFailures:
-    """A candidate whose fingerprint (Change.fingerprint: source, artifact, content, code) was rejected before is refused
-    with the earlier stage and reason — a search does not walk in circles. Reads the change journal; nothing expires
-    (unlike solvi.core.knowledge.FailureMemory, which unblocks a plan after a window)."""
+    """A candidate whose identity (identity(): Change.fingerprint's source, artifact, content and code, with a keyed
+    item's body read as its subject, relation, value and kind only) was rejected before, or was rolled back with a
+    reason (Pipeline.rollback(why=...), failed=True), is refused with the earlier stage and reason — a search does not
+    walk in circles, and an extra key in a rule's body does not make a rejected rule new. A stage that raised (status
+    "error") is not a failure: the candidate runs again. Reads the change journal (kept up to date incrementally).
+
+    By default a failure is remembered for ever and everywhere. `context(change)` → a JSON value (the tests' version,
+    a season, a regime): a failure counts only for a candidate proposed in the same context — a change rejected under
+    old tests is retried under new ones. `ttl` (seconds): a failure older than that no longer counts (as
+    solvi.core.knowledge.FailureMemory unblocks a plan after a window); the age is `clock()` (default time.time) minus
+    the journal record's time, so give the journal's storage the same clock. `key(change)` → a JSON value replaces
+    identity() (two candidates with the same key are one). The key and context are journaled in this stage's verdict
+    (measured["memory"]), so the memory survives the process. A refusal by this stage does not renew a failure.
+
+    rollbacks: do rollbacks with a reason count as failures (default True; False: only rejections do)."""
     name = "failure_memory"
 
+    def __init__(self, *, rollbacks=True, key=None, context=None, ttl=None, clock=None):
+        if ttl is not None and (isinstance(ttl, bool) or not isinstance(ttl, (int, float)) or ttl <= 0):
+            raise ValueError(f"ttl is a number of seconds > 0 or None, not {ttl!r}")
+        self.rollbacks, self.key, self.context, self.ttl = bool(rollbacks), key, context, ttl
+        self.clock = clock or __import__("time").time
+
+    @staticmethod
+    def _hash(x):
+        from ...core.runtime import vhash
+        return vhash(x)[:24]
+
+    def _memory(self, change):
+        """(key, context) of a candidate as this stage compares them."""
+        k = identity(change.content()) if self.key is None else self._hash(self.key(change))
+        return k, (None if self.context is None else self._hash(self.context(change)))
+
+    @staticmethod
+    def _step(st, d):
+        """The failure index over the journal: (key, context) → the latest rejection, the latest failed rollback (kept
+        up to date by ChangeJournal.fold). A candidate's (key, context) is what this stage journaled for it, else its
+        identity() in no context."""
+        a, cid = d.get("action"), d.get("change")
+        if a == "propose":
+            st["mem"][d["id"]] = (identity(d.get("change") or {}), None)
+        elif a == "verdict" and d.get("stage") == KnownFailures.name and cid in st["mem"]:
+            m = (d.get("measured") or {}).get("memory")
+            if isinstance(m, list) and len(m) == 2:
+                st["mem"][cid] = tuple(m)
+        elif a == "rejected" and d.get("stage") != KnownFailures.name and cid in st["mem"]:
+            st["failed"][st["mem"][cid]] = ("rejected", d.get("time"), d, cid)
+        elif a == "rollback" and d.get("failed"):
+            for c in d.get("changes") or ():
+                if c in st["mem"]:
+                    st["rolled"][st["mem"][c]] = ("rolled back", d.get("time"), d, c)
+
     def run(self, change, ctx):
-        fp = change.fingerprint()
-        for d in ctx.journal.records("rejected"):
-            if d.get("fingerprint") == fp:
-                return StageVerdict.refuse(f"rejected before by stage {d.get('stage')!r}: {d.get('reason')}",
-                                      {"earlier": d.get("change")})
-        return StageVerdict.admit()
+        mem, fp = self._memory(change), change.fingerprint()
+        idx = ctx.journal.fold("known_failures", lambda: {"mem": {}, "failed": {}, "rolled": {}}, self._step)
+        now = self.clock()
+        for table in ("failed", "rolled") if self.rollbacks else ("failed",):
+            hit = idx[table].get(mem)
+            if hit is None:
+                continue
+            what, t, d, cid = hit
+            age = None if t is None else now - float(t)
+            if self.ttl is not None and age is not None and age >= self.ttl:
+                continue
+            when = "" if self.ttl is None or age is None else f" ({age:.0f}s ago)"
+            if what == "rolled back":
+                return StageVerdict.refuse(f"rolled back before{when}: {d.get('why')}", {"earlier": cid})
+            same = "" if d.get("fingerprint") == fp or self.key is not None else \
+                " (the same subject, relation and value; other body keys differ)"
+            return StageVerdict.refuse(f"rejected before{when} by stage {d.get('stage')!r}{same}: {d.get('reason')}",
+                                       {"earlier": cid})
+        if self.key is None and self.context is None:
+            return StageVerdict.admit()
+        return StageVerdict.admit(measured={"memory": list(mem)})
 
 
 # ───────────────────────────────────────────────────────────── 1. static (wraps)
