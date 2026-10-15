@@ -547,7 +547,7 @@ class LawSet:
     (|a − b| ≤ tol + rtol·max(|a|, |b|); tuples and lists element by element), or `same(a, b)` → bool. For a numeric
     effect measured with noise: y = 2.5·x over x from 1 to 1e5 with a relative noise of 1e-7 is a mismatch on every
     row under exact equality (no law learned in 60 steps); with rtol=1e-5 the law is learned and no later row is a
-    mismatch.
+    mismatch (tests/test_laws_rtol.py).
 
     cost: the search-cost record — candidates (proposed for mismatches), tests (candidates scored on a buffer),
     accepted, probes (asked by `admit_by_probes`), simulated (0 here; a model-based learner adds its steps) — report it
