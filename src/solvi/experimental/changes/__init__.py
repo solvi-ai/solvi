@@ -101,7 +101,7 @@ What is not done:
 - no validity periods in compile Versions (nor the change-type classifier in the compiler);
 - the research harness's untrusted-code process sandbox is not ported (Static uses the compiler's sandbox check);
 - a held change lives only in this process's memory until it is ruled on (its journal records survive, the Change
-  object does not)."""
+  object does not); Pipeline.expire_held(max_age) rules on the ones that waited too long."""
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -487,6 +487,17 @@ class Pipeline:
     def held(self):
         """The ids of the changes held in this pipeline, waiting for a ruling."""
         return sorted(self._held)
+
+    def expire_held(self, max_age, *, approve=False, by="expiry", now=None):
+        """Rule on every change held for max_age seconds or longer (since its "held" record; `now` default: the
+        journal storage's clock) — rejected by default (approve=True: approved), the ruling journaled as by `by`; a
+        held change without a person no longer waits for ever. → the Results."""
+        if isinstance(max_age, bool) or not isinstance(max_age, (int, float)) or max_age < 0:
+            raise ValueError(f"max_age is a number of seconds >= 0, not {max_age!r}")
+        now = self.journal.storage.clock() if now is None else now
+        held_at = {d["change"]: d.get("time") for d in self.journal.records("held")}
+        return [self.rule(cid, bool(approve), by=by) for cid in self.held()
+                if held_at.get(cid) is not None and now - float(held_at[cid]) >= max_age]
 
 
 __all__ = ["allowed", "Approval", "ARTIFACTS", "Canaries", "catalog_of", "Change", "CHANGE_TYPES", "ChangeJournal", "CleanCases",
