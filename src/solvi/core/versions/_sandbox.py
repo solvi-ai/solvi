@@ -6,7 +6,7 @@ solvi.experimental.compile.sandbox in 1.1, which re-exports it and keeps the sub
 
 `check` reads the module with `ast` and refuses: an import outside `ALLOWED` (pure standard-library modules: re, math,
 datetime, itertools, collections, functools, string, unicodedata, json, fractions, decimal, heapq, bisect, statistics,
-typing) or a relative one; a name or a definition from `FORBIDDEN` (open, eval, exec, compile, __import__, globals,
+typing, cmath — plus the modules given as `allowed=`) or a relative one; a name or a definition from `FORBIDDEN` (open, eval, exec, compile, __import__, globals,
 locals, vars, getattr, setattr, delattr, input, breakpoint, exit, quit, help, memoryview, os, sys, subprocess, socket —
 getattr & co. would reach a dunder by a string); any dunder name or attribute (`__class__`, `__builtins__`, `__name__`).
 
@@ -26,7 +26,7 @@ import hashlib
 import linecache
 
 ALLOWED = frozenset({"re", "math", "datetime", "itertools", "collections", "functools", "string", "unicodedata", "json",
-                     "fractions", "decimal", "heapq", "bisect", "statistics", "typing"})
+                     "fractions", "decimal", "heapq", "bisect", "statistics", "typing", "cmath"})
 FORBIDDEN = frozenset({"open", "eval", "exec", "compile", "__import__", "globals", "locals", "vars", "getattr", "setattr",
                        "delattr", "input", "breakpoint", "exit", "quit", "help", "memoryview", "os", "sys", "subprocess",
                        "socket"})
@@ -45,8 +45,23 @@ def _dunder(s):
     return s.startswith("__") and s.endswith("__")
 
 
-def check(source: str) -> list[str]:
-    """The reasons the sandbox refuses this module, each with its line ([] — allowed). See the module docs."""
+def _allowed(allowed=()):
+    """ALLOWED plus the modules given (top-level names); a forbidden name (os, sys, ...) cannot be allowed."""
+    if not allowed:
+        return ALLOWED
+    extra = {allowed} if isinstance(allowed, str) else set(allowed)
+    if not all(isinstance(m, str) and m.isidentifier() for m in extra):
+        raise ValueError("allowed= takes top-level module names, e.g. allowed=(\"numpy\",)")
+    bad = sorted(extra & FORBIDDEN)
+    if bad:
+        raise ValueError(f"allowed= cannot admit {bad}: those names are forbidden in the sandbox")
+    return ALLOWED | frozenset(extra)
+
+
+def check(source: str, allowed=()) -> list[str]:
+    """The reasons the sandbox refuses this module, each with its line ([] — allowed). allowed: more modules it may
+    import, beyond ALLOWED (top-level names; never a forbidden one). See the module docs."""
+    ok = _allowed(allowed)
     try:
         tree = ast.parse(source)
     except SyntaxError as e:
@@ -56,10 +71,10 @@ def check(source: str) -> list[str]:
         line = getattr(node, "lineno", "?")
         if isinstance(node, ast.Import):
             for a in node.names:
-                if a.name.split(".")[0] not in ALLOWED:
-                    why.append(f"line {line}: import {a.name} is not allowed (allowed: {', '.join(sorted(ALLOWED))})")
+                if a.name.split(".")[0] not in ok:
+                    why.append(f"line {line}: import {a.name} is not allowed (allowed: {', '.join(sorted(ok))})")
         elif isinstance(node, ast.ImportFrom):
-            if node.level or (node.module or "").split(".")[0] not in ALLOWED:
+            if node.level or (node.module or "").split(".")[0] not in ok:
                 why.append(f"line {line}: from {'.' * node.level}{node.module or ''} import ... is not allowed")
         elif isinstance(node, ast.Name):
             if node.id in FORBIDDEN:
@@ -85,19 +100,20 @@ def check(source: str) -> list[str]:
 INTERNAL = frozenset({"_strptime"})
 
 
-def _guarded_import(real):
+def _guarded_import(real, allowed=ALLOWED):
     def guarded(name, globals=None, locals=None, fromlist=(), level=0):
-        if level or (name.split(".")[0] not in ALLOWED and name not in INTERNAL):
+        if level or (name.split(".")[0] not in allowed and name not in INTERNAL):
             raise ImportError(f"import {name} is not allowed in the sandbox")
         return real(name, globals, locals, fromlist, level)
     return guarded
 
 
-def safe_builtins():
-    """The builtins a sandboxed module sees: the forbidden names removed, `__import__` admitting ALLOWED only."""
+def safe_builtins(allowed=()):
+    """The builtins a sandboxed module sees: the forbidden names removed, `__import__` admitting ALLOWED (and
+    `allowed`) only."""
     import builtins
     safe = {k: v for k, v in vars(builtins).items() if k not in FORBIDDEN}
-    safe["__import__"] = _guarded_import(builtins.__import__)
+    safe["__import__"] = _guarded_import(builtins.__import__, _allowed(allowed))
     safe["__build_class__"] = builtins.__build_class__
     return safe
 
@@ -107,16 +123,17 @@ def source_name(source: str) -> str:
     return f"<solvi-sandbox-{hashlib.sha256(source.encode()).hexdigest()[:16]}>"
 
 
-def load(source: str, extra: dict | None = None) -> dict:
+def load(source: str, extra: dict | None = None, allowed=()) -> dict:
     """Execute an allowed module in this process → its namespace. Raises `Refused` with the reasons when `check` refuses
-    it. `extra`: names put into the namespace before it runs (trusted helpers such as `Fail`)."""
-    why = check(source)
+    it. `extra`: names put into the namespace before it runs (trusted helpers such as `Fail`). allowed: more modules it
+    may import, as for check."""
+    why = check(source, allowed)
     if why:
         raise Refused(why)
     name = source_name(source)
     lines = source.splitlines(keepends=True)
     linecache.cache[name] = (len(source), None, lines, name)    # mtime None: never evicted by checkcache
-    ns = {"__builtins__": safe_builtins(), "__name__": name}
+    ns = {"__builtins__": safe_builtins(allowed), "__name__": name}
     ns.update(extra or {})
     exec(compile(source, name, "exec"), ns)                      # noqa: S102 — checked above, restricted builtins
     return ns
