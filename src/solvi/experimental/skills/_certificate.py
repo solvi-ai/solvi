@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import math
 
+from .._evalue import MeanBound
+
 SCOPES = ("skill", "goal", "set")
 
 
@@ -75,10 +77,20 @@ class EProcess:
         self.failures = 0
         self.alarms = 0
         self.since = 0                     # outcomes since the last (re)start
+        self.loss_test = MeanBound(cert.promise)   # update(..., loss=x): x in [0, 1] against "mean loss <= promise"
 
-    def update(self, ok: bool, alone: bool = True) -> dict:
-        """One outcome → {"certified": certified by this outcome, "alarm": restarted by this outcome}."""
+    @property
+    def loss_refuted(self) -> bool:
+        """A numeric loss given to update(loss=) has mean above the promise: its e-process >= 1/delta (lifetime)."""
+        return self.loss_test.evidence >= math.log(1.0 / self.cert.delta) - 1e-12
+
+    def update(self, ok: bool, alone: bool = True, *, loss: float | None = None) -> dict:
+        """One outcome → {"certified": certified by this outcome, "alarm": restarted by this outcome}. loss: an
+        optional numeric outcome in [0, 1] fed to a bounded betting e-process against "the mean loss is at most the
+        promise" (`loss_refuted`; a statement, it does not move certification or the alarm)."""
         c = self.cert
+        if loss is not None:
+            self.loss_test.update(loss)
         self.n += 1
         self.since += 1
         self.failures += 0 if ok else 1
@@ -110,7 +122,8 @@ class EProcess:
     def to_dict(self) -> dict:
         return {"certified": self.certified, "log_wealth": round(self.log_wealth, 6),
                 "need_log_wealth": round(math.log(1.0 / self.cert.delta), 6), "remaining": self.remaining(),
-                "outcomes": self.n, "failures": self.failures, "alarms": self.alarms, "since_restart": self.since}
+                "outcomes": self.n, "failures": self.failures, "alarms": self.alarms, "since_restart": self.since,
+                "loss_against": round(self.loss_test.evidence, 6), "loss_outcomes": self.loss_test.n}
 
     def __repr__(self):
         return f"EProcess(certified={self.certified}, outcomes={self.n}, remaining={self.remaining()})"

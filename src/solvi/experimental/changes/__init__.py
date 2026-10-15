@@ -12,6 +12,9 @@ into what already holds that kind of knowledge, and can be rolled back.
     res = pipe.propose(ch)              # → Result: "promoted" (with a version) | "rejected" (the stage) | "held" | "error"
     pipe.rule(res.change_id, True, by="ann")    # a person's ruling for a held change (or a compile Ruling keep / drop)
     pipe.versions(); pipe.current; pipe.rollback(0); pipe.lineage(res.change_id); pipe.observe(res.change_id, {...})
+    pipe.revert(res.version)            # undo this version alone (rollback(v) undoes every version after v)
+    w = pipe.watch(res.version, promise={"north": 0.10, "rare": 0.10})   # ShipWatch: per-slice e-process after ship
+    w.observe(ok, slice="rare")         # → None | {"event": "reverted" | "graduated" | "ended", ...}
 
 What it is: a generalisation of the learning loop of 0.7–1.0 (a candidate, gates with recorded numbers, promote /
 rollback, versions, a changelog) from one source (labels) to four, with the stages as objects like the knowledge
@@ -117,6 +120,7 @@ from ._stages import (DEFAULT_APPROVAL, LEVELS, REFUSAL_WORDS, Approval, Canarie
                      Consistency, Context, FreshEnvironments, identity, IDENTITY_KEYS, Impact, KnownFailures, RefusalRegression, SliceGuard, SOURCES,
                      Stage, Static, StageVerdict, allowed, gate_of, gates_of, hazard_body, hazard_gate, is_refusal)
 from ._targets import KnowledgeTarget, LearningTarget, Promoted, Refused, VersionsTarget
+from ._watch import ShipWatch
 
 warn_on_import(__name__)
 
@@ -465,6 +469,32 @@ class Pipeline:
                            failed=failed, changes=[promoted[v]["change"] for v in undone])
         return undone
 
+    def revert(self, version, *, by=None, why=None, failed=None):
+        """Undo one version in force — and only it — through its target; recorded (a "rollback" record with
+        `revert`). Later versions stay in force (rollback(v) undoes every version after v). A target whose versions are
+        snapshots (not `independent`: a compiled catalog, a labelled update) can revert only its newest version in
+        force: undoing one out of the middle would restore a state that drops the later ones. failed: as in rollback.
+        → [version]."""
+        in_force, promoted = self._state()
+        if version not in in_force:
+            raise KeyError(f"version {version} is not in force (in force: {in_force})")
+        d = promoted[version]
+        target = self.targets[d["artifact"]]
+        later = [v for v in in_force if v > version and promoted[v]["artifact"] == d["artifact"]]
+        if later and not getattr(target, "independent", False):
+            raise ValueError(f"version {version} is a snapshot of artifact {d['artifact']!r} with later versions in "
+                             f"force {later}: reverting it alone would drop them; rollback to its parent instead")
+        target.rollback(d["ref"], by=by, why=why or f"revert of version {version}")
+        failed = why is not None if failed is None else bool(failed)
+        self.journal.write("rollback", to=None, revert=version, undone=[version], by=None if by is None else str(by),
+                           why=why, failed=failed, changes=[d["change"]])
+        return [version]
+
+    def watch(self, version, promise, **kw):
+        """A ShipWatch on a shipped version (see ShipWatch): per slice an e-process on its alone outcomes against its
+        promise; reverts it alone when a slice breaks the promise."""
+        return ShipWatch(self, version, promise, **kw)
+
     def lineage(self, change_id):
         """The change and its ancestors: [{"change", "version", "parent"}], following each one's parent version back to
         version 0."""
@@ -506,5 +536,5 @@ __all__ = ["allowed", "Approval", "ARTIFACTS", "Canaries", "catalog_of", "Change
            "Confirmation", "Consistency", "Context", "DEFAULT_APPROVAL", "EvalLocked", "EvaluatorLock",
            "FreshEnvironments", "gate_of", "gates_of", "hazard_body", "hazard_gate", "identity", "IDENTITY_KEYS", "Impact", "is_refusal", "KnowledgeTarget",
            "KnownFailures", "REFUSAL_WORDS", "RefusalRegression",
-           "LearningTarget", "LEVELS", "MemoryStorage", "paired_bootstrap", "Pipeline", "Promoted", "Refused", "Result", "run_episode", "SliceGuard", "SOURCES",
+           "LearningTarget", "LEVELS", "MemoryStorage", "paired_bootstrap", "Pipeline", "Promoted", "Refused", "Result", "run_episode", "ShipWatch", "SliceGuard", "SOURCES",
            "Stage", "Static", "STORE_SOURCE", "StageVerdict", "VersionsTarget"]

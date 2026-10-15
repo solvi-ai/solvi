@@ -42,6 +42,7 @@ class Promoted:
 
 class KnowledgeTarget:
     artifact = "item"
+    independent = True          # each version is its own item: one can be undone alone (Pipeline.revert)
 
     def __init__(self, store):
         self.store = store
