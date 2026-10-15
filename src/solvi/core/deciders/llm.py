@@ -723,6 +723,11 @@ answers — see the module docs), or one of them. logprobs: "auto" (ask for them
     drop them when the server refuses; a gateway whose providers differ answers some requests from them and some from
     the written numbers — a calibration then refuses the mix), True, False. ask: "probabilities" (one per option) or "confidence" (one number,
     fewer tokens; the rest shared evenly). retries / backoff: for network errors, timeouts, 408 / 409 / 429 / 5xx.
+    timeout: seconds per request (default 60). A slow or local backend — a queue, a proxy in front of a CLI model, a
+    reasoning model — that answers in 30–300 s needs a larger timeout (and fewer retries: each retry sends the same
+    request again); otherwise every question escalates with "the LLM server did not answer after 3 attempts". Such a
+    question abstains like any escalation, but the audit and `System.stats` count it as `no_answer` ("server did not
+    answer"), apart from `model_escalated` (the model's own doubt or an invalid reply) — no answer is not a wrong one.
     seed: sent only when set (default None: not sent; some providers reject seed 0, and at temperature 0 it rarely
     matters). headers: extra HTTP headers (OpenRouter's HTTP-Referer, X-Title). extra_body: server-specific request
     fields merged into every request's JSON — OpenRouter's provider routing and reasoning settings, vLLM's sampling

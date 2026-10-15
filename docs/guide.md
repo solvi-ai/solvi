@@ -1201,7 +1201,7 @@ answer comes from the probabilities). The scorer (`model.scorer`) keeps the tota
 
 | What happens | Result |
 |---|---|
-| no answer after the retries (network, timeout, 408 / 409 / 429 / 5xx) | the decision escalates ("did not answer after N attempts: …"); not cached, asked again next time |
+| no answer after the retries (network, timeout, 408 / 409 / 429 / 5xx) | the decision escalates ("did not answer after N attempts: …"); not cached, asked again next time; the audit and `system.stats` count it as `no_answer` ("server did not answer"), not `model_escalated` |
 | HTTP 400 / 413 / 422 | the decision escalates with the service's error text (and a gateway's wrapped cause, OpenRouter's `error.metadata.raw`) |
 | 401, 403, 404 and any other 4xx (a wrong key, model or URL) | `SystemOneError` is raised |
 | a reply that is not a JSON object, lacks a question's answer or a probability, or gives a number outside [0, 1] | the decision escalates ("invalid System One output — …"); never a guess |
@@ -1242,7 +1242,8 @@ A reply that is not a choice — a query, a plan, a JSON extraction — is `solv
 
 Everything is checked, and what fails escalates — `model escalated: invalid LLM output — ...` — instead of being turned
 into a guess: an answer that is not one of the options, probabilities that are not numbers in [0, 1] or disagree with
-the answer, a reply that is not JSON, is cut off or refused. Such a decision (and one whose server did not answer) has
+the answer, a reply that is not JSON, is cut off or refused. Such a decision (and one whose server did not answer —
+counted apart as `no_answer` in the audit and `system.stats`, since no answer is not a wrong one) has
 no value (`d.value is None`), no probabilities (`d.probs == {}`) and confidence 0, so code that reads the value or
 p(yes) without looking at `d.escalate` cannot take it for an answer. The quote (and a span answer) is looked up
 literally, up to typographic quotes and apostrophes (’ ‘ “ ” as ' "), dashes (– — as -), runs of whitespace and — when
@@ -1283,8 +1284,10 @@ reasoning — no reasoning text and no reasoning tokens counted — when it was 
 `extra["llm"]["reasoning"] = "none"` and is warned about once (with `response_format="json_schema"` set by hand, that
 is how you see it); `extra["llm"]["reasoning_tokens"]` records the count when the server reports one. Without the
 grammar gpt-oss now and then writes a decimal as `0. nine`: that exact form is read as 0.9 and recorded in
-`extra["llm"]["repaired"]`; anything else that is not JSON escalates as before. Raise `timeout` (default 60 s) with
-reasoning on: the thinking counts against `max_tokens` on most servers, and a reply cut off there escalates ("the
+`extra["llm"]["repaired"]`; anything else that is not JSON escalates as before. A slow or local backend (a queue, a
+proxy in front of a CLI model) that answers in 30–300 s needs a larger `timeout` (default 60 s) and fewer `retries`
+(default 2: each sends the same request again) — otherwise every question becomes `no_answer`. Raise `timeout` with
+reasoning on too: the thinking counts against `max_tokens` on most servers, and a reply cut off there escalates ("the
 reply was cut off (max_tokens)"). Under `long="retrieve"` an LLM reads 512 tokens per request by
 default; `max_len=` widens that (see "A larger budget").
 
@@ -3956,11 +3959,12 @@ by a hard check, and 600 and 400 decisions under the two catalog fingerprints.
 parts, answer heads and learned rules), `grounding_rejected`, `type_rejected`, `outside_options`, `rule_abstained`,
 `low_confidence`, `validator_rejected`,
 `forced_by_hard_check`, `constraint_repairs`, `fallbacks`, `model_escalated`, `evidence_missing`, `timeouts`,
-`instruction_flips`, `memory_disagreements`, `contract_refused` (answers that broke their question's contract:
+`no_answer` (a remote model's server did not answer after its retries — the question abstains, as for an escalation,
+but it is not the model's doubt), `instruction_flips`, `memory_disagreements`, `contract_refused` (answers that broke their question's contract:
 a wrong type or an echo of the input, see `Catalog.contract`) and `not_applicable` (questions whose contract's
 precondition did not hold, so they were not computed).
-`system.safeguard_summary()` prints them (`evidence missing`, `contract_refused` and `not_applicable` once they have
-fired).
+`system.safeguard_summary()` prints them (`evidence missing`, `timeouts`, `no_answer`, `contract_refused` and
+`not_applicable` once they have fired).
 [examples/12_grounded_audit.py](../examples/12_grounded_audit.py) runs one catalog with and without models,
 with a hallucinating extractor and a classifier answering outside its options.
 

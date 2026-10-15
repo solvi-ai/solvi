@@ -15,9 +15,10 @@ STAT_KEYS = {"grounding": "grounding_rejected", "type_rejected": "type_rejected"
              "low_confidence": "low_confidence",
              "validator": "validator_rejected", "hard_check": "forced_by_hard_check",
              "constraint_repair": "constraint_repairs", "fallback": "fallbacks", "escalated": "model_escalated",
-             "evidence_missing": "evidence_missing", "timeout": "timeouts", "instruction": "instruction_flips",
+             "evidence_missing": "evidence_missing", "timeout": "timeouts", "no_answer": "no_answer",
+             "instruction": "instruction_flips",
              "memory": "memory_disagreements", "contract": "contract_refused", "not_applicable": "not_applicable"}
-QUIET = {"evidence_missing", "timeout", "instruction", "memory", "contract", "not_applicable"}      # listed in safeguard_summary only once they fire
+QUIET = {"evidence_missing", "timeout", "no_answer", "instruction", "memory", "contract", "not_applicable"}      # listed in safeguard_summary only once they fire
 STATS = ["asks", "answers", "abstained", "model_outputs"] + list(STAT_KEYS.values())
 
 LABEL = {k: i18n.label(k) for k in STAT_KEYS}      # safeguard → its English label (solvi.core._i18n has the other languages)
@@ -74,10 +75,11 @@ def collect(res, catalog=None):
         events.append({"kind": "type_rejected", "fact": fact, "detail": why,
                        "questions": sorted(q for q, fs in res.flow.unresolved.items() if set(fs) & down and q in asked)})
     for q, a in res.results.items():
-        if a.guard in ("low_confidence", "escalated", "instruction", "grounding", "memory") and any(
+        if a.guard in ("low_confidence", "escalated", "no_answer", "instruction", "grounding", "memory") and any(
                 e["fact"] in ("answer:" + q, "textin") and q in e["questions"] and e["kind"] == a.guard for e in events):
             pass                                      # the answer step itself was rejected: already counted once
-        elif a.guard in ("hard_check", "outside_options", "rule_abstained", "low_confidence", "escalated", "grounding",
+        elif a.guard in ("hard_check", "outside_options", "rule_abstained", "low_confidence", "escalated", "no_answer",
+                         "grounding",
                          "type_rejected", "evidence_missing", "instruction", "memory", "contract", "not_applicable"):
             events.append({"kind": a.guard, "fact": "answer:" + q, "detail": a.why, "questions": [q]})
         if a.repaired:
