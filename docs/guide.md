@@ -3509,7 +3509,12 @@ records (the chain stays verifiable up to them) — `JSONLStorage(path, fsync=Tr
 returns, at the cost of one disk sync per decision. `SQLiteStorage` commits a transaction per record (the record, its
 index rows and the new head): durable once `save` returns, and slower than an unsynced JSON line (a disk sync per commit).
 `DuckDBStorage` and `PostgresStorage` commit per record too; with PostgreSQL the cost is mostly the round trip to the
-server. Measure on your machine before storing every decision of a high-volume stream.
+server. Measure on your machine before storing every decision of a high-volume stream. For a burst of decisions, `with store.batch():` (or
+`store.save_many(responses, metas=None)`) shares the cost: `JSONLStorage` takes its locks once and writes the head
+(and, with `fsync=True`, syncs) once at the end; the SQL stores run the batch as one transaction — one commit, and an
+exception inside rolls it back. Other threads and processes wait for the batch; inside it only saves and reads, not
+`verify` or `redact`. On a laptop SSD with small records (1,000 asks of a one-rule system): JSONL 2,496 → 3,048 asks
+per second, SQLite 1,853 → 2,687.
 
 #### Compact records and rotation
 
