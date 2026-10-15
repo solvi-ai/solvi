@@ -2407,9 +2407,9 @@ def _clip(text, n):
 # the rest of the guard: the confirmation step and the intents of a user's words (they import this module's names, so
 # they come after them)
 from .confirm import accepted_proposals, accepts  # noqa: E402
-from .intents import INTENTS  # noqa: E402
+from .intents import INTENTS, register_intent  # noqa: E402
 
-__all__ = ["action_model_allows", "slots_grounded", "agenda_allows", "accepted_proposals", "accepts", "INTENTS", "model_from_json_schema", "arguments_from_user", "arguments_grounded", "arguments_model", "arguments_valid", "AUTHORIZE_TASK",
+__all__ = ["action_model_allows", "slots_grounded", "agenda_allows", "accepted_proposals", "accepts", "INTENTS", "register_intent", "model_from_json_schema", "arguments_from_user", "arguments_grounded", "arguments_model", "arguments_valid", "AUTHORIZE_TASK",
            "conversation", "Guard", "GuardDecision", "MATCHERS", "Message", "messages", "no_injected_arguments",
            "no_instructions_in_tool_outputs", "proposal", "request_authorizes", "same_url", "Session", "Tool",
            "ToolCall", "url_parts", "VERDICTS"]

@@ -17,7 +17,11 @@ patterns) named `user_asked_to_<intent>`, reading `user_request` — the user's 
 says that the user asked for an action of this kind, not that they asked for this very call: pair it with
 `injections="grounded"` or `"any"` on the tool and with value policies (a date range, a price cap) where that matters.
 A user who pastes a text that asks for the action counts as asking (`scan_user=True` for that case). The patterns are
-word patterns over the NFKC-normalised, case-folded text, in English and Russian; INTENTS lists them."""
+word patterns over the NFKC-normalised, case-folded text, in English and Russian; INTENTS lists them, and
+`register_intent(name, patterns, extend=False)` adds an intent of yours or widens one:
+
+    register_intent("launch", [r"\\blaunch(es|ed|ing)?\\b", r"\\bdeploy\\b"])
+    register_intent("send", [r"\\bpage\\b"], extend=True)"""
 from __future__ import annotations
 
 import re
@@ -27,21 +31,52 @@ INTENTS = {
     "reserve": (r"\b(book|books|booked|booking|bookings|reserve|reserves|reserved|reserving|reservations?)\b",
                 r"(?<!\w)(за|пере)?брон\w*", r"(?<!\w)(за)?резерв\w*"),
     "event": (r"\b(calendar|events?|meetings?|appointments?|reminders?|remind|schedule|scheduled|scheduling)\b",
+              r"\b(book|set up|arrange)( a| an| the)? (call|video call|phone call)\b",
+              r"\bput .{0,40}\b(on|in|into) (my |the |our )?(calendar|schedule|agenda|diary)\b",
               r"(?<!\w)(календар|событи|встреч|напомин|запланир|расписани)\w*"),
     "visit": (r"\b(visit|visits|visiting|website|websites|web ?pages?|sites?|pages?|links?|urls?|articles?|browse|"
               r"browsing)\b", r"https?://", r"\bwww\.",
               r"(?<!\w)(зайди|зайдите|зайти|посети|посетите|посетить|сайт|страниц|ссылк|стать|перейди|перейдите)\w*"),
     "pay": (r"\b(pay|pays|paid|paying|payments?|transfers?|transferr?ed|transferring|wire|remit|refunds?|refunded)\b",
-            r"\bsend (the |my |some )?money\b", r"(?<!\w)(оплат|заплат|плат[её]ж|перевед|переведи|перечисл)\w*"),
+            r"\bsend (the |my |some )?money\b",
+            r"\b(withdraw|withdraws|withdrew|withdrawn|withdrawing|withdrawals?|deposit|deposits|deposited|depositing)\b",
+            r"\btop[ -]?up\b", r"\btop \S+ up\b",
+            r"(?<!\w)(оплат|заплат|плат[её]ж|перевед|переведи|перечисл|пополн)\w*",
+            r"(?<!\w)(сними|снимите|снять)\s+\S+(\s+\S+)?\s+(с|со)\s+(сч[её]т|карт)\w*"),
     "send": (r"\b(send|sends|sending|sent|e-?mails?|e-?mailed|mail|forward|forwarded|messages?|reply|replies|respond|"
-             r"tell|notify|dm)\b", r"(?<!\w)(отправ|пошли|вышли|перешли|напиш|сообщ|ответ|письм)\w*"),
+             r"tell|notify|dm)\b", r"\blet \S+( \S+)? know\b",
+             r"\b(inform|informs|informed|informing|contact|contacted|contacting|dispatch|dispatches|dispatched|"
+             r"dispatching)\b", r"\b(reach out|get in touch)\b",
+             r"(?<!\w)(отправ|пошли|вышли|перешли|напиш|сообщ|ответ|письм|уведом)\w*", r"(?<!\w)дай(те)?\s+знать"),
     "delete": (r"\b(delete|deletes|deleted|deleting|remove|removes|removed|removing|erase|erased|cancel|cancels|"
                r"cancell?ed|cancell?ing|purge|clean ?up)\b", r"(?<!\w)(удал|сотри|стери|отмен|очист)\w*"),
     "invite": (r"\b(invite|invites|invited|inviting|onboard)\b", r"\badd \S+ to\b", r"(?<!\w)(пригла|добав)\w*"),
     "post": (r"\b(post|posts|posted|posting|publish|published|publishing|upload|uploaded|uploading)\b",
              r"(?<!\w)(опубликуй|опубликовать|опубликуйте|публику|выложи|выложить|загрузи|загрузить)\w*"),
-    "share": (r"\b(share|shares|shared|sharing)\b", r"(?<!\w)(подели|поделись|поделитесь|доступ)\w*"),
+    "share": (r"\b(share|shares|shared|sharing|grant|grants|granted|granting|unlock|unlocks|unlocked|unlocking)\b",
+              r"\bgive \S+( \S+)? access\b", r"(?<!\w)(подели|поделись|поделитесь|доступ|разблокир)\w*"),
 }
+
+
+def register_intent(name, patterns, *, extend=False):
+    """Add an intent to INTENTS (or, extend=True, widen one) → its patterns. name: a word ("launch"); patterns:
+    regular expressions over the NFKC-normalised, case-folded text of the user's messages (one found means the user
+    asked for this kind of action). A policy made by require_request keeps the patterns it was made with (they are
+    part of its fingerprint): register before declaring it."""
+    if not isinstance(name, str) or not re.fullmatch(r"[A-Za-z_]\w*", name):
+        raise ValueError(f"an intent's name is a word (letters, digits, _), not {name!r}")
+    pats = (patterns,) if isinstance(patterns, str) else tuple(patterns or ())
+    if not pats or not all(isinstance(p, str) for p in pats):
+        raise ValueError("register_intent needs one or more regular expressions (str)")
+    for p in pats:
+        try:
+            re.compile(p)
+        except re.error as e:
+            raise ValueError(f"intent {name!r}: {p!r} is not a regular expression ({e})") from None
+    if name in INTENTS and not extend:
+        raise ValueError(f"intent {name!r} exists; extend=True adds the patterns to it")
+    INTENTS[name] = tuple(INTENTS.get(name, ())) + tuple(p for p in pats if p not in INTENTS.get(name, ()))
+    return INTENTS[name]
 
 
 def said(text, patterns) -> bool:
@@ -83,4 +118,4 @@ def request_policy(intent=None, phrases=None):
     return user_asked
 
 
-__all__ = ["INTENTS", "request_policy"]
+__all__ = ["INTENTS", "register_intent", "request_policy"]
