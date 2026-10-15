@@ -285,7 +285,8 @@ def test_experimental_modules_warn_on_import_and_say_their_status():
     import sys
 
     from solvi import experimental
-    mods = sorted(m for m in _modules() if m.startswith("solvi.experimental.") and m.count(".") == 2)
+    mods = sorted(m for m in _modules() if m.startswith("solvi.experimental.") and m.count(".") == 2
+                  and not m.split(".")[2].startswith("_"))   # private helpers (_evalue) are no module of their own
     names = {m.split(".")[2] for m in mods}
     assert names == set(experimental.STATUS) | GRADUATED, names ^ (set(experimental.STATUS) | GRADUATED)
     assert not GRADUATED & set(experimental.STATUS)
