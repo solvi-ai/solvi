@@ -144,8 +144,9 @@ class Transition:
 class Buffer:
     """Held-out transitions, grouped. Per action: one bitset per atom over its rows and one per group, so a law's
     support and precision on the rows of every group but one are a few AND operations. The proposing transition's group
-    is left out of every test (`exclude=`). tested: how many candidates have been scored on this buffer, by every
-    law set that tested on it — the N the sized acceptance divides its error by."""
+    is left out of every test (`exclude=`). tested: how many distinct candidates (action, condition, effect) have been
+    scored on this buffer, by every law set that tested on it — the N the sized acceptance divides its error by; scoring
+    the same candidate again does not raise it."""
 
     def __init__(self, grammar: Grammar):
         self.grammar = grammar
@@ -158,7 +159,8 @@ class Buffer:
         self._width: dict[Any, list[int]] = {}                  # action → per row, the grammar's size when added
         self._late: set = set()                                  # (action, atom) indexed on the rows before it
         self.n = 0
-        self.tested = 0                                          # candidates scored on this buffer, in all
+        self.tested = 0                                          # distinct candidates scored on this buffer, in all
+        self._tested: set = set()                                # their (action, condition, effect) keys
 
     def add(self, t: Transition):
         a = _key(t.action)
@@ -183,6 +185,16 @@ class Buffer:
 
     def __len__(self):
         return self.n
+
+    def count_tested(self, keys: Iterable) -> int:
+        """Add candidate keys (action, condition, effect) to the tested ones → how many were new (N grows by these)."""
+        new = 0
+        for k in keys:
+            if k not in self._tested:
+                self._tested.add(k)
+                new += 1
+        self.tested += new
+        return new
 
     def groups(self) -> list:
         """The groups, in order of first appearance."""
@@ -506,7 +518,17 @@ class LawSet:
     chance", not "precision above min_precision" (the filter adds that on the observed rows). The bound assumes the
     held-out rows are independent draws and the candidates were not chosen by looking at them. sized=False: the
     fixed thresholds (the measurements ran so). Each accepted Law records `tested` (N), `null`, `need` and
-    `level`.
+    `level`. N counts distinct candidates: the same (action, condition, effect) scored again on the buffer — the next
+    mismatch proposing it again — does not raise it (it did before 1.2: the same 56 candidates scored three times on an
+    unchanged buffer made N 168).
+
+    acceptance: "sized" (the default with sized=True), "fixed" (sized=False) or "exact" — for few-shot buffers, where the
+    sized rule cannot pass anything (3 groups × 6 rows, a deterministic one-atom law: 0 of 20 learned): a candidate
+    passes when it is right on every held-out row where it applies, with support ≥ min_support, and net > 0; no
+    binomial bound, so nothing bounds the false accepts over many candidates (with min_support=2 the same few-shot task
+    learned the law in 20 of 20) — give it an independent check through `confirm`. Overrides `sized`.
+    confirm: `confirm(candidate)` → bool, an external check (a probe, a person, a second data set) asked about each
+    candidate that passed, best first, before it is accepted; a refusal sets the candidate aside for this test.
 
     disagree: "first" (default: the most specific matching law, ties to the earlier) or "abstain" (`predict` returns
     `Undetermined` where laws none of which is an exception of another disagree; see `predict`).
@@ -520,7 +542,7 @@ class LawSet:
                  min_precision: float = 0.9, retire_below: float = 0.8, retire_min: int = 5, cap: int = 300,
                  sized: bool = True, delta: float = 0.1, space: int | None = None,
                  null: str | float = "base", disagree: str = "first", support_on: str = "applied",
-                 readmit: str = "any"):
+                 readmit: str = "any", acceptance: str | None = None, confirm: Callable | None = None):
         if disagree not in ("first", "abstain"):
             raise ValueError(f"disagree is 'first' or 'abstain', not {disagree!r}")
         if not 0.0 < float(delta) < 1.0:
@@ -536,7 +558,12 @@ class LawSet:
             warnings.warn(f"LawSet: min_precision {self.min_precision} < retire_below {self.retire_below} — a law "
                           f"accepted at a precision between the two is retired by its own check and accepted again "
                           f"on the next mismatch", UserWarning, stacklevel=2)
-        self.sized, self.delta = bool(sized), float(delta)
+        if acceptance is None:
+            acceptance = "sized" if sized else "fixed"
+        if acceptance not in ("sized", "fixed", "exact"):
+            raise ValueError(f"acceptance is 'sized', 'fixed' or 'exact', not {acceptance!r}")
+        self.acceptance, self.confirm = acceptance, confirm
+        self.sized, self.delta = acceptance == "sized", float(delta)
         self.space = int(space) if space is not None else None
         if isinstance(null, str):
             if null != "base":
@@ -714,7 +741,10 @@ class LawSet:
     def passes(self, support: int, hits: int, tested: int, null: float | None = None) -> bool:
         """The acceptance on counts alone (net aside): support ≥ min_support, hits ≥ min_precision · support, and with
         sized=True P[Binomial(support, null) ≥ hits] ≤ sized_level(tested, delta, space). null: the set's fixed null
-        when it has one; with null="base" pass the rate (`base_rate`)."""
+        when it has one; with null="base" pass the rate (`base_rate`). acceptance="exact": support ≥ min_support and
+        hits == support."""
+        if self.acceptance == "exact":
+            return support >= max(1, self.min_support) and hits == support
         if support < self.min_support or hits < self.min_precision * support:
             return False
         if not self.sized:
@@ -753,20 +783,22 @@ class LawSet:
             self.capped += 1
             return []
         active0 = {(_key(law.action), law.condition, _key(law.effect)) for law in self.laws}
-        scored = sum(1 for c in candidates if (_key(c.action), tuple(c.condition), _key(c.effect)) not in active0)
-        buffer.tested += scored
+        keys = [k for k in ((_key(c.action), tuple(c.condition), _key(c.effect)) for c in candidates) if k not in active0]
+        scored = len(keys)
+        buffer.count_tested(keys)
         self.cost["tests"] += scored
         self._last_tested = scored
         n_tested = buffer.tested
         nulls: dict = {}
         out = []
+        refused: set = set()                       # passed, but `confirm` said no
         for _ in range(accept):
             views = {}
-            best = None
+            passing = []
             active = {(_key(law.action), law.condition, _key(law.effect)) for law in self.laws}
             for i, c in enumerate(candidates):
                 cond = tuple(c.condition)
-                if (_key(c.action), cond, _key(c.effect)) in active:
+                if (_key(c.action), cond, _key(c.effect)) in active or i in refused:
                     continue
                 a = _key(c.action)
                 if a not in views:
@@ -777,12 +809,17 @@ class LawSet:
                 nl = self._null_of(buffer, c, exclude, nulls) if self.sized else None
                 if not self.passes(sup, hits, n_tested, nl):
                     continue
-                key = (net, -len(cond), hits / sup, -i)
-                if best is None or key > best[0]:
-                    best = (key, c, sup, hits, net, nl)
+                passing.append(((net, -len(cond), hits / sup, -i), i, c, sup, hits, net, nl))
+            passing.sort(key=lambda r: r[0], reverse=True)
+            best = None
+            for row in passing:
+                if self.confirm is None or self.confirm(row[2]):
+                    best = row
+                    break
+                refused.add(row[1])
             if best is None or len(self.laws) >= self.cap:
                 break
-            _, c, sup, hits, net, nl = best
+            _, _, c, sup, hits, net, nl = best
             m = self._rows_of(c, buffer, exclude, views[_key(c.action)])[0]
             law = self._accept(c, born=exclude, support=sup, hits=hits, net=net,
                                sources=tuple(buffer.ids(c.action, m)))
