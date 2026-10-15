@@ -22,7 +22,9 @@ what it checked. solvi's own test suite runs every check on every built-in (test
     check_extractor(extractor, system, texts)   Extractor: literal quotes at their offsets, deterministic, read fields
                                                 replay
     check_monitor(make, stream, changed=None)   Monitor: reports, flagged, a change flagged, reset forgets it
-    check_environment(make, seeds=(0, 1))       Environment: the same seed and actions give the same outcomes
+    check_environment(make, seeds=(0, 1))       Environment: the same seed and actions give the same outcomes;
+                                                with clone=, a clone gives the original's outcomes and stepping it
+                                                leaves the original unchanged
     check_action_model(make, transitions, ...)  ActionModel: Predictions, determinism, the fingerprint moves with what it
                                                 learned, never contradicts an outcome it observed; held-out comparison
     check_specialist(specialist, sources, ...)  Specialist (solvi.core.specialist): two runs give identical
@@ -392,9 +394,22 @@ def check_monitor(make, stream, *, changed=None):
 
 
 # ------------------------------------------------------------------------------------------------ Environment
-def check_environment(make, *, seeds=(0, 1), steps=30, policy=None):
-    """make: () → a fresh environment; policy: (state, actions) → the action to take (default: the first one).
-    → what was checked."""
+def _env_fp(env) -> str:
+    import hashlib
+    import pickle
+    try:
+        raw = pickle.dumps(env, protocol=4)
+    except Exception:                                  # noqa: BLE001 — an environment that cannot be pickled
+        raw = repr(vars(env) if hasattr(env, "__dict__") else env).encode()
+    return hashlib.sha256(raw).hexdigest()[:16]
+
+
+def check_environment(make, *, seeds=(0, 1), steps=30, policy=None, clone=None):
+    """make: () → a fresh environment; policy: (state, actions) → the action to take (default: the first one);
+    clone: (env, state) → an independent environment at `state` (the hook `ExactModel(clone=)` takes). With it, at
+    every step of every episode a clone at the current state is stepped with the action the original takes next: the
+    clone gives the original's outcome, and stepping it leaves the original's fingerprint (a hash of its pickle, as
+    `ExactModel.fingerprint`) unchanged. → what was checked."""
     from ..core.environment import Environment, Outcome
     pick = policy or (lambda state, acts: acts[0])
     _ok(isinstance(make(), Environment), "the environment lacks reset / actions / step")
@@ -407,8 +422,21 @@ def check_environment(make, *, seeds=(0, 1), steps=30, policy=None):
             acts = list(env.actions(state))
             if not acts:
                 break
-            o = env.step(pick(state, acts))
+            action = pick(state, acts)
+            if clone is not None:
+                before = _env_fp(env)
+                twin = clone(env, state)
+                o_twin = twin.step(action)
+                _ok(_env_fp(env) == before, "stepping the clone leaves the original unchanged (a clone shares state "
+                                            "with the original)")
+                clones[0] += 1
+            o = env.step(action)
             _ok(isinstance(o, Outcome), f"step() → an Outcome, not {type(o).__name__}")
+            if clone is not None:
+                _ok(isinstance(o_twin, Outcome)
+                    and (_vh(o_twin.state), o_twin.accepted, _vh(o_twin.effect), o_twin.done)
+                    == (_vh(o.state), o.accepted, _vh(o.effect), o.done),
+                    "a clone at a state gives the original's outcome for the same action")
             if not o.accepted:
                 _ok(_vh(o.state) == _vh(state), "a refused action leaves the state as it was")
             trail.append((_vh(o.state), o.accepted, _vh(o.effect), o.done))
@@ -417,11 +445,15 @@ def check_environment(make, *, seeds=(0, 1), steps=30, policy=None):
                 break
         return trail
     n = 0
+    clones = [0]
     for seed in seeds:
         a, b = episode(seed), episode(seed)
         _ok(a == b, f"seed {seed}: the same seed and actions give the same outcomes")
         n += len(a) - 1
-    return {"seeds": len(seeds), "steps": n, "deterministic": True}
+    out = {"seeds": len(seeds), "steps": n, "deterministic": True}
+    if clone is not None:
+        out["clones"] = clones[0] // 2                 # each episode ran twice
+    return out
 
 
 # ------------------------------------------------------------------------------------------------ ActionModel
