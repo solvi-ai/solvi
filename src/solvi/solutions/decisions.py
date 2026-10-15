@@ -368,7 +368,7 @@ def build(question, examples, *, catalog=None, learner=None, slow=None, reads=No
     person, but System 1 still answers alone above its threshold), raise a ValueError instead of the default
     GuaranteeWarning. monitor: None (default: no drift monitor), True (a DriftMonitor whose reference is System 1's
     responses on the guarantee's calibration examples) or a monitor of your own (an object with observe(response,
-    question=) → {"drift", "why"}, e.g. a DriftMonitor) — the dispatcher feeds it every System 1 response, and after
+    question=) → {"drift", "why"}, e.g. a DriftMonitor or a NumericDrift) — the dispatcher feeds it every System 1 response, and after
     its flag System 1's answers are checked by the slow path or go to a person (Dispatcher(on_drift=))."""
     from ..core.dispatch import SIGNALS, THINK, Dispatcher
     from ..core.guarantees.guarantee import promise_text
