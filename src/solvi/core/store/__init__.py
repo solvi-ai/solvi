@@ -699,10 +699,13 @@ class TraceStorage(abc.ABC):
         return 0
 
     # --- writing
-    def save(self, response, meta=None):
+    def save(self, response, meta=None, *, record=None):
         """Store a response (its answers, flow and whole trace) → its id. `meta`: your own JSON data kept with it (a
-        ticket id, a user) — hashed into the chain like the rest. What the record holds follows the store's `record=`."""
-        mode, n = self.record_mode
+        ticket id, a user) — hashed into the chain like the rest. What the record holds follows the store's `record=`;
+        record="full" or "compact" overrides it for this response (System(cache=) stores a served decision compact)."""
+        if record is not None and record not in ("full", "compact"):
+            raise ValueError(f'record is "full", "compact" or None (the store\'s), not {record!r}')
+        mode, n = self.record_mode if record is None else (record, None)
         if mode == "sample":
             with _SAMPLE_LOCK:
                 k, self._saved = self._saved, self._saved + 1
