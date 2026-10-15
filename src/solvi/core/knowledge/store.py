@@ -861,14 +861,20 @@ class KnowledgeStore:
                 "flags_pending": [{"flag": t, "why": self.flags[t]["why"]} for t in self._pending_flags()]}
 
     # ------------------------------------------------------------------------------------------------ re-deciding
-    def redecide(self, storage, retracted, decide, *, fact="knowledge"):
+    def redecide(self, storage, retracted, decide, *, fact="knowledge", upto="decision"):
         """The stored decisions that rested on retracted items, re-run on their re-built snapshots.
 
         storage: the decisions' TraceStorage; retracted: the retracted item ids; decide: init_state → {question: answer}
         (a function, or a System: its ask, not stored); fact: the given fact the snapshot was passed as. A decision is
         listed when its recorded snapshot changes once the retracted items' entries are left out of the journal up to
-        its position; each is re-run on the old and the new snapshot. → (answer_changes, justification_only): lists of
-        {"id", "old", "new"} — the first goes to a reviewer, the second is recorded."""
+        its position; each is re-run on the old and the new snapshot. upto: "decision" (default) — the journal up to the
+        decision's position, so the new snapshot is what the decision would have read without the retracted items;
+        "now" — the whole journal without them, so a correction told after the decision (a wrong dose retracted and
+        the right one told) is in the new snapshot and the new answer is the corrected one, not "unknown".
+        → (answer_changes, justification_only): lists of {"id", "old", "new"} — the first goes to a reviewer, the second
+        is recorded."""
+        if upto not in ("decision", "now"):
+            raise ValueError(f'upto is "decision" or "now", not {upto!r}')
         retracted = set(retracted)
         run = _decider(decide)
         rebuilt, changes, same = {}, [], []
@@ -877,7 +883,7 @@ class KnowledgeStore:
             snap = init.get(fact)
             if not isinstance(snap, dict) or "at" not in snap or not retracted & set(snap.get("rests_on") or ()):
                 continue
-            at = int(snap["at"])
+            at = None if upto == "now" else int(snap["at"])
             if at not in rebuilt:
                 rebuilt[at] = self.rebuild(upto=at, skip=retracted)
             new_snap = rebuilt[at].snapshot(**{k: v for k, v in (snap.get("query") or {}).items()})
