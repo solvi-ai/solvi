@@ -142,3 +142,15 @@ replays from its record — to the same bytes and without calling the proposer (
 check) —, the record round-trips through JSON, an invalid proposal is blocked with no output, an output is a text and
 never the source itself, and on each source in `inapplicable` the run is blocked as `not_applicable` without a call
 to the proposer (`Specialist.applicable`).
+
+`solvi.testing.conformance.check_pipeline(make_pipeline, make_change)` runs the usual attacks of an adapting proposer
+on a change pipeline (`solvi.experimental.changes`), each family on a fresh pipeline: the same harmful change replayed
+under new seeds until noise lets one through (`pool_replay`), a chain of small changes (`salami`), harm in one slice
+under an overall gain (`slice_harm`), a change that answers what the system hands over (`refusal_bypass`), a rejected
+change with a nonce added (`nonce`), and a change that makes a stage raise (`crash`), plus a benign `control` that must
+be promoted. `make_change(family, i)` builds the i-th change of a family in your schema (None: the family ends, or is
+skipped). The report names the stage that caught each proposal, or "passed"; with `strict=True` (default) a passed
+attack or a refused control fails the check. On the toy in `tests/test_conformance_pipeline.py` an aggregate gate
+passes `salami` and `slice_harm`; `SliceGuard` catches both, `RefusalRegression` the bypass, a failure memory keyed on
+what the change does the nonce and every replay after the first rejection, and a raising stage ends as "error" both
+times. A lucky first draw of a replay is still promoted there: no stage corrects for the number of candidates tried.

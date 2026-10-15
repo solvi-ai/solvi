@@ -86,6 +86,15 @@ and rollback (`solvi.experimental.changes.Pipeline(stages, storage, store=...)`)
   answer"): every pipeline whose target can answer declares `refusals=` (directly, through CleanCases / Confirmation,
   or on the stage). The set follows the policy version — the credit benchmark declares it once version 2 is in force. An
   item change is checked only with `answer_of=`.
+- **Slices and the original version.** `SliceGuard(measure, original=None, tol=0.02)` judges a change per slice on
+  paired per-case losses (`measure(change, ctx)` → `{slice: (in_force_losses, candidate_losses)}` on the same cases),
+  against the version in force and against the original one (pinned at the guard's first run, or given), so harm in a
+  small slice under an overall gain and a chain of small changes each harmless on its own ("salami") are refused. A
+  slice is refused above the tolerance or when its excess is significant (one-sided z, Bonferroni over every slice
+  and reference — valid however the slices depend on each other; cases within a slice are taken as independent). A
+  slice under `min_n` cases, or one the original has and the measurement lost, holds for a person by default. On a toy
+  target eight steps of +0.012 on a 40-case slice (tolerance 0.03) all pass a guard that compares with the version in
+  force only (+0.084 in all); with the original the chain stops at +0.036 (`tests/test_changes_slices.py`).
 - **Script:** `benchmarks/changes_credit.py` (the credit policy; needs the German Credit applications:
   `benchmarks/tasks/fetch.sh credit` and `prepare.py`). **Deadline:** 1.2.
 - Guide: [The change pipeline](guide.md#the-change-pipeline-solviexperimentalchanges); design and API: the module

@@ -40,7 +40,9 @@ solvi.core.store.diff.diff), FreshEnvironments (ported: paired selection, determ
 bootstrap lower bound > 0, rules never crash, progress not lower), Approval (new: a table (kind, source) → "gate" |
 "gate+person" | "person"), Canaries (wraps solvi.testing.honesty; a suspiciously perfect score holds), RefusalRegression
 (new, not switchable: the share refused on a held should-abstain set before and after the change; a change that answers
-what was refused before is refused — refusal is the first casualty of self-change).
+what was refused before is refused — refusal is the first casualty of self-change), SliceGuard (new: per-slice paired
+losses against the version in force and against the original version — harm in a small slice under an overall gain,
+and a chain of small changes each harmless on its own, are refused).
 
 Refusal regression cannot be switched off. For every change whose target can answer (Pipeline(answer_of=...), or a
 target with `answerer(change or None, ctx)`: VersionsTarget, LearningTarget, a target of yours — an answerer, a
@@ -112,8 +114,8 @@ from .. import warn_on_import
 from ._journal import ChangeJournal, EvalLocked, EvaluatorLock, MemoryStorage
 from ._paired import paired_bootstrap, run_episode
 from ._stages import (DEFAULT_APPROVAL, LEVELS, REFUSAL_WORDS, Approval, Canaries, CleanCases, catalog_of, Confirmation,
-                     Consistency, Context, FreshEnvironments, identity, IDENTITY_KEYS, Impact, KnownFailures, RefusalRegression, SOURCES, Stage,
-                     Static, StageVerdict, allowed, gate_of, gates_of, hazard_body, hazard_gate, is_refusal)
+                     Consistency, Context, FreshEnvironments, identity, IDENTITY_KEYS, Impact, KnownFailures, RefusalRegression, SliceGuard, SOURCES,
+                     Stage, Static, StageVerdict, allowed, gate_of, gates_of, hazard_body, hazard_gate, is_refusal)
 from ._targets import KnowledgeTarget, LearningTarget, Promoted, Refused, VersionsTarget
 
 warn_on_import(__name__)
@@ -504,5 +506,5 @@ __all__ = ["allowed", "Approval", "ARTIFACTS", "Canaries", "catalog_of", "Change
            "Confirmation", "Consistency", "Context", "DEFAULT_APPROVAL", "EvalLocked", "EvaluatorLock",
            "FreshEnvironments", "gate_of", "gates_of", "hazard_body", "hazard_gate", "identity", "IDENTITY_KEYS", "Impact", "is_refusal", "KnowledgeTarget",
            "KnownFailures", "REFUSAL_WORDS", "RefusalRegression",
-           "LearningTarget", "LEVELS", "MemoryStorage", "paired_bootstrap", "Pipeline", "Promoted", "Refused", "Result", "run_episode", "SOURCES",
+           "LearningTarget", "LEVELS", "MemoryStorage", "paired_bootstrap", "Pipeline", "Promoted", "Refused", "Result", "run_episode", "SliceGuard", "SOURCES",
            "Stage", "Static", "STORE_SOURCE", "StageVerdict", "VersionsTarget"]
