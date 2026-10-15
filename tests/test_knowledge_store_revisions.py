@@ -68,3 +68,57 @@ def test_an_expired_item_is_not_usable_at_a_later_time_and_items_without_valid_a
     p = ks.add("fact", fact("k", 1), source="spec")
     q = ks.add("fact", fact("k", 2), source="outcome")            # no valid: an observation refutes, as before
     assert ks.status(p) == "refuted" and ks.status(q) == "active"
+
+
+# --- re-asserting retracted content
+def test_re_asserting_retracted_content_waits_for_a_retest_and_so_do_its_derivations():
+    ks = KnowledgeStore()
+    f = ks.add("fact", fact("w", "kg", "unit"), source="spec", by="v1")
+    d = ks.add("rule", fact("auto", "kg", "uses"), source="person", derived_from=[f])
+    assert ks.status(d) == "active"
+    ks.retract(f, why="wrong")
+    assert ks.status(f) == ks.status(d) == "retracted"
+    assert ks.add("fact", fact("w", "kg", "unit"), source="spec", by="v6") == f
+    assert ks.status(f) == ks.status(d) == "hypothesis" and ks.pending_retest(f) and ks.pending_retest(d)
+    assert not ks.usable(f) and [h["why"] for h in ks.snapshot(about="w")["hints"]] == ["pending retest"]
+    ks.retest(f, ok=True, by="qa")
+    assert ks.status(f) == "active" and ks.status(d) == "hypothesis"       # a derivation waits for its own re-test
+    ks.retest(d, ok=True, by="qa")
+    assert ks.status(d) == "active" and not ks.pending_retest(d)
+    assert ks.verify()
+
+
+def test_a_failed_retest_retracts_and_a_rule_re_added_after_its_retraction_is_held():
+    ks = KnowledgeStore()
+    f = ks.add("fact", fact("a", 1), source="spec")
+    ks.retract(f)
+    ks.add("fact", fact("a", 1), source="spec")
+    ks.retest(f, ok=False, why="still wrong")
+    assert ks.status(f) == "retracted"
+    r = ks.add("rule", fact("rule", 1), source="person")
+    ks.retract(r)
+    assert ks.add("rule", fact("rule", 1), source="person") == r
+    assert ks.status(r) == "hypothesis" and ks.journal[-1]["op"] == "held"
+    assert "re-test" in ks.journal[-1]["verdicts"][-1]["reason"]
+
+
+def test_content_written_after_a_retraction_of_its_premise_is_not_pending():
+    ks = KnowledgeStore()
+    f = ks.add("fact", fact("p", 1), source="spec")
+    ks.retract(f)
+    ks.add("fact", fact("p", 1), source="spec")
+    ks.retest(f, ok=True)
+    d = ks.add("fact", fact("q", 2), source="spec", derived_from=[f])     # derived after the re-test: fresh
+    assert ks.status(d) == "active" and not ks.pending_retest(d)
+    g = ks.add("fact", fact("g", 1), source="person")
+    ks.add("fact", fact("g", 1), source="outcome")                        # a confirmation, never retracted
+    assert ks.status(g) == "active"
+
+
+def test_an_item_a_rule_re_infers_after_its_retraction_follows_its_premises():
+    ks = KnowledgeStore()
+    p = ks.add("fact", fact("p", 1), source="spec")
+    q = ks.add("fact", fact("q", 1), source="spec", derived_from=[p], inferred=True)
+    ks.retract(q, why="the negative condition no longer holds")
+    assert ks.add("fact", fact("q", 1), source="spec", derived_from=[p], inferred=True) == q
+    assert ks.status(q) == "active" and not ks.pending_retest(q)
