@@ -1,5 +1,5 @@
 """solvi.experimental.laws: what the probe admission reports — the refuted candidates themselves, a law's ground next to
-its prediction (`explain`)."""
+its prediction (`explain`), and a pool that never varies an atom the shortest candidate drops (`coverage`)."""
 from __future__ import annotations
 
 import random
@@ -55,3 +55,31 @@ def test_explain_abstains_where_the_laws_disagree():
     v, law = ls.explain({"t": True, "w": 1, "st": 0}, "make", disagree="abstain")
     assert isinstance(v, Undetermined) and law is None
     assert ls.explain({"t": True, "w": 1, "st": 0}, "make") == (1, a) and b in ls.laws
+
+
+def test_a_pool_that_never_varies_an_atom_warns_and_reports_it():
+    ls, cands, pool = craft(table_always=True)
+    with pytest.warns(UserWarning, match="near_table"):
+        adm = ls.admit_by_probes(cands, world, probes=pool, budget=8)
+    assert adm.status == "accepted" and adm.law.condition == ("wood1",)          # as before: accepted, now flagged
+    assert adm.untested == ["near_table"]
+
+
+def test_coverage_undetermined_refuses_the_too_general_law():
+    ls, cands, pool = craft(table_always=True)
+    adm = ls.admit_by_probes(cands, world, probes=pool, budget=8, coverage="undetermined")
+    assert adm.status == "undetermined" and adm.law is None and adm.untested == ["near_table"]
+    assert not ls.laws
+
+
+def test_coverage_ignore_and_a_varied_pool_do_not_warn():
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", UserWarning)
+        ls, cands, pool = craft(table_always=True)
+        adm = ls.admit_by_probes(cands, world, probes=pool, budget=8, coverage="ignore")
+        assert adm.status == "accepted" and adm.untested == []
+        ls, cands, pool = craft(table_always=False)
+        adm = ls.admit_by_probes(cands, world, probes=pool, budget=8)
+        assert adm.status == "accepted" and adm.untested == []
+    with pytest.raises(ValueError):
+        ls.admit_by_probes(cands, world, probes=pool, coverage="maybe")
