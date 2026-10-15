@@ -1359,6 +1359,8 @@ def _combine_failed(catalog, q, failed):
     desc = ", ".join(f"{f} → " + ("abstain" if a is _ABSTAIN else "a function" if callable(a) else
                                   "an unusable answer" if a is _BAD else repr(a)) for (f, _), a in zip(failed, keys))
     mode = getattr(catalog, "combine", "first")
+    if mode == "first" and getattr(catalog, "combine_chosen", False):
+        return failed                                 # Catalog(combine="first"): the declaration order is the priority
     opts = list(q.answer.options or [])
     if mode == "strictest" and opts and all(a is _ABSTAIN or (a is not _BAD and not callable(a) and a in opts)
                                             for a in keys):

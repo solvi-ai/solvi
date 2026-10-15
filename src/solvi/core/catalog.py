@@ -887,22 +887,24 @@ def plain_json(v):
 class Catalog:
     """Everything the system can do; the strategist decides which parts each question needs."""
 
-    def __init__(self, *, quotes="normalized", sensitive=(), combine="first"):
+    def __init__(self, *, quotes="normalized", sensitive=(), combine=None):
         """quotes: how quotes and evidence are matched against their source text — "normalized" (default since 1.0: a
         quote that differs from its text only in Unicode form, no-break spaces or hyphens, dashes, "…", whitespace
         runs or curly quotes is found, and the source's own substring is kept, see solvi.core.locate) or "literal"
         (0.9: the text as written, up to whitespace runs). It applies to the parts registered after it is set.
         sensitive: names of given facts no part may read (age, sex, ...) — `solvi check` (solvi.check.lint) reports a part
         that reads one, directly or through a fact computed from one, as an error; nothing changes at ask time.
-        combine: which of several false hard checks governing one question decides it — "first" (default: the first
-        declared; when their `then` answers differ a warning names them) or "strictest" (the answer that comes last in
+        combine: which of several false hard checks governing one question decides it — None (default: the first
+        declared, and when their `then` answers differ a warning names them), "first" (the same, chosen: no warning —
+        the declaration order is the priority) or "strictest" (the answer that comes last in
         the question's options, so list them from mildest to strictest; a governing check with no `then` answer for
         the question abstains and is strictest of all; with a `then` function among them, or no options, the first
         declared decides, with the warning)."""
         from .provenance import quote_mode
-        if combine not in ("first", "strictest"):
+        if combine not in (None, "first", "strictest"):
             raise ValueError('combine must be "first" or "strictest"')
-        self.combine = combine
+        self.combine = combine or "first"
+        self.combine_chosen = combine is not None    # "first" given explicitly: the order is meant, no warning
         self.quotes = quote_mode(quotes)
         self.sensitive: frozenset[str] = frozenset([sensitive] if isinstance(sensitive, str) else sensitive or ())
         self.parts: dict[str, Part] = {}

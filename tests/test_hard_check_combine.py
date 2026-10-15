@@ -65,3 +65,11 @@ def test_combine_is_validated_and_enters_the_fingerprint():
         Catalog(combine="loudest")
     assert _system().fingerprint()["catalog"] != _system("strictest").fingerprint()["catalog"]
     assert _system().fingerprint()["catalog"] == _system("first").fingerprint()["catalog"]
+
+
+def test_combine_first_chosen_explicitly_keeps_the_order_without_a_warning():
+    s = _system("first")
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        r = s.ask(BOTH, store=False)["size"]
+    assert r.answer == "half"
