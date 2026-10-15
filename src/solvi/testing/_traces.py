@@ -203,3 +203,6 @@ def boundary(cases, n=50, system=None):
                       "the answers were nondeterministic (another answer when asked again, or a trace that does not "
                       "replay)", UserWarning, stacklevel=2)
     return kept
+
+
+__all__ = ["boundary", "cases_from_store"]
