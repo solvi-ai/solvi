@@ -63,6 +63,11 @@ Warnings:
                         gave — say so explicitly (check
                         for None and abstain, or declare the default in System(input_model=...)); `# solvi: ok` on the line
                         accepts it
+  check_shares_call     a check declared with Catalog.check(shares_call_with=X): it re-reads X's model call, so it agrees
+                        with X's answer whatever that answer is — not an independent check (also when X names no part or
+                        question)
+  checks_one_family     the checks in a question's flow that declare family= are all of one family (two or more): they
+                        err together, so agreeing does not make the answer surer — add a check of another family or code
 Notes (never fail):
   mutual_producers      facts derived from each other (net from gross and gross from net), each with a producer
                         outside the loop: the system's strategist plans around it
@@ -174,6 +179,7 @@ def lint(obj, strict=False, max_combos=100_000, sensitive=None):
     in_cycle = _cycles(cat, rep, getattr(system, "strategist", None))
     flows, counted = _questions(cat, questions, heads, given, rep, planner)
     _hard_checks(cat, questions, flows, rep)
+    _provenance(cat, questions, flows, rep)
     if questions:
         used = set().union(*counted.values()) if counted else set()
         for name, p in cat.parts.items():
@@ -376,6 +382,24 @@ def _questions(cat, questions, heads, given, rep, planner):
                 rep.add("note", "no_rule", name, "no rule: it abstains until an answer head is fitted (fit)"
                         + ("" if q.uses else "; without `uses` its flow is everything computable"))
     return flows, counted
+
+
+def _provenance(cat, questions, flows, rep):
+    """check_shares_call / checks_one_family from the checks' declared family= and shares_call_with=."""
+    checks = {n: p for n, p in cat.parts.items() if p.kind == "check"}
+    for name, p in checks.items():
+        x = getattr(p, "shares_call_with", None)
+        if x:
+            known = x in cat.parts or x in cat.rules or x in questions
+            rep.add("warning", "check_shares_call", name,
+                    f"re-reads the model call of {x!r}: it agrees with that answer whatever it is, so it is not an "
+                    "independent check" + ("" if known else f" (and there is no part or question named {x!r})"))
+    for qn in questions:
+        fams = {n: checks[n].family for n in sorted(flows.get(qn, ())) if n in checks and getattr(checks[n], "family", None)}
+        if len(fams) >= 2 and len(set(fams.values())) == 1:
+            rep.add("warning", "checks_one_family", qn,
+                    f"its checks ({', '.join(fams)}) are all family {next(iter(fams.values()))!r}: they err together, so "
+                    "their agreement does not make the answer surer — add a check of another family (or code)")
 
 
 def _hard_checks(cat, questions, flows, rep):
