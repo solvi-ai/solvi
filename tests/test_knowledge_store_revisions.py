@@ -122,3 +122,33 @@ def test_an_item_a_rule_re_infers_after_its_retraction_follows_its_premises():
     ks.retract(q, why="the negative condition no longer holds")
     assert ks.add("fact", fact("q", 1), source="spec", derived_from=[p], inferred=True) == q
     assert ks.status(q) == "active" and not ks.pending_retest(q)
+
+
+# --- retraction of one writer's support
+def test_retracting_one_writers_copy_keeps_the_item_on_the_others_support():
+    ks = KnowledgeStore()
+    a = ks.add("fact", fact("x", 1), source="spec", by="honest")
+    assert ks.add("fact", fact("x", 1), source="spec", by="liar") == a
+    changes = ks.retract(a, why="liar exposed", only_from="liar")
+    assert changes == {} and ks.status(a) == "active" and ks.item(a)["confidence"]["n_confirm"] == 0
+    ks.retract(a, only_from="honest")
+    assert ks.status(a) == "retracted"
+    try:
+        ks.retract(a, only_from="nobody")
+        raise AssertionError("expected ValueError")
+    except ValueError:
+        pass
+    assert ks.verify()
+
+
+def test_retract_source_takes_back_only_what_that_writer_alone_supports():
+    ks = KnowledgeStore()
+    shared = ks.add("fact", fact("s", 1), source="spec", by="honest")
+    ks.add("fact", fact("s", 1), source="spec", by="liar")
+    lie = ks.add("fact", fact("l", 2), source="spec", by="liar")
+    d = ks.add("fact", fact("d", 3), source="spec", by="ann", derived_from=[lie])
+    changes = ks.retract_source("liar", why="exposed")
+    assert ks.status(shared) == "active" and ks.status(lie) == ks.status(d) == "retracted"
+    assert changes == {lie: ("active", "retracted"), d: ("active", "retracted")}
+    assert ks.add("fact", fact("l", 2), source="spec", by="honest") == lie
+    assert ks.pending_retest(lie)                      # its whole support was taken back: told again, it waits

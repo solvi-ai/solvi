@@ -94,7 +94,7 @@ _KNOWLEDGE = "knowledge"                              # the record kind of journ
 
 class _Item:
     __slots__ = ("id", "kind", "body", "scope", "key", "value", "asserts", "promoted", "retracted", "retired",
-                 "reconfirm_after", "uses")
+                 "reconfirm_after", "uses", "cuts")
 
     def __init__(self, iid, kind, body, scope, key, value, reconfirm_after):
         self.id, self.kind, self.body, self.scope, self.key, self.value = iid, kind, body, scope, key, value
@@ -102,9 +102,30 @@ class _Item:
         #                               "of", "inferred"}]
         self.promoted = []          # [t]
         self.retracted = []         # [t]
+        self.cuts = []              # [(t, writer)]: one writer's assertions taken back (retract(..., only_from=))
         self.retired = []           # [t]
         self.reconfirm_after = reconfirm_after
         self.uses = [0, 0]          # [used, used and wrong]
+
+
+def _cut(it):
+    """The last journal position the item's whole support was taken back at (a retraction, or a writer's retraction
+    that left no other assertion standing), or -1."""
+    cut = max(it.retracted, default=-1)
+    for tc, _ in sorted(it.cuts):
+        if tc > cut and not any(cut < a["t"] < tc and not any(a["t"] < t2 <= tc and w2 == a["by"] for t2, w2 in it.cuts)
+                                for a in it.asserts):
+            cut = tc
+    return cut
+
+
+def _live(it):
+    """The item's assertions still standing: after its last retraction, and not taken back with their writer's."""
+    if not it.cuts:
+        cut = max(it.retracted, default=-1)
+        return [a for a in it.asserts if a["t"] > cut]
+    cut = _cut(it)
+    return [a for a in it.asserts if a["t"] > cut and not any(tc > a["t"] and w == a["by"] for tc, w in it.cuts)]
 
 
 def plain_json(x):
@@ -274,7 +295,10 @@ class KnowledgeStore:
                 self._touch(r["item"])
         elif op == "retract":
             if r["item"] in self.items:
-                self.items[r["item"]].retracted.append(t)
+                if r.get("only_from") is not None:
+                    self.items[r["item"]].cuts.append((t, r["only_from"]))
+                else:
+                    self.items[r["item"]].retracted.append(t)
                 self._touch(r["item"])
         elif op == "retire":
             if r["item"] in self.items:
@@ -414,16 +438,40 @@ class KnowledgeStore:
             rec = self._write("promote", item=iid, measured=measured)
             self._apply(rec)
 
-    def retract(self, iid, *, by=None, why=None):
+    def retract(self, iid, *, by=None, why=None, only_from=None):
         """Take an item back, with everything derived from it (the cascade over derived_from); what it refuted or
         disputed comes back. Nothing is deleted: the journal keeps the entry and the chain stays whole.
-        → {id: (status before, status after)} of every item whose status changed."""
+        only_from: a writer (the `by` of its assertions) — take back only that writer's assertions of the item: the same
+        content told by others stays (one item for both, since an id is its content); the item goes only when no other
+        assertion is left. → {id: (status before, status after)} of every item whose status changed."""
         with self._lock:
             if iid not in self.items:
                 raise KeyError(f"no item {iid!r}")
+            extra = {}
+            if only_from is not None:
+                only_from = str(only_from)
+                if not any(a["by"] == only_from for a in _live(self.items[iid])):
+                    raise ValueError(f"item {iid!r} has no standing assertion from {only_from!r}")
+                extra = {"only_from": only_from}
+            self._settle()
             before = self._statuses(self.component([iid]))
-            rec = self._write("retract", item=iid, by=None if by is None else str(by), why=why)
+            rec = self._write("retract", item=iid, by=None if by is None else str(by), why=why, **extra)
             self._apply(rec)
+            after = self._statuses(before)
+            return {i: (before[i], after[i]) for i in before if before[i] != after[i]}
+
+    def retract_source(self, writer, *, by=None, why=None):
+        """Take back every standing assertion from `writer` (an exposed source): items only it told go with their
+        derivations; items others told too stay on their support. → {id: (status before, status after)}."""
+        writer = str(writer)
+        with self._lock:
+            self._settle()
+            hit = sorted(i for i, it in self.items.items() if any(a["by"] == writer for a in _live(it)))
+            before = self._statuses(self.component(hit)) if hit else {}
+            with self.batch():
+                for i in hit:
+                    rec = self._write("retract", item=i, by=None if by is None else str(by), why=why, only_from=writer)
+                    self._apply(rec)
             after = self._statuses(before)
             return {i: (before[i], after[i]) for i in before if before[i] != after[i]}
 
@@ -600,7 +648,7 @@ class KnowledgeStore:
             return False
         if ignore_age:
             return True
-        live = [a for a in it.asserts if a["t"] > max(it.retracted, default=-1)]
+        live = _live(it)
         if not live or min(a["t"] for a in live) > t:
             return False                                  # learned after the flag: not covered
         return not any(a["t"] > t and a["source"] in LIFTS_FLAG for a in live)
@@ -671,7 +719,7 @@ class KnowledgeStore:
             return False
         if any(self._flag_covers(t, iid) for t in self._pending_flags()):
             return True
-        live = [a for a in it.asserts if a["t"] > max(it.retracted, default=-1)]
+        live = _live(it)
         return bool(it.reconfirm_after and live and self.clock - max(a["clock"] for a in live) > it.reconfirm_after)
 
     def usable(self, iid, *, valid_at=None):
@@ -686,7 +734,7 @@ class KnowledgeStore:
         it = self.items.get(iid)
         if it is None:
             return None
-        live = [a for a in it.asserts if a["t"] > max(it.retracted, default=-1)] or it.asserts
+        live = _live(it) or it.asserts
         return live[-1].get("valid") if live else None
 
     def item(self, iid):
@@ -869,8 +917,9 @@ def _taint(items, iid, memo):
     it = items.get(iid)
     if it is None:
         return None
-    cut = max(it.retracted, default=None)
-    live = [a for a in it.asserts if cut is None or a["t"] > cut]
+    cut = _cut(it)
+    cut = None if cut < 0 else cut
+    live = _live(it)
     via, whole = [], bool(live)
     for a in live:
         ta = max((tp for p in a["just"] if (tp := _taint(items, p, memo)) is not None and tp > a["t"]), default=None)
@@ -895,9 +944,7 @@ def _resolve(items, comp, by_key, resolves, clock, flagged, max_iter=200, taints
         if t is not None and not any(p > t for p in items[i].promoted):
             retest.add(i)
 
-    def live_asserts(it):
-        cut = max(it.retracted, default=-1)
-        return [a for a in it.asserts if a["t"] > cut]
+    live_asserts = _live
 
     status = {i: "active" for i in order if live_asserts(items[i])}
     keys = sorted({items[i].key for i in order if items[i].key is not None})
