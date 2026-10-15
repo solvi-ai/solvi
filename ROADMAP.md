@@ -67,6 +67,7 @@ what was missing, and was written by hand around solvi's records, is planned her
 | Item | What it gives | Status |
 |---|---|---|
 | **A verdict history across runs** | The same question over runs, with stability classes (stable / flaky / regression / fixed), quarantine, «passed on the second attempt», and the share of stable outcomes as a metric: on a live environment a single verdict says little | planned |
+| **A control for every honesty score** | `solvi honesty --control`: the same answers against shuffled gold, and whether the set discriminates (a score an untrained model also reaches means nothing) | done (on `dev`) |
 | **A known-bug registry** | Failing checks and their text matched to a known bug's id, with its status (open / fixed) and a signal when a bug has not been seen for N runs («check that it is fixed») | planned |
 | **«Environment degraded» at the run level** | When many checks of one run are blocked at once, one run-level status instead of many independent failures (the per-answer `contract(applicable=...)` exists) | planned |
 | **Several acceptable answers in a label** | A label as a set of right answers (close by the button or by Escape): `solvi.build` and `act_guard` calibrated on sets of acceptable answers, so another right answer is not counted as an error | planned |
