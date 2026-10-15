@@ -884,14 +884,22 @@ def plain_json(v):
 class Catalog:
     """Everything the system can do; the strategist decides which parts each question needs."""
 
-    def __init__(self, *, quotes="normalized", sensitive=()):
+    def __init__(self, *, quotes="normalized", sensitive=(), combine="first"):
         """quotes: how quotes and evidence are matched against their source text — "normalized" (default since 1.0: a
         quote that differs from its text only in Unicode form, no-break spaces or hyphens, dashes, "…", whitespace
         runs or curly quotes is found, and the source's own substring is kept, see solvi.core.locate) or "literal"
         (0.9: the text as written, up to whitespace runs). It applies to the parts registered after it is set.
         sensitive: names of given facts no part may read (age, sex, ...) — `solvi check` (solvi.check.lint) reports a part
-        that reads one, directly or through a fact computed from one, as an error; nothing changes at ask time."""
+        that reads one, directly or through a fact computed from one, as an error; nothing changes at ask time.
+        combine: which of several false hard checks governing one question decides it — "first" (default: the first
+        declared; when their `then` answers differ a warning names them) or "strictest" (the answer that comes last in
+        the question's options, so list them from mildest to strictest; a governing check with no `then` answer for
+        the question abstains and is strictest of all; with a `then` function among them, or no options, the first
+        declared decides, with the warning)."""
         from .provenance import quote_mode
+        if combine not in ("first", "strictest"):
+            raise ValueError('combine must be "first" or "strictest"')
+        self.combine = combine
         self.quotes = quote_mode(quotes)
         self.sensitive: frozenset[str] = frozenset([sensitive] if isinstance(sensitive, str) else sensitive or ())
         self.parts: dict[str, Part] = {}
@@ -1039,7 +1047,9 @@ class Catalog:
         function of facts instead of a constant — `then={"step": free_side}` with `def free_side(position, walls) ->
         str` — whose argument names are the facts it reads (typed like any part's); it runs only when the check is
         False, its value must be one of the question's answers (else the question abstains), and it is recorded in the
-        trace (record kind "then") and re-checked by replay. `cite`, `clause`: as for extract."""
+        trace (record kind "then") and re-checked by replay. When several hard checks governing a question are False,
+        the first declared decides (Catalog(combine="strictest"): the strictest answer by the question's option order).
+        `cite`, `clause`: as for extract."""
         if then is not None and not isinstance(then, dict):
             raise TypeError(f"then= is {{question: answer or function of facts}}, not {type(then).__name__}: e.g. "
                             "then={\"step\": free_side}")
