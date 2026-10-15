@@ -42,21 +42,34 @@ for one pre-registered check, run once, before it enters the library.
 | Item | What it gives | Status |
 |---|---|---|
 | **`combine="strictest"` by default for ordered answers** | Several failed hard checks give the strictest answer, not the first declared | decided for 1.2 |
-| **A cost of error at decision time** | `loss=` for wrong accept / wrong ignore / check / abstain, actions answer · check · abstain · defer, value of a check against the policy that will act | experimental module first; core only if a check stand shows a gain |
-| **Correlation-aware combination of checks** | Checks of one model family counted as one piece of evidence, not several | after a stand (one family vs two) |
-| **A calibrator for model confidence** | Hierarchical calibration by domain and format, with a shift warning between calibration and use | after a stand (leave-one-domain-out vs Platt) |
-| **Label-free drift on check agreement** | A drift signal from checks disagreeing more, without labels | after a stand (planted shift) |
-| **Laws: sequential admission, a «new regime» and regime memory** | Admission that stays valid on a long stream; old rows stop refuting a new regime's law | after a stand |
-| **Laws with numeric effects** | Formula candidates with parameters and units, a noise model, «structure ± interval» | after a stand |
-| **Guard for agents: taint scope, task tool list, `effect=`** | Taint per message instead of the whole context; read / act / irreversible / egress | after a stand |
+| **A cost of error at decision time** | `loss=` for wrong accept / wrong ignore / check / abstain, actions answer · check · abstain · defer, value of a check against the policy that will act | measured: no gain over a threshold tuned per λ on the review-triage benchmark; stays out of the library (the experimental module was not merged) |
+| **Correlation-aware combination of checks** | Checks of one model family counted as one piece of evidence, not several | stand running |
+| **A calibrator for model confidence** | Hierarchical calibration by domain and format, with a shift warning between calibration and use | stand running |
+| **Label-free drift on check agreement** | A drift signal from checks disagreeing more, without labels | measured: slower than the current monitor on a new-intent shift (median delay 80.5 vs 72); not merged. Secondary result: a check that broke was missed by the current monitor in 98 of 100 runs, while a 10 % random audit of decisions caught it in 59 of 100 — `Dispatcher(audit=)` now exists |
+| **Laws: sequential admission, a «new regime» and regime memory** | Admission that stays valid on a long stream; old rows stop refuting a new regime's law | measured: more false admissions (4 of 100 vs 0 for the sized rule) and no saving of rows (0.89–0.99 of the rows, bar 0.8); the library's default restored an old regime in 47.5 steps without memory against 55 with it; not merged |
+| **Laws with numeric effects** | Formula candidates with parameters and units, a noise model, «structure ± interval» | stand running |
+| **Guard for agents: taint scope, task tool list, `effect=`** | Taint per message instead of the whole context; read / act / irreversible / egress | stand running |
 | **A calibrated `injection_spans`** | Today it flags ordinary text (an address, a payment line) and misses about a third of polite attacks; calibrate on labelled agent texts with a regression set | with the Guard stand |
-| **Shadow and canary for changes** | A paired anytime-valid harm stop per slice | planned |
+| **Shadow and canary for changes** | A paired anytime-valid harm stop per slice | Shadow done (`Shadow.label`, overall and per-slice stop); canary rejected. A post-ship watch that reverts one version, `ShipWatch` + `Pipeline.revert`, is in `experimental.changes` (60 of 60 harmful rollouts reverted, 0 of 60 clean) |
+| **Certificate default alarm level** | The default alarm (1/δ) fires on most stable streams far inside the promise (64 % at a failure rate of 0.05 under a promise of 0.2); `alarm=50` did better on false alarms and delay | a confirmation on fresh seeds runs before the default changes |
 | **`build(monitor=)` on by default** | Once its false-alarm rate on short calibration sets is measured | open |
 | **Laws: several missing laws at once** | The remaining wrong probe admissions (6/100 with two laws) need a version space over pairs of laws | open |
 | **Knowledge: an expiry index for `tick`; `valid_at` on `Knowledge.value`** | `tick` still re-resolves every item with `reconfirm_after` | open |
-| **`run_file(isolate=, max_mem=)`; memoised nested fingerprints; thresholds from rule constants in `boundary`** | Faster, isolated tests and better edge cases | open |
+| **`run_file(isolate=, max_mem=)`; memoised nested fingerprints; thresholds from rule constants in `boundary`; long distinct sets, dict keys and huge negative numbers in `boundary`** | Faster, isolated tests and better edge cases | open |
+| **Metamorphic cases in `testing`** | A state transform and the relation the answers must keep (a unit conversion), next to `boundary` | open |
 | **Guard: unsigned «user» messages read as tool output when a verifier is set** | The other half of signed approvals | open |
-| **Dispatcher: selection correction over the conformal front; an open-set gate for a catalog-rule System 1; support-based confidence in `RuleList`; `sandbox.run_many`** | Remaining items of the review | open |
+| **An escalation queue by the value of an answer** | Which escalations to hand to a person first, by how many decisions an answer unblocks | stand running |
+| **Changes: a correction for the number of candidates tried** | A failure memory keyed on what a change does stops a replay only after its first rejection, so a lucky first draw is promoted (toy: 1 of 10 with `KnownFailures` + `SliceGuard`, 4 of 10 with an aggregate gate); a per-proposer count of evaluations on the same pool with an alpha-spending or e-value threshold | open |
+| **Changes: `SliceGuard`'s pinned original kept across processes** | Today it lives in the guard object (or is passed as `original=`); a hash-pinned file next to `EvaluatorLock`'s pins | open |
+| **The gated update cycle as one stand** | Random audit labels + the Shadow harm stop on a drift replay over public intent sets; the Shadow part is done | open |
+| **Audit labels used first** | `guarantee(corrections=True)` reading the randomly audited sample first; `build` suggesting an audit rate when the report has no random labels | open |
+| **`build(split="hash")` as the default** | Old examples keep their share when examples are added; a default change because it moves which examples calibrate what | later release |
+| **Cache for `aask` / `ask_text`** | The pure-decision cache serves `ask` only | open |
+| **Stores: a faster `verify`** | Skip re-answering (`deep=False`); the other half of the batch-save request | open |
+| **MCP proxy: an authenticated context channel** | The client's context channel is trust-on-client; a signed or host-authenticated one when MCP has it | open |
+| **Laws: intervention effects, over-generalisation, noise-aware probes** | `LawSet.delta(state_before, state_after, actions)` — the predicted effect of an intervention with the laws behind it and uncovered marks; refusal of a law exact on the demonstrations that picked the wrong feature (the pool-coverage warning covers only atoms that never varied); `split(..., score="eig", noise=σ)` choosing probes by expected information gain under measurement noise | open |
+| **Laws: `Buffer(window=N)`, a score memo, an own `Proposals` count in `LawSet`** | A sliding window needs re-basing the buffer's row indices and a decision on what the sized rule's N is after rows leave | open |
+| **Dispatcher: selection correction over the conformal front; an open-set gate for a catalog-rule System 1; support-based confidence in `RuleList`** | Remaining items of the review (`sandbox.run_many` done) | open |
 
 ## Next (1.2): from use over the automated tests of a live web application
 

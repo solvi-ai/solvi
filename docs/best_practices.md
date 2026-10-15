@@ -833,3 +833,37 @@ make it a forger (a rule on outcomes accused an honest lab in 52 % of runs).
 resolved" comes in the first ~20 measurements. `learn_order` saved 7 % of the cost at 2.9× the time on cheap checks —
 use it only where parts are expensive. A `RuleList` as the compiler's System 1 took 0–12 % of the traffic, against
 48–81 % for a distilled logistic head.
+
+**A slow or local LLM backend: raise `timeout`, lower `retries`.** A server that does not answer after its retries
+makes the question abstain and is counted as `no_answer` in `System.stats`, apart from the model's own doubt; watch
+that share, not only escalations.
+
+**Check an exact model's clone hook once** with `testing.conformance.check_environment(make, clone=)`: a clone that
+shares state with the original, or restores the wrong state, makes plans that do not hold. Nondeterminism found by
+accident is what `check_environment` is for.
+
+**Labels from corrections are not a random sample** — people correct what looks wrong. On a toy dispatcher the stored
+corrections showed 7.2 % error against 1.8 % on the truth. `Dispatcher(audit=0.05–0.25)` and labelling the marked
+decisions gives an unbiased reading (within 5 points on 1,200 decisions at audit=0.25). A random audit also catches a
+check that broke silently: in a drift stand the current monitor missed a broken check in 98 of 100 runs, while a 10 %
+random audit found it in 59 of 100.
+
+**Refit on a hash split when examples keep arriving.** `build(split="hash")` keeps every old example in its share when
+examples are added (600 + 60 examples, 5 seeds: 0 old examples moved in or out of the fit share, against 101–120 with the
+shuffle). Routes still move with the thresholds; `solvi diff` shows them.
+
+**Check a change pipeline's gates once with `testing.conformance.check_pipeline`** on your own change schema. An
+aggregate gate passes harm in a small slice and salami (eight steps of +0.012 on a 40-case slice each pass against the
+version in force); add `SliceGuard` with the original pinned, and give `KnownFailures(key=...)` what the change *does*,
+not a seed or salt it carries, so a replay under new identities is refused after its first rejection.
+
+**Watch a shipped change per slice, against its promise.** `pipe.watch(version, promise)` reverts only that version
+when one slice's evidence is enough; in a synthetic stand it reverted 60 of 60 harmful rollouts and 0 of 60 clean ones,
+where a mean-with-tolerance rule checked after every outcome reverted 22 of 60 clean ones.
+
+**A Shadow halt needs evidence:** about 10 discordant pairs when the candidate is always the wrong one, hundreds when it
+is wrong on a tenth of them. Label the shadowed answers so that the outcome does not depend on which answer was served.
+
+**Turn on `cache=` only for catalogs whose parts are pure** (no clock, randomness or I/O). A long input makes hashing
+most of a hit (0.43–0.74× the time of an uncached ask on 3.7k floats, against at most 0.17× on small inputs). Run
+`replay_all` on the store now and then: an impure part shows there as a recompute mismatch on the `cache_of` records.
