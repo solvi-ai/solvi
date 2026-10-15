@@ -110,9 +110,11 @@ class ConsistencyGate:
         key = item.get("key")
         if key is not None and just:
             v = (item.get("body") or {}).get("o")
-            for p in sorted(store.upstream(just)):
-                q = store.items[p]
-                if q.key == key and q.value != v:
+            rivals = sorted(p for p in store.by_key.get(tuple(key), ()) if store.items[p].value != v)
+            up = store.upstream(just) if rivals else ()      # walked only when the key has another value
+            for p in rivals:
+                if p in up:
+                    q = store.items[p]
                     return Verdict(False, f"self-defeating: premise {p} holds {q.value!r} on its key", gate=self.name)
         return Verdict(True, gate=self.name)
 

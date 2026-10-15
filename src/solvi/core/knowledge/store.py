@@ -618,6 +618,21 @@ class KnowledgeStore:
                 todo.extend(self.by_key[it.key])
         return seen
 
+    def downstream(self, ids):
+        """Items whose state a change to `ids` can change: `ids`, what is derived from them (transitively) and same-key
+        competitors — what a write re-resolves (the rest keeps its state)."""
+        seen, todo = set(), list(ids)
+        while todo:
+            i = todo.pop()
+            if i in seen or i not in self.items:
+                continue
+            seen.add(i)
+            todo.extend(self.dependents.get(i, ()))
+            k = self.items[i].key
+            if k is not None:
+                todo.extend(self.by_key.get(k, ()))
+        return seen
+
     def _statuses(self, ids):
         return {i: self._status(i) for i in ids}
 
@@ -671,13 +686,14 @@ class KnowledgeStore:
             self._tick_dirty = False
         if not self._touched:
             return
-        comp = self.component(self._touched)
+        comp = self.downstream(self._touched)           # upstream items keep their state: nothing here changes it
         self._touched = set()
         for i in comp:
             self._taints.pop(i, None)
         pending = self._pending_flags()
         flagged = {i for i in comp if any(self._flag_covers(t, i) for t in pending)}
-        new = _resolve(self.items, comp, self.by_key, self.resolves, self.clock, flagged, taints=self._taints)
+        new = _resolve(self.items, comp, self.by_key, self.resolves, self.clock, flagged, taints=self._taints,
+                       state=self.state)
         for i in comp:
             if i in new:
                 self.state[i] = new[i]
@@ -939,10 +955,13 @@ def _taint(items, iid, memo):
     return memo[iid]
 
 
-def _resolve(items, comp, by_key, resolves, clock, flagged, max_iter=200, taints=None):
-    """The state of the items in `comp` (a union of components) from their raw entries → {id: record} for present
-    items. Fixed point of: liveness of justifications ↔ per-key walk. Deterministic; components do not interact."""
+def _resolve(items, comp, by_key, resolves, clock, flagged, max_iter=200, taints=None, state=None):
+    """The state of the items in `comp` (closed under dependents and shared keys) from their raw entries → {id:
+    record} for present items. Fixed point of: liveness of justifications ↔ per-key walk. Deterministic; premises
+    outside `comp` are read from `state` (their resolved records), which nothing in `comp` can change."""
     order = sorted(comp, key=lambda i: (min((a["t"] for a in items[i].asserts), default=0), i))
+    fixed = {p: state[p] for i in order for a in items[i].asserts for p in a["just"]
+             if p not in comp and p in (state or {})}
     taints = {} if taints is None else taints
     retest = set()
     for i in order:
@@ -952,11 +971,12 @@ def _resolve(items, comp, by_key, resolves, clock, flagged, max_iter=200, taints
 
     live_asserts = _live
 
-    status = {i: "active" for i in order if live_asserts(items[i])}
+    status = {**{p: f["status"] for p, f in fixed.items()}, **{i: "active" for i in order if live_asserts(items[i])}}
     keys = sorted({items[i].key for i in order if items[i].key is not None})
     live, keyed, rank = {}, {}, {}
     for _ in range(max_iter):
-        live, rank, arank = {}, {}, {}
+        prev_rank = rank                                # a premise later in `order` is read from the last round
+        live, rank, arank = {}, {p: f["rank"] for p, f in fixed.items()}, {}
         for i in order:                                 # liveness of each assertion under the current premise statuses
             la = [a for a in live_asserts(items[i]) if all(status.get(p) not in (None, "refuted") for p in a["just"])]
             if not la:
@@ -966,7 +986,7 @@ def _resolve(items, comp, by_key, resolves, clock, flagged, max_iter=200, taints
             for a in la:
                 ra = RANK[a["source"]]
                 for p in a["just"]:
-                    ra = min(ra, rank.get(p, 0))
+                    ra = min(ra, rank.get(p, prev_rank.get(p, 0)))
                 arank[(i, a["t"])] = ra
                 r = max(r, ra)
             rank[i] = r
@@ -974,7 +994,7 @@ def _resolve(items, comp, by_key, resolves, clock, flagged, max_iter=200, taints
         for k in keys:
             ids = [i for i in by_key[k] if i in live]
             keyed.update(_walk_key(ids, live, arank, {i: items[i].value for i in ids}, resolves.get(k, ())))
-        new = {}
+        new = {p: f["status"] for p, f in fixed.items()}
         for i in order:
             if i not in live:
                 continue
@@ -997,13 +1017,15 @@ def _resolve(items, comp, by_key, resolves, clock, flagged, max_iter=200, taints
             if s == "active" and not any(all(status.get(p) == "active" for p in a["just"]) for a in live[i]):
                 s = "hypothesis"                        # a derived item is a fact only on active premises
             new[i] = s
-        if new == status:
+        if new == status and rank == prev_rank:
             break
         status = new
     else:
         raise RuntimeError(f"resolution did not converge on a component of {len(comp)} items")
     rec = {}
     for i, s in status.items():
+        if i in fixed:
+            continue
         la = live[i]
         kr = keyed.get(i) or ("", None, [], None)
         rec[i] = {"status": s, "rank": rank[i], "n_confirm": len(la) - 1, "refuted_by": kr[2],
