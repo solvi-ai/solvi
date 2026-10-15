@@ -248,7 +248,8 @@ def code_fingerprint(f, _seen=None):
     bytecode when there is no source), the simple values it closes over or reads as module globals (THRESHOLD = 30), and
     the code of the module's own functions it calls. A callable object (a model-backed part such as a decision) is
     identified by its type: its weights are the model's fingerprint. Cached per function: a module constant rebound after
-    the first fingerprint is not noticed within the process."""
+    the first fingerprint is not noticed within the process; a mutable module-level container (dict, list, set) is
+    hashed by its content as first seen in the process (see _global_container)."""
     import inspect
     import weakref
     global _CODE
@@ -289,8 +290,11 @@ def code_fingerprint(f, _seen=None):
         if name in g:
             # co_names holds attribute names too: `type(x).__name__` reads the module's own __name__ here, recorded
             # as its 0.9 name
-            v = _value_fp(fp_module(g[name]) if name == "__name__" and isinstance(g[name], str) else g[name], f, seen,
-                          module_only=True)
+            if isinstance(g[name], _MUTABLE):
+                v = _global_container(g, name, f, seen)
+            else:
+                v = _value_fp(fp_module(g[name]) if name == "__name__" and isinstance(g[name], str) else g[name], f,
+                              seen, module_only=True)
             if v is not None:
                 glob.append([name, v])
     parts.append(glob)
@@ -302,6 +306,34 @@ def code_fingerprint(f, _seen=None):
             _CODE[f] = fp
         except TypeError:
             pass
+    return fp
+
+
+_MUTABLE = (dict, list, set, bytearray)
+_FIRST = {}             # (id of a module's globals, name) → (the container, its value as first fingerprinted)
+
+
+def _global_container(g, name, owner, seen):
+    """A mutable module-level container a function reads (a registry dict, a list of limits): hashed by its content
+    the first time it is fingerprinted in the process, and by that first content after — filling a registry at run time
+    is state, not a change of the code, and must not change every part's fingerprint (and so every stored decision's
+    "catalog changed") within one process. A content that differs later is said once per global (UserWarning); a new
+    process hashes the content it starts with, so an edited literal in the source is still a changed fingerprint."""
+    v = g[name]
+    key = (id(g), name)
+    first = _FIRST.get(key)
+    if first is not None and first[0] is v:
+        if not first[2]:
+            now = _value_fp(v, owner, seen, module_only=True)
+            if now != first[1]:
+                import warnings
+                first[2] = True
+                warnings.warn(f"the module global {name!r} that {owner.__qualname__} reads changed after it was "
+                              "fingerprinted: the fingerprint keeps its first content (a mutable global is state, not "
+                              "code — pass it as an input, or make it a constant)", UserWarning, stacklevel=4)
+        return first[1]
+    fp = _value_fp(v, owner, seen, module_only=True)
+    _FIRST[key] = [v, fp, False]
     return fp
 
 

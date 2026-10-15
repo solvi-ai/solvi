@@ -131,6 +131,8 @@ class FlowModel(BaseModel):
     steps: list[StepModel]
     per_question: dict[str, list[str]] = {}
     skipped: dict[str, str] = {}
+    skipped_by: dict[str, list[str]] = {}   # a stored record's skipped parts grouped by reason (see pack_skipped)
+    skipped_rest: dict[str, Any] = {}       # ... and the rest of the catalog's parts: {"reason", "n", "hash"}
     unresolved: dict[str, list[str]] = {}
     types: dict[str, str] = {}          # fact → type name
     batches: list[list[str]] = []       # decision parts scored together in one forward pass
@@ -520,6 +522,52 @@ def _flow(f):
             "batches": [list(b) for b in getattr(f, "batches", None) or ()]}
 
 
+def _names_hash(names):
+    import hashlib
+    return hashlib.sha256("\n".join(names).encode()).hexdigest()[:16]
+
+
+PACK_REST = 16          # pack_skipped: a reason shared by more parts than this is kept as a count and a hash
+
+
+def pack_skipped(flow):
+    """A flow's dict (as Response.to_dict() writes it) with its skipped parts packed for a stored record: in a large
+    catalog of which a decision plans a few parts, the rest are all listed as skipped, nearly all for one reason, and
+    that list was most of the record. The reason most parts share (when more than PACK_REST do) becomes
+    {"skipped_rest": {"reason", "n", "hash"}} — every other part of the catalog that decided, in catalog order, its
+    count and the hash of their names; the others are grouped {"skipped_by": {reason: [part, ...]}}. Loading with the
+    catalog restores the per-part form exactly (the count and the hash must match: a catalog that changed since gives
+    back only the grouped ones); the older per-part form loads as before."""
+    sk = flow.get("skipped")
+    if not sk:
+        return flow
+    by = {}
+    for name, why in sk.items():
+        by.setdefault(why, []).append(name)
+    out = {k: v for k, v in flow.items() if k != "skipped"}
+    top = max(by, key=lambda w: len(by[w]))
+    if len(by[top]) > PACK_REST:
+        names = by.pop(top)
+        out["skipped_rest"] = {"reason": top, "n": len(names), "hash": _names_hash(names)}
+    if by:
+        out["skipped_by"] = by
+    return out
+
+
+def _unpack_skipped(m, steps, catalog):
+    """The per-part skipped of a loaded flow (see pack_skipped)."""
+    skipped = dict(m.skipped)
+    for why, names in m.skipped_by.items():
+        skipped.update(dict.fromkeys(names, why))
+    rest = m.skipped_rest
+    if rest and catalog is not None and hasattr(catalog, "parts"):
+        planned = {st.part.name for st in steps}
+        names = [n for n in catalog.parts if n not in planned and n not in skipped]
+        if len(names) == rest.get("n") and _names_hash(names) == rest.get("hash"):
+            skipped.update(dict.fromkeys(names, rest.get("reason")))
+    return skipped
+
+
 def _to_dict(obj):
     n = type(obj).__name__
     if n == "AnswerType":
@@ -689,7 +737,7 @@ def _load_flow(m, catalog):
         if catalog is not None:
             p = catalog.rules.get(s.name[7:]) if s.name.startswith("answer:") else catalog.parts.get(s.name)
         steps.append(Step(p if p is not None else _stub(s.name, s.kind, s.inputs, s.hard), list(s.reasons)))
-    return Flow(steps, {q: list(v) for q, v in m.per_question.items()}, dict(m.skipped),
+    return Flow(steps, {q: list(v) for q, v in m.per_question.items()}, _unpack_skipped(m, steps, catalog),
                 {q: list(v) for q, v in m.unresolved.items()}, dict(m.types), [list(b) for b in m.batches])
 
 

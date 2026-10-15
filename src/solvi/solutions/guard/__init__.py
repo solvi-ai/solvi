@@ -2210,12 +2210,23 @@ class Guard:
     def replay(self, stored_id):
         """Re-compute a stored decision from its recorded inputs with the tool's current checks → solvi's replay report
         ({"ok", "steps", "mismatches", "catalog", ...}): a recorded step that now computes differently (a changed policy,
-        schema or authorizer) is a mismatch; "catalog" says whether the tool's checks changed since the decision."""
+        schema or authorizer) is a mismatch; "catalog" says whether the tool's checks changed since the decision.
+        A compact record (the store's record="compact") is re-run from its recorded input with the tool's checks and
+        every step compared with its recorded hash (TraceStorage.rederive); one that cannot be rebuilt is reported
+        with ok False, its mismatches and "record": "compact"."""
         if self.storage is None:
             raise ValueError("the guard has no storage")
         rec = self.storage.record(stored_id)
         tool = ((rec.get("meta") or {}).get("guard") or {}).get("tool")
         s = self.system(tool) if tool is not None else self._unknown_system()
+        if rec.get("record") == "compact":
+            from ...core.runtime import mismatch_summary
+            from ...core.store import rederive
+            res, ms = rederive(rec, s, trust_models=True)
+            if res is None:
+                return {"ok": False, "steps": 0, "mismatches": ms, "models": [], "catalog": None, "record": "compact",
+                        **mismatch_summary(ms)}
+            return res.trace.replay(s.catalog, trust_models=True)   # its model steps were just checked by rederive
         res = self.storage.get(stored_id, s)
         return res.trace.replay(s.catalog)
 

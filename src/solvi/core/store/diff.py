@@ -26,13 +26,16 @@ def _events(resp, q):
 
 
 def _deps(resp, q):
-    """The facts an answer rests on in a response: from the answer (and a deciding hard check) back through the recorded
-    inputs."""
+    """The facts an answer rests on in a response: from the answer (and every hard check that ran for its question, the
+    deciding one included) back through the recorded inputs."""
     by = {}
     for r in resp.trace.records:
         by.setdefault(r.name, []).append(r)
     res = resp.results.get(q)
     todo = ["answer:" + q] + ([res.source] if res is not None and res.guard == "hard_check" and res.source in by else [])
+    hard = {st.part.name for st in resp.flow.steps if st.part.kind == "check" and st.part.hard}
+    todo += [c for c in (getattr(resp.flow, "per_question", None) or {}).get(q) or () if c in hard and c in by
+             and c not in todo]
     seen = set(todo)
     while todo:
         n = todo.pop()
