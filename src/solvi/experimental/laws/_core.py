@@ -464,7 +464,9 @@ class Admission:
     the set without any new law still survives; why: the reason; witnesses: the candidates refuted only as too narrow
     that are right wherever they were applied and predict otherwise than the surviving class where they apply — while
     any is left nothing is accepted (several laws may be missing); refuted_list: the refuted candidates, in the order
-    they fell."""
+    they fell; untested: the atoms of a longer candidate in the surviving class that the shortest one drops and that
+    never varied on the pool and the rows seen where the shortest one holds — the evidence cannot tell the shorter law
+    from the longer, so the accepted law may be too general there (see `coverage` of `admit_by_probes`)."""
     status: str
     law: Law | None
     classes: list
@@ -474,6 +476,7 @@ class Admission:
     why: str
     witnesses: list = field(default_factory=list)
     refuted_list: list = field(default_factory=list)
+    untested: list = field(default_factory=list)
 
 
 # ───────────────────────────────────────────── the law set
@@ -889,7 +892,8 @@ class LawSet:
                         budget: int = 8, buffer: Buffer | None = None, exclude=None,
                         read_only: Callable[..., bool] | None = None, cost: Callable[[Any, Any], Any] | None = None,
                         order: str = "split", unique: bool = True, seed: int = 0, tol: float | None = None,
-                        same: Callable[[Any, Any], bool] | None = None, assume_one_law: bool = False) -> Admission:
+                        same: Callable[[Any, Any], bool] | None = None, assume_one_law: bool = False,
+                        coverage: str = "warn") -> Admission:
         """Admit one of `candidates` by asking the world where they disagree (CEGIS-style), not by a random held-out
         sample. ask(state, action) → the observation (the environment, or an exact model of it); probes: the (state,
         action) pairs you may ask about (a finite pool; also what the equivalence classes are computed on); safe:
@@ -922,6 +926,13 @@ class LawSet:
         wherever it applies on the pool, so no probe tells them apart). assume_one_law=True: the narrow refutation is
         final (before 1.2).
 
+        coverage: what to do when the pool cannot tell the accepted (shortest) candidate from a longer one of its
+        class — an atom the longer one adds never varied on the pool or the rows seen where the shorter one holds
+        (a pool where every state is next to the table admits "make & wood ≥ 1 → pickaxe" without "near table";
+        the probes agree with both, so the shortest is taken). "warn" (the default): accept as before, list the atoms
+        in `Admission.untested` and warn; "undetermined": refuse to accept, with the atoms in `untested`; "ignore":
+        accept silently (before 1.2). Give the pool states where those atoms vary to settle it.
+
         Measured on a synthetic world (10 binary features, 20 atoms, k = 3; the hidden law a random conjunction of two
         atoms; the 176 candidates Enumerate proposes from one state where it fires; a pool of 200 random states; 300
         trials; a wrong law = one that differs from the hidden law on any of the 1,024 states): at 8 checks a random
@@ -935,6 +946,8 @@ class LawSet:
         applied, born = "probe"."""
         if order not in ("split", "random"):
             raise ValueError(f"order is 'split' or 'random', not {order!r}")
+        if coverage not in ("warn", "undetermined", "ignore"):
+            raise ValueError(f"coverage is 'warn', 'undetermined' or 'ignore', not {coverage!r}")
         from ._probes import groups_of, sameness, split
         eq = sameness(tol, same)
         E = eq or (lambda u, v: u == v)
@@ -1117,8 +1130,23 @@ class LawSet:
 
         out = [cands[j] for j in fell]
 
-        def undetermined(reason, ws=()):
-            return Admission("undetermined", None, classes, asked, refuted, null, reason, [cands[d] for d in ws], out)
+        def undetermined(reason, ws=(), untested=()):
+            return Admission("undetermined", None, classes, asked, refuted, null, reason, [cands[d] for d in ws], out,
+                             list(untested))
+
+        def untested_of(j, members):
+            """The atoms longer members of j's class add to j's condition that never varied where j's condition holds
+            (on the pool and every row seen, j's action only)."""
+            extra = sorted({n for m in members for n in cands[m].condition} - set(cands[j].condition))
+            if not extra:
+                return []
+            ka, cond = _key(cands[j].action), set(cands[j].condition)
+            pts = [pinfo(i)[0] for i in range(len(pool)) if _key(pool[i][1]) == ka]
+            if buffer is not None:
+                pts += [set(self.grammar.true(r.state, r.action)) for r in buffer.rows(cands[j].action, exclude)]
+            pts += [set(self.grammar.true(r.state, r.action)) for r in asked if _key(r.action) == ka]
+            pts = [T for T in pts if cond <= T]
+            return [n for n in extra if len({n in T for T in pts}) < 2]
 
         if not alive:
             return undetermined("no candidate survived" + (f" ({why})" if why else ""))
@@ -1136,8 +1164,19 @@ class LawSet:
                 return undetermined(f"{len(ws)} candidate(s) refuted only as too narrow are right wherever they were "
                                     f"applied and predict otherwise than the surviving class — more than one law may "
                                     f"be missing: {why}", ws)
+            members = cls[0]
         else:
             j = min(alive, key=order_key)
+            members = next((g for g in cls if j in g), [j])
+        gap = untested_of(j, members) if coverage != "ignore" else []
+        if gap and coverage == "undetermined":
+            return undetermined(f"the atom(s) {gap} never varied where the shortest candidate holds — the pool cannot "
+                                f"tell it from a longer one of its class: {why}", untested=gap)
+        if gap:
+            warnings.warn(f"admit_by_probes: the atom(s) {gap} never varied on the pool where the accepted law "
+                          f"{cands[j].condition} holds — it may be too general (a longer candidate adding them "
+                          f"predicts the same on every probe); add pool states where they vary, or pass "
+                          f"coverage='undetermined' to refuse", UserWarning, stacklevel=2)
         if len(self.laws) >= self.cap:
             self.capped += 1
             return undetermined("the cap of active laws is reached")
@@ -1153,7 +1192,7 @@ class LawSet:
                            sources=tuple(r.id for r in sup))
         law.admitted, law.tested = "probes", len(cands)
         self.cost["accepted"] += 1
-        return Admission("accepted", law, classes, asked, refuted, null, why or "one class left", [], out)
+        return Admission("accepted", law, classes, asked, refuted, null, why or "one class left", [], out, gap)
 
     def _accept(self, c, *, born, support=0, hits=0, net=0, sources=()):
         self._seq += 1
