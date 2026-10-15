@@ -227,7 +227,7 @@ def run_case(system, case, state, store=False, timeout=None, reruns=0):
             try:
                 with _deadline(timeout):
                     res = system.ask(copy.deepcopy(state), case.get("ask"), **_store_kw(system, False))
-            except (Exception, CaseTimeout):  # noqa: BLE001 — a re-run that fails says nothing more
+            except (Exception, CaseTimeout):  # noqa: BLE001, S112 — a re-run that fails says nothing more
                 continue
             again = {q: [_show(r.answer), r.status] for q, r in res.results.items()}
             if again != out.answers:

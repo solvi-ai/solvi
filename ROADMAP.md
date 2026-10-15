@@ -34,6 +34,29 @@ Built on the account above: what works becomes the stable low level, and the hig
 |---|---|---|
 | **solvi-ai/recipes** | Subprojects, one per task: how a real task is solved, why it is solved this way, and what the library does in it — and where it does not help. Kept apart from the library so a recipe can use any data, model or service. | planned |
 
+## Next (1.2): from a second external review of 1.1.1
+
+The verified defects are fixed on `dev` (CHANGELOG «1.2.0 — unreleased»). What remains is either decided for 1.2 or waits
+for one pre-registered check, run once, before it enters the library.
+
+| Item | What it gives | Status |
+|---|---|---|
+| **`combine="strictest"` by default for ordered answers** | Several failed hard checks give the strictest answer, not the first declared | decided for 1.2 |
+| **A cost of error at decision time** | `loss=` for wrong accept / wrong ignore / check / abstain, actions answer · check · abstain · defer, value of a check against the policy that will act | experimental module first; core only if a check stand shows a gain |
+| **Correlation-aware combination of checks** | Checks of one model family counted as one piece of evidence, not several | after a stand (one family vs two) |
+| **A calibrator for model confidence** | Hierarchical calibration by domain and format, with a shift warning between calibration and use | after a stand (leave-one-domain-out vs Platt) |
+| **Label-free drift on check agreement** | A drift signal from checks disagreeing more, without labels | after a stand (planted shift) |
+| **Laws: sequential admission, a «new regime» and regime memory** | Admission that stays valid on a long stream; old rows stop refuting a new regime's law | after a stand |
+| **Laws with numeric effects** | Formula candidates with parameters and units, a noise model, «structure ± interval» | after a stand |
+| **Guard for agents: taint scope, task tool list, `effect=`** | Taint per message instead of the whole context; read / act / irreversible / egress | after a stand |
+| **Shadow and canary for changes** | A paired anytime-valid harm stop per slice | planned |
+| **`build(monitor=)` on by default** | Once its false-alarm rate on short calibration sets is measured | open |
+| **Laws: several missing laws at once** | The remaining wrong probe admissions (6/100 with two laws) need a version space over pairs of laws | open |
+| **Knowledge: an expiry index for `tick`; `valid_at` on `Knowledge.value`** | `tick` still re-resolves every item with `reconfirm_after` | open |
+| **`run_file(isolate=, max_mem=)`; memoised nested fingerprints; thresholds from rule constants in `boundary`** | Faster, isolated tests and better edge cases | open |
+| **Guard: unsigned «user» messages read as tool output when a verifier is set** | The other half of signed approvals | open |
+| **Dispatcher: selection correction over the conformal front; an open-set gate for a catalog-rule System 1; support-based confidence in `RuleList`; `sandbox.run_many`** | Remaining items of the review | open |
+
 ## Next (1.2): from use over the automated tests of a live web application
 
 A user ran solvi as the decision layer over the automated tests of a live web application (thousands of step

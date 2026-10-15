@@ -737,3 +737,32 @@ cannot stop a request that solvi is about to send.
 
 **After a change of the catalog, replay before you trust old traces.** A renamed part, a new input or a retrained
 model each make old decisions non-reproducible; `solvi diff` shows which stored decisions would change and why.
+
+## Checks, drift and knowledge over time (from a second external review)
+
+**A check from the same model call is not a check.** In the review's measurement a check made by the same call
+agreed with the answer in 260 of 260 cases, every error included; three checks by one model were no better than one
+answer. Declare `Catalog.check(shares_call_with=...)` and `family=` so `solvi check` flags it, and put a check of
+another family, or executed code, next to a model.
+
+**Drift on numbers:** `NumericDrift` with a reference of at least ~50 values from calibration data, not the stream's
+start; under 20 values the false-alarm bound does not hold (it warns). Whiten autocorrelated residuals first.
+
+**Facts with `valid=`:** ask with `snapshot(valid_at=<the decision's world time>)`; without it every interval's
+value is a fact at once. After retracting a wrong item and telling the correction, `redecide(..., upto="now")` gives
+the corrected answers; the default answers «what would the decision have been without the bad item at the time».
+
+**Mutable registries read by rules are state, not code:** pass them as inputs, or freeze them before the first
+`ask`; the fingerprint keeps the content first seen in the process.
+
+**Keep regression cases from your records:** `testing.cases_from_store(storage, n=...)` plus
+`testing.boundary(cases, system=...)` before changing a catalog; hand-written cases rarely sit on a threshold's edge.
+
+**Laws on few rows:** on 3 groups × 6 rows a deterministic one-atom law was learned 0/20 with the sized default and
+20/20 with `acceptance="exact", min_support=2`; the exact rule has no false-accept bound over many candidates, so
+pair it with `confirm=` (an independent check). Measured values need `tol=`: with exact equality, 1e-6 noise refuted
+every candidate of y = c·x.
+
+**Paid checks pay only when a wrong accept is dear, the check is cheap and independent, and wrong answers occur.**
+Where a check costs more than the error, or every check is the same model, deciding without checks did as well or
+better in the review's stands.

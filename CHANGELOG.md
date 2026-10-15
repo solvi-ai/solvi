@@ -1,5 +1,88 @@
 # Changelog
 
+## 1.2.0 — unreleased — fixes from a second external review of 1.1.1
+
+A user ran solvi 1.1.1 through some sixty experiments and sent the defects with reproductions. Each fix below
+started from a failing test built on the reproduction; the numbers are before → after on that reproduction.
+
+### Fixed
+
+- **Provenance follows every hard check that ran, not only the deciding one.** `quarantine`, `where_is` and
+  `diff`'s answer scope missed a decision that read a wrong fact only through a passing required check (1 of 3
+  found → 3 of 3).
+- **`build` and the guarantees say when the promise does not hold.** A calibration whose only threshold is inf now
+  says why and emits a `GuaranteeWarning`, as does conformal risk control on too few examples ((n + 1) · risk < 2);
+  `build` warns when the dispatcher's calibration measures System 1 breaking the promise, and `build(strict=True)`
+  raises instead; `build(slow=..., split=(fit, guarantee, 0))` works (it raised "none are left").
+- **After a drift flag, an answer with no slow path to check it goes to a person** with «out of its guarantee
+  since the drift flag»; it was accepted as «within its guarantee» (measured error 6.5–6.9 % against a promised 5 %).
+  `Dispatcher(on_drift="accept")` keeps the old routing with honest reasons; `build(monitor=True | <monitor>)`
+  attaches a monitor. **Behaviour change.**
+- **Knowledge: `valid=` takes part in resolution.** Values on a key compete only when their validity intervals
+  overlap; of two overlapping values the later `since` wins regardless of write order; the same `since` from two
+  writers is a dispute at equal rank. New `usable(id, valid_at=)`, `snapshot(valid_at=)`, `KnowledgeStore.valid(id)`.
+  Keys without `valid` resolve as before.
+- **Knowledge: content told again after a retraction is not revived silently** — it is a hypothesis until
+  `retest(id, ok=True)`, and items that rested on it wait for their own re-test (`pending_retest()`). An item a rule
+  only re-infers follows its premises. **Behaviour change.**
+- **Knowledge: an item added earlier in a `batch()` reads as present** (it read as retracted, and a fact derived
+  from it in the same batch was refused).
+- **Knowledge: loading is linear.** A write re-resolves only the touched items, their derivations and same-key
+  competitors: a 2,000-fact chain 15.8 s → 0.12 s. A derived item's rank no longer depends on the order its premises
+  were first written in (fingerprints of affected stores change once).
+- **Laws: a candidate's support and precision are counted on the rows where it would be the applied law**, as its
+  net already was: a default whose exceptions are already laws scored 45/55 and was refused at 0.9; now 45/45.
+  `LawSet(support_on="matched")` restores the old count. **Behaviour change.**
+- **Laws: retirements by the check after an acceptance reach `Step.retired`** (and `LawSet.last_retired`);
+  `min_precision < retire_below` warns at construction (such a law is accepted and retired in turn).
+- **Laws: the sized acceptance's N counts distinct candidates**, so re-scoring the same candidates no longer raises
+  the bar (the same 56 candidates three times: N 168 → 56).
+- **Laws: `admit_by_probes` no longer trusts a «too narrow» refutation when more than one law may be missing.**
+  Candidates never wrong where they applied are kept as `Admission.witnesses`, and a lone survivor is accepted only
+  once the witnesses no longer fit or agree with it. Two-law world (x0 ∨ x1): wrong admissions 29 → 6 of 100;
+  single-law benchmark at 8 checks: right 0.987 → 0.897, never wrong (1.000 at 10 checks). `assume_one_law=True`
+  keeps the old rule. **Behaviour change.**
+- **Fingerprints ignore later changes of a mutable module-level container** read by a rule: the content first seen
+  in the process is hashed, a later change warns once (the fingerprint changed three times while a registry filled).
+- **`Guard.replay` / `replay_all` work on `record="compact"` stores** (they raised `CompactRecord`).
+- **Guard: `firewall(locale=)`** — "$3,000" grounds under the tool's own locale (default `"tool"`; `None` restores);
+  a "/" between two words separates them ("personal/address"), never inside a path or address.
+- **Guard: `require_request` knows more verbs** ("let X know", inform, dispatch, withdraw, grant, unlock, "book a
+  call", with Russian forms); `register_intent(name, patterns, extend=False)` adds your own.
+- **Sandbox: `cmath` is allowed**; `check`, `load`, `safe_builtins` and `run` take `allowed=` (a forbidden name is
+  still refused).
+- **`RuleList` warns when `max_rules` cuts the list** while more rules would pass; `RuleList.truncated` holds the count.
+- **experimental.changes: a stage that raises gives status `"error"`, not a rejection** remembered for ever
+  (`Pipeline(raise_stage_errors=True)` re-raises after journaling); `rollback(why=...)` records the undone changes as
+  failed (`failed=False` for the old behaviour); the failure memory compares a keyed item by subject, relation, value,
+  kind and change type, so an extra body key (a nonce) no longer makes a rejected rule new. **Behaviour changes.**
+- **experimental.changes: a proposal no longer re-reads the whole journal** — 1.0 → 12.3 ms per proposal over 400
+  proposals before, 0.3 ms flat after. New in-memory `MemoryStorage` (`Pipeline(stages, ":memory:")`).
+- **experimental.changes: `EvaluatorLock.create` takes `seeds=[...]`** and refuses a bad `n` with a clear error.
+
+### Added
+
+- `Catalog(combine="strictest")` (opt-in): when several hard checks governing a question fail, the strictest
+  `then` answers; a warning names conflicting failed checks under the default «first declared decides»
+  (`combine="first"` explicitly: no warning). The default flips for ordered answers in 1.2.
+- `Catalog.check(family=, shares_call_with=)` and `solvi check` warnings `check_shares_call` / `checks_one_family`:
+  a check that re-reads another part's model call agrees with it whatever it says.
+- `NumericDrift` monitor over any numeric stream (residuals, latencies) and `Cusum.calibrate(ref_n=)`.
+- `testing.cases_from_store(storage, n)` and `testing.boundary(cases, n, system=)`: regression cases from recorded
+  decisions and inputs at the edges of what the cases show (they caught `< 100` → `< 101`; the seed cases did not).
+- `solvi test` case statuses (ok, regression, nondeterministic, timeout, error, invalid), `run_file(timeout=,
+  reruns=)`, `--timeout` / `--reruns`.
+- Stored full records keep the skipped catalog parts grouped (`flow.skipped_rest`, `flow.skipped_by`): a 302-part
+  catalog record 13.5 kB → 2.9 kB; loading with the catalog restores `flow.skipped`; an older solvi reading a new
+  record sees an empty `flow.skipped`.
+- Knowledge: `retract(id, only_from=writer)`, `retract_source(writer)`; `redecide(..., upto="now")`.
+- Laws: `acceptance="sized"|"fixed"|"exact"` (few-shot: 0/20 → 20/20 learned with `"exact", min_support=2`),
+  `confirm=fn`, `ties="earlier"|"newer"`, `readmit="grown"`, `tol=` / `same=` in `split`, `discriminate`,
+  `admit_by_probes`.
+- experimental.changes: `KnownFailures(context=, ttl=, key=, clock=)`, `Pipeline.expire_held(max_age)`.
+- Guard: `Guard(user_verifier=)` binds an approval to who gave it and to the call (`sign_approval`,
+  `approval_verifier`).
+
 ## 1.1.1 — 2026-10-11 — fixes from use, and four learning items with their measurements
 
 ### Fixed
