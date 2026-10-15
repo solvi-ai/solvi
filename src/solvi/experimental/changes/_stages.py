@@ -118,22 +118,29 @@ class KnownFailures:
     def __init__(self, *, rollbacks=True):
         self.rollbacks = bool(rollbacks)
 
+    @staticmethod
+    def _step(st, d):
+        """The failure index over the journal: fingerprint → the first rejection; fingerprint → the first failed
+        rollback (kept up to date by ChangeJournal.fold)."""
+        a = d.get("action")
+        if a == "propose":
+            st["fp"][d["id"]] = d.get("fingerprint")
+        elif a == "rejected":
+            st["rejected"].setdefault(d.get("fingerprint"), d)
+        elif a == "rollback" and d.get("failed"):
+            for cid in d.get("changes") or ():
+                st["rolled"].setdefault(st["fp"].get(cid), (cid, d))
+
     def run(self, change, ctx):
         fp = change.fingerprint()
-        for d in ctx.journal.records("rejected"):
-            if d.get("fingerprint") == fp:
-                return StageVerdict.refuse(f"rejected before by stage {d.get('stage')!r}: {d.get('reason')}",
-                                      {"earlier": d.get("change")})
-        if self.rollbacks:
-            props = None
-            for d in ctx.journal.records("rollback"):
-                if not d.get("failed"):
-                    continue
-                if props is None:
-                    props = {p["id"]: p.get("fingerprint") for p in ctx.journal.records("propose")}
-                for cid in d.get("changes") or ():
-                    if props.get(cid) == fp:
-                        return StageVerdict.refuse(f"rolled back before: {d.get('why')}", {"earlier": cid})
+        idx = ctx.journal.fold("known_failures", lambda: {"fp": {}, "rejected": {}, "rolled": {}}, self._step)
+        d = idx["rejected"].get(fp)
+        if d is not None:
+            return StageVerdict.refuse(f"rejected before by stage {d.get('stage')!r}: {d.get('reason')}",
+                                       {"earlier": d.get("change")})
+        if self.rollbacks and fp in idx["rolled"]:
+            cid, d = idx["rolled"][fp]
+            return StageVerdict.refuse(f"rolled back before: {d.get('why')}", {"earlier": cid})
         return StageVerdict.admit()
 
 
