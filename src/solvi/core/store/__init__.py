@@ -250,6 +250,9 @@ def entry(resp, meta=None, record="full"):
         e["record"] = "compact"
         e["compact"] = compact_content(d)             # to_dict() has tagged it already
     else:
+        from ..schema import pack_skipped
+        if isinstance(d.get("flow"), dict):
+            d = {**d, "flow": pack_skipped(d["flow"])}  # the parts the flow did not plan: grouped by reason
         e["response"] = d
     return e
 
