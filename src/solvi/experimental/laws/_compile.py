@@ -52,7 +52,7 @@ def law_to_code(law, grammar, name: str | None = None) -> str:
 
 def lawset_to_module(lawset) -> str:
     """One module for the active laws: the atoms' defs (each once), one function per law, LAWS in dispatch order
-    (most specific first, ties to the earlier law — the law set's own order), applied(s, a) → the law id or None,
+    (most specific first, ties by the set's `ties` — the law set's own order), applied(s, a) → the law id or None,
     predict(s, a, base=None, apply=None) → the first applying law's effect (through `apply` if given), else
     base(s, a), else None. ValueError naming every atom without code."""
     miss = sorted({x for law in lawset.laws for x in missing_code(lawset.grammar, law.condition)})

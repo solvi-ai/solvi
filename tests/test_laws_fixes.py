@@ -178,3 +178,44 @@ def test_the_exact_acceptance_refuses_any_error_and_asks_the_confirm_hook():
     assert LawSet(g).acceptance == "sized" and LawSet(g, sized=False).acceptance == "fixed"
     with pytest.raises(ValueError):
         LawSet(g, acceptance="loose")
+
+
+# ───────────────────────────────────────────── the tie order between laws of equal length
+def wood():
+    return Grammar([Atom("w2", lambda s: s["wood"] >= 2, feature="w2"),
+                    Atom("w3", lambda s: s["wood"] >= 3, feature="w3")], k=1)
+
+
+def test_ties_newer_lets_a_newer_law_of_equal_length_speak():
+    old = LawSet(wood(), base=lambda s, a: None)
+    new = LawSet(wood(), base=lambda s, a: None, ties="newer")
+    for ls in (old, new):
+        ls.add(Candidate("table", ("w2",), "none"))
+        ls.add(Candidate("table", ("w3",), "table"))
+    assert old.predict({"wood": 3}, "table") == "none"                   # the earlier law (the default, unchanged)
+    assert new.predict({"wood": 3}, "table") == "table"
+    assert new.predict({"wood": 2}, "table") == "none"
+    assert [law.condition for law in new.laws] == [("w3",), ("w2",)]
+    h = LawSet(wood(), base=lambda s, a: None, ties="newer")
+    h.add(Candidate("table", ("w2",), "none"))
+    assert h.hypothesis(Candidate("table", ("w3",), "table"))({"wood": 3}, "table") == "table"
+    with pytest.raises(ValueError):
+        LawSet(wood(), ties="random")
+
+
+def test_ties_newer_scores_a_candidate_on_the_rows_it_would_take_from_an_equal_law():
+    g = wood()
+    b = Buffer(g)
+    for i in range(30):
+        w = 2 + i % 2
+        b.add(Transition({"wood": w, "i": i}, "table", "table" if w >= 3 else "none", group=i % 3))
+    c = Candidate("table", ("w3",), "table")
+    for ties, expect in (("earlier", (0, 0, 0)), ("newer", (15, 15, 15))):
+        ls = LawSet(g, base=lambda s, a: None, ties=ties, sized=False)
+        ls.add(Candidate("table", ("w2",), "none"))
+        assert ls.score(c, b) == expect
+    ls = LawSet(g, base=lambda s, a: None, ties="newer")
+    ls.add(Candidate("table", ("w2",), "none"))
+    adm = ls.admit_by_probes([c], lambda s, a: "table" if s["wood"] >= 3 else "none",
+                             probes=[({"wood": w}, "table") for w in range(5)])
+    assert adm.status == "accepted" and ls.predict({"wood": 4}, "table") == "table"
