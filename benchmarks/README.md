@@ -61,6 +61,9 @@ quoted any more: their scripts were not ported here).
 
 ## Scripts
 
+`baseline.json` holds the published numbers of `drift_simulation.py`, `journal_size.py` and `ask_overhead.py` and the
+bars `tests/test_benchmark_bars.py` keeps them to (`pytest -m slow`; speed as ratios between settings in one run).
+
 | Script | What it measures |
 |---|---|
 | `perturb_injection.py` | `perturb=k` against instructions appended to Bitext support messages: how often they are followed, what it costs |

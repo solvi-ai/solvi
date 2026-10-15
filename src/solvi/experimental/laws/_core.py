@@ -1336,6 +1336,69 @@ class LawSet:
             lo, hi = (lo, mid) if ok(mid) else (mid, hi)
         return hi
 
+    def why_not(self, candidate: Candidate, buffer: Buffer, exclude=None) -> dict:
+        """Why `test` would not accept `candidate` on `buffer` (the held-out rows of every group but `exclude`) — the
+        first of its tests the candidate fails, in the order `test` applies them, and by how much. Read-only: the
+        buffer's N and the set's cost are not touched. → {"passes", "failed", "reason" (in words), "support", "hits",
+        "net", "precision", "null", "tested", "need", "short"}.
+
+        failed: None (it would pass; `confirm`, when the set has one, is still asked), "active" (already an active
+        law), "readmit" (retired on a buffer this size, readmit="grown"), "cap" (the set holds `cap` laws), "net"
+        (it removes no more errors than it adds where it would be the applied law), "min_support", "min_precision",
+        "exact" (acceptance="exact": wrong on some row it applies to), "sized_need" (fewer rows than the sized rule
+        needs at this N), "sized_bound" (enough rows, but the binomial tail against the null is above δ_N). tested: the
+        N `test` would score it at (this candidate counted when it is new to the buffer); need: the support a law right
+        on every row needs at that N (min_support when not sized); short: rows short of `need` for the support tests,
+        hits short of min_precision · support for "min_precision", else 0."""
+        c = candidate
+        k = (_key(c.action), tuple(c.condition), _key(c.effect))
+        N = max(1, buffer.tested + (k not in buffer._tested))
+        sup, hits, net = self.score(c, buffer, exclude)
+        null = (self.base_rate(buffer, c.action, c.effect, exclude) if isinstance(self.null, str) else self.null)
+        need = (max(self.min_support, sized_need(N, self.delta, null, self.space)) if self.sized
+                else max(1, self.min_support))
+        out = {"passes": False, "failed": None, "reason": "", "support": sup, "hits": hits, "net": net,
+               "precision": round(hits / sup, 4) if sup else None, "null": round(null, 4) if self.sized else None,
+               "tested": N, "need": need, "short": 0}
+
+        def fail(name, reason, short=0):
+            out.update(failed=name, reason=reason, short=int(short))
+            return out
+        if k in {(_key(law.action), law.condition, _key(law.effect)) for law in self.laws}:
+            return fail("active", "it is already an active law")
+        at = self._retired_at.get(k) if self.readmit == "grown" else None
+        if at is not None and len(buffer) <= at:
+            return fail("readmit", f"it was retired on a buffer of {at} rows and the buffer has not grown since "
+                                   f"({len(buffer)} rows)")
+        if len(self.laws) >= self.cap:
+            return fail("cap", f"the set already holds cap={self.cap} active laws")
+        if net <= 0:
+            return fail("net", f"net {net}: where it would be the applied law it removes no more errors than it adds "
+                               f"({hits} of {sup} rows right)")
+        if self.acceptance == "exact":
+            if sup < max(1, self.min_support):
+                return fail("min_support", f"{sup} row(s), min_support {self.min_support}: "
+                                           f"{max(1, self.min_support) - sup} rows short", max(1, self.min_support) - sup)
+            if hits != sup:
+                return fail("exact", f"wrong on {sup - hits} of its {sup} rows (acceptance='exact')")
+        else:
+            if sup < self.min_support:
+                return fail("min_support", f"{sup} row(s), min_support {self.min_support}: {need - sup} rows short "
+                                           f"of the {need} a law right on every row needs", need - sup)
+            if hits < self.min_precision * sup:
+                lack = math.ceil(self.min_precision * sup - 1e-9) - hits
+                return fail("min_precision", f"precision {hits}/{sup} < min_precision {self.min_precision}: "
+                                             f"{lack} more right row(s) needed", lack)
+            if self.sized:
+                if sup < sized_need(N, self.delta, null, self.space):
+                    return fail("sized_need", f"{sup} row(s), the sized rule needs {need} at N={N} candidates "
+                                              f"against a null of {null:.3g}: {need - sup} rows short", need - sup)
+                if not self.passes(sup, hits, N, null):
+                    return fail("sized_bound", f"{hits}/{sup} right is not far enough above the null {null:.3g} at "
+                                               f"N={N} candidates (δ_N = {sized_level(N, self.delta, self.space):.3g})")
+        out.update(passes=True, reason="it passes every test" + (" (confirm is still asked)" if self.confirm else ""))
+        return out
+
     def report(self, buffer: Buffer, steps: Iterable[Step] | None = None, *, precision: float | None = None) -> dict:
         """What a learning run did, and per action whether the buffer could admit a law at all — so «0 laws accepted»
         reads as «too few rows» where that is the reason. → {"accepted", "active", "retired", "tested" (N, the

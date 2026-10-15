@@ -21,7 +21,11 @@ System 1, from what is given:
 The examples are shuffled (seed=) and split: a fit share when something is fitted or a signal is chosen (3/4 to fit a
 head or a learner; 1/3 to choose a signal for a rule), the rest for calibration — all of it for System 1's guarantee,
 or half for it and half for the dispatcher when there is a slow path, since the dispatcher must be calibrated on
-examples System 1's guarantee did not see. `split=(fit, guarantee, dispatch)` sets the shares.
+examples System 1's guarantee did not see. `split=(fit, guarantee, dispatch)` sets the shares. `split="hash"` keeps
+the default shares but puts each example in its share by a hash of its state (salted by seed=): a refit on the same
+examples plus new ones leaves every old example where it was (600 examples + 60 new, 5 seeds: 0 old examples moved in
+or out of the fit share, against 101–120 with the shuffle) and the order of the examples does not matter; the
+thresholds still move with the new examples. Routes that move while answers stay are what `solvi diff` shows.
 
 Examples that share a source — several from one screen, one customer, one document — are not independent: a random
 split puts some of each source on both sides, System 1 is calibrated on sources it was fitted on, and the promise is
@@ -59,6 +63,7 @@ its promises hold for inputs like the examples (the gate stretches that to new o
 further). One question per build."""
 from __future__ import annotations
 
+import bisect
 import copy
 import math
 import random
@@ -198,6 +203,18 @@ def _group_desc(groups):
     if callable(groups):
         return f"{getattr(groups, '__name__', 'a function')}(state)"
     return "the given groups"
+
+
+def _canon(x) -> str:
+    import json
+    return json.dumps(x, sort_keys=True, ensure_ascii=False, default=str)
+
+
+def _hash_unit(seed, x) -> float:
+    """A stable number in [0, 1) for `x` (its canonical JSON), salted by `seed` (split="hash")."""
+    import hashlib
+    h = hashlib.sha256(f"{seed}\x00{_canon(x)}".encode()).digest()
+    return int.from_bytes(h[:8], "big") / 2.0 ** 64
 
 
 def _edge(gs, k):
@@ -357,7 +374,11 @@ def build(question, examples, *, catalog=None, learner=None, slow=None, reads=No
     total: solvi.core.dispatch.Budget per decision / for the dispatcher's life; price: dollars per million input and output
     tokens (needed for dollars). storage: a path or a TraceStorage — every decision and the policy, hash-chained.
     split: (fit, guarantee, dispatch) shares (with slow=, a dispatch share of 0 calibrates System 1 on all the rest and
-    leaves the slow path uncalibrated). seed: the shuffle and the open-set simulation. delta: learn-then-test's
+    leaves the slow path uncalibrated), or "hash": the default shares, each example's share set by a hash of its state
+    (of its group with groups=) salted by seed — not by its place in a shuffled list, so examples added later leave
+    every old example in its share and the order of the examples does not matter (thresholds still move with the
+    new examples; opt-in in 1.2: it calibrates on other examples than the default split). seed: the shuffle (the
+    hash's salt with split="hash") and the open-set simulation. delta: learn-then-test's
     confidence. min_slice: a slice of the slow path with fewer calibration examples goes to a person. writer, inputs:
     gone in 1.0 (they compiled a Spec here): a TypeError says to compile it first. knowledge: a solvi.Knowledge (or a
     function state → snapshot) — every decision, and every example at build time, is given its snapshot as the fact
@@ -383,6 +404,7 @@ def build(question, examples, *, catalog=None, learner=None, slow=None, reads=No
     if not examples or not all(len(e) == 2 and isinstance(e[0], dict) for e in examples):
         raise ValueError("examples are [(state dict, correct answer), ...]")
     given_keys = list(examples[0][0].keys())
+    raw_states = [st for st, _ in examples]   # split="hash" hashes these (before a knowledge snapshot is added)
     snap_of, knowledge_desc = _knowledge_source(knowledge)
     if snap_of is not None:
         if callable(getattr(knowledge, "snapshot", None)):
@@ -403,7 +425,18 @@ def build(question, examples, *, catalog=None, learner=None, slow=None, reads=No
             raise ValueError(f"no rule answers {qname!r} in the catalog: give the Question (its answer type) so a head "
                              "can be fitted, or learner=")
     gids = _group_ids(groups, examples)
-    if gids is None:
+    hashed = isinstance(split, str)
+    if hashed:
+        if split != "hash":
+            raise ValueError(f'split is (fit, guarantee, dispatch) shares or "hash", not {split!r}')
+        split = None                           # the default shares, cut by hash
+    su = None                                  # with split="hash": each shuffled example's hash in [0, 1), ascending
+    if hashed:
+        keys = [_hash_unit(seed, gids[i] if gids is not None else raw_states[i]) for i in range(len(examples))]
+        tie = [_canon([raw_states[i], examples[i][1]]) for i in range(len(examples))]
+        order = sorted(range(len(examples)), key=lambda i: (keys[i], tie[i]))
+        su = [keys[i] for i in order]
+    elif gids is None:
         order = list(range(len(examples)))
         random.Random(seed).shuffle(order)
     else:                                      # whole groups, in a shuffled order of groups
@@ -425,9 +458,10 @@ def build(question, examples, *, catalog=None, learner=None, slow=None, reads=No
     else:
         fit_share = SPLIT_FIT if mode != "given" else 0.0
         g_ratio = 0.5 if has_slow else 1.0
-    n_fit = _edge(sg, int(round(n * fit_share)))
+    n_fit = _edge(sg, int(round(n * fit_share))) if su is None else bisect.bisect_left(su, fit_share)
     fit_ex, rest = shuffled[:n_fit], shuffled[n_fit:]
     rest_g = None if sg is None else sg[n_fit:]
+    rest_u, lo = (None, 0.0) if su is None else (su[n_fit:], fit_share)   # the rest's hashes, all ≥ lo
     if mode != "given" and not fit_ex:
         raise ValueError("System 1 is fitted here and the fit share is empty: more examples, or split=")
 
@@ -463,6 +497,7 @@ def build(question, examples, *, catalog=None, learner=None, slow=None, reads=No
     if mode == "given" and fit_ex:              # nothing is fitted on them: they calibrate
         rest, fit_ex = fit_ex + rest, []
         rest_g = sg
+        rest_u, lo = su, 0.0
 
     # --- the signal the guarantee reads
     sig_name, sig_desc, choose_on = signal, f"{signal!r} (given)", []
@@ -476,7 +511,12 @@ def build(question, examples, *, catalog=None, learner=None, slow=None, reads=No
             if fit_ex:
                 choose_on = fit_ex
             else:
-                k = _edge(rest_g, int(round(len(rest) * SPLIT_SELECT)))
+                if rest_u is None:
+                    k = _edge(rest_g, int(round(len(rest) * SPLIT_SELECT)))
+                else:
+                    lo = lo + (1.0 - lo) * SPLIT_SELECT
+                    k = bisect.bisect_left(rest_u, lo)
+                    rest_u = rest_u[k:]
                 choose_on, rest = rest[:k], rest[k:]
                 rest_g = None if rest_g is None else rest_g[k:]
             best, auc, scores = _choose_signal(system, qname, choose_on, correct, q)
@@ -491,7 +531,10 @@ def build(question, examples, *, catalog=None, learner=None, slow=None, reads=No
                             + "); the answer's confidence does not vary")
             if choose_on is fit_ex:
                 choose_on = []                  # counted as the fit share
-    k = _edge(rest_g, int(round(len(rest) * g_ratio)))
+    if rest_u is None:
+        k = _edge(rest_g, int(round(len(rest) * g_ratio)))
+    else:
+        k = bisect.bisect_left(rest_u, lo + (1.0 - lo) * g_ratio)
     g_ex, d_ex = rest[:k], rest[k:]
     no_dispatch = has_slow and split is not None and split[2] == 0       # asked for: the slow path is not calibrated
     if has_slow and not d_ex and not no_dispatch:
@@ -597,6 +640,9 @@ def build(question, examples, *, catalog=None, learner=None, slow=None, reads=No
     choices = {"examples": n, "seed": seed, "mode": mode, "system1": desc1, "signal": sig_desc or str(sig_name),
                "split": {"to fit System 1": len(fit_ex), "to choose the signal": len(choose_on),
                          "to calibrate System 1's guarantee": len(g_ex), "to calibrate the dispatcher": len(d_ex)},
+               "split_by": (f"a hash of each example's {'group' if gids is not None else 'state'} (seed {seed})"
+                            if hashed else "a shuffle" + (" of the groups" if gids is not None else "")
+                            + f" (seed {seed})"),
                "guarantee": gdesc, "novel": novel_desc, "slow": slow_desc, "wake": list(wake),
                "budget": ("none" if budget is None and total is None else
                           "; ".join(x for x in (f"per decision {budget.to_dict()}" if budget is not None else "",

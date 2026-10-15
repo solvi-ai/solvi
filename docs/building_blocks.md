@@ -337,7 +337,9 @@ A world acted in step by step: `reset(seed)` → the first state, `actions(state
 [Using solvi: agents and knowledge](agent.md)) runs on, and what an action model learns from: the effects and refusals
 the environment itself reports.
 `check_environment(make)` checks that the same seed and actions give the same outcomes and that a refused action leaves
-the state as it was.
+the state as it was; `check_environment(make, clone=)` also checks a snapshot / restore hook (the one
+`ExactModel(clone=)` takes): a clone at a state gives the original's outcome for the same action, and stepping the clone
+leaves the original's fingerprint unchanged.
 
 Reference: [`Environment`](api/environment.md#solvi.core.environment.Environment), [`Outcome`](api/environment.md#solvi.core.environment.Outcome).
 

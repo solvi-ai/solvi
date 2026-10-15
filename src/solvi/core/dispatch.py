@@ -618,6 +618,7 @@ class Dispatched:
     config: str | None = None
     slice: str | None = None
     stored_id: str | None = None
+    audit: bool = False
 
     @property
     def supervised(self):
@@ -631,7 +632,7 @@ class Dispatched:
                 "disagreement": _stored(self.disagreement), "cost": {k: v.to_dict() for k, v in self.cost.items()},
                 "n": self.n, "draw": self.draw, "spent_before": self.spent_before.to_dict(), "drift": self.drift,
                 "expected": None if self.expected is None else self.expected.to_dict(), "over_budget": self.over_budget,
-                "config": self.config, "slice": self.slice}
+                "config": self.config, "slice": self.slice, **({"audit": True} if self.audit else {})}
 
     def to_json(self, indent=None):
         return json.dumps(self.to_dict(), ensure_ascii=False, indent=indent, default=str)
@@ -648,7 +649,7 @@ class Dispatched:
                    {k: Cost.from_dict(v) for k, v in (d.get("cost") or {}).items()}, d.get("n", 0), d.get("draw", 1.0),
                    Cost.from_dict(d.get("spent_before") or {}), d.get("drift"),
                    Cost.from_dict(d["expected"]) if d.get("expected") is not None else None, d.get("over_budget"),
-                   d.get("config"), d.get("slice"))
+                   d.get("config"), d.get("slice"), audit=bool(d.get("audit", False)))
 
     def replay(self, dispatcher, trust_models=False):
         """Re-check this decision against `dispatcher` without calling a model → {"ok", "mismatches": [(what, why)]}:
@@ -683,11 +684,16 @@ class Dispatcher:
     on_drift: what System 1's answers become after a drift flag when no slow path checks them (none, "drift" not in
     wake, or no budget left) — "human" (default: a person decides; its guarantee was calibrated on a stream that has
     changed) or "accept" (System 1's answer stands, its reasons say it is out of its guarantee). Either way no answer
-    after a flag is reported "within its guarantee"; reset_drift() ends it."""
+    after a flag is reported "within its guarantee"; reset_drift() ends it. audit: the share of the decisions drawn at
+    random (a hash of seed, the input and the decision's number, independent of the supervision draw) and marked
+    for labelling — `Dispatched.audit` and "audit": true in the stored record; label them with
+    `teach(..., label_source="audit", of=<stored id>)` (the store refuses an audit label of an unmarked decision), and the
+    system report measures the promise on that random sample, which corrections made where an answer looked wrong do
+    not give. Default 0: nothing is marked and the records are as before."""
 
     def __init__(self, system, slow=None, *, question=None, budget=None, total=None, price=None, wake=SIGNALS,
                  agreement=None, monitor=None, supervise=0.0, seed=0, think="s2", on_disagree="record", storage=None,
-                 store_responses=True, asked=None, same=None, unknown="answer", on_drift="human"):
+                 store_responses=True, asked=None, same=None, unknown="answer", on_drift="human", audit=0.0):
         if question is None:
             if len(system.questions) != 1:
                 raise ValueError(f"the System asks {sorted(system.questions)}: say which with question=")
@@ -699,6 +705,9 @@ class Dispatcher:
             raise ValueError(f"unknown signal(s) {bad}; the signals are {SIGNALS}")
         if not 0.0 <= float(supervise) <= 1.0:
             raise ValueError("supervise is a share between 0 and 1")
+        if not 0.0 <= float(audit) <= 1.0:
+            raise ValueError("audit is a share between 0 and 1 (the decisions marked for labelling)")
+        self.audit = float(audit)
         if think not in ("s2", "agree"):
             raise ValueError('think must be "s2" or "agree"')
         if on_disagree not in ("record", "human", "s2"):
@@ -768,6 +777,7 @@ class Dispatcher:
         return digest("Dispatcher", self.question, self.wake, sorted(self.agreement.items()), self.supervise, self.seed,
                       self.think_policy, self.on_disagree, self.unknown,
                       *([("on_drift", self.on_drift)] if self.on_drift != "human" else []),
+                      *([("audit", self.audit)] if self.audit else []),
                       code_fingerprint(self.same) if self.same is not None else None,
                       None if self.budget is None else self.budget.to_dict(),
                       None if self.total is None else self.total.to_dict(), pr,
@@ -780,6 +790,11 @@ class Dispatcher:
     def draw(self, init_hash, n):
         """The supervision draw of decision n on this input: a number in [0, 1) from a hash (reproducible)."""
         h = hashlib.sha256(f"{self.seed}|{init_hash}|{n}".encode()).hexdigest()
+        return int(h[:13], 16) / 16 ** 13
+
+    def audit_draw(self, init_hash, n):
+        """The audit draw of decision n on this input: a number in [0, 1) from a hash, independent of `draw`."""
+        h = hashlib.sha256(f"audit|{self.seed}|{init_hash}|{n}".encode()).hexdigest()
         return int(h[:13], 16) / 16 ** 13
 
     def expected(self):
@@ -924,7 +939,8 @@ class Dispatcher:
             self.spent = self.spent + c2
             self.counts[by] += 1
         d = Dispatched(q, answer, by, action, reasons, res, th, cand, disagreement, cost, n, draw, spent, self.drift,
-                       expected, over, self.config(), slice=sl)
+                       expected, over, self.config(), slice=sl,
+                       audit=bool(self.audit) and self.audit_draw(res.trace.init_hash, n) < self.audit)
         if self.storage is not None:
             from .store import FORMAT
             rec = self.storage._append({"v": FORMAT, "kind": "dispatch", **json.loads(d.to_json())})

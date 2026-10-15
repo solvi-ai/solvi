@@ -711,6 +711,14 @@ class Compiled(CatalogVersion):
     checks per round. `catalog()` / `system()` load the module (checked first) and refuse an unaccepted compilation
     unless `allow_unaccepted=True`; the System says it decides with an experimental piece (meta["experimental"])."""
 
+    @property
+    def proposals(self):
+        """proposed / dropped / refuted / admitted over the drafts of every round (solvi.core.slow.proposals): a draft
+        with no module, a broken contract or a sandbox failure is dropped, one sent back after it ran refuted, one that
+        passed every check in its round admitted."""
+        from ...core.slow.proposals import of_compile_record
+        return of_compile_record(self.record)
+
     def system(self, allow_unaccepted: bool = False, **kw):
         """An ordinary System over the compiled catalog (kw: System's own — storage, ...), marked "compile"."""
         return mark(super().system(allow_unaccepted, **kw), "compile")
