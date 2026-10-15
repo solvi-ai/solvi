@@ -329,7 +329,7 @@ SURFACES = {
     "solvi.solutions.decisions": ["DecisionSystem", "build"],
     "solvi.solutions.agent": ["Agent", "CHECKS", "QUESTION", "s1_pick", "search_order", "state_key"],
     "solvi.solutions.knowledge": ["Knowledge", "action_key", "split_action"],
-    "solvi.solutions.guard": ["action_model_allows", "agenda_allows", "accepted_proposals", "accepts", "INTENTS", "register_intent", "model_from_json_schema", "arguments_from_user",
+    "solvi.solutions.guard": ["action_model_allows", "agenda_allows", "accepted_proposals", "accepts", "INTENTS", "register_intent", "approval_verifier", "sign_approval", "model_from_json_schema", "arguments_from_user",
                               "arguments_grounded", "arguments_model", "arguments_valid", "AUTHORIZE_TASK",
                               "conversation", "Guard", "GuardDecision", "MATCHERS", "Message", "messages",
                               "no_injected_arguments", "no_instructions_in_tool_outputs", "proposal",
