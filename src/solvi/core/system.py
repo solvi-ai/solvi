@@ -126,7 +126,8 @@ class System:
     @_deprecate.removed_kwargs(journal="storage=JSONLStorage(path)", inputs="input_model", costs="cost_policy")
     def __init__(self, catalog: Catalog, questions, *, workers: int = 1, order: str = "default",
                  producers: str = "declared", learn: bool | None = None, input_model=None, strategist=None, storage=None,
-                 timeout: float | None = None, cost_policy="declared", lang: str = "en", early_exit: bool = True):
+                 timeout: float | None = None, cost_policy="declared", lang: str = "en", early_exit: bool = True,
+                 cache: int | None = None):
         """order: "default" (hard checks and their inputs first, all together) or "learned" (hard checks one at a time, most
         expected saving first — see learn_order). producers: "declared" (alternative producers of a fact are tried in
         declaration order) or "learned" (a policy picks the order per input and learns from outcomes). learn: after every
@@ -155,7 +156,16 @@ class System:
         hard check still decides), `res.values` and the trace hold every fact and rule value, and the trace says so
         (`trace.early_exit` is False). `ask(..., early_exit=...)` overrides it for one ask.
         lang: the language of what solvi renders for people — res.audit(), solvi.show, safeguard_summary() — "en" (default)
-        or "ru" (solvi.core._i18n). Only the rendering changes: traces, stored responses, hashes and `why` stay in English."""
+        or "ru" (solvi.core._i18n). Only the rendering changes: traces, stored responses, hashes and `why` stay in English.
+        cache: None (default) — every ask runs its flow. N — opt-in pure-decision cache for a catalog without models:
+        `ask` serves a decision it made before from a cache of the last N, keyed by the catalog's and questions'
+        fingerprints, the questions asked, early_exit and the given facts (their hash, as trace.init_hash). Only for parts
+        that are pure functions of their inputs (no clock, no randomness, no I/O): a part's code is not re-run on a hit.
+        A served response is a copy of the first one (same trace and hashes) with `res.cached` = {"of": the stored id of
+        that first decision}; stored, it is a compact record with meta {"cache_of": that id} — replay / rederive re-run
+        it from its input and compare every step's hash, as for any compact record. A model-backed part raises here;
+        the cache is bypassed for an ask with another order, a system that learns (learn=True, order or producers
+        "learned"), answer heads, a stateful guarantee or a strategist of your own. aask and ask_text do not use it."""
         from . import _i18n as i18n
         from .costs import CostBook
         self.lang = i18n.check(lang)
@@ -236,6 +246,16 @@ class System:
 
         if self.strategist is not None:
             self._then_wired()
+        self._cache = None
+        if cache is not None:
+            if isinstance(cache, bool) or not isinstance(cache, int) or cache < 1:
+                raise ValueError(f"cache is the number of decisions kept (an int ≥ 1) or None, not {cache!r}")
+            lost = _model_parts(catalog)
+            if lost:
+                raise ValueError(f"cache= serves decisions of a catalog without models; {', '.join(lost)} "
+                                 f"{'is' if len(lost) == 1 else 'are'} model-backed: a model's answer is not a pure "
+                                 "function of the facts")
+            self._cache = _AskCache(cache)
 
     def _then_wired(self):
         """A hard check whose `then` names a question must be in that question's flow. The deterministic strategist puts
@@ -301,10 +321,57 @@ class System:
         if workers is not None and (not isinstance(workers, int) or isinstance(workers, bool) or workers < 1):
             raise ValueError(f"workers must be a positive int, not {workers!r}")
         t0 = now_ms()
+        key = memo = None
+        if self._cache is not None:
+            key, memo = self._cache_key(init_state, questions, order, early_exit)
+            hit = None if key is None else self._cache.get(key)
+            if hit is not None:
+                return self._serve(hit, t0, store)
         p = self._prepare(init_state, questions, order)
         trace, vals = execute(self.catalog, p.flow, p.state, workers=workers or self.workers, order=p.order,
-                              costs=self.cost_book, policy=p.policy, known=p.known, early_exit=self._early(early_exit))
-        return self._respond(p, trace, vals, t0, store)
+                              costs=self.cost_book, policy=p.policy, known=p.known, early_exit=self._early(early_exit),
+                              memo=memo)
+        resp = self._respond(p, trace, vals, t0, store)
+        if key is not None:
+            self._cache.put(key, _served(resp, resp.ms), resp.stored_id)
+        return resp
+
+    def _cache_key(self, init_state, questions, order, early_exit):
+        """(the cache key of an ask (System(cache=)), the HashMemo that hashed its input) — (None, None) when this ask
+        cannot be served from the cache. The memo lends the input's hashes to the run on a miss: hashed once."""
+        if (order not in (None, "default") or self.order != "default" or self.learn or self.producers == "learned"
+                or self.heads or self.strategist is not None and type(self.strategist).__module__ != "solvi.core.plan.cost"
+                or any(g.promise.stateful for g in self.guards.values())):
+            return None, None
+        fp = catalog_fingerprint(self.catalog)["fp"]
+        if self._cache.fp != fp:                      # the catalog changed: check it again for model-backed parts
+            self._cache.fp, self._cache.model_free = fp, not _model_parts(self.catalog)
+        if not self._cache.model_free:
+            return None, None
+        from .runtime import HashMemo
+        try:
+            state, rejected = self._state(init_state)
+            memo = HashMemo(state, getattr(self.catalog, "_hash_seed", None))
+            memo.hashed = memo.init_hash()            # trace.init_hash of this input
+        except Exception:  # noqa: BLE001 — not hashable as a trace hashes it: run the ask, which says what is wrong
+            return None, None
+        names = None if questions is None else tuple([questions] if isinstance(questions, str) else questions)
+        return (fp, self._questions_fp(), names, self._early(early_exit), memo.hashed,
+                srepr(rejected) if rejected else None), memo
+
+    def _serve(self, hit, t0, store):
+        """A cached decision (System(cache=)) as a new response, counted and stored as ask would."""
+        ref, ref_id = hit
+        resp = _served(ref, now_ms() - t0)
+        resp.cached = {"of": ref_id}
+        self._tally(resp)
+        if self.storage is not None and store:
+            if ref_id is None:                        # the first one was not stored: this one is kept whole, as the reference
+                self.storage.save(resp)
+                self._cache.refer(ref, resp.stored_id)
+            else:
+                self.storage.save(resp, meta={"cache_of": ref_id}, record="compact")
+        return resp
 
     def _decide(self, init_state, questions=None, early_exit=None):
         """The answers of `ask` without its record keeping — for answers that are never stored (the candidates of
@@ -622,9 +689,15 @@ class System:
                 "parts": {s.part.name: c["parts"][s.part.name] for s in flow.steps if s.part.name in c["parts"]}}
 
     def _count(self, resp):
-        from .store.audit import STAT_KEYS, collect
+        from .store.audit import collect
         events, n_model = collect(resp, self.catalog)
         resp.safeguards, resp.model_outputs = events, n_model
+        self._tally(resp)
+
+    def _tally(self, resp):
+        """The lifetime stats count one response (its safeguards and model outputs collected already)."""
+        from .store.audit import STAT_KEYS
+        events, n_model = resp.safeguards or [], resp.model_outputs
         st = self.stats
         st["asks"] += 1
         st["model_outputs"] += n_model
@@ -1256,6 +1329,64 @@ class MultiHead:
     def fingerprint(self):
         """The options and every option's head (the Head protocol; the value 0.9 computed for it by type name)."""
         return digest("MultiHead", self.options, {o: fingerprint(h) for o, h in self.heads.items()})
+
+
+# --- the pure-decision cache (System(cache=))
+def _model_parts(catalog):
+    """The parts and rules of a catalog that run a model (one of their producers does)."""
+    items = list(catalog.parts.items()) + [(p.name, p) for p in catalog.rules.values()]
+    return [n for n, p in items if any(a.model is not None for a in (p.alternatives or [p]))]
+
+
+class _AskCache:
+    """The last `size` decisions by key → (a private copy of the response, the stored id of the decision or None)."""
+
+    def __init__(self, size):
+        import threading
+        from collections import OrderedDict
+        self.size, self.items, self.lock = size, OrderedDict(), threading.Lock()
+        self.fp, self.model_free = None, True         # the catalog fingerprint last checked for model-backed parts
+
+    def get(self, key):
+        with self.lock:
+            hit = self.items.get(key)
+            if hit is not None:
+                self.items.move_to_end(key)
+            return hit
+
+    def put(self, key, resp, stored_id):
+        with self.lock:
+            self.items[key] = (resp, stored_id)
+            self.items.move_to_end(key)
+            while len(self.items) > self.size:
+                self.items.popitem(last=False)
+
+    def refer(self, resp, stored_id):
+        """The decision kept as `resp` is now stored as `stored_id` (the first served copy that was stored)."""
+        with self.lock:
+            for k, (r, _) in self.items.items():
+                if r is resp:
+                    self.items[k] = (r, stored_id)
+                    return
+
+
+def _served(ref, ms):
+    """A copy of a response that a caller may change without changing `ref`: its own results, trace and values (the
+    records, flow and catalog are shared — nothing changes them)."""
+    import copy
+    results = {}
+    for q, r in ref.results.items():
+        r = results[q] = copy.copy(r)
+        if isinstance(r.probs, dict):
+            r.probs = dict(r.probs)
+    trace = copy.copy(ref.trace)
+    trace.records = list(ref.trace.records)
+    resp = Response(results, ref.flow, trace, dict(ref.values), ms, ref.feasible, ref.violations, ref.catalog,
+                    list(ref.safeguards or []), ref.model_outputs)
+    for k in ("_heads", "_system", "read", "experimental", "lang"):
+        if k in ref.__dict__:
+            setattr(resp, k, ref.__dict__[k])
+    return resp
 
 
 MISSING_INPUTS = "missing inputs: "

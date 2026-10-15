@@ -3531,6 +3531,24 @@ verifies and every decision replays):
 What is left is mostly the input: a compact record keeps every given fact, so 1.1 KB of notes given with every step
 costs 1.1 KB a decision — give a long constant text once (a hash or a key as the input) when it does not change.
 
+**Repeated inputs: the pure-decision cache (opt-in).** A catalog without models whose parts are pure functions of
+their inputs (no clock, randomness or I/O) gives the same decision for the same facts. `System(cat, questions,
+cache=10_000)` keeps the last 10,000 decisions keyed by the catalog's and questions' fingerprints, the questions asked,
+`early_exit` and the given facts' hash (the trace's `init_hash`); a repeated input is served as a copy of the first
+decision (the same trace and hashes) with `res.cached == {"of": <the first decision's stored id>}`, and no part runs.
+Stored, a served decision is a compact record with `meta={"cache_of": <that id>}`: `verify()` checks it and
+`replay_all` re-runs it from its input and compares every step's hash, like any compact record — an impure part or a
+changed catalog shows up there. A catalog with a model-backed part refuses `cache=`; an ask with another order, a
+learning system, answer heads, a stateful guarantee or a strategist of your own runs without it.
+
+| ms per ask, cache hit ÷ no cache ([benchmarks/ask_speed.py](../benchmarks/ask_speed.py) cases) | not stored | SQLite store |
+|---|---|---|
+| quickstart (5 steps) | 0.12–0.17× | 0.36–0.56× |
+| catalog of 50 / 1000 parts | 0.08–0.10× / 0.05–0.06× | 0.41–0.59× / 0.27–0.28× |
+| large input (3,712 floats: hashing the input is most of a hit) | 0.43–0.74× | 0.61–0.65× |
+
+A miss costs the key: 1.0–1.2× an ask without the cache.
+
 **What a compact record still proves, and what it cannot.** It is hashed into the chain like any other record:
 `verify()` checks it, that each kept step sits in the record's chain of step hashes and is linked to the step before,
 and that its answers are the record's. `replay_all(system)` re-runs it: the flow is planned again for the recorded
