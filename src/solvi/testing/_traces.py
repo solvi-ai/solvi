@@ -1,12 +1,14 @@
 """Regression cases from what a System has decided: `cases_from_store` turns recorded decisions into cases (their
 inputs and the answers given), `boundary` makes inputs at the edges of what the cases show — per field the values seen,
-then empty / single / long text, 0, -1, one past the smallest and largest number, an empty or one-element list, one
-level into dicts and lists — and, given the System, pins its current answers on them as the expected ones. Both give
-case dicts in the cases.json format (see solvi.testing), so `solvi test` and `run_case` run them."""
+then empty / single / long text and its Unicode forms, 0, -1, one past the smallest and largest number, None and
+another type where the field has shown them, an empty or one-element list, one level into dicts and lists — and, given
+the System, pins its current answers on them as the expected ones. Both give case dicts in the cases.json format (see
+solvi.testing), so `solvi test` and `run_case` run them."""
 from __future__ import annotations
 
 import copy
 import json
+import unicodedata
 import warnings
 
 from .honesty import _plain
@@ -57,12 +59,17 @@ def cases_from_store(storage, n=None):
 
 
 # --- boundary inputs
+def _kind(v):
+    return type(v).__name__
+
+
 class _Profile:
-    """What the cases show about one field: the values seen (by kind), numbers' range, texts' and lists' lengths, and
-    — one level deep — a profile per key of a dict value and of a list's elements."""
+    """What the cases show about one field: the values seen (by kind), the first value of each type, numbers' range,
+    texts' and lists' lengths, and — one level deep — a profile per key of a dict value and of a list's elements."""
 
     def __init__(self):
         self.values = []
+        self.kinds = {}                 # type name → the first value of that type seen (None included)
         self.nums = []
         self.keys = {}
         self.elem = None
@@ -70,6 +77,7 @@ class _Profile:
     def add(self, v, depth=0):
         if len(self.values) < 8 and v not in self.values:
             self.values.append(v)
+        self.kinds.setdefault(_kind(v), v)
         if isinstance(v, (int, float)) and not isinstance(v, bool):
             self.nums.append(v)
         if depth < 1 and isinstance(v, dict):
@@ -81,10 +89,21 @@ class _Profile:
                 self.elem.add(x, depth + 1)
 
 
+_ACCENT = str.maketrans("aeiouncAEIOUNC", "áéíóúñçÁÉÍÓÚÑÇ")
+
+
 def _text(s):
     base = s or "abc"
+    acc = base.translate(_ACCENT)
+    if acc == base:
+        acc = base + "é"
+    acc = unicodedata.normalize("NFC", acc)
     return [("empty text", ""), ("one character", base[:1]), ("long text", (base * (LONG // len(base) + 1))[:LONG]),
-            ("non-ASCII text", base + " é Привет 😀"), ("padded text", f"  {base}  "), ("upper case", base.upper())]
+            ("non-ASCII text", base + " é Привет 😀"), ("padded text", f"  {base}  "), ("upper case", base.upper()),
+            # the same accents decomposed (a letter + a combining mark) and a compatibility ligature with a special
+            # case mapping: an input that compares, casefolds or normalises text in one form only answers differently
+            ("decomposed accents (NFD)", unicodedata.normalize("NFD", acc)),
+            ("compatibility ligature", base + "\ufb01\u00df")]
 
 
 def _number(v, p):
@@ -100,7 +119,33 @@ def _number(v, p):
 
 
 def _variants(v, p, depth=0):
-    """Boundary replacements of one field's value → [(what, value)]."""
+    """Boundary replacements of one field's value → [(what, value)]: by its type, then None when the field has shown
+    None and a value of each other type the field has shown (a number recorded once as a string, say)."""
+    out = _by_type(v, p, depth)
+    if p is not None:
+        if v is not None and "NoneType" in p.kinds:
+            out.append(("none", None))
+        for k, x in p.kinds.items():
+            if k not in (_kind(v), "NoneType"):
+                out.append(("another type seen", _as(x, v)))
+    return out
+
+
+def _as(example, v):
+    """v in the type of `example` when it converts cleanly (7 → "7", "7" → 7, 2.0 → 2), else the example itself."""
+    try:
+        if isinstance(example, str) and isinstance(v, (int, float)) and not isinstance(v, bool):
+            return str(v)
+        if isinstance(example, (int, float)) and not isinstance(example, bool) and isinstance(v, (str, int, float)) \
+                and not isinstance(v, bool):
+            x = type(example)(v)
+            return x if x == float(v) else example
+    except (TypeError, ValueError, OverflowError):
+        pass
+    return example
+
+
+def _by_type(v, p, depth=0):
     if isinstance(v, bool):
         return [("flipped", not v)]
     if isinstance(v, (int, float)):
@@ -138,17 +183,42 @@ def _answers(res):
     return expected, {q: r.status for q, r in res.results.items()}
 
 
+def _shape(state):
+    return tuple(sorted((k, _kind(v)) for k, v in state.items()))
+
+
+def _by_shape(states):
+    """The states in the order their changes are taken: the first state of each distinct shape (field → type), then
+    the shortest and the longest of the rest, then the rest in the order given — so with many cases of one shape the
+    changes do not all come from the first few of them."""
+    seen, first, rest = set(), [], []
+    for st in states:
+        sh = _shape(st)
+        (rest if sh in seen else first).append(st)
+        seen.add(sh)
+    if len(rest) > 2:
+        size = [len(_key(st)) for st in rest]
+        lo = min(range(len(rest)), key=lambda i: (size[i], i))
+        hi = max(range(len(rest)), key=lambda i: (size[i], -i))
+        ends = [lo] if lo == hi else [lo, hi]
+        rest = [rest[i] for i in ends] + [st for i, st in enumerate(rest) if i not in ends]
+    return first + rest
+
+
 def boundary(cases, n=50, system=None):
     """Inputs at the edges of what the cases show → up to n new case dicts (name, state, note "boundary: <field>:
     <what>"): each case's state with one field changed — to a value just past the range the cases show, 0, -1, a huge
-    number; empty, one-character, long, non-ASCII, padded text; an empty, one-element or long list; one level into
-    dicts and lists. Deduplicated, without the cases' own states, taken in turn from each kind of change, the same for
-    the same cases (no randomness).
+    number; empty, one-character, long, non-ASCII, padded text, its accents decomposed (NFD) and a compatibility
+    ligature; None where the field has shown None, a value of another type the field has shown (the value itself
+    converted when it converts: 7 → "7"); an empty, one-element or long list; one level into dicts and lists.
+    Deduplicated, without the cases' own states, taken in turn from each kind of change and, within a kind, from the
+    first case of each input shape (field → type) first, then the shortest and the longest case, then the rest; the
+    same for the same cases (no randomness).
     system: the current answers are pinned — "expected" and "status" from asking each input (never stored), so the
     cases fail when a later change moves an answer at an edge. An input whose ask raises is left out (fuzz reports
     those), so is one whose answers differ when asked again or whose trace does not replay (nondeterministic); a
     UserWarning says how many. Without a system the cases have no expectations: fill them in before running."""
-    states = [c["state"] for c in cases if isinstance(c.get("state"), dict)]
+    states = _by_shape([c["state"] for c in cases if isinstance(c.get("state"), dict)])
     prof = {}
     for st in states:
         for k, v in st.items():

@@ -768,7 +768,20 @@ the corrected answers; the default answers «what would the decision have been w
 **Laws on few rows:** on 3 groups × 6 rows a deterministic one-atom law was learned 0/20 with the sized default and
 20/20 with `acceptance="exact", min_support=2`; the exact rule has no false-accept bound over many candidates, so
 pair it with `confirm=` (an independent check). Measured values need `tol=`: with exact equality, 1e-6 noise refuted
-every candidate of y = c·x.
+every candidate of y = c·x. Values over several orders of magnitude need `rtol=` (relative), and give it to the
+`LawSet` itself (`LawSet(..., rtol=)`) so that `step` / `test` / `observe` compare within it too: y = 2.5·x over x from
+1 to 1e5 with relative noise 1e-7 learned no law in 60 steps under exact equality and learned it with rtol=1e-5, with no
+mismatch after; in `admit_by_probes`, tol=1e-4 refuted every candidate where the noise reached 2e-3…0.2 and rtol=1e-4
+admitted the right one.
+
+**A copied environment is an oracle only if it is deterministic.** Before using a clone or a replay as the judge
+(`admit_by_probes(ask=...)` on a `deepcopy` of the environment, a simulator that plans on a copy, `boundary(system=...)`
+pinning answers), run the same actions twice from the same state and compare. An environment whose step iterates a
+`set` (or a dict keyed by objects hashed by address) is not: in Crafter 1.8 objects are despawned in the order of a set
+of objects, so the same seed gives different worlds from run to run and a `deepcopy` diverges from the original —
+probes asked on it are noisy observations, not exact answers, and a refutation from one of them can be wrong. Fix the
+iteration order in the environment, or treat the copy as noisy (a tolerance, repeated probes, `confirm=`). `boundary`
+already leaves out inputs whose answers differ when asked twice.
 
 **Paid checks pay only when a wrong accept is dear, the check is cheap and independent, and wrong answers occur.**
 Where a check costs more than the error, or every check is the same model, deciding without checks did as well or

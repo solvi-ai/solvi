@@ -541,6 +541,14 @@ class LawSet:
     disagree: "first" (default: the most specific matching law, ties by `ties`) or "abstain" (`predict` returns
     `Undetermined` where laws none of which is an exception of another disagree; see `predict`).
 
+    tol / rtol / same: how a prediction is compared with an observation — and two predictions with each other — in
+    `step`, `mismatch`, `test` (support, hits and net), `observe`, `check`, `conflict` and, unless the call gives its
+    own, `admit_by_probes`: exact equality by default; numbers within an absolute `tol` and a relative `rtol`
+    (|a − b| ≤ tol + rtol·max(|a|, |b|); tuples and lists element by element), or `same(a, b)` → bool. For a numeric
+    effect measured with noise: y = 2.5·x over x from 1 to 1e5 with a relative noise of 1e-7 is a mismatch on every
+    row under exact equality (no law learned in 60 steps); with rtol=1e-5 the law is learned and no later row is a
+    mismatch (tests/test_laws_rtol.py).
+
     cost: the search-cost record — candidates (proposed for mismatches), tests (candidates scored on a buffer),
     accepted, probes (asked by `admit_by_probes`), simulated (0 here; a model-based learner adds its steps) — report it
     next to accuracy."""
@@ -551,7 +559,8 @@ class LawSet:
                  sized: bool = True, delta: float = 0.1, space: int | None = None,
                  null: str | float = "base", disagree: str = "first", support_on: str = "applied",
                  readmit: str = "any", acceptance: str | None = None, confirm: Callable | None = None,
-                 ties: str = "earlier"):
+                 ties: str = "earlier", tol: float | None = None, rtol: float | None = None,
+                 same: Callable[[Any, Any], bool] | None = None):
         if disagree not in ("first", "abstain"):
             raise ValueError(f"disagree is 'first' or 'abstain', not {disagree!r}")
         if not 0.0 < float(delta) < 1.0:
@@ -591,6 +600,9 @@ class LawSet:
         if ties not in ("earlier", "newer"):
             raise ValueError(f"ties is 'earlier' or 'newer', not {ties!r}")
         self.ties = ties
+        from ._probes import sameness
+        self.same = sameness(tol, same, rtol=rtol)          # None: exact equality
+        self._cmp = None if self.same is None else (("same", id(same)) if same is not None else ("tol", tol, rtol))
         self.refused_readmit = 0           # candidates refused because they were retired on a buffer of this size
         self._retired_at: dict = {}        # (action, condition, effect) → buffer size at retirement (None: not seen)
         self.abstained = 0                 # predictions that abstained (disagree="abstain")
@@ -602,9 +614,13 @@ class LawSet:
         self.transition: Transition | None = None   # the transition `step` is proposing for (a proposer may read it)
         self._seq = 0
         self._last_tested = 0
-        self._base_key = ("base", id(base))
+        self._base_key = ("base", id(base)) if self._cmp is None else ("base", id(base), self._cmp)
 
     # ----------------------------------------------------------------------------------- prediction
+    def agrees(self, predicted, observed) -> bool:
+        """A prediction is the observation: == by default, else within the set's tol / rtol or by its `same`."""
+        return predicted == observed if self.same is None else bool(self.same(predicted, observed))
+
     def all(self) -> list[Law]:
         """Every law ever accepted, in acceptance order."""
         return sorted(self.laws + self.retired, key=lambda law: law.seq)
@@ -640,8 +656,13 @@ class LawSet:
         sets = [set(law.condition) for law in ms]
         top = [law for law, c in zip(ms, sets) if not any(o > c for o in sets)]
         preds = [self.apply(law.effect, state) for law in top]
-        if len({_key(p) for p in preds}) < 2:
-            return None
+        if self.same is None:
+            if len({_key(p) for p in preds}) < 2:
+                return None
+        else:
+            from ._probes import groups_of
+            if len(groups_of(preds, self.same)) < 2:
+                return None
         return Undetermined(tuple(top), tuple(preds))
 
     def predict(self, state, action, base: Callable | None = None, *, disagree: str | None = None):
@@ -684,7 +705,7 @@ class LawSet:
     def mismatch(self, state, action, observed) -> list[Candidate]:
         """No mismatch (the prediction is the observation) → []; else the proposer's candidates, without the laws
         already active."""
-        if self.predict(state, action, disagree="first") == observed:
+        if self.agrees(self.predict(state, action, disagree="first"), observed):
             return []
         active = {(_key(law.action), law.condition, _key(law.effect)) for law in self.laws}
         proposed = list(self.proposer.propose(self, state, action, observed))
@@ -693,8 +714,9 @@ class LawSet:
 
     # ----------------------------------------------------------------------------------- the held-out test
     def _effect_mask(self, buffer, action, effect):
-        return buffer.where(action, ("effect", id(self.apply)), _key(effect),
-                            lambda t: self.apply(effect, t.state) == t.observed)
+        what = ("effect", id(self.apply)) if self._cmp is None else ("effect", id(self.apply), self._cmp)
+        return buffer.where(action, what, _key(effect),
+                            lambda t: self.agrees(self.apply(effect, t.state), t.observed))
 
     def _view(self, buffer, action, exclude=None):
         """Over the rows of `action` (without the group `exclude`): cov[s] = rows some active law of ≥ s atoms matches,
@@ -715,7 +737,7 @@ class LawSet:
                 cov[s] |= m
         if self.base is not None:
             base = self.base
-            ok |= rem & buffer.where(action, self._base_key, None, lambda t: base(t.state, t.action) == t.observed)
+            ok |= rem & buffer.where(action, self._base_key, None, lambda t: self.agrees(base(t.state, t.action), t.observed))
         return allowed, cov, ok, take
 
     def _rows_of(self, candidate, buffer, exclude=None, _view=None):
@@ -878,7 +900,8 @@ class LawSet:
                         budget: int = 8, buffer: Buffer | None = None, exclude=None,
                         read_only: Callable[..., bool] | None = None, cost: Callable[[Any, Any], Any] | None = None,
                         order: str = "split", unique: bool = True, seed: int = 0, tol: float | None = None,
-                        same: Callable[[Any, Any], bool] | None = None, assume_one_law: bool = False) -> Admission:
+                        same: Callable[[Any, Any], bool] | None = None, assume_one_law: bool = False,
+                        rtol: float | None = None) -> Admission:
         """Admit one of `candidates` by asking the world where they disagree (CEGIS-style), not by a random held-out
         sample. ask(state, action) → the observation (the environment, or an exact model of it); probes: the (state,
         action) pairs you may ask about (a finite pool; also what the equivalence classes are computed on); safe:
@@ -897,7 +920,10 @@ class LawSet:
         random safe probes, the shortest survivor accepted (a held-out sample of that size). tol / same: predictions
         and observations compared within an absolute tolerance (numbers; tuples element by element) or by `same(a, b)`,
         for refutation, for the classes and for the probe choice (`split`) — with exact equality a measurement noise of
-        1e-6 refuted every candidate of y = c·x; with tol=1e-4 the right c is admitted.
+        1e-6 refuted every candidate of y = c·x; with tol=1e-4 the right c is admitted. rtol: a relative tolerance
+        (|a − b| ≤ tol + rtol·max(|a|, |b|)) — over x from 1 to 1e5 with a relative noise of 1e-6, tol=1e-4 refutes
+        every candidate (undetermined) and rtol=1e-4 admits the right c. None of the three: the set's own comparison
+        (its tol / rtol / same; exact by default).
 
         The "too narrow" refutation is sound only when exactly one law is missing. Where two are (the world x0 ∨ x1,
         a base that says False, 10 binary atoms, k = 2, a pool of 200 random states, 8 checks), each right law is too
@@ -925,7 +951,7 @@ class LawSet:
         if order not in ("split", "random"):
             raise ValueError(f"order is 'split' or 'random', not {order!r}")
         from ._probes import groups_of, sameness, split
-        eq = sameness(tol, same)
+        eq = sameness(tol, same, rtol=rtol) if (tol, rtol, same) != (None, None, None) else self.same
         E = eq or (lambda u, v: u == v)
         veq = None if eq is None else (lambda u, v: len(u) == len(v) and all(eq(x, y) for x, y in zip(u, v)))
         cands: list[Candidate] = []
@@ -1188,7 +1214,7 @@ class LawSet:
         if law is None or (law.born is not None and _key(t.group) == _key(law.born)):
             return []
         law.n += 1
-        law.hits_after += int(self.apply(law.effect, t.state) == t.observed)
+        law.hits_after += int(self.agrees(self.apply(law.effect, t.state), t.observed))
         if self._falls(law):
             h, n = law.running()
             self.retire(law, why=f"held-out precision {h}/{n} below {self.retire_below}")
@@ -1211,7 +1237,7 @@ class LawSet:
         predicted = self.predict(t.state, t.action, disagree="first")
         retired = self.observe(t)
         self._stamp(retired, len(buffer))
-        miss = predicted != t.observed
+        miss = predicted != t.observed if self.same is None else not self.agrees(predicted, t.observed)
         st = Step(t, predicted, law, miss, retired=retired)
         if miss:
             self.transition = t
