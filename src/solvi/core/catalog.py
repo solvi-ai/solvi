@@ -609,6 +609,9 @@ class Part:
     quotes: str = "normalized"           # quote matching: "normalized" (1.0 default) or "literal" (0.9); Catalog(quotes=)
     cites: list | None = None            # what it implements: [(clause id or None, verbatim quote or None)] — the
     #                                      decorators' clause= / cite=; checked by solvi.check.citations, shown by diff
+    family: str | None = None            # check only: where its evidence comes from (a model family, "code", "human", a
+    #                                      data source) — metadata for solvi.check.lint, not in the fingerprint
+    shares_call_with: str | None = None  # check only: the part (or question) whose model call it re-reads — metadata
     then_parts: dict | None = field(default=None, repr=False, compare=False)   # check only: question → Part of a `then`
     #                                                                            function (its typed inputs; see check)
     tin: dict | None = field(default=None, repr=False, compare=False)   # compiled validators of the typed arguments
@@ -884,14 +887,24 @@ def plain_json(v):
 class Catalog:
     """Everything the system can do; the strategist decides which parts each question needs."""
 
-    def __init__(self, *, quotes="normalized", sensitive=()):
+    def __init__(self, *, quotes="normalized", sensitive=(), combine=None):
         """quotes: how quotes and evidence are matched against their source text — "normalized" (default since 1.0: a
         quote that differs from its text only in Unicode form, no-break spaces or hyphens, dashes, "…", whitespace
         runs or curly quotes is found, and the source's own substring is kept, see solvi.core.locate) or "literal"
         (0.9: the text as written, up to whitespace runs). It applies to the parts registered after it is set.
         sensitive: names of given facts no part may read (age, sex, ...) — `solvi check` (solvi.check.lint) reports a part
-        that reads one, directly or through a fact computed from one, as an error; nothing changes at ask time."""
+        that reads one, directly or through a fact computed from one, as an error; nothing changes at ask time.
+        combine: which of several false hard checks governing one question decides it — None (default: the first
+        declared, and when their `then` answers differ a warning names them), "first" (the same, chosen: no warning —
+        the declaration order is the priority) or "strictest" (the answer that comes last in
+        the question's options, so list them from mildest to strictest; a governing check with no `then` answer for
+        the question abstains and is strictest of all; with a `then` function among them, or no options, the first
+        declared decides, with the warning)."""
         from .provenance import quote_mode
+        if combine not in (None, "first", "strictest"):
+            raise ValueError('combine must be "first" or "strictest"')
+        self.combine = combine or "first"
+        self.combine_chosen = combine is not None    # "first" given explicitly: the order is meant, no warning
         self.quotes = quote_mode(quotes)
         self.sensitive: frozenset[str] = frozenset([sensitive] if isinstance(sensitive, str) else sensitive or ())
         self.parts: dict[str, Part] = {}
@@ -1030,7 +1043,7 @@ class Catalog:
                           timeout=timeout, blocking=blocking, cites=cites_of(cite, clause))
 
     def check(self, f=None, *, hard=False, then=None, cost=None, model=None, provenance=None, timeout=None, blocking=None,
-              cite=None, clause=None):
+              cite=None, clause=None, family=None, shares_call_with=None):
         """A check: a function of facts that answers True or False (or `solvi.core.slow.refine.Fail("why")` for False with its
         reasons). hard=True: when it is False it decides the questions it governs — the model cannot override it.
         then: {question: answer} — the answer a question gets when this hard check is False (a question listed here is
@@ -1039,12 +1052,22 @@ class Catalog:
         function of facts instead of a constant — `then={"step": free_side}` with `def free_side(position, walls) ->
         str` — whose argument names are the facts it reads (typed like any part's); it runs only when the check is
         False, its value must be one of the question's answers (else the question abstains), and it is recorded in the
-        trace (record kind "then") and re-checked by replay. `cite`, `clause`: as for extract."""
+        trace (record kind "then") and re-checked by replay. When several hard checks governing a question are False,
+        the first declared decides (Catalog(combine="strictest"): the strictest answer by the question's option order).
+        `cite`, `clause`: as for extract. family: where the check's evidence comes from (a model family such as
+        "gpt", "code", "human", a data source); shares_call_with: the part or question whose model call the check
+        re-reads (a self-check in the same response). Both are metadata: nothing changes at ask time and the
+        fingerprint is the same; `solvi check` warns about a check that shares a call (it agrees with that answer
+        whatever it is) and about a question whose checks are all of one family (they err together)."""
+        for k, v in (("family", family), ("shares_call_with", shares_call_with)):
+            if v is not None and not isinstance(v, str):
+                raise TypeError(f"{k}= is a name (str), not {type(v).__name__}")
         if then is not None and not isinstance(then, dict):
             raise TypeError(f"then= is {{question: answer or function of facts}}, not {type(then).__name__}: e.g. "
                             "then={\"step\": free_side}")
         return self._deco("check", f, hard=hard, then=then or {}, cost=cost, model=model, provenance=provenance,
-                          timeout=timeout, blocking=blocking, cites=cites_of(cite, clause))
+                          timeout=timeout, blocking=blocking, cites=cites_of(cite, clause), family=family,
+                          shares_call_with=shares_call_with)
 
     def features(self, fact):
         """Cheap features of the input for choosing among a fact's alternative producers (the learned producer policy):

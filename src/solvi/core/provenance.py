@@ -411,12 +411,14 @@ def catalog_fingerprint(catalog):
     after that is not noticed: register a new one)."""
     items = [(n, p) for n, p in catalog.parts.items()] + [(p.name, p) for p in catalog.rules.values()] + \
             [("constraint:" + n, p) for n, p in catalog.constraints.items()]
-    key = tuple((n, id(p), id(p.func), id(p.model), len(p.alternatives or ()), len(p.inputs)) for n, p in items)
+    combine = getattr(catalog, "combine", "first")
+    key = tuple((n, id(p), id(p.func), id(p.model), len(p.alternatives or ()), len(p.inputs)) for n, p in items) + (combine,)
     cached = getattr(catalog, "_fp_cache", None)
     if cached is not None and cached[0] == key:
         return cached[1]
     parts = {n: part_fingerprint(p) for n, p in items}
-    out = {"fp": digest(sorted(parts.items())), "parts": parts}
+    out = {"fp": digest(sorted(parts.items())) if combine == "first" else digest(sorted(parts.items()), ("combine", combine)),
+           "parts": parts}
     catalog._fp_cache = (key, out)
     return out
 

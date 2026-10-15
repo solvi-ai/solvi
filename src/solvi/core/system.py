@@ -671,24 +671,25 @@ class System:
         # for other questions it is an ordinary failed check. hard: the catalog's hard checks, in catalog order.
         in_flow = set(facts)
         hard = [(f, part) for f, part in hard if f in in_flow]
-        for f, part in hard:                          # several failed: the first declared in the catalog decides
-            r = by.get(f)
-            if r is not None and r.value is False:
-                if not governs(part, q):
-                    continue
-                if q.name in part.then:
-                    because = (r.extra or {}).get("reasons") if isinstance(r.extra, dict) else None   # refine.Fail
-                    said = f"hard check {f} is false" + (": " + "; ".join(because) if because else "")
-                    if callable(part.then[q.name]):   # a function of facts gives the answer (1.0): run and recorded here
-                        return _then_answer(self.catalog, part, q, trace, vals, flow, said)
-                    try:
-                        forced = q.answer.normalize(part.then[q.name])
-                    except ValueError as e:           # a `then` answer that is not an answer of this question: the check
-                        return Result(None, 0.0, f"hard check {f} is false and its `then` answer is not usable: {e}",   # still
-                                      "abstain", source=f, guard="hard_check")                                         # decides
-                    return Result(forced, 1.0, said, "forced", provenance=r.origin, source=f, guard="hard_check")
-                return Result(None, 0.0, f"hard check {f} is false and no answer is set for it", "abstain", source=f,
-                              guard="hard_check")
+        failed = [(f, part) for f, part in hard if by.get(f) is not None and by[f].value is False and governs(part, q)]
+        if len(failed) > 1:                           # several failed: the first declared decides, or the strictest
+            failed = _combine_failed(self.catalog, q, failed)
+        if failed:
+            f, part = failed[0]
+            r = by[f]
+            if q.name in part.then:
+                because = (r.extra or {}).get("reasons") if isinstance(r.extra, dict) else None   # refine.Fail
+                said = f"hard check {f} is false" + (": " + "; ".join(because) if because else "")
+                if callable(part.then[q.name]):   # a function of facts gives the answer (1.0): run and recorded here
+                    return _then_answer(self.catalog, part, q, trace, vals, flow, said)
+                try:
+                    forced = q.answer.normalize(part.then[q.name])
+                except ValueError as e:           # a `then` answer that is not an answer of this question: the check
+                    return Result(None, 0.0, f"hard check {f} is false and its `then` answer is not usable: {e}",   # still
+                                  "abstain", source=f, guard="hard_check")                                         # decides
+                return Result(forced, 1.0, said, "forced", provenance=r.origin, source=f, guard="hard_check")
+            return Result(None, 0.0, f"hard check {f} is false and no answer is set for it", "abstain", source=f,
+                          guard="hard_check")
         for f, part in hard:                          # a governing hard check that could not be evaluated: the answer
             r = by.get(f)                             # is unknown, never "passed"
             if r is not None and r.value is MISSING and governs(part, q):
@@ -1337,6 +1338,44 @@ def _read_of_trace(trace):
                 status=ex.get("status"), confidence=r.confidence, required=bool(ex.get("required")))
     missing = [f for f, x in fields.items() if x.status not in ("read", "given") and (x.required or x.status == "conflict")]
     return SimpleNamespace(question=route.value, route={"confidence": route.confidence}, fields=fields, missing=missing)
+
+
+def _combine_failed(catalog, q, failed):
+    """Several false hard checks govern q (catalog order) → the list whose first decides: as given under
+    Catalog(combine="first"), with a warning when their answers differ; under "strictest" the one whose answer comes
+    last in q's options (no `then` answer for q: an abstention, strictest of all)."""
+    import warnings
+    keys = []
+    for f, part in failed:
+        a = part.then.get(q.name, _ABSTAIN)
+        if a is not _ABSTAIN and not callable(a):
+            try:
+                a = q.answer.normalize(a)
+            except ValueError:
+                a = _BAD
+        keys.append(a)
+    if all(not callable(a) and srepr(a) == srepr(keys[0]) for a in keys):
+        return failed
+    desc = ", ".join(f"{f} → " + ("abstain" if a is _ABSTAIN else "a function" if callable(a) else
+                                  "an unusable answer" if a is _BAD else repr(a)) for (f, _), a in zip(failed, keys))
+    mode = getattr(catalog, "combine", "first")
+    if mode == "first" and getattr(catalog, "combine_chosen", False):
+        return failed                                 # Catalog(combine="first"): the declaration order is the priority
+    opts = list(q.answer.options or [])
+    if mode == "strictest" and opts and all(a is _ABSTAIN or (a is not _BAD and not callable(a) and a in opts)
+                                            for a in keys):
+        rank = [math.inf if a is _ABSTAIN else opts.index(a) for a in keys]
+        best = max(range(len(failed)), key=lambda i: (rank[i], -i))
+        return [failed[best]] + [x for i, x in enumerate(failed) if i != best]
+    warnings.warn(f"question {q.name!r}: several hard checks are false with different `then` answers ({desc}); the "
+                  f"first declared, {failed[0][0]}, decides"
+                  + (" (combine=\"strictest\" needs constant answers among the question's options)"
+                     if mode == "strictest" else " — Catalog(combine=\"strictest\") takes the strictest by the "
+                     "question's option order"), UserWarning, stacklevel=2)
+    return failed
+
+
+_ABSTAIN, _BAD = object(), object()
 
 
 def _then_answer(catalog, check, q, trace, vals, flow, said):
