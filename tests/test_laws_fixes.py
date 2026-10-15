@@ -219,3 +219,44 @@ def test_ties_newer_scores_a_candidate_on_the_rows_it_would_take_from_an_equal_l
     adm = ls.admit_by_probes([c], lambda s, a: "table" if s["wood"] >= 3 else "none",
                              probes=[({"wood": w}, "table") for w in range(5)])
     assert adm.status == "accepted" and ls.predict({"wood": 4}, "table") == "table"
+
+
+# ───────────────────────────────────────────── a tolerance for numeric predictions
+def test_discriminate_and_split_with_a_tolerance_ignore_float_rounding():
+    from solvi.experimental.laws import discriminate, split
+    a = lambda s, act: s * 0.1 * 10                                      # noqa: E731
+    b = lambda s, act: s                                                 # noqa: E731
+    probes = [(0.1 + 0.1 * i, "y") for i in range(30)]
+    always = lambda s, act: True                                         # noqa: E731
+    assert discriminate(a, b, always, probes) is not None                # exact: 0.10000000000000002 vs 0.1
+    assert discriminate(a, b, always, probes, tol=1e-9) is None
+    assert discriminate(a, b, always, probes, same=lambda x, y: round(x, 6) == round(y, 6)) is None
+    c = lambda s, act: 2 * s                                             # noqa: E731
+    pr = split([a, b, c], always, probes, tol=1e-9)
+    assert pr is not None and pr.score == 1                              # a and b are one group, c the other
+    assert split([(lambda s, act: (s, "x")), (lambda s, act: (s + 1e-12, "x"))], always, probes, tol=1e-9) is None
+    with pytest.raises(ValueError):
+        split([a, b], always, probes, tol=1e-9, same=lambda x, y: True)
+
+
+def scale():
+    g = Grammar([Atom("box", lambda s: True, feature="box")], k=1)
+    cands = [Candidate("y", ("box",), c) for c in (1.0, 2.0, 3.0)]
+    probes = [(0.5 + 0.1 * i, "y") for i in range(40)]
+    return g, cands, probes
+
+
+@pytest.mark.parametrize("noise", [0.0, 1e-6])
+def test_admit_by_probes_with_a_tolerance_admits_through_measurement_noise(noise):
+    g, cands, probes = scale()
+    rng = random.Random(0)
+    ask = lambda s, act: 2.0 * s * (1 + noise * rng.gauss(0, 1))         # noqa: E731
+    exact = LawSet(g, apply=lambda e, s: e * s, base=lambda s, a: 0.0).admit_by_probes(cands, ask, probes=probes)
+    assert exact.status == ("accepted" if noise == 0 else "undetermined")   # exact equality: noise refutes all
+    ls = LawSet(g, apply=lambda e, s: e * s, base=lambda s, a: 0.0)
+    adm = ls.admit_by_probes(cands, ask, probes=probes, tol=1e-4)
+    assert adm.status == "accepted" and adm.law.effect == 2.0 and adm.refuted == 2
+    assert adm.law.hits == adm.law.support                               # hits counted within the tolerance
+    off = LawSet(g, apply=lambda e, s: e * s, base=lambda s, a: 0.0).admit_by_probes(
+        cands, lambda s, act: 2.5 * s, probes=probes, tol=1e-4)
+    assert off.status == "undetermined"                                  # outside the tolerance: refuted

@@ -3,6 +3,7 @@ the hypotheses apart, safely and cheaply (see the package docstring)."""
 from __future__ import annotations
 
 import inspect
+import numbers
 from dataclasses import dataclass
 from typing import Any, Callable, Iterable, Sequence
 
@@ -46,22 +47,69 @@ def _k(x):
         return repr(x)
 
 
+def sameness(tol: float | None = None, same: Callable[[Any, Any], bool] | None = None
+             ) -> Callable[[Any, Any], bool] | None:
+    """The comparison of two predictions (or a prediction and an observation): None — exact equality (the default);
+    `same(a, b)` → bool as given; `tol` — numbers equal within an absolute `tol` (|a − b| ≤ tol), tuples and lists
+    element by element, anything else by ==. Not both."""
+    if tol is not None and same is not None:
+        raise ValueError("give tol= or same=, not both")
+    if same is not None:
+        return same
+    if tol is None:
+        return None
+    t = float(tol)
+    if t < 0:
+        raise ValueError("tol is a non-negative number")
+
+    def close(a, b):
+        if isinstance(a, numbers.Number) and isinstance(b, numbers.Number):
+            try:
+                return abs(a - b) <= t
+            except TypeError:
+                return a == b
+        if isinstance(a, (tuple, list)) and isinstance(b, (tuple, list)):
+            return len(a) == len(b) and all(close(x, y) for x, y in zip(a, b))
+        return a == b
+    return close
+
+
+def groups_of(values: Sequence, eq: Callable[[Any, Any], bool] | None) -> list[list[int]]:
+    """The indices of `values` grouped by equal value: exact (hashing) when `eq` is None, else each value joins the
+    first group whose first member it is `eq` to (a tolerance is not transitive: the first member decides)."""
+    out: dict = {}
+    if eq is None:
+        for i, x in enumerate(values):
+            out.setdefault(_k(x), []).append(i)
+        return list(out.values())
+    gs: list[list[int]] = []
+    for i, x in enumerate(values):
+        for g in gs:
+            if eq(values[g[0]], x):
+                g.append(i)
+                break
+        else:
+            gs.append([i])
+    return gs
+
+
 def split(hypotheses: Sequence, safe: Callable[[Any, Any], bool], probes: Iterable[tuple[Any, Any]], *,
-          read_only: Callable[..., bool] | None = None, cost: Callable[[Any, Any], Any] | None = None) -> Probe | None:
+          read_only: Callable[..., bool] | None = None, cost: Callable[[Any, Any], Any] | None = None,
+          tol: float | None = None, same: Callable[[Any, Any], bool] | None = None) -> Probe | None:
     """The probe that best splits the hypotheses (law sets, or predictors `fn(state, action)`), among `probes` —
     (state, action) pairs — that `safe(state, action)` allows. Order: read-only probes first (`read_only(action)`, or
     `read_only(state, action)` when the kind of call is in the state),
     then the larger split, then the lower `cost(state, action)`, then the order given. None when no safe probe tells
-    any two hypotheses apart."""
+    any two hypotheses apart. Predictions are told apart by exact equality, or within `tol` (numbers: |a − b| ≤ tol,
+    tuples element by element) or by `same(a, b)` — two formulas that differ by float rounding (x·0.1·10 and x) are
+    the same hypothesis under tol=1e-9."""
     preds = [_predictor(h) for h in hypotheses]
+    eq = sameness(tol, same)
     ro = _ro(read_only)
     best = None
     for i, (state, action) in enumerate(probes):
         ps = tuple(p(state, action) for p in preds)
-        counts: dict = {}
-        for x in ps:
-            counts[_k(x)] = counts.get(_k(x), 0) + 1
-        score = len(ps) - max(counts.values(), default=0)
+        score = len(ps) - max((len(g) for g in groups_of(ps, eq)), default=0)
         if score <= 0:
             continue
         key = (0 if ro is None or ro(state, action) else 1, -score, cost(state, action) if cost else 0, i)
@@ -74,11 +122,12 @@ def split(hypotheses: Sequence, safe: Callable[[Any, Any], bool], probes: Iterab
 
 
 def discriminate(laws_a, laws_b, safe: Callable[[Any, Any], bool], probes: Iterable[tuple[Any, Any]], *,
-                 read_only: Callable[..., bool] | None = None, cost: Callable[[Any, Any], Any] | None = None
-                 ) -> Probe | None:
+                 read_only: Callable[..., bool] | None = None, cost: Callable[[Any, Any], Any] | None = None,
+                 tol: float | None = None, same: Callable[[Any, Any], bool] | None = None) -> Probe | None:
     """The cheapest safe probe where two law sets (or predictors) predict different outcomes — read-only actions
-    before writes, then the lower cost, then the order given; None when they agree on every safe probe."""
-    return split([laws_a, laws_b], safe, probes, read_only=read_only, cost=cost)
+    before writes, then the lower cost, then the order given; None when they agree on every safe probe. tol / same: as
+    in `split` (different = not within the tolerance)."""
+    return split([laws_a, laws_b], safe, probes, read_only=read_only, cost=cost, tol=tol, same=same)
 
 
 __all__ = ["Probe", "discriminate", "split"]
