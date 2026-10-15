@@ -6,6 +6,7 @@ import hashlib
 import heapq
 import json
 import pickle
+import warnings
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
@@ -39,7 +40,14 @@ class ExactModel:
     fork during a search). The real environment is only read (copied), never stepped: `fingerprint()` hashes it, so a
     caller can check that a plan call left it as it was.
 
-    Counters: `forks`, `steps` (simulated steps, every search and every verify); `last`: what the last search did."""
+    Counters: `forks`, `steps` (simulated steps, every search and every verify); `last`: what the last search did.
+
+    Without `clone`, the first fork checks what the deep copy carries and warns once when it holds a torch module (a
+    trained model copied at every fork: a planner that seems to hang) or pickles to more than FORK_WARN_BYTES — give
+    `clone=` a snapshot / restore of the world's state alone (check it with
+    `solvi.testing.conformance.check_environment(make, clone=)`)."""
+
+    FORK_WARN_BYTES = 8_000_000
 
     def __init__(self, env, clone: Callable[[Any, Any], Any] | None = None, key: Callable[[Any], str] | None = None):
         if not callable(getattr(env, "step", None)):
@@ -48,6 +56,7 @@ class ExactModel:
         self.forks = 0
         self.steps = 0
         self.last: dict = {}
+        self._fork_checked = clone is not None
 
     def fork(self, state=None):
         """An independent copy of the environment (at `state` when a clone hook is given)."""
@@ -56,7 +65,30 @@ class ExactModel:
     def copy(self, world, state=None):
         """An independent copy of `world` (the real environment or a fork)."""
         self.forks += 1
-        return self.clone(world, state) if self.clone is not None else copy.deepcopy(world)
+        if self.clone is not None:
+            return self.clone(world, state)
+        if not self._fork_checked:
+            self._fork_checked = True
+            self._warn_heavy(world)
+        return copy.deepcopy(world)
+
+    def _warn_heavy(self, world):
+        """Once: warn when the deep copy of `world` holds a torch module or is large (see the class docstring)."""
+        why = None
+        torch_at = _torch_module_in(world)
+        if torch_at is not None:
+            why = f"it holds a torch module ({torch_at})"
+        else:
+            try:
+                size = len(pickle.dumps(world, protocol=4))
+            except Exception:                          # noqa: BLE001 — not picklable: no size to report
+                size = 0
+            if size > self.FORK_WARN_BYTES:
+                why = f"it pickles to {size:,} bytes"
+        if why:
+            warnings.warn(f"ExactModel.fork deep-copies the whole environment at every fork and {why}; give "
+                          f"ExactModel(clone=) a snapshot / restore of the world's state instead (check it with "
+                          f"solvi.testing.conformance.check_environment(make, clone=))", UserWarning, stacklevel=3)
 
     def step(self, world, action):
         """One simulated step on a fork (counted)."""
@@ -81,6 +113,30 @@ class ExactModel:
         except Exception:                              # noqa: BLE001 — an environment that cannot be pickled
             raw = repr(vars(self.env) if hasattr(self.env, "__dict__") else self.env).encode()
         return hashlib.sha256(raw).hexdigest()[:16]
+
+
+def _torch_module_in(obj, depth: int = 4, budget: int = 10_000):
+    """The path to a torch.nn.Module inside `obj` (attributes, dict values, list / tuple / set items, a few levels
+    down) or None; torch is not imported."""
+    seen: set = set()
+    todo = [(obj, "env", 0)]
+    while todo and budget > 0:
+        x, path, d = todo.pop()
+        budget -= 1
+        if id(x) in seen or isinstance(x, (str, bytes, int, float, bool, type(None))):
+            continue
+        seen.add(id(x))
+        if any(c.__name__ == "Module" and c.__module__.startswith("torch.nn") for c in type(x).__mro__):
+            return path
+        if d >= depth:
+            continue
+        if isinstance(x, dict):
+            todo += [(v, f"{path}[{k!r}]", d + 1) for k, v in list(x.items())[:1000]]
+        elif isinstance(x, (list, tuple, set, frozenset)):
+            todo += [(v, f"{path}[{i}]", d + 1) for i, v in enumerate(list(x)[:1000])]
+        elif hasattr(x, "__dict__") and not isinstance(x, type):
+            todo += [(v, f"{path}.{k}", d + 1) for k, v in list(vars(x).items())[:1000]]
+    return None
 
 
 @dataclass(frozen=True)
