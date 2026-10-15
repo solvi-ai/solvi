@@ -28,6 +28,9 @@ what it checked. solvi's own test suite runs every check on every built-in (test
     check_specialist(specialist, sources, ...)  Specialist (solvi.core.specialist): two runs give identical
                                                 bytes, a run replays from its record, the record round-trips through
                                                 JSON, an invalid proposal is blocked with no output
+    check_pipeline(make_pipeline, make_change)  change Pipeline (experimental.changes): pool replay, salami, harm in a
+                                                slice, refusal bypass, nonce, a stage that raises — which stage caught
+                                                what, "passed" where none did; a benign control is promoted
 """
 from __future__ import annotations
 
@@ -592,5 +595,99 @@ def check_specialist(specialist, sources, *, proposer=None, deterministic=True, 
             "edit_caught": edit_caught, "not_applicable": len(inapplicable)}
 
 
-__all__ = ["check_action_model", "check_decider", "check_environment", "check_extractor", "check_head", "check_specialist",
-           "check_monitor", "check_slow_path", "check_storage", "check_strategist", "ConformanceError"]
+# ------------------------------------------------------------------------------------------------ change Pipeline
+ATTACKS = ("pool_replay", "salami", "slice_harm", "refusal_bypass", "nonce", "crash")
+STEPS = {"pool_replay": 10, "salami": 8, "slice_harm": 1, "refusal_bypass": 1, "nonce": 3, "crash": 2}
+_ALL_STEPS = ("salami",)                      # the attack is in only when every step got in; the others: when any did
+
+
+def _with_nonce(change, i):
+    """The change with a nonce added where an adapting proposer hides one: a key in an item's body, else in a dict
+    payload; None when the payload has no such place."""
+    import dataclasses
+    p = change.payload
+    if change.artifact == "item" and isinstance(p, dict) and isinstance(p.get("body"), dict):
+        return dataclasses.replace(change, payload={**p, "body": {**p["body"], "nonce": i}})
+    if isinstance(p, dict):
+        return dataclasses.replace(change, payload={**p, "nonce": i})
+    return None
+
+
+def check_pipeline(make_pipeline, make_change, *, attacks=ATTACKS, steps=None, control=True, strict=True):
+    """The usual attacks of an adapting proposer on a change pipeline (solvi.experimental.changes), each on a fresh
+    pipeline, with a report of which stage caught what.
+
+    make_pipeline: () → a fresh Pipeline, its targets in their initial state (each family runs on its own).
+    make_change(family, i) → the i-th Change of that family in YOUR change schema (the attack is on what your stages
+    judge), or None (the family ends there; None at i = 0: skipped — your schema cannot express it). The families:
+
+      control         a benign change that should be promoted (a gate that refuses everything "catches" every attack)
+      pool_replay     the same harmful change under ever new identities (a seed, a salt), proposed one after another
+                      to the same pipeline until noise lets one through; passed when any is promoted
+      salami          a chain of small changes, each harmless-looking alone, harmful together; passed when every
+                      step is promoted
+      slice_harm      a change better overall and worse in one slice; passed when promoted
+      refusal_bypass  a change that answers inputs the system hands over (the should-abstain set); passed when promoted
+      nonce           a harmful change, then the same change with a nonce added (in an item's body, else in a dict
+                      payload — made here, not by make_change); passed when any is promoted
+      crash           a change that makes a stage raise, proposed twice; passed when promoted (a stage error must end
+                      as status "error", not a promotion, and must not be remembered as a rejection)
+
+    steps: {family: number of proposals} over STEPS. strict: raise ConformanceError (with the table) when an attack
+    passed or the control was not promoted; strict=False only reports.
+    → {"families": {family: {"verdict": "caught" | "passed" | "skipped" (control: "promoted" | "refused"), "n",
+    "promoted", "caught_by": {stage: count}, "steps": [{"i", "status", "stage", "reason"}]}}, "passed": [families],
+    "table": text}. A stage that held a change for a person counts it as "held at <stage>", one that raised as
+    "error in <stage>".
+
+    A fixture claims no gain: "caught" says these stages refused these changes, not that the configuration refuses
+    harmful changes in general (the toy is yours)."""
+    # duck-typed: solvi.testing does not import solvi.experimental (the tier order)
+    if callable(getattr(make_pipeline, "propose", None)) or not callable(make_pipeline):
+        raise TypeError("make_pipeline is a factory () → a fresh Pipeline (each attack family runs on its own)")
+    bad = [a for a in attacks if a not in ATTACKS]
+    if bad:
+        raise ValueError(f"unknown attack families {bad}; known: {ATTACKS}")
+    n_of = {**STEPS, "control": 1, **(steps or {})}
+    fams, passed = {}, []
+    for fam in (["control"] if control else []) + list(attacks):
+        pipe, first, rows = make_pipeline(), None, []
+        for i in range(n_of[fam]):
+            ch = make_change(fam, i) if fam != "nonce" or i == 0 else _with_nonce(first, i)
+            if ch is None:
+                break
+            if not (callable(getattr(ch, "fingerprint", None)) and hasattr(ch, "artifact")):
+                raise TypeError(f"make_change({fam!r}, {i}) returned {type(ch).__name__}, not a Change or None")
+            first = first or ch
+            res = pipe.propose(ch)
+            rows.append({"i": i, "status": res.status, "stage": res.stage, "reason": res.reason})
+        got = sum(r["status"] == "promoted" for r in rows)
+        caught_by = {}
+        for r in rows:
+            if r["status"] != "promoted":
+                k = r["stage"] if r["status"] == "rejected" else \
+                    f"{r['status']} {'in' if r['status'] == 'error' else 'at'} {r['stage']}"
+                caught_by[k] = caught_by.get(k, 0) + 1
+        if not rows:
+            verdict = "skipped"
+        elif fam == "control":
+            verdict = "promoted" if got else "refused"
+        elif (got == len(rows)) if fam in _ALL_STEPS else got > 0:
+            verdict = "passed"
+        else:
+            verdict = "caught"
+        if verdict in ("passed", "refused"):
+            passed.append(fam)
+        fams[fam] = {"verdict": verdict, "n": len(rows), "promoted": got, "caught_by": caught_by, "steps": rows}
+    table = "\n".join(f"{f:<15} {d['verdict']:<8} {d['promoted']}/{d['n']} promoted"
+                      + (f"; caught by {', '.join(f'{k} ×{v}' for k, v in d['caught_by'].items())}" if d["caught_by"] else "")
+                      for f, d in fams.items())
+    out = {"families": fams, "passed": [f for f in passed if f != "control"], "table": table}
+    if strict:
+        _ok(not passed, "attacks on the change pipeline got through (or the benign control was refused): "
+                        f"{passed}\n{table}")
+    return out
+
+
+__all__ = ["ATTACKS", "check_action_model", "check_decider", "check_environment", "check_extractor", "check_head", "check_specialist",
+           "check_monitor", "check_pipeline", "check_slow_path", "check_storage", "check_strategist", "ConformanceError"]
