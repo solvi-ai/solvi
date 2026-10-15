@@ -159,13 +159,40 @@ class EvaluatorLock:
         self.access_log = open_storage(access_log) if access_log is not None else None
 
     @staticmethod
-    def create(path, n=500, *, low=1_000_000_000, high=2 ** 31 - 1, purpose="held-out evaluation"):
-        """Write n random seeds (os.urandom, not a range: knowing the rule does not reveal them) once, read-only → the
-        file's SHA-256 (the pin). Refuses when the file exists."""
+    def create(path, n=None, *, seeds=None, low=1_000_000_000, high=2 ** 31 - 1, purpose="held-out evaluation"):
+        """Write n random seeds (os.urandom, not a range: knowing the rule does not reveal them; default 500) once,
+        read-only → the file's SHA-256 (the pin). Refuses when the file exists.
+
+        seeds: your own held-out seeds instead (distinct ints; also accepted in place of n:
+        `EvaluatorLock.create("eval_seeds.json", [11, 12, 13])`) — then keep them out of every file a proposer reads."""
         path = Path(path)
+        if n is not None and not isinstance(n, int) and isinstance(n, (list, tuple, range, set, frozenset)):
+            if seeds is not None:
+                raise TypeError("pass the seeds as n or as seeds=, not both")
+            n, seeds = None, n
+        if seeds is not None:
+            if n is not None:
+                raise TypeError("pass n (how many random seeds) or seeds= (your own), not both")
+            if isinstance(seeds, (str, bytes)) or not hasattr(seeds, "__iter__"):
+                raise TypeError(f"seeds is a list of ints, not {type(seeds).__name__}")
+            seeds = list(seeds)
+            bad = [s for s in seeds if isinstance(s, bool) or not isinstance(s, int)]
+            if bad:
+                raise TypeError(f"seeds are ints, not {bad[:3]}")
+            if not seeds or len(set(seeds)) != len(seeds):
+                raise ValueError("seeds are a non-empty list of distinct ints")
+            seeds = set(seeds)
+            n = len(seeds)
+        else:
+            n = 500 if n is None else n
+            if isinstance(n, bool) or not isinstance(n, int):
+                raise TypeError(f"n is the number of seeds to draw (an int ≥ 1), not {n!r}; your own seeds go in "
+                                f"seeds=[...]")
+            if n < 1:
+                raise ValueError(f"n is the number of seeds to draw (an int ≥ 1), not {n}")
         if path.exists():
             raise FileExistsError(f"{path} exists: the evaluation seeds are written once")
-        seeds = set()
+        seeds = set(seeds or ())
         while len(seeds) < n:
             seeds.add(int.from_bytes(os.urandom(4), "big") % (high - low) + low)
         path.write_text(json.dumps({"purpose": purpose, "n": n, "created": time.strftime("%Y-%m-%d %H:%M:%S"),
