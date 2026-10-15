@@ -3729,6 +3729,21 @@ The candidate runs on the same input after the current system; its response is s
 candidate is counted (`shadow.stats["errors"]`), never raised. The candidate runs in the same thread: it adds its own
 time to each ask.
 
+When outcomes arrive later, label them and let the shadow stop a harmful candidate:
+
+```python
+shadow = Shadow(current, candidate, slice_of=lambda st: st["region"], alpha=0.05)
+shadow.ask(state, rid="req-17")
+event = shadow.label("req-17", truth)        # None, or {"event": "halted", "scope": "overall" | "slice", "why", ...}
+```
+
+Both systems answered the same input, so each label is a paired comparison. Among the pairs where exactly one is right,
+a test martingale bets that the candidate is the wrong one, overall (at alpha/2) and per slice (alpha/(2·max_slices)
+each). It is anytime-valid: checking after every label is allowed, and a candidate that is no more often the wrong one is
+halted with probability at most alpha. A halt sets `shadow.halted`; the shadow still answers with `current` — switching
+(or not) is yours. A halt needs evidence: a candidate wrong on every discordant pair is halted after ten of them,
+harm on a tenth of the discordant pairs takes hundreds. The outcome must not depend on which answer was served.
+
 ## Grounded decisions: provenance, audit and safeguards
 
 The principle: **fuzzy proposes, deterministic decides, everything is in the trace.** A model may extract a value, pick a
