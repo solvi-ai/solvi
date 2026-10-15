@@ -767,6 +767,15 @@ every candidate of y = c·x. Values over several orders of magnitude need `rtol=
 mismatch after; in `admit_by_probes`, tol=1e-4 refuted every candidate where the noise reached 2e-3…0.2 and rtol=1e-4
 admitted the right one.
 
+**A copied environment is an oracle only if it is deterministic.** Before using a clone or a replay as the judge
+(`admit_by_probes(ask=...)` on a `deepcopy` of the environment, a simulator that plans on a copy, `boundary(system=...)`
+pinning answers), run the same actions twice from the same state and compare. An environment whose step iterates a
+`set` (or a dict keyed by objects hashed by address) is not: in Crafter 1.8 objects are despawned in the order of a set
+of objects, so the same seed gives different worlds from run to run and a `deepcopy` diverges from the original —
+probes asked on it are noisy observations, not exact answers, and a refutation from one of them can be wrong. Fix the
+iteration order in the environment, or treat the copy as noisy (a tolerance, repeated probes, `confirm=`). `boundary`
+already leaves out inputs whose answers differ when asked twice.
+
 **Paid checks pay only when a wrong accept is dear, the check is cheap and independent, and wrong answers occur.**
 Where a check costs more than the error, or every check is the same model, deciding without checks did as well or
 better in the review's stands.
