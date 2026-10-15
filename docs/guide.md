@@ -1794,7 +1794,8 @@ res = system.ask(init_state, ["ship"])         # a subset: questions=["ship"] (o
 `questions=`, was removed in 0.9.)
 
 `System(catalog, questions, *, workers=1, order="default", producers="declared", learn=None, input_model=None,
-strategist=None, storage=None, timeout=None, cost_policy="declared", lang="en", early_exit=True)`; `learn`: after every ask,
+strategist=None, storage=None, timeout=None, cost_policy="declared", lang="en", early_exit=True,
+cache=None)`; `cache=N`: the opt-in pure-decision cache (see [Compact records](#compact-records-and-rotation)); `learn`: after every ask,
 update the parts' measured costs and the learned order / producer policies from what happened (default: on when
 `order` or `producers` is "learned"); the others are described where they matter. `storage` (a `TraceStorage` or a path) saves every
 response with its whole trace, hash-chained across responses (see [Storing decisions](#storing-decisions-tracestorage)).
