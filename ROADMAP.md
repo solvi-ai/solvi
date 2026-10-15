@@ -49,6 +49,7 @@ for one pre-registered check, run once, before it enters the library.
 | **Laws: sequential admission, a «new regime» and regime memory** | Admission that stays valid on a long stream; old rows stop refuting a new regime's law | after a stand |
 | **Laws with numeric effects** | Formula candidates with parameters and units, a noise model, «structure ± interval» | after a stand |
 | **Guard for agents: taint scope, task tool list, `effect=`** | Taint per message instead of the whole context; read / act / irreversible / egress | after a stand |
+| **A calibrated `injection_spans`** | Today it flags ordinary text (an address, a payment line) and misses about a third of polite attacks; calibrate on labelled agent texts with a regression set | with the Guard stand |
 | **Shadow and canary for changes** | A paired anytime-valid harm stop per slice | planned |
 | **`build(monitor=)` on by default** | Once its false-alarm rate on short calibration sets is measured | open |
 | **Laws: several missing laws at once** | The remaining wrong probe admissions (6/100 with two laws) need a version space over pairs of laws | open |
