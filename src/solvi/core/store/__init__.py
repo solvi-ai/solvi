@@ -40,7 +40,7 @@ import time as _time
 from dataclasses import dataclass
 
 from ... import _deprecate
-from ..sources import TRUSTED_SOURCES, VERIFIED, VERIFIED_REFUSED, UntrustedLabel, check_source   # noqa: F401 — re-exported
+from ..sources import AUDIT, TRUSTED_SOURCES, VERIFIED, VERIFIED_REFUSED, UntrustedLabel, check_source   # noqa: F401 — re-exported
 
 try:
     import fcntl
@@ -728,6 +728,8 @@ class TraceStorage(abc.ABC):
         check_source(source, accept=(VERIFIED,))
         if source == VERIFIED:
             self._check_vouched(question, answer, of)
+        if source == AUDIT:
+            self._check_audited(question, of)
         body = {"v": FORMAT, "kind": "teach", "teach": question, "init": plain(dict(init_state)), "answer": plain(answer)}
         if source != "human":
             body["source"] = source
@@ -740,6 +742,18 @@ class TraceStorage(abc.ABC):
         if meta is not None:
             body["meta"] = plain(meta)
         return self._append(body)["id"]
+
+    def _check_audited(self, question, of):
+        """An "audit" label: `of` is a decision in this store that the dispatcher marked for audit (Dispatcher(audit=))
+        on `question` — else UntrustedLabel (a label chosen by a person is not a random sample)."""
+        d = self._find(str(of)) if of is not None else None
+        if d is None or not d.get("audit"):
+            raise UntrustedLabel(f"an audit label names a stored decision the dispatcher drew for audit "
+                                 f"(Dispatcher(audit=)): {of!r} is " + ("not given" if of is None else
+                                 "not one" if d is not None else "not in this store")
+                                 + "; label it with label_source='human' or 'outcome'")
+        if d.get("question", question) != question:
+            raise UntrustedLabel(f"the audited decision {of!r} answered {d.get('question')!r}, not {question!r}")
 
     def _check_vouched(self, question, answer, of):
         """A "verified" label: `of` is a decision in this store that answered `question` alone, under a guarantee, with
@@ -835,13 +849,17 @@ class TraceStorage(abc.ABC):
             return "yes" if answer else "no"
         return answer
 
-    def corrections(self):
+    def corrections(self, label_source=None):
         """The stored corrections → [{"id", "time", "question", "init", "answer", "source", "by", "of"}] (feed them to fit /
         learn_rule, a CorrectionMemory or an update target of solvi.experimental.changes). source: "human" (also every record without one), "outcome",
         "rule", "verified" — or, for a record written around save_correction, whatever it says (solvi.core.knowledge.memory and
         the update target of solvi.experimental.changes refuse anything outside TRUSTED_SOURCES, "verified" included; System.guarantee takes "verified"
-        when told to)."""
+        when told to). label_source: only the corrections from this source (or these sources) — e.g. "audit", the
+        labels of the decisions drawn at random (Dispatcher(audit=))."""
         from ..schema import untag_floats                # stored tagged ({"$float": "inf"}), read back as the float
+        if label_source is not None:
+            keep = {label_source} if isinstance(label_source, str) else set(label_source)
+            return [c for c in self.corrections() if c["source"] in keep]
         return [{"id": s.id, "time": s.time, "question": s.data["teach"], "init": untag_floats(s.data["init"]),
                  "answer": untag_floats(s.data["answer"]), "source": s.data.get("source", "human"), "by": s.data.get("by"),
                  "of": s.data.get("of"), **({"note": s.data["happened"]} if "happened" in s.data else {})}
@@ -1859,4 +1877,4 @@ def open_storage(where, system=None):
 __all__ = ["chained", "check_source", "compact_content", "CompactRecord", "DuckDBStorage", "entry", "FORMAT",
            "JSONLStorage", "open_storage", "plain", "PostgresStorage", "record_body", "record_hash", "record_mode",
            "RECORD_MODES", "rederive", "SQLiteStorage", "Stored", "TraceStorage", "TRUSTED_SOURCES", "UntrustedLabel",
-           "VERIFIED", "VERIFIED_REFUSED", "view"]
+           "VERIFIED", "VERIFIED_REFUSED", "view", "AUDIT"]
