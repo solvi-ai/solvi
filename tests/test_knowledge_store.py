@@ -110,8 +110,10 @@ def test_the_retraction_cascade_and_what_comes_back():
     assert changes[a] == ("disputed", "retracted") and changes[b][1] == "retracted" and ks.status(c) == "active"
     assert ks.verify() and ks.fingerprint() == ks.rebuild(skip={a}).fingerprint()
     assert [r["op"] for r in ks.journal].count("retract") == 1        # nothing deleted: the chain stays whole
-    again = ks.add("fact", fact("x", "y", "same"), source="person")   # asserted again later: present again
-    assert again == a and ks.status(a) in ("active", "disputed")
+    again = ks.add("fact", fact("x", "y", "same"), source="person")   # asserted again later: pending a re-test
+    assert again == a and ks.status(a) == "hypothesis" and ks.pending_retest(a)
+    ks.retest(a, ok=True)
+    assert ks.status(a) in ("active", "disputed")
 
 
 def test_random_retractions_are_exact():
