@@ -1314,7 +1314,7 @@ def provenance_of(part, out):
 
 
 def execute(catalog, flow, init_state, workers=1, early_exit=True, order=None, costs=None, policy=None, known=None,
-            hashes=True):
+            hashes=True, memo=None):
     """Run the flow. Hard checks and what they depend on run first; a failed hard check settles the questions whose flow contains
     it, and the steps only those questions needed are skipped (early exit). Steps that do not depend on each other run in
     parallel when workers > 1 (threads: suits I/O-bound parts such as API calls and model inference). Records are always written
@@ -1330,8 +1330,9 @@ def execute(catalog, flow, init_state, workers=1, early_exit=True, order=None, c
     early_exit=False: every step of the flow runs, whatever the hard checks say (the answers are the same: a failed hard
     check still decides); the trace records it (`trace.early_exit`). hashes=False: a lean run — the same steps, values and
     records, but nothing is hashed (no input hashes, no record hashes, an empty init hash): for answers that are never
-    stored or replayed (the candidates of solvi.core.slow.search); such a trace does not replay."""
-    run = _Run(catalog, flow, init_state, early_exit, order, costs, policy, known, hashes)
+    stored or replayed (the candidates of solvi.core.slow.search); such a trace does not replay. memo: a HashMemo of
+    this very init_state whose init_hash() was taken already (System(cache=) hashes the input for its key): reused."""
+    run = _Run(catalog, flow, init_state, early_exit, order, costs, policy, known, hashes, memo)
     for idxs in run.phases():
         run.run_sync(idxs, workers)
     return run.finish()
@@ -1360,7 +1361,7 @@ class _Run:
     """One execution of a flow: the plan of phases and the state the sync and async drivers share."""
 
     def __init__(self, catalog, flow, init_state, early_exit=True, order=None, costs=None, policy=None, known=None,
-                 hashes=True):
+                 hashes=True, memo=None):
         from .costs import CostBook
         self.catalog, self.flow, self.init_state = catalog, flow, init_state
         self.early_exit, self.order, self.policy = early_exit, order, policy
@@ -1375,7 +1376,9 @@ class _Run:
         self.schedule = []
         self.timeout = None
         self.known = dict(known) if known else ({} if (catalog.readers or catalog.types) else None)
-        if hashes:
+        if hashes and memo is not None and memo.init_state is init_state and getattr(memo, "hashed", None):
+            self.memo, self.init_hash = memo, memo.hashed
+        elif hashes:
             self.memo = HashMemo(init_state, getattr(catalog, "_hash_seed", None))
             self.init_hash = self.memo.init_hash()    # first: the steps then find every given value already hashed
         else:                                         # a lean run: _step hashes nothing when its memo is False

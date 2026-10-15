@@ -1797,7 +1797,8 @@ res = system.ask(init_state, ["ship"])         # a subset: questions=["ship"] (o
 `questions=`, was removed in 0.9.)
 
 `System(catalog, questions, *, workers=1, order="default", producers="declared", learn=None, input_model=None,
-strategist=None, storage=None, timeout=None, cost_policy="declared", lang="en", early_exit=True)`; `learn`: after every ask,
+strategist=None, storage=None, timeout=None, cost_policy="declared", lang="en", early_exit=True,
+cache=None)`; `cache=N`: the opt-in pure-decision cache (see [Compact records](#compact-records-and-rotation)); `learn`: after every ask,
 update the parts' measured costs and the learned order / producer policies from what happened (default: on when
 `order` or `producers` is "learned"); the others are described where they matter. `storage` (a `TraceStorage` or a path) saves every
 response with its whole trace, hash-chained across responses (see [Storing decisions](#storing-decisions-tracestorage)).
@@ -3545,6 +3546,24 @@ verifies and every decision replays):
 What is left is mostly the input: a compact record keeps every given fact, so 1.1 KB of notes given with every step
 costs 1.1 KB a decision — give a long constant text once (a hash or a key as the input) when it does not change.
 
+**Repeated inputs: the pure-decision cache (opt-in).** A catalog without models whose parts are pure functions of
+their inputs (no clock, randomness or I/O) gives the same decision for the same facts. `System(cat, questions,
+cache=10_000)` keeps the last 10,000 decisions keyed by the catalog's and questions' fingerprints, the questions asked,
+`early_exit` and the given facts' hash (the trace's `init_hash`); a repeated input is served as a copy of the first
+decision (the same trace and hashes) with `res.cached == {"of": <the first decision's stored id>}`, and no part runs.
+Stored, a served decision is a compact record with `meta={"cache_of": <that id>}`: `verify()` checks it and
+`replay_all` re-runs it from its input and compares every step's hash, like any compact record — an impure part or a
+changed catalog shows up there. A catalog with a model-backed part refuses `cache=`; an ask with another order, a
+learning system, answer heads, a stateful guarantee or a strategist of your own runs without it.
+
+| ms per ask, cache hit ÷ no cache ([benchmarks/ask_speed.py](../benchmarks/ask_speed.py) cases) | not stored | SQLite store |
+|---|---|---|
+| quickstart (5 steps) | 0.12–0.17× | 0.36–0.56× |
+| catalog of 50 / 1000 parts | 0.08–0.10× / 0.05–0.06× | 0.41–0.59× / 0.27–0.28× |
+| large input (3,712 floats: hashing the input is most of a hit) | 0.43–0.74× | 0.61–0.65× |
+
+A miss costs the key: 1.0–1.2× an ask without the cache.
+
 **What a compact record still proves, and what it cannot.** It is hashed into the chain like any other record:
 `verify()` checks it, that each kept step sits in the record's chain of step hashes and is linked to the step before,
 and that its answers are the record's. `replay_all(system)` re-runs it: the flow is planned again for the recorded
@@ -3742,6 +3761,21 @@ The candidate runs on the same input after the current system; its response is s
 `{"shadow_of": the current response's stored id, "current_catalog", "diff"}`, never in its own storage, and a failing
 candidate is counted (`shadow.stats["errors"]`), never raised. The candidate runs in the same thread: it adds its own
 time to each ask.
+
+When outcomes arrive later, label them and let the shadow stop a harmful candidate:
+
+```python
+shadow = Shadow(current, candidate, slice_of=lambda st: st["region"], alpha=0.05)
+shadow.ask(state, rid="req-17")
+event = shadow.label("req-17", truth)        # None, or {"event": "halted", "scope": "overall" | "slice", "why", ...}
+```
+
+Both systems answered the same input, so each label is a paired comparison. Among the pairs where exactly one is right,
+a test martingale bets that the candidate is the wrong one, overall (at alpha/2) and per slice (alpha/(2·max_slices)
+each). It is anytime-valid: checking after every label is allowed, and a candidate that is no more often the wrong one is
+halted with probability at most alpha. A halt sets `shadow.halted`; the shadow still answers with `current` — switching
+(or not) is yours. A halt needs evidence: a candidate wrong on every discordant pair is halted after ten of them,
+harm on a tenth of the discordant pairs takes hundreds. The outcome must not depend on which answer was served.
 
 ## Grounded decisions: provenance, audit and safeguards
 
@@ -5405,7 +5439,9 @@ lets an LLM write those parts from the text and accepts them only after checks t
    and every clause is cited by a part or declared not normative with a reason;
 2. the module is **pure functions** checked by `solvi.experimental.compile.sandbox` (an `ast` allowlist of standard-library imports, no
    files, reflection or dunders) and run there — in a subprocess with memory and time limits — before anything of it
-   enters your process;
+   enters your process (`sandbox.run_many(sources, driver, payload)` runs many modules in one subprocess, each with
+   its own CPU and wall-time limit and its own result — about 5 ms a module instead of about 110 ms for one `run` each;
+   a module that ends the process is reported and the rest go on in a fresh one);
 3. **two drafts are written independently** and must give the same answer to every question on every input of a pool:
    inputs drawn from the values you declare (`Inputs`), boundary values around every number of the text and of both
    drafts, your unlabelled samples, and the tests' inputs. Every input must get an answer: a draft that abstains or
