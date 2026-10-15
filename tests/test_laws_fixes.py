@@ -100,3 +100,81 @@ def test_a_law_its_own_check_retires_is_in_step_retired_and_the_bars_are_warned(
     with warnings.catch_warnings():
         warnings.simplefilter("error")
         LawSet(g, min_precision=0.9, retire_below=0.8)                   # the defaults: no warning
+
+
+# ───────────────────────────────────────────── the sized N over distinct candidates; the exact acceptance
+NF = 10
+STATES = list(itertools.product((0, 1), repeat=NF))
+
+
+def bits(k=2):
+    return Grammar([Atom(f"x{i}", (lambda s, i=i: s[i] == 1), feature=f"f{i}") for i in range(NF)], k=k)
+
+
+def test_the_same_candidates_rescored_on_the_same_buffer_do_not_raise_n():
+    g = bits()
+    b = Buffer(g)
+    rng = random.Random(1)
+    for i in range(300):
+        s = rng.choice(STATES)
+        b.add(Transition(s, "go", s[3] == 1 and s[4] == 1, group=i % 3))
+    cands = LawSet(g, base=lambda s, a: False).mismatch(tuple([1] * NF), "go", True)
+    Ns, costs = [], []
+    for _ in range(3):
+        ls = LawSet(g, base=lambda s, a: False)
+        ls.test(cands, b, exclude=0)
+        Ns.append(b.tested)
+        costs.append(ls.cost["tests"])
+    assert Ns == [len(cands)] * 3                                        # was 56, 112, 168
+    assert costs == [len(cands)] * 3                                     # the cost still counts every evaluation
+    ls = LawSet(g, base=lambda s, a: False)
+    ls.test(cands + cands, b, exclude=0)
+    assert b.tested == len(cands)                                        # a repeat within one call counts once
+    ls.test([Candidate("go", ("x9",), False)], b, exclude=0)
+    assert b.tested == len(cands) + 1
+
+
+def few_shot(seed):
+    rng = random.Random(seed)
+    g = bits()
+    b = Buffer(g)
+    for grp in range(3):
+        for _ in range(6):
+            s = rng.choice(STATES)
+            b.add(Transition(s, "go", s[3] == 1, group=grp))
+    return g, b
+
+
+@pytest.mark.parametrize("kw, learned", [({}, 0), ({"acceptance": "exact", "min_support": 2}, 20)])
+def test_few_shot_an_exact_law_is_learned_only_with_the_exact_acceptance(kw, learned):
+    ok = 0
+    for seed in range(20):
+        g, b = few_shot(seed)
+        ls = LawSet(g, base=lambda s, a: False, **kw)
+        for t in b.rows("go"):
+            ls.step(t, b)
+        ok += any(law.condition == ("x3",) and law.effect is True for law in ls.laws)
+    assert ok == learned
+
+
+def test_the_exact_acceptance_refuses_any_error_and_asks_the_confirm_hook():
+    g, b = few_shot(0)
+    ls = LawSet(g, base=lambda s, a: False, acceptance="exact", min_support=2)
+    assert ls.acceptance == "exact" and not ls.sized
+    assert ls.passes(5, 5, 10_000) and not ls.passes(50, 49, 10) and not ls.passes(1, 1, 1)
+    seen = []
+    no = LawSet(g, base=lambda s, a: False, acceptance="exact", min_support=2,
+                confirm=lambda c: seen.append(c) or False)
+    for t in b.rows("go"):
+        no.step(t, b)
+    assert no.laws == [] and seen                                        # every passing candidate was asked, refused
+    yes = LawSet(g, base=lambda s, a: False, acceptance="exact", min_support=2,
+                 confirm=lambda c: c.condition == ("x3",))
+    for t in b.rows("go"):
+        yes.step(t, b)
+    assert [law.condition for law in yes.laws] == [("x3",)]
+    law = yes.laws[0]
+    assert law.precision == 1.0 and law.level is None and law.null is None
+    assert LawSet(g).acceptance == "sized" and LawSet(g, sized=False).acceptance == "fixed"
+    with pytest.raises(ValueError):
+        LawSet(g, acceptance="loose")
