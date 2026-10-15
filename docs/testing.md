@@ -42,10 +42,16 @@ solvi test gallery/07_kyc_aml/cases.json -q
 solvi test gallery/ --json                # results as data
 solvi test gallery/ --fuzz 30             # also 30 mutated inputs per case (see below)
 solvi test . --store                      # also save the cases' decisions to the system's own store
+solvi test . --timeout 5 --reruns 2       # stop a case after 5 s; ask a failing case twice more
 ```
 
 From Python, use `solvi.testing.run_path(paths)` to get a `FileResult` per file and a `CaseResult` per case (`ok`,
-`problems`, `answers`). To run the cases inside your own pytest suite, one test is enough:
+`problems`, `answers`, `status`). A failing case's status says what kind of failure it is: `regression` (an answer,
+status, safeguard or the replay is not what the case expects), `nondeterministic` (a step of the fresh trace does not
+recompute on replay, or — with `--reruns N` / `run_path(paths, reruns=N)` — asking the case again gave other answers),
+`timeout` (longer than `--timeout S` / `timeout=S` seconds; stopped with SIGALRM, so POSIX and the main thread only),
+`error` (ask raised) or `invalid` (the case cannot fail: an unknown key, nothing expected). `FileResult.counts()` gives
+the numbers per status, and the summary line of `solvi test` lists them. To run the cases inside your own pytest suite, one test is enough:
 
 ```python
 from solvi.testing import run_path

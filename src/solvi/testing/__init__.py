@@ -28,7 +28,9 @@ from __future__ import annotations
 import copy
 import json
 import random
+import time
 import traceback
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -106,14 +108,26 @@ def load(path):
 
 
 # --------------------------------------------------------------------------------------------------- checking
+STATUSES = ("ok", "regression", "nondeterministic", "timeout", "error", "invalid")
+
+
 @dataclass
 class CaseResult:
     """One case of a cases.json file after `solvi test`: its name, the problems found (none: `ok`), the answers given
-    {question: [answer, status]} and the time it took in ms."""
+    {question: [answer, status]}, the time it took in ms and its `status` — one of STATUSES: "ok"; "regression" (an
+    answer, status, safeguard or the trace replay is not what the case expects); "nondeterministic" (the decision is not
+    the same when computed again: a step of its trace does not recompute on replay, or a re-run of a failing case — see
+    run_file(reruns=) — gave other answers); "timeout" (it ran longer than run_file(timeout=)); "error" (ask raised, or
+    the case's state could not be prepared); "invalid" (the case itself cannot fail: an unknown key, nothing expected)."""
     name: str
     problems: list = field(default_factory=list)     # one line per mismatch (or the crash)
     answers: dict = field(default_factory=dict)      # question → [answer, status]
     ms: float = 0.0
+    status: str = ""                                 # set by run_case; "" read as "ok" / "regression" from problems
+
+    def __post_init__(self):
+        if not self.status:
+            self.status = "regression" if self.problems else "ok"
 
     @property
     def ok(self):
@@ -136,6 +150,13 @@ class FileResult:
     def ok(self):
         return self.error is None and all(c.ok for c in self.cases)
 
+    def counts(self):
+        """{status: number of cases} for the statuses that occur (see CaseResult), in STATUSES order."""
+        n = {}
+        for c in self.cases:
+            n[c.status] = n.get(c.status, 0) + 1
+        return {k: n[k] for k in STATUSES if k in n}
+
 
 def _abstains(want, answer_type):
     return want is None or (isinstance(want, str) and want in ABSTAIN_WORDS and want not in answer_type.options)
@@ -157,11 +178,66 @@ def _store_kw(system, store):
 CASE_KEYS = ("name", "state", "expected", "status", "safeguards", "ask", "note")
 
 
-def run_case(system, case, state, store=False):
-    """Ask one case and compare → CaseResult. Nothing is written to the system's own storage (a test input is not a
-    decision) unless store=True. Exceptions from ask are reported as a crash, not raised. A case that cannot
-    fail is a problem too: a key that is not one of CASE_KEYS (a misspelled "expcted"), a status or safeguards entry for
-    a question that was not asked, a case that expects nothing."""
+class CaseTimeout(BaseException):
+    """Raised inside a case that ran longer than its timeout (a BaseException, so the code under test does not catch it
+    as an error of its own)."""
+
+
+@contextmanager
+def _deadline(seconds):
+    """Raise CaseTimeout in the running code after `seconds` (None / 0: no limit). Uses SIGALRM: POSIX, main thread."""
+    if not seconds:
+        yield
+        return
+    import signal
+    import threading
+    if not hasattr(signal, "setitimer") or threading.current_thread() is not threading.main_thread():
+        raise ValueError("timeout= stops a case with SIGALRM: it needs a POSIX system and the main thread")
+
+    def stop(signum, frame):
+        raise CaseTimeout(f"ran longer than {seconds:g} s")
+    old = signal.signal(signal.SIGALRM, stop)
+    signal.setitimer(signal.ITIMER_REAL, seconds)
+    try:
+        yield
+    finally:
+        signal.setitimer(signal.ITIMER_REAL, 0)
+        signal.signal(signal.SIGALRM, old)
+
+
+def run_case(system, case, state, store=False, timeout=None, reruns=0):
+    """Ask one case and compare → CaseResult (with its status: see CaseResult). Nothing is written to the system's own
+    storage (a test input is not a decision) unless store=True. Exceptions from ask are reported as a crash (status
+    "error"), not raised. A case that cannot fail is a problem too: a key that is not one of CASE_KEYS (a misspelled
+    "expcted"), a status or safeguards entry for a question that was not asked, a case that expects nothing.
+    timeout: seconds the case may take (ask and replay; None: no limit) — a longer one is stopped and reported with
+    status "timeout" (by SIGALRM: POSIX and the main thread only; code stuck in a C call is stopped when it returns).
+    reruns: a failing case is asked that many times more (never stored); answers that differ from the first run's make
+    it "nondeterministic" rather than a regression."""
+    started = time.perf_counter()
+    try:
+        with _deadline(timeout):
+            out = _run_case(system, case, state, store)
+    except CaseTimeout as e:
+        out = CaseResult(case.get("name", "?"), [f"timeout: {e}"], status="timeout")
+        out.ms = (time.perf_counter() - started) * 1000
+        return out
+    if out.status == "regression" and reruns:
+        for k in range(reruns):
+            try:
+                with _deadline(timeout):
+                    res = system.ask(copy.deepcopy(state), case.get("ask"), **_store_kw(system, False))
+            except (Exception, CaseTimeout):  # noqa: BLE001 — a re-run that fails says nothing more
+                continue
+            again = {q: [_show(r.answer), r.status] for q, r in res.results.items()}
+            if again != out.answers:
+                out.status = "nondeterministic"
+                out.problems.append(f"nondeterministic: re-run {k + 1} gave {again}, the first run {out.answers}")
+                break
+    return out
+
+
+def _run_case(system, case, state, store):
     name = case.get("name", "?")
     out = CaseResult(name)
     odd = sorted(k for k in case if k not in CASE_KEYS and k != "gold")
@@ -176,7 +252,9 @@ def run_case(system, case, state, store=False):
         res = system.ask(state, case.get("ask"), **_store_kw(system, store))
     except Exception as e:  # noqa: BLE001
         out.problems.append(f"crash: {type(e).__name__}: {e}\n{traceback.format_exc(limit=-3)}")
+        out.status = "error"
         return out
+    n_case = len(out.problems)                       # problems of the case itself, before anything was compared
     out.ms = res.ms
     out.answers = {q: [_show(r.answer), r.status] for q, r in res.results.items()}
     for q, want in (expected or {}).items():
@@ -216,12 +294,19 @@ def run_case(system, case, state, store=False):
     rep = res.trace.replay(system)
     if not rep["ok"]:
         out.problems.append(f"trace replay failed: {rep['mismatches'][:3]}")
+    if any(getattr(m, "kind", None) == "recompute" for m in rep["mismatches"]):
+        out.status = "nondeterministic"              # just computed, and a step already gives something else
+    else:
+        out.status = "regression" if len(out.problems) > n_case else "invalid" if n_case else "ok"
     return out
 
 
-def run_file(path, fuzz_n=0, seed=0, store=False):
+def run_file(path, fuzz_n=0, seed=0, store=False, timeout=None, reruns=0):
     """Run every case of a cases file → FileResult (with fuzz_n > 0, each case is also fuzzed; crashes are problems).
-    store=True: the cases (never the fuzz mutations) are saved to the system's storage, when it has one."""
+    store=True: the cases (never the fuzz mutations) are saved to the system's storage, when it has one.
+    timeout: seconds each case may take (see run_case; None: no limit). reruns: a failing case is asked that many times
+    more, to tell a nondeterministic decision from a regression (see run_case). FileResult.counts() splits the cases by
+    status."""
     path = Path(path)
     out = FileResult(path)
     try:
@@ -234,18 +319,22 @@ def run_file(path, fuzz_n=0, seed=0, store=False):
         try:
             state = suite.state(case)
         except Exception as e:  # noqa: BLE001
-            out.cases.append(CaseResult(case.get("name", f"#{i + 1}"), [f"prepare failed: {type(e).__name__}: {e}"]))
+            out.cases.append(CaseResult(case.get("name", f"#{i + 1}"), [f"prepare failed: {type(e).__name__}: {e}"],
+                                        status="error"))
             continue
-        r = run_case(system, case, state, store)
+        r = run_case(system, case, state, store, timeout, reruns)
         if fuzz_n:
-            r.problems += [f"fuzz {c}" for c in fuzz(system, state, fuzz_n, seed + i)]
+            found = [f"fuzz {c}" for c in fuzz(system, state, fuzz_n, seed + i)]
+            r.problems += found
+            if found and r.status == "ok":
+                r.status = "error"
         out.cases.append(r)
     return out
 
 
-def run_path(paths, fuzz_n=0, seed=0, store=False):
-    """Every cases file under the paths → [FileResult]."""
-    return [run_file(f, fuzz_n, seed, store) for f in find(paths)]
+def run_path(paths, fuzz_n=0, seed=0, store=False, timeout=None, reruns=0):
+    """Every cases file under the paths → [FileResult] (see run_file)."""
+    return [run_file(f, fuzz_n, seed, store, timeout, reruns) for f in find(paths)]
 
 
 # --------------------------------------------------------------------------------------------------- fuzzing
@@ -333,11 +422,15 @@ def main(argv=None):
     ap.add_argument("--seed", type=int, default=0, help="fuzzing seed (default 0)")
     ap.add_argument("--store", action="store_true", help="save the cases' decisions to the system's own storage "
                                                          "(default: test inputs are not stored)")
+    ap.add_argument("--timeout", type=float, default=None, metavar="S", help="stop a case that runs longer than S "
+                    "seconds and report it as a timeout (POSIX)")
+    ap.add_argument("--reruns", type=int, default=0, metavar="N", help="ask a failing case N more times: answers that "
+                    "differ make it nondeterministic, not a regression")
     ap.add_argument("--json", action="store_true", help="print the results as JSON")
     ap.add_argument("-q", "--quiet", action="store_true", help="print failures and the summary only")
     a = ap.parse_args(argv)
     try:
-        files = run_path(a.paths, a.fuzz, a.seed, a.store)
+        files = run_path(a.paths, a.fuzz, a.seed, a.store, a.timeout, a.reruns)
     except FileNotFoundError as e:
         print(f"solvi test: {e}", file=sys.stderr)
         return 2
@@ -347,11 +440,17 @@ def main(argv=None):
     n = sum(len(f.cases) for f in files)
     passed = sum(f.passed for f in files)
     bad_files = [f for f in files if f.error]
+    counts = {}
+    for f in files:
+        for k, v in f.counts().items():
+            counts[k] = counts.get(k, 0) + v
+    counts = {k: counts[k] for k in STATUSES if k in counts}
     if a.json:
         from ..core.schema import dumps
         print(dumps({"files": [{"path": str(f.path), "error": f.error, "cases": [
-            {"name": c.name, "ok": c.ok, "problems": c.problems, "answers": c.answers} for c in f.cases]} for f in files],
-            "cases": n, "passed": passed, "ok": passed == n and not bad_files}, indent=1, ensure_ascii=False, default=str))
+            {"name": c.name, "ok": c.ok, "status": c.status, "problems": c.problems, "answers": c.answers}
+            for c in f.cases]} for f in files],
+            "cases": n, "passed": passed, "counts": counts, "ok": passed == n and not bad_files}, indent=1, ensure_ascii=False, default=str))
     else:
         for f in files:
             if f.error:
@@ -361,15 +460,16 @@ def main(argv=None):
                 print(f"{f.path}: {f.passed}/{len(f.cases)}")
             for c in f.cases:
                 if not c.ok:
-                    print(f"  FAIL {c.name}")
+                    print(f"  FAIL {c.name}" + ("" if c.status == "regression" else f" [{c.status}]"))
                     for p in c.problems:
                         print("       " + p.replace("\n", "\n       ").rstrip())
                 elif not a.quiet:
                     print(f"  ok   {c.name}")
-        print(f"{passed}/{n} cases passed in {len(files)} file(s)"
+        failed = ", ".join(f"{v} {k}" for k, v in counts.items() if k != "ok")
+        print(f"{passed}/{n} cases passed in {len(files)} file(s)" + (f" ({failed})" if failed else "")
               + (f", {len(bad_files)} could not be loaded" if bad_files else ""))
     return 0 if passed == n and not bad_files else 1
 
 
-__all__ = ["CaseResult", "FileResult", "find", "fuzz", "is_cases_file", "load", "main", "mutations",
+__all__ = ["CaseResult", "CaseTimeout", "FileResult", "STATUSES", "find", "fuzz", "is_cases_file", "load", "main", "mutations",
            "run_case", "run_file", "run_path", "Suite"]
