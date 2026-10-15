@@ -250,6 +250,9 @@ def entry(resp, meta=None, record="full"):
         e["record"] = "compact"
         e["compact"] = compact_content(d)             # to_dict() has tagged it already
     else:
+        from ..schema import pack_skipped
+        if isinstance(d.get("flow"), dict):
+            d = {**d, "flow": pack_skipped(d["flow"])}  # the parts the flow did not plan: grouped by reason
         e["response"] = d
     return e
 
@@ -1083,8 +1086,8 @@ class TraceStorage(abc.ABC):
     # --- provenance over the store
     def quarantine(self, fact, value=ANY):
         """A fact (or a given input) found to be wrong: the stored decisions whose answers rest on it — through the trace's
-        provenance graph (each step's recorded inputs, from the answer back to the fact; a hard check that decided an
-        answer counts). `value`: only where the fact had this value (compared by its hash as the consumers recorded it).
+        provenance graph (each step's recorded inputs, from the answer back to the fact; a hard check that ran for the
+        question counts, passed or failed: the answer stood because it passed). `value`: only where the fact had this value (compared by its hash as the consumers recorded it).
         → [{"id", "seq", "time", "questions": {question: {"answer", "status", "path": [fact, ..., "answer:question"]}}}].
         Nothing is changed: re-decide or review these.
         A compact record keeps no step inputs: it is re-derived with the store's System (rederive) and its rebuilt
@@ -1149,12 +1152,16 @@ def _dependents(resp, fact, value_hash=None):
     by = {}
     for r in tr.get("records") or ():
         by.setdefault(r["name"], []).append(r)
+    flow = resp.get("flow") or {}
+    hard = {st["name"] for st in flow.get("steps") or () if st.get("kind") == "check" and st.get("hard")}
+    per_q = flow.get("per_question") or {}
     out = {}
     for q, res in (resp.get("results") or {}).items():
         roots = ["answer:" + q]
         if res.get("guard") == "hard_check" and res.get("source") in by:
             roots.append(res["source"])
-        path = _path(by, roots, fact, value_hash)
+        roots += [c for c in per_q.get(q) or () if c in hard and c in by and c not in roots]   # a hard check that ran
+        path = _path(by, roots, fact, value_hash)        # and passed gated the answer too: it rests on what it read
         if path is not None:
             out[q] = {"answer": "<not stated>" if res.get("not_stated") else res.get("answer"), "status": res.get("status"),
                       "path": path}

@@ -42,10 +42,16 @@ solvi test gallery/07_kyc_aml/cases.json -q
 solvi test gallery/ --json                # results as data
 solvi test gallery/ --fuzz 30             # also 30 mutated inputs per case (see below)
 solvi test . --store                      # also save the cases' decisions to the system's own store
+solvi test . --timeout 5 --reruns 2       # stop a case after 5 s; ask a failing case twice more
 ```
 
 From Python, use `solvi.testing.run_path(paths)` to get a `FileResult` per file and a `CaseResult` per case (`ok`,
-`problems`, `answers`). To run the cases inside your own pytest suite, one test is enough:
+`problems`, `answers`, `status`). A failing case's status says what kind of failure it is: `regression` (an answer,
+status, safeguard or the replay is not what the case expects), `nondeterministic` (a step of the fresh trace does not
+recompute on replay, or — with `--reruns N` / `run_path(paths, reruns=N)` — asking the case again gave other answers),
+`timeout` (longer than `--timeout S` / `timeout=S` seconds; stopped with SIGALRM, so POSIX and the main thread only),
+`error` (ask raised) or `invalid` (the case cannot fail: an unknown key, nothing expected). `FileResult.counts()` gives
+the numbers per status, and the summary line of `solvi test` lists them. To run the cases inside your own pytest suite, one test is enough:
 
 ```python
 from solvi.testing import run_path
@@ -62,6 +68,29 @@ pytest session wherever solvi was installed.)
 A test input is not a decision: when the System has a store (`System(storage=...)`), `solvi test`,
 `--fuzz` and `solvi honesty` write nothing to it. `solvi test --store` (`run_path(paths, store=True)`) saves the cases'
 decisions — never the fuzz mutations.
+
+## Cases from recorded decisions and boundary inputs
+
+Cases do not have to be written by hand. `testing.cases_from_store(storage, n=None)` turns the decisions a store holds
+(full or compact records) into cases: the recorded input as `state`, the answers given as `expected`, each question's
+status, the questions asked. The same input twice is one case; with `n`, every distinct outcome comes first. Running them
+after a change is a regression test against what the System actually decided.
+
+`testing.boundary(cases, n=50, system=None)` makes inputs at the edges of what the cases show: per field, a number just
+past the largest and smallest seen, 0, -1, a huge one; empty, one-character, long, non-ASCII or padded text; an empty,
+one-element or long list; the same one level into dicts and lists. With `system=`, each input is asked (never stored)
+and its current answers are pinned as `expected`, so a later change that moves an answer at an edge — a threshold
+`amount < 100` becoming `<= 100` — fails a case even when the hand-written cases all pass. Inputs whose ask raises are
+left out (that is what `--fuzz` is for), and so are inputs whose answers are nondeterministic.
+
+```python
+import json
+from solvi import testing
+
+cases = testing.cases_from_store(system.storage, n=200)
+cases += testing.boundary(cases, n=100, system=system)
+open("recorded.cases.json", "w").write(json.dumps({"task": "task.py", "cases": cases}, indent=1))
+```
 
 ## Fuzzing
 
