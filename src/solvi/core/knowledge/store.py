@@ -24,6 +24,13 @@ it names; any other contradiction makes every side "disputed" and asks a person 
 journal position it opened at): the same two items disputed again after a resolution are asked again. `resolve(key,
 value, by=)` is the person's answer. A disputed item is never a fact.
 
+Validity. `valid=(since, until)` is when a value holds in the world (half-open, None unbounded, any ordered times). On a
+key where some assertion carries one, values compete only when their intervals overlap (a dose label for 2023 and
+another from mid-2024 are both facts, for their times); of two overlapping values the later `since` wins whatever order
+they were written in; the same `since` from two writers is not an observation of a change — rank decides, equal ranks
+dispute. `usable(id, valid_at=)` and `snapshot(valid_at=)` read an item outside its interval as not a fact. Keys whose
+assertions carry no `valid` resolve as described above.
+
 Statuses: "active" (a fact System 1 may answer on), "hypothesis" (a hint: a behaviour-changing item not yet promoted
 by the write gates, a derived item on a premise that is not active, or an item under a pending flag), "disputed",
 "refuted", "expired" (its reconfirm_after ran out on the store's clock, or retired) and "retracted".
@@ -114,6 +121,32 @@ def item_id(kind, body, scope):
 def scope_matches(scope, pattern):
     """Does an item's scope fall under a flag's scope (every key of `pattern` has the same value in `scope`)?"""
     return all(scope.get(k) == v for k, v in (pattern or {}).items())
+
+
+def _interval(valid):
+    """A `valid` as (since, until); None (no valid given) is unbounded on both sides."""
+    if not valid:
+        return (None, None)
+    return (valid[0], valid[1] if len(valid) > 1 else None)
+
+
+def _overlap(v1, v2):
+    """Do two half-open validity intervals [since, until) share a moment? Times that do not compare overlap (the
+    conservative answer: the values compete)."""
+    (a1, b1), (a2, b2) = _interval(v1), _interval(v2)
+    try:
+        return (b2 is None or a1 is None or a1 < b2) and (b1 is None or a2 is None or a2 < b1)
+    except TypeError:
+        return True
+
+
+def covers(valid, at):
+    """Is the world time `at` inside an item's validity [since, until)? (None: unbounded; no valid: always.)"""
+    since, until = _interval(valid)
+    try:
+        return (since is None or since <= at) and (until is None or at < until)
+    except TypeError:
+        raise ValueError(f"valid_at={at!r} does not compare with the item's valid {list(valid)!r}") from None
 
 
 class SelfDefeating(ValueError):
@@ -604,9 +637,20 @@ class KnowledgeStore:
         live = [a for a in it.asserts if a["t"] > max(it.retracted, default=-1)]
         return bool(it.reconfirm_after and live and self.clock - max(a["clock"] for a in live) > it.reconfirm_after)
 
-    def usable(self, iid):
-        """Is the item a fact System 1 may answer on alone: active and not stale?"""
-        return self.status(iid) == "active" and not self.stale(iid)
+    def usable(self, iid, *, valid_at=None):
+        """Is the item a fact System 1 may answer on alone: active and not stale? valid_at: a world time — and is the
+        item valid then (its `valid` covers it; an item without `valid` always is)?"""
+        if not (self.status(iid) == "active" and not self.stale(iid)):
+            return False
+        return valid_at is None or covers(self.valid(iid), valid_at)
+
+    def valid(self, iid):
+        """The item's validity in the world: the `valid` of its latest live assertion, or None (no valid given)."""
+        it = self.items.get(iid)
+        if it is None:
+            return None
+        live = [a for a in it.asserts if a["t"] > max(it.retracted, default=-1)] or it.asserts
+        return live[-1].get("valid") if live else None
 
     def item(self, iid):
         """The record of one item (the schema of DESIGN_KM §4) → dict, or None."""
@@ -665,13 +709,16 @@ class KnowledgeStore:
                 if any((self.state.get(i) or {}).get("status") == "disputed"
                        and (self.state[i].get("dispute_at") == q["opened_at"]) for i in q["items"])]
 
-    def snapshot(self, *, about=None, relation=None, scope=None, kinds=None):
+    def snapshot(self, *, about=None, relation=None, scope=None, kinds=None, valid_at=None):
         """What a decision is given, as one plain fact: the items that match (`about`: a subject or a list of them;
         `relation`; `scope`; `kinds`, default every kind) — "facts" (active and not stale) and "hints" (hypotheses,
         expired or stale items, with why) — the ids they rest on, the store's fingerprint and journal position, and the
-        query (so redecide can rebuild it). Disputed, refuted and retracted items are not given."""
+        query (so redecide can rebuild it). Disputed, refuted and retracted items are not given. valid_at: a world time —
+        an item whose `valid` does not cover it is a hint ("not valid at ..."), not a fact."""
         self._settle()
         q = {"about": about, "relation": relation, "scope": scope, "kinds": None if kinds is None else list(kinds)}
+        if valid_at is not None:
+            q["valid_at"] = valid_at
         subjects = None if about is None else ({about} if isinstance(about, str) else set(about))
         facts, hints = [], []
         for iid in sorted(self.state):
@@ -687,7 +734,9 @@ class KnowledgeStore:
                 continue
             st = self.status(iid)
             row = {"id": iid, "kind": it.kind, "body": it.body, "source": it.asserts[-1]["source"]}
-            if st == "active" and not self.stale(iid):
+            if st == "active" and valid_at is not None and not covers(self.valid(iid), valid_at):
+                hints.append({**row, "why": f"not valid at {valid_at}"})
+            elif st == "active" and not self.stale(iid):
                 facts.append(row)
             elif st in ("active", "hypothesis", "expired"):
                 hints.append({**row, "why": "stale" if st == "active" else st})
@@ -844,6 +893,8 @@ def _walk_key(ids, live, arank, values, res):
     holds the key."""
     if not ids:
         return {}
+    if any(a.get("valid") for i in ids for a in live[i]):
+        return _walk_key_valid(ids, live, arank, values, res)
     ev = [(a["t"], 0, i, a) for i in ids for a in live[i]] + [(t, 1, v, by) for t, v, by in res]
     ev.sort(key=lambda e: (e[0], e[1], str(e[2])))
     holders, hval, hrank, disputed, refuted = set(), None, 0, set(), {}
@@ -908,5 +959,80 @@ def _walk_key(ids, live, arank, values, res):
     return out
 
 
-__all__ = ["item_id", "key_of", "KINDS", "KnowledgeStore", "NEEDS_PROMOTION", "RANK", "RECONFIRM_DEFAULTS",
+def _beats(a, r, iv, by, holder):
+    """+1: assertion `a` (rank r, interval iv, writer by) refutes the holder; -1: the holder refutes it; 0: a dispute."""
+    hiv, hr, hby, hj = holder
+    si, sj = iv[0], hiv[0]
+    if si is not None and sj is not None:
+        try:
+            if si != sj:
+                return 1 if si > sj else -1           # a later valid.since is the newer state of the world
+        except TypeError:
+            pass
+    if a.get("supersedes") == hj:
+        return 1
+    same_since = si is not None and si == sj and by != hby
+    if a["source"] == "outcome" and not a.get("inferred") and not same_since:
+        return 1
+    return 1 if r > hr else 0
+
+
+def _walk_key_valid(ids, live, arank, values, res):
+    """_walk_key on a key where assertions carry `valid`: only values on overlapping intervals compete (see the module
+    docstring) → the same {id: (state, refuted_at, refuted_by, dispute_opened_at)}."""
+    ev = [(a["t"], 0, i, a) for i in ids for a in live[i]] + [(t, 1, v, by) for t, v, by in res]
+    ev.sort(key=lambda e: (e[0], e[1], str(e[2])))
+    seen = {}                                           # id → (interval, rank, by, id) of its latest assertion
+    holders, disputed, refuted, dopen = set(), set(), {}, None
+
+    def rival(i, j):
+        return values[i] != values[j] and _overlap(seen[i][0], seen[j][0])
+    for e in ev:
+        if e[1] == 1:                                   # a person's answer to a dispute: that value wins
+            win = {i for i in disputed if values[i] == e[2]}
+            for i in disputed - win:
+                refuted[i] = (e[0], ["resolve"])
+            holders |= win
+            disputed = set()
+            continue
+        t, _, i, a = e
+        iv, r = _interval(a.get("valid")), arank[(i, t)]
+        seen[i] = (iv, r, a.get("by"), i)
+        holders.discard(i)
+        disputed.discard(i)
+        refuted.pop(i, None)
+        rivals = sorted(j for j in holders | disputed if rival(i, j))
+        verdict = {j: _beats(a, r, iv, a.get("by"), seen[j]) for j in rivals}
+        lost = [j for j in rivals if verdict[j] < 0]
+        if lost:
+            refuted[i] = (t, lost)
+            continue
+        for j in rivals:
+            if verdict[j] > 0:
+                holders.discard(j)
+                disputed.discard(j)
+                refuted[j] = (t, [i])
+        tie = [j for j in rivals if verdict[j] == 0]
+        if tie:
+            holders.difference_update(tie)
+            disputed |= set(tie) | {i}
+            dopen = t
+        else:
+            holders.add(i)
+        for j in sorted(disputed):                      # a side whose every rival is gone holds again
+            if not any(rival(j, k) for k in disputed if k != j):
+                disputed.discard(j)
+                holders.add(j)
+    out = {}
+    for i in ids:
+        if i in disputed:
+            out[i] = ("disputed", None, [], dopen)
+        elif i in refuted and i not in holders:
+            out[i] = ("refuted", refuted[i][0], refuted[i][1], None)
+        else:
+            out[i] = ("", None, [], None)
+    return out
+
+
+__all__ = ["covers", "item_id", "key_of", "KINDS", "KnowledgeStore", "NEEDS_PROMOTION", "RANK", "RECONFIRM_DEFAULTS",
            "scope_matches", "SelfDefeating", "SOURCES", "STATUSES", "Verdict"]
