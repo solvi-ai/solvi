@@ -172,3 +172,53 @@ def test_an_extra_key_in_a_rejected_rule_body_does_not_make_it_new(tmp_path):
     assert pipe.propose(rule(hazard_body("lava", {"next": "pit"}, ["step"]))).stage == "deny"
     assert pipe.propose(rule(b, scope={"x": 1})).stage == "deny"
     assert pipe.propose(Change("person", payload={"kind": "fact", "body": b})).stage == "deny"
+
+
+# ───────────────────────────────────────────── the failure memory's context and expiry; held changes expire
+def test_known_failures_with_a_context_and_a_ttl(tmp_path):
+    from solvi.experimental.changes import MemoryStorage
+    now = [1000.0]
+    clock = lambda: now[0]  # noqa: E731
+    tests = {"version": 1}
+    kf = KnownFailures(context=lambda ch: tests["version"], ttl=100, clock=clock)
+    pipe = Pipeline([kf, Deny()], MemoryStorage(clock=clock), targets=[Target()], approval=A)
+    assert pipe.propose(update("s1")).stage == "deny"
+    now[0] += 50
+    r = pipe.propose(update("s1"))
+    assert r.stage == "failure_memory" and "50s ago" in r.reason, str(r)
+    now[0] += 40                                    # a refusal by the memory does not renew the failure
+    assert pipe.propose(update("s1")).stage == "failure_memory"
+    now[0] += 20                                    # 110 s after the rejection: expired, the stages run again
+    assert pipe.propose(update("s1")).stage == "deny"
+    tests["version"] = 2                            # another context (the tests changed): not a known failure
+    assert pipe.propose(update("s1")).stage == "deny"
+    tests["version"] = 1
+    assert pipe.propose(update("s1")).stage == "failure_memory"
+    # a key of the caller's: two candidates with the same key are one
+    kf2 = KnownFailures(key=lambda ch: ch.payload["fingerprint"][0])
+    p2 = Pipeline([kf2, Deny()], None, targets=[Target()], approval=A)
+    assert p2.propose(update("s1")).stage == "deny" and p2.propose(update("s2")).stage == "failure_memory"
+    assert p2.propose(update("t1")).stage == "deny"
+    with pytest.raises(ValueError):
+        KnownFailures(ttl=0)
+
+
+def test_held_changes_expire(tmp_path):
+    from solvi.experimental.changes import MemoryStorage
+    now = [0.0]
+    clock = lambda: now[0]  # noqa: E731
+    pipe = Pipeline([KnownFailures()], MemoryStorage(clock=clock), targets=[Target()],
+                    approval={("update", "person"): "person"})
+    a = pipe.propose(update("s1"))
+    now[0] = 50
+    b = pipe.propose(update("s2"))
+    assert a.status == b.status == "held" and pipe.held() == sorted([a.change_id, b.change_id])
+    now[0] = 120
+    out = pipe.expire_held(100, now=now[0])
+    assert [(r.change_id, r.status) for r in out] == [(a.change_id, "rejected")] and pipe.held() == [b.change_id]
+    assert pipe.history("ruling")[-1]["by"] == "expiry"
+    again = pipe.propose(update("s1"))       # an expired change is a rejected one (advisory under level "person")
+    assert again.verdicts[0].stage == "failure_memory" and not again.verdicts[0].ok and "expiry" in again.verdicts[0].reason
+    assert pipe.rule(again.change_id, False, by="ann").status == "rejected"
+    out = pipe.expire_held(10, approve=True, by="ops", now=now[0])
+    assert [r.status for r in out] == ["promoted"] and pipe.held() == []
