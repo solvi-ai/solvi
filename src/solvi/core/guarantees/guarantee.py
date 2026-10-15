@@ -33,6 +33,8 @@ What is checked before a threshold is set, so that a promise is never made on a 
 - support: a threshold must have at least min_support calibration examples at or above it (default 10); none that
   does → everything escalates, and the report says why;
 - feasibility: with n examples, conformal risk control cannot certify a risk below 1 / (n + 1) — the report says so.
+A guarantee whose threshold is inf (everything escalates; the report's "why" names the best finite threshold's bound) or
+one calibrated on so few examples that the promise allows no wrong answer among the answered emits a GuaranteeWarning.
 
 The report gives, on the calibration examples, both "risk" (answered alone and wrong, a share of all) and "error"
 (among the answered), the share answered, the threshold's support and the separation (AUROC, p). Every answer of a
@@ -113,8 +115,10 @@ def _search(s, w, method, level, delta, min_support, bound_delta=None):
                 i = pos[float(t)]
                 good[i] = ok_support[i] and k[i] > 0 and _binom_cdf(float(m[i]), int(k[i]), level) <= delta / len(g)
     hit = np.flatnonzero(good)
-    if len(hit):
+    if len(hit) and np.isfinite(grid[hit[0]]):
         return float(grid[hit[0]]), None
+    if len(hit):        # only inf keeps it (conformal risk control: escalating everything is never wrong) — say why
+        return math.inf, _why_only_inf(n, k, m, grid, level, min_support, bound_delta is not None)
     if method == "crc" and bound_delta is None and (n + 1) * level < 1:
         return math.inf, f"{n} examples cannot certify a risk of {level:g}: conformal risk control needs at least {math.ceil(1 / level) - 1}"
     if method == "empirical" and ((m <= level * np.maximum(k, 1) + 1e-9) & (k > 0) & np.isfinite(grid)).any():
@@ -123,6 +127,24 @@ def _search(s, w, method, level, delta, min_support, bound_delta=None):
     if not (k[np.isfinite(grid)] >= min_support).any():
         return math.inf, f"no threshold has {min_support} calibration examples at or above it (min_support)"
     return math.inf, "no threshold reaches the target on these examples"
+
+
+def _why_only_inf(n, k, m, grid, level, min_support, bound):
+    """Why conformal risk control kept its promise only by escalating everything: the best finite threshold's bound,
+    and (unbounded form) about how many examples that threshold's risk would need."""
+    fin = np.isfinite(grid) & (k >= min_support)
+    head = f"no finite threshold keeps the promise on these {n} examples"
+    if not fin.any():
+        return head + f": none has {min_support} calibration examples at or above it (min_support)"
+    if bound:
+        return head + f" (risk {level:g} per group with its binomial bound)"
+    b = (m[fin] + 1) / (n + 1)
+    i = int(np.argmin(b))
+    out = head + f": the best gives (wrong answered + 1) / (n + 1) = {b[i]:.3f} > {level:g}"
+    r = float(m[fin][i]) / n
+    if r < level:
+        out += f"; at its risk ({r:.3f}) about {math.ceil((1 - level) / (level - r))} examples would be needed"
+    return out
 
 
 def separation(s, ok):
@@ -272,6 +294,16 @@ def calibrate(scores, correct, *, max_error=None, max_risk=None, method=None, de
         rep = {"threshold": t, "n": len(s), "answered": float(auto.mean()),
                "error": float(w[auto].sum() / auto.sum()) if auto.any() else 0.0, "risk": float(w[auto].sum() / len(s)),
                "support": int(auto.sum()), "groups": {k: dict(v) for k, v in nodes.items()}}
+    if not math.isfinite(t):
+        msg = f"everything escalates: {why or (nodes or {}).get((), {}).get('why') or 'no threshold keeps the promise'}"
+        warnings.warn(msg, GuaranteeWarning, stacklevel=2)
+        notes.append(msg)
+    elif method == "crc" and groups is None and (len(s) + 1) * level < 2:
+        msg = (f"too few calibration examples for a risk of {level:g}: with {len(s)} the promise allows no wrong answer "
+               f"among the answered, so one more wrong example moves the threshold (at least {math.ceil(2 / level) - 1} "
+               "for room of one)")
+        warnings.warn(msg, GuaranteeWarning, stacklevel=2)
+        notes.append(msg)
     base = float(w.mean())
     rep.update(method=method, separation=sep, base_error=base, warnings=notes,
                promise=promise_text(method, level, delta if (method == "ltt" or groups is not None) else None,
