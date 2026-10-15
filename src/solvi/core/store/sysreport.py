@@ -22,7 +22,9 @@ What it shows, per question, from the records the library already writes:
   that have a label — the corrections in the store (`System.teach`, `save_correction`). Labels from a person, an outcome
   or a rule are measured; "verified" labels (System 2's own vouched answers) are counted but not measured, since they
   are the system's own answers. Labels that are not a random sample (people correct what looks wrong) overstate the
-  error: the report says how many decisions are labelled;
+  error: the report says how many decisions are labelled. A dispatcher with `audit=` marks a random share of its
+  decisions for labelling; their "audit" labels are measured apart, as the audited sample, next to every promise — the
+  unbiased reading of it;
 - drift: the flags the decisions recorded (an open-set gate's change point, the dispatcher's drift flag) and a
   `DriftMonitor` run over the period's decisions in order (`drift_window=`; None: not run), with the first decision at
   which it flagged and why.
@@ -34,7 +36,7 @@ from __future__ import annotations
 import datetime
 from dataclasses import dataclass, field
 
-from . import VERIFIED, _cj, _when, akey, view
+from . import AUDIT, VERIFIED, _cj, _when, akey, view
 
 KIND = {"computed": "rule", "decided": "model", "learned": "learned head", "proposed": "model proposal",
         "quoted": "quote", "given": "given"}
@@ -165,6 +167,7 @@ def system_report(store, since=None, until=None, *, question=None, price=None, d
         init = (((s.data.get("s1") or {}).get("trace") or {}).get("init"))
         by_init.setdefault(_cj(untag_floats(init)), []).append(s)
     labels, sources, unmatched, in_period = {}, {}, 0, 0
+    audited = {}                                  # (decision id, question) → the answer of its audit label
     for c in teach:
         d = c.data
         src = d.get("source", "human")
@@ -182,8 +185,10 @@ def system_report(store, since=None, until=None, *, question=None, price=None, d
         if src == VERIFIED and key in labels and labels[key][0] != VERIFIED:
             continue                              # a label from outside the system stays over a vouched System 2 answer
         labels[key] = (src, akey(store._answer_key(q, untag_floats(d.get("answer")))))
+        if src == AUDIT:
+            audited[key] = labels[key]
     s1, cost1 = _system1(asks, labels, question, price, drift_window, monitor)
-    dp, cost2 = _dispatch(disp, labels, policies)
+    dp, cost2 = _dispatch(disp, labels, policies, audited)
     times = [s.time for s in asks + disp]
     catalogs, models, experimental = {}, {}, {}
     for s in asks:
@@ -199,7 +204,10 @@ def system_report(store, since=None, until=None, *, question=None, price=None, d
     notes = []
     if labels and len(labels) < len(asks) + len(disp):
         notes.append("labels cover part of the decisions: unless they were drawn at random, the measured error is "
-                     "not the error of the whole stream (corrections are usually made where the answer looked wrong)")
+                     "not the error of the whole stream (corrections are usually made where the answer looked wrong)"
+                     + (f"; the {len(audited)} audit label(s) are of decisions drawn at random (Dispatcher(audit=)): "
+                        "read the promise on the audited sample" if audited else
+                        "; Dispatcher(audit=) draws a random share for labelling"))
     if asks and disp:
         notes.append("the store holds System 1's own decisions and the dispatcher's: System 1's section counts every "
                      "System 1 answer, the dispatcher's section the final answers")
@@ -354,7 +362,7 @@ def _refine(loops, price):
     return out
 
 
-def _dispatch(disp, labels, policies):
+def _dispatch(disp, labels, policies, audited=None):
     per_q, total = {}, {"system1": _cost([], 0.0, None), "slow_path": _cost([], 0.0, None)}
     total["system1"]["usd"] = total["slow_path"]["usd"] = 0.0
     for s in disp:
@@ -363,7 +371,7 @@ def _dispatch(disp, labels, policies):
         p = per_q.setdefault(q, {"decisions": 0, "by": {"s1": 0, "s2": 0, "human": 0}, "actions": {}, "slices": {},
                                  "over_budget": 0, "disagreements": 0, "drift_flagged": 0, "first_drift": None,
                                  "policies": {}, "uncalibrated": 0, "_labels": {"all": [], "s1": [], "s2": []},
-                                 "_slices": {}})
+                                 "_slices": {}, "_audit": [], "_marked": 0})
         p["decisions"] += 1
         p["by"][d.get("by")] = p["by"].get(d.get("by"), 0) + 1
         p["actions"][d.get("action")] = p["actions"].get(d.get("action"), 0) + 1
@@ -392,10 +400,19 @@ def _dispatch(disp, labels, policies):
                                      "calibrated_on": pp.get("n"), "decisions": 0,
                                      "slices": {k: {x: v.get(x) for x in ("answer", "threshold", "n", "accuracy", "answered",
                                                                            "wrong", "why") if v.get(x) is not None}
-                                                for k, v in (pp.get("slices") or {}).items()}, "_labels": []}
+                                                for k, v in (pp.get("slices") or {}).items()}, "_labels": [],
+                                     "_audit": []}
             p["policies"][pk]["decisions"] += 1
         else:
             p["uncalibrated"] += 1
+        p["_marked"] += bool(d.get("audit"))
+        au = (audited or {}).get((s.id, q))
+        if au is not None and d.get("audit"):
+            alone = d.get("by") in ("s1", "s2")
+            arow = (alone, (_cj(d.get("answer")) != au[1]) if alone else None)
+            p["_audit"].append(arow)
+            if pol is not None:
+                p["policies"][pol["policy"].get("fingerprint")]["_audit"].append(arow)
         lab = labels.get((s.id, q))
         if lab is not None and lab[0] != VERIFIED:
             alone = d.get("by") in ("s1", "s2")
@@ -410,9 +427,11 @@ def _dispatch(disp, labels, policies):
         L = p.pop("_labels")
         p["labels"] = {"all": _labels_block(L["all"]), "by_s1": _labels_block(L["s1"]), "by_s2": _labels_block(L["s2"]),
                        "by_slice": {k: _labels_block(v) for k, v in p.pop("_slices").items()}}
+        p["audit"] = {"marked": p.pop("_marked"), "labels": _labels_block(p.pop("_audit"))}
         p["policies"] = list(p["policies"].values())
         for pr in p["policies"]:
             pr["labels"] = _labels_block(pr.pop("_labels"), pr["level"], pr["measure"])
+            pr["labels_audited"] = _labels_block(pr.pop("_audit"), pr["level"], pr["measure"])
     return per_q, total
 
 
@@ -533,11 +552,18 @@ def render(d):
             lb = pr["labels"]
             L.append("    labels: " + _labels_line(lb)
                      + (f" — promised {lb['measure']} ≤ {lb['level']:g}: {lb['verdict']}" if lb["labelled"] else ""))
+            la = pr.get("labels_audited") or {}
+            if la.get("labelled"):
+                L.append("    audited sample (drawn at random): " + _labels_line(la)
+                         + f" — promised {la['measure']} ≤ {la['level']:g}: {la['verdict']}")
         if p["uncalibrated"]:
             L.append(f"  {p['uncalibrated']} decision(s) under no calibrated policy (Dispatcher.calibrate): the answers "
                      "given alone carry System 1's guarantee and the slow path's own checks")
         lab = p["labels"]
         L.append("  labels (final answers): " + _labels_line(lab["all"]))
+        if p["audit"]["marked"]:
+            L.append(f"  audited sample      {p['audit']['marked']} decision(s) drawn at random for labelling "
+                     f"(Dispatcher(audit=)); " + _labels_line(p["audit"]["labels"]))
         for who, key in (("System 1", "by_s1"), ("slow path", "by_s2")):
             if lab[key]["labelled"]:
                 L.append(f"    by {who}: " + _labels_line(lab[key]))

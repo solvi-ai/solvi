@@ -4,7 +4,8 @@ re-exports every name, so that the guarantees and the memory of corrections chec
 from __future__ import annotations
 
 
-TRUSTED_SOURCES = ("human", "outcome", "rule")   # where a label may come from: never the system's own answers
+TRUSTED_SOURCES = ("human", "outcome", "rule", "audit")   # where a label may come from: never the system's own answers
+AUDIT = "audit"               # a label of a decision the dispatcher drew at random for labelling (Dispatcher(audit=))
 VERIFIED = "verified"         # a System 2 answer that passed the checks and a guarantee: a label only where accepted
 # What a channel says when it refuses a verified label: measured on three stand tasks replayed as a stream (Abt-Buy,
 # CUAD, Banking77; docs/best_practices.md), System 2's verified answers fed to it did not make System 1 answer more
@@ -25,7 +26,8 @@ class UntrustedLabel(ValueError):
 
 
 def check_source(source, accept=(), channel=None):
-    """A label's source → itself, when it is trusted: "human", "outcome" or "rule" — or "verified" when the channel
+    """A label's source → itself, when it is trusted: "human", "outcome", "rule" or "audit" (a person's or an
+    outcome's label of a decision drawn at random for it; the store checks the decision was) — or "verified" when the channel
     lists it in `accept` (only System.guarantee(..., sources=) does: see VERIFIED); else UntrustedLabel, with the
     measured reason when a channel (`channel`, a key of VERIFIED_REFUSED) refuses a verified label."""
     if source in TRUSTED_SOURCES or (source == VERIFIED and VERIFIED in tuple(accept)):
@@ -40,4 +42,4 @@ def check_source(source, accept=(), channel=None):
                          "a guarantee, where a channel takes it); the system's own answers are never labels")
 
 
-__all__ = ["TRUSTED_SOURCES", "UntrustedLabel", "VERIFIED", "VERIFIED_REFUSED", "check_source"]
+__all__ = ["AUDIT", "TRUSTED_SOURCES", "UntrustedLabel", "VERIFIED", "VERIFIED_REFUSED", "check_source"]
