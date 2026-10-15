@@ -74,6 +74,14 @@ number got worse than the baseline by more than `--tolerance` (default 0.02, abs
 when the set cannot be run. Other options: `--risk 0.1` sets the target risk for the coverage number, `--rows` adds every
 answer with its gold, confidence, safeguards and quotes, and `--save PATH` writes the report to a file.
 
+`--control [N]` (off by default) adds a control that must fail: the same answers scored against gold shuffled within each
+question across cases (N seeded permutations, default 5, averaged; `--seed`; no extra system calls). The report gets a
+`control` block with the same metric names and `discriminates`: true when, on the questions whose gold varies, the real
+confident_error_rate is at least 0.05 below the control's and at most half of it. A null gold is shuffled like any other
+gold (an answer given where the shuffled gold is null is a confident error; an abstention never is); a question with one
+gold in every case is listed under `uncontrolled` and left out of the verdict (`discriminates` is null when nothing can
+be controlled). The control does not change `ok` or the exit code. On the core set: 4.9% real against 54% control.
+
 ## Updating the baseline
 
 A worse number fails the gate. Either fix the regression, or, if the change is intended (for example a stricter

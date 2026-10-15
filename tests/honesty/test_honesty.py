@@ -153,6 +153,46 @@ def test_injection_traps_count_how_often_the_injected_answer_is_given_alone():
     assert honesty.metrics([_row("a", "a", 0.9)])["injection_followed_rate"] is None
 
 
+# --------------------------------------------------------------------------------------------------- the control
+def _q_rows(question, golds, answers):
+    return [dict(_row(g, a, 0.9), question=question) for g, a in zip(golds, answers)]
+
+
+def test_control_fails_for_a_system_that_answers_right():
+    golds = ["a", "b", "c"] * 4
+    c = honesty.control(_q_rows("q", golds, golds))
+    assert c["real_error"] == 0.0 and c["control_error"] > 0.4 and c["discriminates"] is True
+    assert c["metrics"]["confident_error_rate"] == pytest.approx(c["control_error"]) and c["uncontrolled"] == []
+    assert c == honesty.control(_q_rows("q", golds, golds))        # a fixed seed: the same control every time
+
+
+def test_control_matches_a_constant_answer_on_its_majority():
+    golds = ["a"] * 9 + ["b"]
+    c = honesty.control(_q_rows("q", golds, ["a"] * 10))
+    assert c["real_error"] == pytest.approx(0.1) and c["control_error"] == pytest.approx(0.1)
+    assert c["discriminates"] is False                              # the score is the base rate, not knowledge
+
+
+def test_control_shuffles_null_gold_and_leaves_constant_questions_out():
+    golds = ["a", None, "b", None, "c", None]                       # abstains exactly where it should, right elsewhere
+    c = honesty.control(_q_rows("q", golds, golds))
+    assert c["real_error"] == 0.0 and c["control_error"] > 0.3 and c["discriminates"] is True
+    one = honesty.control(_q_rows("k", ["x"] * 5, ["x"] * 5))       # one gold in every case: shuffling changes nothing
+    assert one["uncontrolled"] == ["k"] and one["controlled_rows"] == 0 and one["discriminates"] is None
+    mixed = honesty.control(_q_rows("k", ["x"] * 6, ["x"] * 6) + _q_rows("q", golds, golds))
+    assert mixed["uncontrolled"] == ["k"] and mixed["controlled_rows"] == 6 and mixed["discriminates"] is True
+
+
+def test_control_on_the_command_line_is_off_by_default(capsys):
+    assert honesty.main([str(CORE), "--baseline", str(CORE_BASE)]) == 0
+    assert "control" not in json.loads(capsys.readouterr().out)
+    assert honesty.main([str(CORE), "--baseline", str(CORE_BASE), "--control"]) == 0
+    out = json.loads(capsys.readouterr().out)
+    c = out["control"]
+    assert c["permutations"] == 5 and set(honesty.GATED) <= set(c["metrics"]) and out["ok"]
+    assert c["discriminates"] is True and c["real_error"] < c["control_error"]
+
+
 # --------------------------------------------------------------------------------------------------- with the real decider
 @pytest.mark.model
 def test_model_subset_does_not_get_less_honest():

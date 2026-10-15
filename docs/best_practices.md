@@ -173,6 +173,13 @@ labels (log-wealth 0.35 of the 2.30 needed). What labels do buy: more answers on
 the price of fewer before it (−5). If you want coverage on new kinds of input, plan for hundreds of labels per new option
 and a new answerer, and keep the person on the rest.
 
+**Every score has a control that must fail.** In an external lab we audited, a knowledge-graph ranker reported
+100% Hits@10 that an untrained model also reached: the score measured the shape of the scoring, not the model. Run
+`solvi honesty <set> --control`: the same answers against gold shuffled within each question. The set discriminates only
+when the real confident-error rate is at least 0.05 below the control's and at most half of it (core set: 4.9% against
+54%). A system that always gives the majority answer scores the same against shuffled gold (`discriminates: false`), and a
+question with one gold in every case cannot be controlled this way at all (`uncontrolled`): add cases where the answer differs.
+
 **Fix a head's ridge strength when its answers go through a guarantee.** `fit` chooses λ by leave-one-out accuracy; a
 refit on more labels can choose a much smaller one, and the head's ranking of its own answers gets worse even when the
 added labels are right: on product matching, a head refitted on 808 instead of 300 pairs picked λ 0.1 and the error

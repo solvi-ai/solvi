@@ -62,6 +62,11 @@ started from a failing test built on the reproduction; the numbers are before �
 
 ### Added
 
+- `solvi honesty --control [N]` (opt-in; default off, outputs and baselines unchanged): the same answers scored
+  against shuffled gold — within each question, gold permuted across cases, N seeded permutations averaged, no extra
+  system calls — reported as `control` with the same metric names and `discriminates` (real confident_error_rate at
+  least 0.05 below the control's and at most half of it; questions with one gold in every case are listed as
+  `uncontrolled`). `solvi.testing.honesty.control(rows)`. On the core set: 4.9% real against 54% control.
 - `Catalog(combine="strictest")` (opt-in): when several hard checks governing a question fail, the strictest
   `then` answers; a warning names conflicting failed checks under the default «first declared decides»
   (`combine="first"` explicitly: no warning). The default flips for ordered answers in 1.2.
