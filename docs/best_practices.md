@@ -761,7 +761,11 @@ the corrected answers; the default answers «what would the decision have been w
 **Laws on few rows:** on 3 groups × 6 rows a deterministic one-atom law was learned 0/20 with the sized default and
 20/20 with `acceptance="exact", min_support=2`; the exact rule has no false-accept bound over many candidates, so
 pair it with `confirm=` (an independent check). Measured values need `tol=`: with exact equality, 1e-6 noise refuted
-every candidate of y = c·x.
+every candidate of y = c·x. Values over several orders of magnitude need `rtol=` (relative), and give it to the
+`LawSet` itself (`LawSet(..., rtol=)`) so that `step` / `test` / `observe` compare within it too: y = 2.5·x over x from
+1 to 1e5 with relative noise 1e-7 learned no law in 60 steps under exact equality and learned it with rtol=1e-5, with no
+mismatch after; in `admit_by_probes`, tol=1e-4 refuted every candidate where the noise reached 2e-3…0.2 and rtol=1e-4
+admitted the right one.
 
 **Paid checks pay only when a wrong accept is dear, the check is cheap and independent, and wrong answers occur.**
 Where a check costs more than the error, or every check is the same model, deciding without checks did as well or
