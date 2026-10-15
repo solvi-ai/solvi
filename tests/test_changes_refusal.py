@@ -87,7 +87,8 @@ def test_the_stage_is_inserted_for_an_answering_target_and_journaled_for_every_c
     assert order.index("refusal_regression") < order.index("approval")
     # the pipeline offers no switch to remove it
     params = set(inspect.signature(Pipeline).parameters)
-    assert params == {"stages", "storage", "store", "approval", "targets", "refusals", "answer_of"}
+    assert params == {"stages", "storage", "store", "approval", "targets", "refusals", "answer_of",
+                      "raise_stage_errors"}
 
 
 def test_its_refusal_is_final_even_where_the_other_stages_are_advisory(tmp_path):

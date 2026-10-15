@@ -106,10 +106,17 @@ def _call(fn, change, ctx):
 
 # ───────────────────────────────────────────────────────────── 9. failure memory (new)
 class KnownFailures:
-    """A candidate whose fingerprint (Change.fingerprint: source, artifact, content, code) was rejected before is refused
-    with the earlier stage and reason — a search does not walk in circles. Reads the change journal; nothing expires
-    (unlike solvi.core.knowledge.FailureMemory, which unblocks a plan after a window)."""
+    """A candidate whose fingerprint (Change.fingerprint: source, artifact, content, code) was rejected before, or was
+    rolled back with a reason (Pipeline.rollback(why=...), failed=True), is refused with the earlier stage and reason —
+    a search does not walk in circles. A stage that raised (status "error") is not a failure: the candidate runs again.
+    Reads the change journal; nothing expires (unlike solvi.core.knowledge.FailureMemory, which unblocks a plan after a
+    window).
+
+    rollbacks: do rollbacks with a reason count as failures (default True; False: only rejections do)."""
     name = "failure_memory"
+
+    def __init__(self, *, rollbacks=True):
+        self.rollbacks = bool(rollbacks)
 
     def run(self, change, ctx):
         fp = change.fingerprint()
@@ -117,6 +124,16 @@ class KnownFailures:
             if d.get("fingerprint") == fp:
                 return StageVerdict.refuse(f"rejected before by stage {d.get('stage')!r}: {d.get('reason')}",
                                       {"earlier": d.get("change")})
+        if self.rollbacks:
+            props = None
+            for d in ctx.journal.records("rollback"):
+                if not d.get("failed"):
+                    continue
+                if props is None:
+                    props = {p["id"]: p.get("fingerprint") for p in ctx.journal.records("propose")}
+                for cid in d.get("changes") or ():
+                    if props.get(cid) == fp:
+                        return StageVerdict.refuse(f"rolled back before: {d.get('why')}", {"earlier": cid})
         return StageVerdict.admit()
 
 
