@@ -62,6 +62,7 @@ from __future__ import annotations
 import copy
 import math
 import random
+import warnings
 
 from ..core.catalog import Answer, Catalog, Question
 
@@ -136,9 +137,15 @@ class DecisionSystem:
                 lines.append(f"All answers given alone together: {c['dispatch_promise']}.")
                 lines.append(f"Woken by: {', '.join(c['wake'])}; held back by the open-set gate → a person; after a drift "
                              "flag System 1's answers are checked by the slow path and a disagreement goes to a person.")
+            elif c["split"].get("to calibrate the dispatcher") == 0 and "drift" != c["wake"][0]:
+                lines.append(f"Woken by: {', '.join(c['wake'])}: the slow path's accepted answer is given, uncalibrated; "
+                             "after a drift flag System 1's answers are checked by the slow path and a disagreement goes "
+                             "to a person.")
             else:
                 lines.append("Every input System 1 does not answer alone goes to a person; after a drift flag System 1's "
                              "answers are checked by the slow path and a disagreement goes to a person.")
+        if c.get("monitor"):
+            lines.append(f"Drift: {c['monitor']}.")
         if c.get("knowledge"):
             lines.append(f"Knowledge: {c['knowledge']}.")
         lines.append(f"Budget: {c['budget']}.")
@@ -336,7 +343,8 @@ def _slow_path(slow, q, reads, novel_on, writer, inputs):
 # ------------------------------------------------------------------------------------------------ build
 def build(question, examples, *, catalog=None, learner=None, slow=None, reads=None, max_risk=None, max_error=None,
           signal=None, correct=None, novel="auto", budget=None, total=None, price=None, storage=None, split=None,
-          seed=0, delta=0.10, min_slice=20, writer=None, inputs=None, knowledge=None, groups=None):
+          seed=0, delta=0.10, min_slice=20, writer=None, inputs=None, knowledge=None, groups=None, strict=False,
+          monitor=None):
     """Fit System 1, calibrate its guarantee and the dispatcher, wire the store → a DecisionSystem (see the module docs).
 
     question: a Question, or the name of one a rule of `catalog` (or learner=) answers. examples: [(state, correct
@@ -348,13 +356,20 @@ def build(question, examples, *, catalog=None, learner=None, slow=None, reads=No
     that says "right" / "wrong" of System 1's answer, a quote that overlaps). novel: "auto", True or False. budget /
     total: solvi.core.dispatch.Budget per decision / for the dispatcher's life; price: dollars per million input and output
     tokens (needed for dollars). storage: a path or a TraceStorage — every decision and the policy, hash-chained.
-    split: (fit, guarantee, dispatch) shares. seed: the shuffle and the open-set simulation. delta: learn-then-test's
+    split: (fit, guarantee, dispatch) shares (with slow=, a dispatch share of 0 calibrates System 1 on all the rest and
+    leaves the slow path uncalibrated). seed: the shuffle and the open-set simulation. delta: learn-then-test's
     confidence. min_slice: a slice of the slow path with fewer calibration examples goes to a person. writer, inputs:
     gone in 1.0 (they compiled a Spec here): a TypeError says to compile it first. knowledge: a solvi.Knowledge (or a
     function state → snapshot) — every decision, and every example at build time, is given its snapshot as the fact
     "knowledge", which System 1's rules read like any fact (`Knowledge.value(knowledge, s, r)`). groups: split by
     group (module docs) — a key of the state, a function state → group, or a list with one group per example; every
-    share then holds whole groups (at least two groups); None: the random split."""
+    share then holds whole groups (at least two groups); None: the random split. strict: when the dispatcher's
+    calibration measures System 1's own answers breaking the promise on its examples (every slice then goes to a
+    person, but System 1 still answers alone above its threshold), raise a ValueError instead of the default
+    GuaranteeWarning. monitor: None (default: no drift monitor), True (a DriftMonitor whose reference is System 1's
+    responses on the guarantee's calibration examples) or a monitor of your own (an object with observe(response,
+    question=) → {"drift", "why"}, e.g. a DriftMonitor or a NumericDrift) — the dispatcher feeds it every System 1 response, and after
+    its flag System 1's answers are checked by the slow path or go to a person (Dispatcher(on_drift=))."""
     from ..core.dispatch import SIGNALS, THINK, Dispatcher
     from ..core.guarantees.guarantee import promise_text
     from ..core.store import open_storage
@@ -478,8 +493,10 @@ def build(question, examples, *, catalog=None, learner=None, slow=None, reads=No
                 choose_on = []                  # counted as the fit share
     k = _edge(rest_g, int(round(len(rest) * g_ratio)))
     g_ex, d_ex = rest[:k], rest[k:]
-    if has_slow and not d_ex:
-        raise ValueError("a slow path is calibrated on examples System 1's guarantee did not see: none are left")
+    no_dispatch = has_slow and split is not None and split[2] == 0       # asked for: the slow path is not calibrated
+    if has_slow and not d_ex and not no_dispatch:
+        raise ValueError("a slow path is calibrated on examples System 1's guarantee did not see: none are left "
+                         "(split=(fit, guarantee, 0) leaves the slow path uncalibrated)")
     if not g_ex:
         raise ValueError("no examples are left to calibrate System 1's guarantee on")
 
@@ -531,7 +548,11 @@ def build(question, examples, *, catalog=None, learner=None, slow=None, reads=No
     novel_on = gate is not None
     wake = tuple(s for s in SIGNALS if s != "openset")
     slice_open, probe_desc = True, None
-    if has_slow:
+    if no_dispatch:
+        probe_desc = ("split= gave the dispatcher no examples: the slow path answers every slice System 1 hands over as "
+                      "it is (its own checks and guarantee decide what it gives), and no promise is calibrated on the "
+                      "dispatcher's answers as a whole")
+    elif has_slow:
         # a dev-only probe: does System 1 hand the slow path anything? Its share of the examples goes through System 1 as
         # calibrated; the inputs it holds back on a signal that wakes the slow path are counted. Fewer than min_slice: no
         # slice is open to the slow path, and that share calibrates System 1 instead.
@@ -569,8 +590,10 @@ def build(question, examples, *, catalog=None, learner=None, slow=None, reads=No
         slow_path, slow_desc = _slow_path(slow, q, reads, novel_on, writer, inputs)
     if not slice_open:
         wake = ("drift", "supervise")
+    mon, mon_desc = _monitor(monitor, system, qname, g_ex, gate)
     d = Dispatcher(system, slow_path, question=qname, budget=budget, total=total, price=price, wake=wake,
-                   unknown="human" if novel_on else "answer", on_disagree="human", storage=open_storage(storage))
+                   unknown="human" if novel_on else "answer", on_disagree="human", storage=open_storage(storage),
+                   monitor=mon)
     choices = {"examples": n, "seed": seed, "mode": mode, "system1": desc1, "signal": sig_desc or str(sig_name),
                "split": {"to fit System 1": len(fit_ex), "to choose the signal": len(choose_on),
                          "to calibrate System 1's guarantee": len(g_ex), "to calibrate the dispatcher": len(d_ex)},
@@ -583,11 +606,12 @@ def build(question, examples, *, catalog=None, learner=None, slow=None, reads=No
                            if d.storage is not None else "not stored (storage= keeps every decision)")}
     choices["probe"] = probe_desc
     choices["knowledge"] = knowledge_desc
+    choices["monitor"] = mon_desc
     if sg is not None:
         side = {"fit": len({sg[i] for i in range(len(fit_ex))}) if mode != "given" else 0}
         choices["groups"] = {"n": len(set(sg)), "by": _group_desc(groups), "fit": side["fit"],
                              "calibrate": len(set(sg)) - side["fit"]}
-    if has_slow and slice_open:
+    if has_slow and slice_open and d_ex:
         rep = d.calibrate(d_ex, max_risk=max_risk, max_error=max_error, delta=delta, min_slice=min_slice,
                           correct=None if correct is None else (lambda ans, label, res: correct(ans, label)))
         calib["dispatch"] = rep
@@ -608,7 +632,39 @@ def build(question, examples, *, catalog=None, learner=None, slow=None, reads=No
         choices["dispatch_promise"] = (f"{promise_text(rep['method'], rep['level'], rep['delta'])}; on the {rep['n']} "
                                        f"calibration examples: answered alone {rep['answered']:.1%}, P(alone and wrong) "
                                        f"{rep['risk']:.2%}" + (f" ({rep['why']})" if rep.get("why") else ""))
+        if rep.get("why"):
+            msg = (f"the dispatcher's calibration measured a broken promise: on its {rep['n']} examples System 1 answered "
+                   f"{rep['s1_answered']} alone with {rep['s1_wrong']} wrong ({rep['why']}); "
+                   "System 1 still answers alone above its own threshold — more examples, a stricter System 1, or "
+                   "another split")
+            if strict:
+                raise ValueError(msg + " (strict=True)")
+            from ..core.guarantees.guarantee import GuaranteeWarning
+            warnings.warn(msg, GuaranteeWarning, stacklevel=2)
     return DecisionSystem(qname, system, d, gate, slow_path, choices, calib, knowledge=snap_of)
+
+
+def _monitor(monitor, system, qname, g_ex, gate):
+    """build(monitor=) → (the monitor or None, its description or None)."""
+    if monitor is None or monitor is False:
+        return None, None
+    if monitor is True:
+        from ..core.guarantees.drift import DriftMonitor
+        mon = DriftMonitor()
+        ref = [system.ask(st, [qname], store=False)[qname] for st, _ in g_ex]
+        if gate is not None:
+            gate.reset()                         # the reference examples are not the stream
+        if len(ref) >= 2:
+            mon.set_reference(ref)
+            return mon, (f"a DriftMonitor (window {mon.window}) with System 1's responses on the {len(ref)} guarantee "
+                         "calibration examples as its reference; after its flag System 1's answers are checked by the "
+                         "slow path, or go to a person when there is none")
+        return mon, (f"a DriftMonitor (window {mon.window}) whose reference is the first {mon.window} decisions; after "
+                     "its flag System 1's answers are checked by the slow path, or go to a person when there is none")
+    if not callable(getattr(monitor, "observe", None)):
+        raise TypeError("monitor= takes True, None or a monitor with observe(response, question=)")
+    return monitor, (f"{type(monitor).__name__} given to build; after its flag System 1's answers are checked by the slow "
+                     "path, or go to a person when there is none")
 
 
 def _rule_answer(cat, qname):

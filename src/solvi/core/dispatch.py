@@ -28,7 +28,9 @@ guarantee do not accept its answer, its budget runs out) a person does. "check":
 guarantee and the slow path answers too; a disagreement is recorded (the material a teacher of System 1 learns from)
 and, with `on_disagree="human"` or `"s2"`, goes to a person or to the slow path's accepted answer instead. A hard check
 that forces System 1's answer is never re-thought: the check decides. A signal left out of `wake` sends its inputs to a
-person instead of the slow path.
+person instead of the slow path. After a drift flag System 1's guarantee no longer covers its answers: when no slow
+path checks them they go to a person (`on_drift="accept"`: they stand, marked out of the guarantee), and none is
+reported "within its guarantee" until `reset_drift()`.
 
 The slow path (a `SlowPath`) is built from the existing parts and judged by a System's checks:
   - `AskPath(system)`: a System that answers the question itself — an LLM decision part (`solvi.core.deciders.llm`),
@@ -85,6 +87,7 @@ import json
 import math
 import threading
 import time
+import warnings
 from dataclasses import dataclass, field
 from typing import Any, ClassVar
 
@@ -676,11 +679,15 @@ class Dispatcher:
     (default: equal values). unknown: what the slow path's "not stated" (solvi.Unknown) is — "answer" (default: a real
     answer) or "human" (none of the options fits: a person decides). storage: a TraceStorage that keeps every decision
     (kind "dispatch"). asked: the questions System 1 is asked together (default: all of its questions, so that constraints between them apply);
-    store_responses: whether System 1's and the slow path's Systems store their responses in their own storage."""
+    store_responses: whether System 1's and the slow path's Systems store their responses in their own storage.
+    on_drift: what System 1's answers become after a drift flag when no slow path checks them (none, "drift" not in
+    wake, or no budget left) — "human" (default: a person decides; its guarantee was calibrated on a stream that has
+    changed) or "accept" (System 1's answer stands, its reasons say it is out of its guarantee). Either way no answer
+    after a flag is reported "within its guarantee"; reset_drift() ends it."""
 
     def __init__(self, system, slow=None, *, question=None, budget=None, total=None, price=None, wake=SIGNALS,
                  agreement=None, monitor=None, supervise=0.0, seed=0, think="s2", on_disagree="record", storage=None,
-                 store_responses=True, asked=None, same=None, unknown="answer"):
+                 store_responses=True, asked=None, same=None, unknown="answer", on_drift="human"):
         if question is None:
             if len(system.questions) != 1:
                 raise ValueError(f"the System asks {sorted(system.questions)}: say which with question=")
@@ -698,6 +705,8 @@ class Dispatcher:
             raise ValueError('on_disagree must be "record", "human" or "s2"')
         if unknown not in ("answer", "human"):
             raise ValueError('unknown must be "answer" or "human"')
+        if on_drift not in ("human", "accept"):
+            raise ValueError('on_drift must be "human" or "accept"')
         if same is not None and not callable(same):
             raise TypeError("same is a function (answer, answer) → bool")
         for b in (budget, total):
@@ -728,7 +737,7 @@ class Dispatcher:
         self._require(list(self.agreement))
         self.monitor, self.supervise, self.seed = monitor, float(supervise), int(seed)
         self.think_policy, self.on_disagree = think, on_disagree
-        self.same, self.unknown = same, unknown
+        self.same, self.unknown, self.on_drift = same, unknown, on_drift
         from .store import open_storage
         self.storage = open_storage(storage)
         self.store_responses = bool(store_responses)
@@ -758,6 +767,7 @@ class Dispatcher:
         pr = code_fingerprint(self.price) if callable(self.price) else self.price
         return digest("Dispatcher", self.question, self.wake, sorted(self.agreement.items()), self.supervise, self.seed,
                       self.think_policy, self.on_disagree, self.unknown,
+                      *([("on_drift", self.on_drift)] if self.on_drift != "human" else []),
                       code_fingerprint(self.same) if self.same is not None else None,
                       None if self.budget is None else self.budget.to_dict(),
                       None if self.total is None else self.total.to_dict(), pr,
@@ -834,12 +844,23 @@ class Dispatcher:
             if why:
                 return "human", reasons + [why]
             return "think", reasons
+        drifted = [w for s, w in check if s == "drift"] if res[self.question].status != "forced" else []
         check = [(s, w) for s, w in check if s in self.wake]
         if check and self.slow is not None:
             why = self._no_budget(spent_before, expected)
-            if why:
-                return "accept", [w for _, w in check] + [why + "; System 1's answer stands unchecked"]
-            return "check", [w for _, w in check]
+            if not why:
+                return "check", [w for _, w in check]
+            if drifted and self.on_drift == "human":
+                return "human", [w for _, w in check] + [why + "; System 1 is out of its guarantee since the drift "
+                                                               "flag: a person decides"]
+            return "accept", [w for _, w in check] + [why + "; System 1's answer stands unchecked"
+                                                      + (", out of its guarantee since the drift flag" if drifted else "")]
+        if drifted:
+            if self.on_drift == "human":
+                return "human", drifted + ["System 1 is out of its guarantee since the drift flag and no slow path "
+                                           "checks it: a person decides"]
+            return "accept", drifted + ["System 1 answered, out of its guarantee since the drift flag (on_drift="
+                                        "\"accept\"; reset_drift() after recalibrating)"]
         return "accept", ["System 1 answered within its guarantee" if (res[self.question].extra or {}).get("guarantee")
                           else ("a hard check decided" if res[self.question].status == "forced"
                                 else "System 1 answered")]
@@ -864,6 +885,11 @@ class Dispatcher:
             rep = self.monitor.observe(res, question=q)
             if rep.get("drift") and self.drift is None:
                 self.drift = "DriftMonitor: " + "; ".join(rep.get("why") or ["drift"])
+                if self.slow is None or "drift" not in self.wake:
+                    from .guarantees.guarantee import GuaranteeWarning
+                    warnings.warn(f"drift flagged ({self.drift}) and no slow path checks System 1: its answers are "
+                                  + ("given to a person" if self.on_drift == "human" else "given out of its guarantee")
+                                  + " until reset_drift()", GuaranteeWarning, stacklevel=2)
         with self._lock:
             self.n += 1
             n = self.n

@@ -51,38 +51,54 @@ def literals(row, facts):
 class RuleList:
     def __init__(self, facts, min_support=3, min_precision=0.8, max_rules=40):
         self.facts, self.min_support, self.min_precision, self.max_rules = facts, min_support, min_precision, max_rules
-        self.rules, self.default = [], None
+        self.rules, self.default, self.truncated = [], None, 0
 
     def fit(self, rows, answers):
-        """Learn the list from rows of facts and their answers; a second fit starts over (it replaces the list)."""
+        """Learn the list from rows of facts and their answers; a second fit starts over (it replaces the list). When
+        the list stops at max_rules while another rule would still pass min_precision, a warning says how many
+        examples were left to the default answer (and `truncated` is that number; 0 otherwise)."""
         if not rows or len(rows) != len(answers):
             raise ValueError(f"a rule list is fitted on examples, one answer for each: got {len(rows)} rows and "
                              f"{len(answers)} answers")
-        self.rules, self.default = [], None
+        self.rules, self.default, self.truncated = [], None, 0
         L = [literals(r, self.facts) for r in rows]
         remaining = list(range(len(rows)))
-        while remaining and len(self.rules) < self.max_rules:
-            cnt = defaultdict(Counter)
-            for i in remaining:
-                for lit in L[i]:
-                    cnt[lit][answers[i]] += 1
-            best = None
-            for lit, c in sorted(cnt.items()):          # sorted: ties break the same way on every run
-                a, k = c.most_common(1)[0]
-                n = sum(c.values())
-                if k < self.min_support:
-                    continue
-                prec = (k + 1) / (n + 2)                     # smoothed precision
-                key = (prec, k)
-                if best is None or key > best[0]:
-                    best = (key, lit, a, k, n)
+        while remaining:
+            best = self._best(L, answers, remaining)
             if best is None or best[0][0] < self.min_precision:
+                break
+            if len(self.rules) >= self.max_rules:     # another rule would pass: say the list was cut, not finished
+                self.truncated = len(remaining)
+                import warnings
+                warnings.warn(f"the rule list stopped at max_rules={self.max_rules} with {len(remaining)} of {len(rows)} "
+                              f"examples left to the default answer while more rules pass min_precision "
+                              f"{self.min_precision:g} (the next: if {best[1]} → {best[2]!r}, {best[3]}/{best[4]}); "
+                              "raise max_rules to learn them", UserWarning, stacklevel=2)
                 break
             _, lit, a, k, n = best
             self.rules.append({"if": lit, "then": a, "support": k, "covered": n})
             remaining = [i for i in remaining if lit not in L[i]]
         self.default = Counter(answers[i] for i in remaining).most_common(1)[0][0] if remaining else Counter(answers).most_common(1)[0][0]
         return self
+
+    def _best(self, L, answers, remaining):
+        """The rule with the best smoothed precision on the remaining examples → ((precision, support), literal,
+        answer, support, covered), or None."""
+        cnt = defaultdict(Counter)
+        for i in remaining:
+            for lit in L[i]:
+                cnt[lit][answers[i]] += 1
+        best = None
+        for lit, c in sorted(cnt.items()):          # sorted: ties break the same way on every run
+            a, k = c.most_common(1)[0]
+            n = sum(c.values())
+            if k < self.min_support:
+                continue
+            prec = (k + 1) / (n + 2)                     # smoothed precision
+            key = (prec, k)
+            if best is None or key > best[0]:
+                best = (key, lit, a, k, n)
+        return best
 
     def predict(self, row):
         ls = literals(row, self.facts)
