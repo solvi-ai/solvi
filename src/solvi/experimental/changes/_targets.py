@@ -52,6 +52,10 @@ class KnowledgeTarget:
         iid = ks.add(**change.item_kwargs(), shadow=shadow)
         if iid is None:
             raise Refused(ks.journal[-1].get("why", "refused by the knowledge store"))
+        held = [r for r in ks.journal if r.get("op") == "held" and r.get("item") == iid]
+        if ks.pending_retest(iid) and held and {v["gate"] for v in held[-1]["verdicts"] if not v["admit"]} == {"retest"}:
+            # written again after a retraction (a rollback): the stages this change just passed are its re-test
+            ks.retest(iid, ok=True, by=change.proposer, why="re-measured by the change pipeline")
         if ks.status(iid) != "active":
             held = [r for r in ks.journal if r.get("op") == "held" and r.get("item") == iid]
             why = "; ".join(f"{v['gate']}: {v['reason']}" for v in (held[-1]["verdicts"] if held else []) if not v["admit"])

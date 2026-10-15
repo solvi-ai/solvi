@@ -32,8 +32,15 @@ dispute. `usable(id, valid_at=)` and `snapshot(valid_at=)` read an item outside 
 assertions carry no `valid` resolve as described above.
 
 Statuses: "active" (a fact System 1 may answer on), "hypothesis" (a hint: a behaviour-changing item not yet promoted
-by the write gates, a derived item on a premise that is not active, or an item under a pending flag), "disputed",
+by the write gates, a derived item on a premise that is not active, an item under a pending flag, or one pending a
+re-test), "disputed",
 "refuted", "expired" (its reconfirm_after ran out on the store's clock, or retired) and "retracted".
+
+Re-test. Content written again after it was retracted — the same item id, since an id is its content — is not revived
+by the new assertion: it is a hypothesis "pending re-test" until `retest(id, ok=True)` (a person or a test confirms
+it; ok=False retracts it again), and so is every item that rested on it when it was retracted, each until its own
+re-test. Items derived after the re-test are fresh; an item a rule only re-infers (`inferred=True`) follows its
+premises. `pending_retest(id)` reads it.
 
 Staleness. `flag(scope=..., why=...)` (a drift or open-set flag) or `reconfirm(id)` marks items for re-confirmation: an
 item learned before the flag is a hint, not a fact, until a newer observation or person confirms it or the flag ends
@@ -202,6 +209,7 @@ class KnowledgeStore:
         self._open_disputes = set()
         self._batch, self._touched, self._tick_dirty = 0, set(), False
         self._fp = None
+        self._taints = {}                            # id → the journal position its support was last cut at (memo)
         if self.storage is not None and _replay:
             with self.batch():
                 for s in self.storage.iter(_KNOWLEDGE):
@@ -390,6 +398,9 @@ class KnowledgeStore:
             with self.batch():
                 self._raw_assert(rec, rec["n"])
                 if kind in NEEDS_PROMOTION:
+                    if self._needs_retest(prop["id"]):
+                        verdicts.append(Verdict(False, "written again after a retraction: pending re-test "
+                                                       "(retest(id, ok=True))", gate="retest"))
                     held = [v for v in verdicts if not v.admit]
                     if held:
                         self._write("held", item=prop["id"], verdicts=[v.to_dict() for v in verdicts])
@@ -415,6 +426,30 @@ class KnowledgeStore:
             self._apply(rec)
             after = self._statuses(before)
             return {i: (before[i], after[i]) for i in before if before[i] != after[i]}
+
+    def retest(self, iid, *, ok, by=None, why=None):
+        """The re-test of an item pending one (re-asserted after a retraction, or resting on one that was): ok=True — it
+        is a fact again (a "promote" entry; its premises must be active too); ok=False — it is retracted again."""
+        with self._lock:
+            if iid not in self.items:
+                raise KeyError(f"no item {iid!r}")
+            if not ok:
+                return self.retract(iid, by=by, why=why or "failed re-test")
+            rec = self._write("promote", item=iid, measured=None, retest=True, by=None if by is None else str(by),
+                              why=why)
+            self._apply(rec)
+
+    def pending_retest(self, iid):
+        """Is the item waiting for a re-test (see the module docstring)?"""
+        self._settle()
+        return bool((self.state.get(iid) or {}).get("pending_retest"))
+
+    def _needs_retest(self, iid):
+        it = self.items.get(iid)
+        if it is None:
+            return False
+        t = _taint(self.items, iid, self._taints)
+        return t is not None and not any(p > t for p in it.promoted)
 
     def rollback(self, iid, *, by=None, why=None):
         """Supervision undoes an update: retract `iid`; the version it superseded or refuted comes back — as a fact, or
@@ -590,9 +625,11 @@ class KnowledgeStore:
             return
         comp = self.component(self._touched)
         self._touched = set()
+        for i in comp:
+            self._taints.pop(i, None)
         pending = self._pending_flags()
         flagged = {i for i in comp if any(self._flag_covers(t, i) for t in pending)}
-        new = _resolve(self.items, comp, self.by_key, self.resolves, self.clock, flagged)
+        new = _resolve(self.items, comp, self.by_key, self.resolves, self.clock, flagged, taints=self._taints)
         for i in comp:
             if i in new:
                 self.state[i] = new[i]
@@ -739,7 +776,8 @@ class KnowledgeStore:
             elif st == "active" and not self.stale(iid):
                 facts.append(row)
             elif st in ("active", "hypothesis", "expired"):
-                hints.append({**row, "why": "stale" if st == "active" else st})
+                why = "stale" if st == "active" else st
+                hints.append({**row, "why": "pending retest" if self.state[iid].get("pending_retest") else why})
         ids = [x["id"] for x in facts + hints]
         return {"at": len(self.journal), "fp": self.fingerprint(), "query": q, "facts": facts, "hints": hints,
                 "rests_on": sorted(self.upstream(ids)) if ids else []}
@@ -819,10 +857,43 @@ def _decider(decide):
 
 
 # ---------------------------------------------------------------------------------------------------- the resolver
-def _resolve(items, comp, by_key, resolves, clock, flagged, max_iter=200):
+def _taint(items, iid, memo):
+    """The journal position the item's support was last cut at — its own retraction, or, when every assertion since
+    then rests on a premise cut after it was written, that premise's cut — or None. An item retracted and then only
+    re-inferred (`inferred` assertions: a rule recomputing it from premises) is not cut by its own retraction. Pure in the journal (`memo` keeps it
+    between resolutions); an item with one uncut justification left is not cut (so a retraction stays exact: the store
+    after it is the store rebuilt without the retracted item)."""
+    if iid in memo:
+        return memo[iid]
+    memo[iid] = None                                    # a premise cycle reads as uncut
+    it = items.get(iid)
+    if it is None:
+        return None
+    cut = max(it.retracted, default=None)
+    live = [a for a in it.asserts if cut is None or a["t"] > cut]
+    via, whole = [], bool(live)
+    for a in live:
+        ta = max((tp for p in a["just"] if (tp := _taint(items, p, memo)) is not None and tp > a["t"]), default=None)
+        if ta is None:
+            whole = False
+        else:
+            via.append(ta)
+    if cut is not None and live and all(a.get("inferred") for a in live):
+        cut = None                                      # recomputed from premises: their own cuts decide (above)
+    memo[iid] = max(([cut] if cut is not None else []) + (via if whole else []), default=None)
+    return memo[iid]
+
+
+def _resolve(items, comp, by_key, resolves, clock, flagged, max_iter=200, taints=None):
     """The state of the items in `comp` (a union of components) from their raw entries → {id: record} for present
     items. Fixed point of: liveness of justifications ↔ per-key walk. Deterministic; components do not interact."""
     order = sorted(comp, key=lambda i: (min((a["t"] for a in items[i].asserts), default=0), i))
+    taints = {} if taints is None else taints
+    retest = set()
+    for i in order:
+        t = _taint(items, i, taints)
+        if t is not None and not any(p > t for p in items[i].promoted):
+            retest.add(i)
 
     def live_asserts(it):
         cut = max(it.retracted, default=-1)
@@ -866,7 +937,7 @@ def _resolve(items, comp, by_key, resolves, clock, flagged, max_iter=200):
             s = "active"
             if it.kind in NEEDS_PROMOTION and not any(p > max(it.retracted, default=-1) for p in it.promoted):
                 s = "hypothesis"
-            if i in flagged:
+            if i in flagged or i in retest:
                 s = "hypothesis"
             if it.reconfirm_after and clock - max(a["clock"] for a in live[i]) > it.reconfirm_after:
                 s = "expired"
@@ -884,7 +955,8 @@ def _resolve(items, comp, by_key, resolves, clock, flagged, max_iter=200):
         kr = keyed.get(i) or ("", None, [], None)
         rec[i] = {"status": s, "rank": rank[i], "n_confirm": len(la) - 1, "refuted_by": kr[2],
                   "learned_at": min(a["t"] for a in la), "invalidated_at": kr[1] if s == "refuted" else None,
-                  "last_support": max(a["t"] for a in la), "dispute_at": kr[3] if s == "disputed" else None}
+                  "last_support": max(a["t"] for a in la), "dispute_at": kr[3] if s == "disputed" else None,
+                  **({"pending_retest": True} if i in retest else {})}
     return rec
 
 
