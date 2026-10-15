@@ -69,6 +69,29 @@ A test input is not a decision: when the System has a store (`System(storage=...
 `--fuzz` and `solvi honesty` write nothing to it. `solvi test --store` (`run_path(paths, store=True)`) saves the cases'
 decisions — never the fuzz mutations.
 
+## Cases from recorded decisions and boundary inputs
+
+Cases do not have to be written by hand. `testing.cases_from_store(storage, n=None)` turns the decisions a store holds
+(full or compact records) into cases: the recorded input as `state`, the answers given as `expected`, each question's
+status, the questions asked. The same input twice is one case; with `n`, every distinct outcome comes first. Running them
+after a change is a regression test against what the System actually decided.
+
+`testing.boundary(cases, n=50, system=None)` makes inputs at the edges of what the cases show: per field, a number just
+past the largest and smallest seen, 0, -1, a huge one; empty, one-character, long, non-ASCII or padded text; an empty,
+one-element or long list; the same one level into dicts and lists. With `system=`, each input is asked (never stored)
+and its current answers are pinned as `expected`, so a later change that moves an answer at an edge — a threshold
+`amount < 100` becoming `<= 100` — fails a case even when the hand-written cases all pass. Inputs whose ask raises are
+left out (that is what `--fuzz` is for), and so are inputs whose answers are nondeterministic.
+
+```python
+import json
+from solvi import testing
+
+cases = testing.cases_from_store(system.storage, n=200)
+cases += testing.boundary(cases, n=100, system=system)
+open("recorded.cases.json", "w").write(json.dumps({"task": "task.py", "cases": cases}, indent=1))
+```
+
 ## Fuzzing
 
 `--fuzz N` asks N mutated copies of each case's input (after `prepare`). A mutation removes a field, sets it to `None`,
