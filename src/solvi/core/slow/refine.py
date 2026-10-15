@@ -239,6 +239,14 @@ class Refinement:
         return next((r.proposal for r in self.rounds if r.accepted), None)
 
     @property
+    def proposals(self):
+        """proposed / dropped / refuted / admitted over the rounds (solvi.core.slow.proposals): a round whose reply was
+        rejected or whose proposer failed is dropped, one the checks did not accept refuted, the accepted one
+        admitted."""
+        from .proposals import of_rounds
+        return of_rounds(self.rounds)
+
+    @property
     def response(self):
         return next((r.response for r in reversed(self.rounds) if r.response is not None), None)
 

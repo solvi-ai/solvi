@@ -119,6 +119,7 @@ nav:
           - solvi.core.slow.generate: api/generate.md
           - solvi.core.slow.agree: api/agree.md
           - solvi.core.slow.refine: api/refine.md
+          - solvi.core.slow.proposals: api/proposals.md
           - solvi.core.slow.search: api/search.md
           - solvi.core.dispatch: api/dispatch.md
           - solvi.core.environment: api/environment.md
