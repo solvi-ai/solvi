@@ -260,3 +260,48 @@ def test_admit_by_probes_with_a_tolerance_admits_through_measurement_noise(noise
     off = LawSet(g, apply=lambda e, s: e * s, base=lambda s, a: 0.0).admit_by_probes(
         cands, lambda s, act: 2.5 * s, probes=probes, tol=1e-4)
     assert off.status == "undetermined"                                  # outside the tolerance: refuted
+
+
+# ───────────────────────────────────────────── admit_by_probes when more than one law is missing
+def or_world_trials(**kw):
+    world = lambda s, a: bool(s[0] or s[1])                              # noqa: E731 — two laws are missing
+    acc = wrong = 0
+    for seed in range(100):
+        rng = random.Random(seed)
+        g = bits()
+        ls = LawSet(g, base=lambda s, a: False)
+        s0 = tuple([1, 1] + [rng.randint(0, 1) for _ in range(NF - 2)])
+        pool = [(rng.choice(STATES), "go") for _ in range(200)]
+        adm = ls.admit_by_probes(ls.mismatch(s0, "go", True), world, probes=pool, budget=8, seed=seed, **kw)
+        if adm.status == "accepted":
+            acc += 1
+            wrong += any(adm.law.holds(g.true(s, "go")) and world(s, "go") != adm.law.effect for s in STATES)
+        else:
+            assert adm.law is None and ls.laws == []
+    return acc, wrong
+
+
+def test_with_two_laws_missing_the_witnesses_stop_most_wrong_admissions():
+    assert or_world_trials(assume_one_law=True) == (100, 29)            # the old rule: 29 of 100 wrong
+    acc, wrong = or_world_trials()
+    assert wrong <= 6 and acc >= 70                                      # measured: 77 accepted, 6 wrong
+
+
+def test_a_witness_blocks_the_lone_class_and_is_reported():
+    g = Grammar([Atom(f"x{i}", (lambda s, i=i: s[i] == 1), feature=f"f{i}") for i in range(3)], k=1)
+    world = lambda s, a: bool(s[0] or s[1])                              # noqa: E731
+    cands = [Candidate("go", ("x0",), True), Candidate("go", ("x1",), True), Candidate("go", ("x2",), True)]
+    b = Buffer(g)                                                        # x0 and x1 each too narrow once; x2 fits both
+    b.extend([Transition((0, 1, 1), "go", True, group="log"), Transition((1, 0, 1), "go", True, group="log")])
+    pool = [((0, 0, 1), "go"), ((1, 1, 0), "go")]
+
+    def admit(**kw):
+        return LawSet(g, base=lambda s, a: False).admit_by_probes(cands, world, probes=pool, buffer=b, **kw)
+    old = admit(budget=0, assume_one_law=True)
+    assert old.status == "accepted" and old.law.condition == ("x2",)    # wrong: x2 alone at (0, 0, 1) is False
+    new = admit(budget=0)
+    assert new.status == "undetermined" and {c.condition for c in new.witnesses} == {("x0",), ("x1",)}
+    assert "more than one law" in new.why
+    probed = admit(budget=1)                                             # asks where x2 alone would speak
+    assert [t.state for t in probed.asked] == [(0, 0, 1)]
+    assert probed.status == "undetermined" and "no candidate survived" in probed.why

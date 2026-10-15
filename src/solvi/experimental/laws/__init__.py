@@ -136,7 +136,11 @@ a new law is a hypothesis too); `split` picks the safe probe that splits the cla
 shortest candidate is accepted only when one class survives (identifiability) — else an `Admission` "undetermined"
 with the classes, never a guess. On a synthetic world (a hidden two-atom law, 176 candidates, 300 trials) at 8 checks a
 random held-out sample with the shortest survivor accepted a wrong law in 0.593 of the trials; the active admission in
-none (0.987 right, 0.013 undetermined, 7.45 asks). The probes are of the world you may ask: a law set whose other laws
+none (0.897 right, 0.103 undetermined, 7.56 asks; at 10 checks 1.000 right). Where more than one law is missing the
+"too narrow" refutation is not sound: the candidates it refuted that were never wrong where they applied are kept as
+witnesses, and nothing is accepted while the set with all of them added still fits every row and predicts otherwise
+than the surviving class where it would apply (x0 ∨ x1 with a base saying False: wrong admissions 29 → 6 of 100;
+`assume_one_law=True` keeps the old rule). The probes are of the world you may ask: a law set whose other laws
 or base are wrong where it probes may refute a right candidate (a candidate is refuted only where it is the applied law
 and wrong, or where it does not hold, the set is wrong and its effect is what happened).
 
