@@ -21,6 +21,8 @@ Built in, in the order the pipeline usually runs them (what each one wraps, port
   RefusalRegression  the share refused on a held should-abstain set before and after the change; refused when the
                      change answers what was refused before. Not switchable: the pipeline runs it for every
                      change whose target can answer, before Approval, final under every approval level           new
+  SliceGuard         per-slice paired losses against the version in force and against the original version, so
+                     harm in a slice under an overall gain and a chain of small changes ("salami") are refused   new
 
 `ctx` is the pipeline's Context: the KnowledgeStore (ctx.store, may be None), the journal, the verdicts so far
 (ctx.verdicts: stage name → StageVerdict), the approval level, and the person's ruling once given."""
@@ -807,6 +809,107 @@ class RefusalRegression:
         return StageVerdict.admit(f"refused {nb} → {na} of {n} on the should-abstain set ({where}); lost {len(lost)}", m)
 
 
+# ───────────────────────────────────────────────────────────── 11. slices, and the original version (new)
+SMALL = ("hold", "refuse", "admit")
+
+
+def _paired(ref, cand):
+    """Mean and standard error of the per-case differences candidate − reference (cases assumed independent)."""
+    d = [c - r for c, r in zip(cand, ref)]
+    n = len(d)
+    m = sum(d) / n
+    v = sum((x - m) ** 2 for x in d) / (n - 1) if n > 1 else 0.0
+    return m, (v / n) ** 0.5
+
+
+class SliceGuard:
+    """Per-slice non-regression, against the version in force AND against the original version (new).
+
+    An aggregate gate passes harm in a small slice under cover of an improvement elsewhere; a gate that compares only
+    with the version in force passes a chain of small changes ("salami") each under the tolerance and not significant
+    on its own. This stage compares every slice, both ways.
+
+    measure(change, ctx) → {slice: (in_force_losses, candidate_losses)}: per-case losses (lower is better) of the
+    version in force and of the candidate on the SAME cases, in the same order (paired).
+    original: the original version's losses on those cases, {slice: losses} — a dict, or `original(change, ctx)` → one;
+    None (default): pinned from the in-force losses the first time this guard runs (so "original" is the version in
+    force then; the pin lives in this object — pass the dict to keep it across processes); False: no comparison with
+    the original.
+
+    A slice is refused against a reference when the mean excess d = mean(candidate − reference) is above the tolerance
+    (`tol` against the version in force, `cumulative_tol` (default tol) against the original), or when d > 0 is
+    significant: one-sided z at `alpha` divided by the number of comparisons made (Bonferroni — valid however the
+    slices depend on each other; within a slice the cases are taken as independent for the standard error). An
+    excess with no spread at all (every case worse by the same amount) counts as significant. A slice with fewer than
+    `min_n` cases, or one the original has and the measurement lacks: on_small = "hold" (default: a person decides) |
+    "refuse" | "admit". A slice the original lacks is compared with the version in force only (listed as "new").
+    The verdict's numbers: per slice {"n", "in_force": {"d", "se"}, "original": {"d", "se"}}, the z used, "small", "new"."""
+    name = "slices"
+
+    def __init__(self, measure: Callable, *, original=None, tol: float = 0.02, cumulative_tol: float | None = None,
+                 alpha: float = 0.05, min_n: int = 30, on_small: str = "hold"):
+        if on_small not in SMALL:
+            raise ValueError(f"on_small is one of {SMALL}, not {on_small!r}")
+        if not 0.0 < alpha < 1.0:
+            raise ValueError(f"alpha is in (0, 1), not {alpha!r}")
+        for nm, t in (("tol", tol), ("cumulative_tol", cumulative_tol)):
+            if t is not None and t < 0:
+                raise ValueError(f"{nm} is >= 0, not {t!r}")
+        self.measure, self.original = measure, original
+        self.tol = float(tol)
+        self.cumulative_tol = self.tol if cumulative_tol is None else float(cumulative_tol)
+        self.alpha, self.min_n, self.on_small = float(alpha), int(min_n), on_small
+        self._pinned = None
+
+    def z(self, m):
+        """The one-sided critical z for m comparisons (Bonferroni)."""
+        from statistics import NormalDist
+        return NormalDist().inv_cdf(1.0 - self.alpha / max(1, m))
+
+    def _original(self, change, ctx, m):
+        if self.original is False:
+            return None, False
+        if self.original is None:
+            if self._pinned is None:
+                self._pinned = {s: list(now) for s, (now, _) in m.items()}
+                return self._pinned, True
+            return self._pinned, False
+        o = self.original(change, ctx) if callable(self.original) else self.original
+        return {s: list(v) for s, v in o.items()}, False
+
+    def run(self, change, ctx):
+        m = {s: (list(a), list(b)) for s, (a, b) in self.measure(change, ctx).items()}
+        orig, pinned_now = self._original(change, ctx, m)
+        for s, (now, cand) in m.items():
+            if len(now) != len(cand):
+                raise ValueError(f"slice {s!r}: the version in force and the candidate must come from the same cases")
+            if orig is not None and s in orig and len(orig[s]) != len(cand):
+                raise ValueError(f"slice {s!r}: the original must come from the same cases as the candidate "
+                                 f"({len(orig[s])} vs {len(cand)})")
+        small = sorted(s for s, (_, cand) in m.items() if len(cand) < self.min_n)
+        small += sorted(s for s in (orig or {}) if s not in m)              # unmeasured now: not a measured success
+        new = sorted(s for s in m if orig is not None and s not in orig)
+        pairs = [(s, ref) for s in sorted(m) if s not in small
+                 for ref in ("in_force", "original") if ref == "in_force" or (orig is not None and s in orig)]
+        z = self.z(len(pairs))
+        rep, bad = {}, []
+        for s, ref in pairs:
+            now, cand = m[s]
+            d, se = _paired(now if ref == "in_force" else orig[s], cand)
+            rep.setdefault(s, {"n": len(cand)})[ref] = {"d": round(d, 6), "se": round(se, 6)}
+            tol = self.tol if ref == "in_force" else self.cumulative_tol
+            if d > tol or (d > 0 and (se == 0 or d - z * se > 0)):
+                why = "above the tolerance" if d > tol else "significant"
+                bad.append(f"{s}: {d:+.4f} vs {ref.replace('_', ' ')} ({why}, tol {tol})")
+        rep.update({"z": round(z, 4), "small": small, "new": new, "original_pinned_now": pinned_now})
+        if bad:
+            return StageVerdict.refuse("slice regression: " + "; ".join(bad), rep)
+        if small and self.on_small != "admit":
+            why = f"slices with < {self.min_n} cases or unmeasured: {small}"
+            return StageVerdict.hold(why, rep) if self.on_small == "hold" else StageVerdict.refuse(why, rep)
+        return StageVerdict.admit(f"no slice regresses ({len(pairs)} comparisons)", rep)
+
+
 @dataclass
 class Context:
     """What a stage sees besides the change: the pipeline, its KnowledgeStore (or None), its journal, the change's
@@ -823,5 +926,5 @@ class Context:
 
 __all__ = ["Approval", "allowed", "Canaries", "is_refusal", "REFUSAL_WORDS", "RefusalRegression", "catalog_of", "CleanCases", "Confirmation", "Consistency", "Context", "DECISIONS",
            "DEFAULT_APPROVAL", "FreshEnvironments", "gate_of", "gates_of", "hazard_body", "hazard_gate", "Impact",
-           "KnownFailures",
+           "KnownFailures", "SliceGuard",
            "LEVELS", "SOURCES", "Stage", "Static", "StageVerdict"]
