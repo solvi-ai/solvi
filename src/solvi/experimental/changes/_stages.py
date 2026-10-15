@@ -105,12 +105,29 @@ def _call(fn, change, ctx):
 
 
 # ───────────────────────────────────────────────────────────── 9. failure memory (new)
+IDENTITY_KEYS = ("s", "r", "o", "kind", "change")   # what a keyed item body says; its other keys are not its identity
+
+
+def identity(content):
+    """What the failure memory compares: Change.content() (or a journaled change dict) without the body keys of a keyed
+    item (a body with a subject "s" and a relation "r") other than IDENTITY_KEYS — an added "nonce" or note does not
+    make a rejected rule new. Other candidates: their whole content, as Change.fingerprint."""
+    from ...core.runtime import vhash
+    c = content.get("content")
+    if content.get("artifact") == "item" and isinstance(c, dict):
+        body = c.get("body")
+        if isinstance(body, dict) and "s" in body and "r" in body:
+            c = {**c, "body": {k: body[k] for k in IDENTITY_KEYS if k in body}}
+    return vhash({**{k: content.get(k) for k in ("source", "artifact", "code", "check")}, "content": c})[:24]
+
+
 class KnownFailures:
-    """A candidate whose fingerprint (Change.fingerprint: source, artifact, content, code) was rejected before, or was
-    rolled back with a reason (Pipeline.rollback(why=...), failed=True), is refused with the earlier stage and reason —
-    a search does not walk in circles. A stage that raised (status "error") is not a failure: the candidate runs again.
-    Reads the change journal; nothing expires (unlike solvi.core.knowledge.FailureMemory, which unblocks a plan after a
-    window).
+    """A candidate whose identity (identity(): Change.fingerprint's source, artifact, content and code, with a keyed
+    item's body read as its subject, relation, value and kind only) was rejected before, or was rolled back with a
+    reason (Pipeline.rollback(why=...), failed=True), is refused with the earlier stage and reason — a search does not
+    walk in circles, and an extra key in a rule's body does not make a rejected rule new. A stage that raised (status
+    "error") is not a failure: the candidate runs again. Reads the change journal; nothing expires (unlike
+    solvi.core.knowledge.FailureMemory, which unblocks a plan after a window).
 
     rollbacks: do rollbacks with a reason count as failures (default True; False: only rejections do)."""
     name = "failure_memory"
@@ -120,26 +137,28 @@ class KnownFailures:
 
     @staticmethod
     def _step(st, d):
-        """The failure index over the journal: fingerprint → the first rejection; fingerprint → the first failed
-        rollback (kept up to date by ChangeJournal.fold)."""
+        """The failure index over the journal: identity → the first rejection; identity → the first failed rollback
+        (kept up to date by ChangeJournal.fold)."""
         a = d.get("action")
         if a == "propose":
-            st["fp"][d["id"]] = d.get("fingerprint")
-        elif a == "rejected":
-            st["rejected"].setdefault(d.get("fingerprint"), d)
+            st["id"][d["id"]] = identity(d.get("change") or {})
+        elif a == "rejected" and d.get("change") in st["id"]:
+            st["rejected"].setdefault(st["id"][d["change"]], d)
         elif a == "rollback" and d.get("failed"):
             for cid in d.get("changes") or ():
-                st["rolled"].setdefault(st["fp"].get(cid), (cid, d))
+                if cid in st["id"]:
+                    st["rolled"].setdefault(st["id"][cid], (cid, d))
 
     def run(self, change, ctx):
-        fp = change.fingerprint()
-        idx = ctx.journal.fold("known_failures", lambda: {"fp": {}, "rejected": {}, "rolled": {}}, self._step)
-        d = idx["rejected"].get(fp)
+        key, fp = identity(change.content()), change.fingerprint()
+        idx = ctx.journal.fold("known_failures", lambda: {"id": {}, "rejected": {}, "rolled": {}}, self._step)
+        d = idx["rejected"].get(key)
         if d is not None:
-            return StageVerdict.refuse(f"rejected before by stage {d.get('stage')!r}: {d.get('reason')}",
+            same = "" if d.get("fingerprint") == fp else " (the same subject, relation and value; other body keys differ)"
+            return StageVerdict.refuse(f"rejected before by stage {d.get('stage')!r}{same}: {d.get('reason')}",
                                        {"earlier": d.get("change")})
-        if self.rollbacks and fp in idx["rolled"]:
-            cid, d = idx["rolled"][fp]
+        if self.rollbacks and key in idx["rolled"]:
+            cid, d = idx["rolled"][key]
             return StageVerdict.refuse(f"rolled back before: {d.get('why')}", {"earlier": cid})
         return StageVerdict.admit()
 

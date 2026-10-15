@@ -112,7 +112,7 @@ from .. import warn_on_import
 from ._journal import ChangeJournal, EvalLocked, EvaluatorLock, MemoryStorage
 from ._paired import paired_bootstrap, run_episode
 from ._stages import (DEFAULT_APPROVAL, LEVELS, REFUSAL_WORDS, Approval, Canaries, CleanCases, catalog_of, Confirmation,
-                     Consistency, Context, FreshEnvironments, Impact, KnownFailures, RefusalRegression, SOURCES, Stage,
+                     Consistency, Context, FreshEnvironments, identity, IDENTITY_KEYS, Impact, KnownFailures, RefusalRegression, SOURCES, Stage,
                      Static, StageVerdict, allowed, gate_of, gates_of, hazard_body, hazard_gate, is_refusal)
 from ._targets import KnowledgeTarget, LearningTarget, Promoted, Refused, VersionsTarget
 
@@ -491,7 +491,7 @@ class Pipeline:
 
 __all__ = ["allowed", "Approval", "ARTIFACTS", "Canaries", "catalog_of", "Change", "CHANGE_TYPES", "ChangeJournal", "CleanCases",
            "Confirmation", "Consistency", "Context", "DEFAULT_APPROVAL", "EvalLocked", "EvaluatorLock",
-           "FreshEnvironments", "gate_of", "gates_of", "hazard_body", "hazard_gate", "Impact", "is_refusal", "KnowledgeTarget",
+           "FreshEnvironments", "gate_of", "gates_of", "hazard_body", "hazard_gate", "identity", "IDENTITY_KEYS", "Impact", "is_refusal", "KnowledgeTarget",
            "KnownFailures", "REFUSAL_WORDS", "RefusalRegression",
            "LearningTarget", "LEVELS", "MemoryStorage", "paired_bootstrap", "Pipeline", "Promoted", "Refused", "Result", "run_episode", "SOURCES",
            "Stage", "Static", "STORE_SOURCE", "StageVerdict", "VersionsTarget"]
