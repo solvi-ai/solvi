@@ -786,6 +786,7 @@ def _slot_grounding(spec, with_facts):
         from decimal import Decimal
         rules = json.loads(spec)
         sources, exempt, enums, match = set(rules["sources"]), set(rules["exempt"]), set(rules["enums"]), rules["match"]
+        locale = rules.get("locale")
         texts = [(x[0], x[1]) for x in conversation_roles if x[2] in sources]
         facts = sorted((request_facts or {}).items()) if with_facts else []
         leaves = [x for k, v in facts for x in _fact_leaves(v, k)]
@@ -804,7 +805,7 @@ def _slot_grounding(spec, with_facts):
                     continue
                 at = None
                 for s, e in texts:
-                    occ = _occurrences(v, conversation[s:e], match)
+                    occ = _occurrences(v, conversation[s:e], match, locale)
                     if occ:
                         at = ["request", s + occ[0][0], s + occ[0][1]]
                         break
@@ -814,7 +815,7 @@ def _slot_grounding(spec, with_facts):
                             continue
                         hit = (isinstance(f, (int, float, Decimal)) and isinstance(v, (int, float, Decimal))
                                and _same_number(v, Decimal(repr(f)) if isinstance(f, float) else Decimal(f))) or \
-                            (isinstance(f, str) and bool(_occurrences(v, f, match)))
+                            (isinstance(f, str) and bool(_occurrences(v, f, match, locale)))
                         if hit:
                             at = [where]
                             break
@@ -1036,8 +1037,26 @@ def _glued(text, a, b):
     return False
 
 
-def _bounded(text, a, b, s, match):
-    """Does the occurrence text[a:b] of the string s stand on its own under the matcher?"""
+_SLASH_WORDS = re.compile(r"[^\W\d_]+(?:-[^\W\d_]+)*/[^\W\d_]+(?:-[^\W\d_]+)*")
+
+
+def _word_slash(text, i):
+    """Is the "/" at text[i] a separator between two words ("personal/address", "and/or") — the whitespace-delimited
+    token holding it is two words of letters with one "/" between them — not part of a path or a web address
+    ("/home/x", "docs/v2/x", "x.org/a", "a/b.txt")?"""
+    lo, hi = i, i + 1
+    while lo > 0 and not text[lo - 1].isspace():
+        lo -= 1
+    while hi < len(text) and not text[hi].isspace():
+        hi += 1
+    tok = text[lo:hi].strip("\"'`()[]{}<>,;:!?")
+    tok = tok[:-1] if tok.endswith(".") else tok
+    return bool(_SLASH_WORDS.fullmatch(tok))
+
+
+def _bounded(text, a, b, s, match, words_slash=False):
+    """Does the occurrence text[a:b] of the string s stand on its own under the matcher? words_slash ("nocase"): a "/"
+    between two words separates them (_word_slash)."""
     if match == "substring":
         return True
     before, after = text[a - 1] if a > 0 else "", text[b] if b < len(text) else ""
@@ -1048,9 +1067,11 @@ def _bounded(text, a, b, s, match):
     word = re.compile(r"\w")                                 # "token": not inside a longer word or address
     if (word.match(s[0]) and before and word.match(before)) or (word.match(s[-1]) and after and word.match(after)):
         return False
-    if before in _JOIN and a >= 2 and word.match(text[a - 2]):        # "evil.bob@x.org", "x-acct"
+    if before in _JOIN and a >= 2 and word.match(text[a - 2]) and \
+            not (words_slash and before == "/" and _word_slash(text, a - 1)):   # "evil.bob@x.org", "x-acct"
         return False
-    if after in _JOIN and b + 1 < len(text) and word.match(text[b + 1]):   # "bob@x.org.evil", "acct-12"
+    if after in _JOIN and b + 1 < len(text) and word.match(text[b + 1]) and \
+            not (words_slash and after == "/" and _word_slash(text, b)):        # "bob@x.org.evil", "acct-12"
         return False
     return not (s.isdigit() and _glued(text, a, b))          # a digit string: not a group of a longer identifier
 
@@ -1124,6 +1145,7 @@ def _occurrences(v, text, match="token", locale=None):
         if not s.strip():
             return []
         needles = [s]
+        words_slash = match == "nocase"
         if match in ("nocase", "id"):
             text, needles = _lower(text), [_lower(s)]
             if match == "id" and s.startswith("#") and s[1:].strip():
@@ -1132,7 +1154,7 @@ def _occurrences(v, text, match="token", locale=None):
         for n in needles:
             i = text.find(n)
             while i >= 0:
-                if _bounded(text, i, i + len(n), n, match) and not any(a <= i and i + len(n) <= b for a, b in out):
+                if _bounded(text, i, i + len(n), n, match, words_slash) and not any(a <= i and i + len(n) <= b for a, b in out):
                     out.append((i, i + len(n)))
                 i = text.find(n, i + 1)
         out.sort()
@@ -1577,7 +1599,7 @@ class Guard:
         return t
 
     def firewall(self, tools=None, *, grounded=True, sources=("user",), facts=True, exempt=(), match="nocase",
-                 on_ungrounded="escalate"):
+                 on_ungrounded="escalate", locale="tool"):
         """A call firewall over tools (a name, a list of names, or None — every tool, also those declared later): two
         deterministic checks of every call.
 
@@ -1593,7 +1615,11 @@ class Guard:
         facts=False: the text only). A string is found as a whole word after normalisation (`match`: "nocase" —
         letters without their case, typographic dashes and quotes as plain ones, Unicode spaces as spaces; "token",
         "whole" or "substring" — see `tool`), a number as a number token of exactly its value written in digits
-        ("two" does not ground 2). Exempt by declaration: an argument declared as an enumeration (Literal, an Enum, a
+        ("two" does not ground 2); a number written with one separator and one group of three digits ("3,000",
+        "1.500") is read under `locale` — "tool" (default): the tool's own `tool(locale=)`, a key of LOCALES ("en",
+        "de", "fr", "ch") for every tool, None: no locale, so such a number grounds nothing. In "nocase" a "/" between
+        two words separates them ("personal/address" holds "address"), not inside a path or a web address. Exempt by
+        declaration: an argument declared as an enumeration (Literal, an Enum, a
         JSON-schema enum / const), a boolean, null, an empty string, and the arguments named in `exempt` (dotted for
         nested fields, "legs[].city" for list items). An argument the call does not send (its default) is not a slot.
         A call with a slot found nowhere fails `slots_grounded` → on_ungrounded: "escalate" (default: a person
@@ -1608,13 +1634,15 @@ class Guard:
             raise ValueError('on_ungrounded must be "deny" or "escalate"')
         if match not in _FIREWALL_MATCHERS:
             raise ValueError(f"match is one of {', '.join(_FIREWALL_MATCHERS)}, not {match!r}")
+        if locale is not None and locale != "tool" and locale not in LOCALES:
+            raise ValueError(f'locale is "tool", one of {", ".join(LOCALES)} or None, not {locale!r}')
         roles = tuple(ROLES.get(r, r) for r in ((sources,) if isinstance(sources, str) else sources))
         bad = [r for r in roles if r not in ROLES.values()]
         if bad or not roles:
             raise ValueError(f"sources are roles among {', '.join(sorted(set(ROLES.values())))}, not {bad or 'none'}")
         spec = {"grounded": bool(grounded), "sources": sorted(set(roles)), "facts": bool(facts),
                 "exempt": sorted({exempt} if isinstance(exempt, str) else set(exempt)), "match": match,
-                "on_ungrounded": on_ungrounded}
+                "on_ungrounded": on_ungrounded, "locale": locale}
         self._firewalls.append((_names(tools), spec))
         for t in self.tools.values():
             t.firewall = self._firewall_of(t.name)
@@ -1845,6 +1873,9 @@ class Guard:
         if fw is not None and fw["grounded"]:
             spec = {k: fw[k] for k in ("sources", "exempt", "match")}
             spec["enums"] = sorted(_enum_paths(t.model.model_json_schema()))
+            loc = t.locale if fw.get("locale", "tool") == "tool" else fw["locale"]
+            if loc is not None:                       # (absent when None: the declaration's fingerprint is as before)
+                spec["locale"] = loc
             cat.fn(_slot_grounding(json.dumps(spec, sort_keys=True), fw["facts"]))
             check(slots_grounded, fw["on_ungrounded"])
         if t.ground:

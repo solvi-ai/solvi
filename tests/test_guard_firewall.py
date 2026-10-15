@@ -214,3 +214,52 @@ def test_the_benchmark_reports_three_arms():
     assert rep["n"]["irrelevant"] > 0 and rep["n"]["relevant"] > 0 and rep["n"]["near_miss"] > 0
     assert 0.0 <= a["schema+grounded"]["relevant_allowed"] <= 1.0
     assert rep == mod.run()                                                    # deterministic
+
+
+# ───────────────────────────────────────────── the firewall reads numbers under the tool's locale; "/" between words
+def _locale_guard(**fw):
+    g = Guard()
+
+    @g.tool(locale="en")
+    def transfer(amount: float) -> str:
+        return "ok"
+
+    @g.tool
+    def pay(amount: float) -> str:
+        return "ok"
+
+    @g.tool
+    def autofill(info_type: str) -> str:
+        return "ok"
+    g.firewall(**fw)
+    return g
+
+
+def _out(g, name, args, text):
+    return g.check({"name": name, "arguments": args}, [{"role": "user", "content": text}], store=False).outcome
+
+
+def test_the_firewall_reads_a_grouped_number_under_the_tools_locale():
+    g = _locale_guard()
+    assert _out(g, "transfer", {"amount": 3000}, "transfer $3,000 now") == "allow"
+    assert _out(g, "transfer", {"amount": 3000}, "transfer $3000 now") == "allow"
+    assert _out(g, "transfer", {"amount": 3}, "transfer $3,000 now") == "escalate"
+    assert _out(g, "pay", {"amount": 3000}, "pay $3,000 now") == "escalate"       # no locale: "3,000" grounds nothing
+    g = _locale_guard(locale="de")                                              # the firewall's own locale wins
+    assert _out(g, "pay", {"amount": 3000}, "zahle 3.000 EUR") == "allow"
+    assert _out(g, "transfer", {"amount": 3000}, "transfer $3,000 now") == "escalate"
+    assert _out(g, "transfer", {"amount": 3}, "überweise 3,000 EUR") == "allow"
+    g = _locale_guard(locale=None)                                              # None: no locale, also not the tool's
+    assert _out(g, "transfer", {"amount": 3000}, "transfer $3,000 now") == "escalate"
+    with pytest.raises(ValueError, match="locale"):
+        _locale_guard(locale="xx")
+
+
+def test_the_firewall_splits_a_slash_between_two_words_but_not_a_path_or_url():
+    g = _locale_guard()
+    assert _out(g, "autofill", {"info_type": "address"}, "fill my personal/address info") == "allow"
+    assert _out(g, "autofill", {"info_type": "personal"}, "fill my personal/address info") == "allow"
+    assert _out(g, "autofill", {"info_type": "address"}, "fill my personal address info") == "allow"
+    for text in ("open /home/address now", "see https://x.org/address", "read docs/v2/address", "see x.org/address",
+                 "file a/address.txt", "the a/b/address form"):
+        assert _out(g, "autofill", {"info_type": "address"}, text) == "escalate", text
