@@ -7,9 +7,11 @@ differs (the part's code or declarations changed, its model changed, it is new, 
 or external source). A step that was added or changed and gives nothing different downstream is not named.
 
 Shadow(current, candidate) answers with the current system and runs the candidate on the same inputs, storing the
-candidate's response with its differences; the answer returned is always the current system's."""
+candidate's response with its differences; the answer returned is always the current system's. Labelled later
+(`shadow.label(rid, truth)`), the paired outcomes feed an anytime-valid harm stop, overall and per slice."""
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 
 from ... import _deprecate
@@ -408,19 +410,74 @@ def _add_cites(changes, cat, new):
 
 
 # --- shadow mode
-class Shadow:
-    """Answer with `current`, run `candidate` on the same input, keep what differs.
+_BETS = (0.05, 0.1, 0.2, 0.3, 0.5, 0.7)
 
-        shadow = Shadow(current, candidate, storage=SQLiteStorage("shadow.db"))
-        res = shadow.ask(state)        # current's response, exactly as current.ask(state) (saved to current's storage)
+
+class _PairedHarm:
+    """A test martingale against "the candidate is the wrong one in at most half of the discordant pairs" (one where
+    exactly one of current / candidate is right). Per pair x = 1 when the candidate is the wrong one; each bet b
+    multiplies its wealth by 1 + b·(2x − 1), whose mean is ≤ 1 under that null, and the e-value is the mean wealth over
+    the bets in _BETS (a mixture of test martingales is one). Ville: the chance it ever reaches 1/alpha is ≤ alpha, so
+    it may be checked after every label. update(x) → True when this pair takes it to 1/alpha (it fires once)."""
+
+    def __init__(self, alpha):
+        self.alpha = alpha
+        self.log_w = [0.0] * len(_BETS)
+        self.n = self.harm = 0
+        self.fired = False
+
+    @property
+    def e_value(self):
+        return sum(math.exp(w) for w in self.log_w) / len(_BETS)
+
+    def update(self, cand_wrong):
+        self.n += 1
+        self.harm += bool(cand_wrong)
+        sign = 1.0 if cand_wrong else -1.0
+        self.log_w = [w + math.log1p(b * sign) for w, b in zip(self.log_w, _BETS)]
+        if not self.fired and self.e_value >= 1.0 / self.alpha:
+            self.fired = True
+            return True
+        return False
+
+    def to_dict(self):
+        return {"discordant": self.n, "candidate_wrong": self.harm, "e_value": round(self.e_value, 4),
+                "threshold": round(1.0 / self.alpha, 4), "halted": self.fired}
+
+
+class Shadow:
+    """Answer with `current`, run `candidate` on the same input, keep what differs; with labels, stop a harmful candidate.
+
+        shadow = Shadow(current, candidate, storage=SQLiteStorage("shadow.db"), slice_of=lambda st: st["region"])
+        res = shadow.ask(state, rid="req-17")  # current's response, exactly as current.ask(state) (saved to current's storage)
+        shadow.label("req-17", truth)          # when the outcome is known → None, or the event that halted the candidate
 
     The candidate's response is saved to `storage` (when given) with meta {"shadow_of": the current response's stored id,
     "current_catalog", "diff": compare(current, candidate)}; the candidate never writes to its own storage. A candidate that
     fails is counted and recorded, never raised. stats: {"asks", "agree", "differ", "errors"}; changed: the last `keep`
-    differing inputs [{"stored_id", "shadow_id", "questions"}]; report() as text."""
+    differing inputs [{"stored_id", "shadow_id", "questions"}]; summary() as text.
 
-    def __init__(self, current, candidate, storage=None, confidence=0.01, keep=1000):
+    Harm stop. Both systems answer every input, so each labelled one is a paired comparison. Among the labelled
+    question answers where exactly one of the two is right, a test martingale bets that the candidate is the wrong one
+    (see _PairedHarm): overall at alpha/2 and per slice at alpha/(2·max_slices) — the chance of ever halting a candidate
+    that is no more often the wrong one is ≤ alpha, at any stopping time, so checking after every label is allowed. The
+    first test to reach its level halts: `halted` holds the event {"event": "halted", "scope": "overall" | "slice",
+    "slice", "question", "why", "e_value", "labels"}; the shadow keeps running and answering with `current` (switching
+    is yours); later labels still count but nothing halts twice. A halt needs evidence: harm on a tenth of the discordant
+    pairs takes hundreds of them. The outcome must not depend on which answer was served (no feedback loop).
+
+    slice_of: fn(init_state) → a slice name (None: one slice). The first max_slices − 1 names have their own test; the
+    rest share one ("(other)"). alpha: the harm stop's error (default 0.05). correct: fn(answer, truth) → bool (default
+    equality; a question left unanswered counts as not right). max_pending: the answered, not yet labelled requests kept
+    (the oldest go first). rid: given to ask(), else the current response's stored_id."""
+
+    def __init__(self, current, candidate, storage=None, confidence=0.01, keep=1000, *, slice_of=None, alpha=0.05,
+                 max_slices=20, correct=None, max_pending=10_000):
         from . import open_storage
+        if not 0.0 < float(alpha) < 1.0:
+            raise ValueError("alpha is a probability strictly between 0 and 1")
+        if int(max_slices) < 1:
+            raise ValueError("max_slices is at least 1")
         self.current, self.candidate = current, candidate
         self.storage = open_storage(storage, candidate)
         if self.storage is not None and self.storage.catalog is None:
@@ -429,9 +486,89 @@ class Shadow:
         self.stats = {"asks": 0, "agree": 0, "differ": 0, "errors": 0}
         self.changed, self.errors = [], []
         self.last = None                              # (candidate response or None, diff) of the last ask
+        self.slice_of, self.correct = slice_of, correct or (lambda answer, truth: answer == truth)
+        self.alpha, self.max_slices, self.max_pending = float(alpha), int(max_slices), int(max_pending)
+        self._overall = _PairedHarm(self.alpha / 2)
+        self._slices = {}
+        self._pending = {}                            # rid → (slice, {question: (current answer, candidate answer)})
+        self.labels = {"labels": 0, "discordant": 0, "current_wrong": 0, "candidate_wrong": 0}
+        self.halted = None
+
+    @property
+    def harm(self):
+        """The harm stop's state: {"overall": {...}, "slices": {name: {...}}, "halted": the event or None}."""
+        return {"overall": self._overall.to_dict(), "slices": {k: v.to_dict() for k, v in self._slices.items()},
+                "halted": self.halted}
+
+    def _remember(self, rid, init_state, resp, cand):
+        if rid is None:
+            return
+        sl = None
+        if self.slice_of is not None:
+            try:
+                sl = self.slice_of(init_state)
+            except Exception as e:  # noqa: BLE001
+                sl = f"(slice_of failed: {type(e).__name__})"
+        pairs = {q: (r.answer, cand.results[q].answer if q in cand.results else None) for q, r in resp.results.items()}
+        self._pending.pop(rid, None)
+        self._pending[rid] = (sl, pairs)
+        while len(self._pending) > self.max_pending:
+            del self._pending[next(iter(self._pending))]
+
+    def _slice_test(self, sl):
+        if sl not in self._slices:
+            if len(self._slices) >= self.max_slices - 1 and sl != "(other)":
+                sl = "(other)"
+            self._slices.setdefault(sl, _PairedHarm(self.alpha / (2 * self.max_slices)))
+        return sl, self._slices[sl]
+
+    def label(self, rid, truth, question=None):
+        """The outcome of an answered request: truth for `question`, or {question: truth}. → None, or the event when this
+        label halts the candidate. A request is labelled once; an unknown (or forgotten) rid gives None."""
+        if rid is None:
+            raise ValueError("label needs the rid given to ask() (or the current response's stored_id)")
+        if rid not in self._pending:
+            return None
+        sl, pairs = self._pending[rid]
+        if isinstance(truth, dict):
+            truths = truth
+        elif question is not None:
+            truths = {question: truth}
+        elif len(pairs) == 1:
+            truths = {next(iter(pairs)): truth}
+        else:
+            raise ValueError(f"the request answered {sorted(pairs)}: name the question or pass {{question: truth}}")
+        del self._pending[rid]
+        event = None
+        for q, t in truths.items():
+            if q not in pairs:
+                continue
+            a_cur, a_cand = pairs[q]
+            cw, kw = not self.correct(a_cur, t), not self.correct(a_cand, t)
+            self.labels["labels"] += 1
+            self.labels["current_wrong"] += cw
+            self.labels["candidate_wrong"] += kw
+            if cw == kw:
+                continue
+            self.labels["discordant"] += 1
+            tests = [("overall", None, self._overall)]
+            if self.slice_of is not None:
+                name, test = self._slice_test(sl)
+                tests.append(("slice", name, test))
+            for scope, name, test in tests:
+                if test.update(kw) and self.halted is None:
+                    where = "overall" if scope == "overall" else f"in slice {name!r}"
+                    event = self.halted = {
+                        "event": "halted", "scope": scope, "slice": name, "question": q,
+                        "why": f"candidate worse {where}: e-value {test.e_value:.1f} ≥ {1 / test.alpha:.0f} "
+                               f"({test.harm} of {test.n} discordant pairs the candidate's error)",
+                        "e_value": test.e_value, "labels": self.labels["labels"]}
+        return event
 
     @_deprecate.removed_kwargs(names="questions")
-    def ask(self, init_state, questions=None, **kw):
+    def ask(self, init_state, questions=None, *, rid=None, **kw):
+        """current.ask(init_state, questions, **kw), the candidate run beside it. rid: the key a later label() uses
+        (default: the current response's stored_id; with neither, the request cannot be labelled)."""
         resp = self.current.ask(init_state, questions, **kw)
         self.stats["asks"] += 1
         try:
@@ -455,6 +592,7 @@ class Shadow:
                                )[-self.keep:]
         if ch:
             self.changed = (self.changed + [{"stored_id": resp.stored_id, "shadow_id": sid, "questions": ch}])[-self.keep:]
+        self._remember(resp.stored_id if rid is None else rid, init_state, resp, cand)
         self.last = (cand, ch)
         return resp
 
@@ -472,6 +610,13 @@ class Shadow:
                 per[t] = per.get(t, 0) + 1
         for t, n in sorted(per.items(), key=lambda kv: -kv[1]):
             lines.append(f"  {t}  ×{n}")
+        lb = self.labels
+        if lb["labels"]:
+            lines.append(f"labels: {lb['labels']}, current wrong {lb['current_wrong']}, candidate wrong "
+                         f"{lb['candidate_wrong']}, discordant {lb['discordant']}; harm e-value "
+                         f"{self._overall.e_value:.2f} (halts at {1 / self._overall.alpha:.0f})")
+        if self.halted:
+            lines.append("halted: " + self.halted["why"])
         return "\n".join(lines)
 
 
