@@ -152,3 +152,27 @@ def test_retract_source_takes_back_only_what_that_writer_alone_supports():
     assert changes == {lie: ("active", "retracted"), d: ("active", "retracted")}
     assert ks.add("fact", fact("l", 2), source="spec", by="honest") == lie
     assert ks.pending_retest(lie)                      # its whole support was taken back: told again, it waits
+
+
+# --- re-deciding after a correction
+def test_redecide_on_the_current_journal_gives_the_corrected_answer(tmp_path):
+    import solvi
+    from solvi import Answer, Catalog, Question, System
+    from solvi.core.store import JSONLStorage
+    st = JSONLStorage(tmp_path / "d.jsonl")
+    cat = Catalog()
+
+    @cat.rule("dose")
+    def dose(knowledge) -> str:
+        return solvi.Knowledge.value(knowledge, "drugX", "max_dose", "unknown")
+    s = System(cat, [Question("dose", "Dose?", Answer.choice(["10mg", "20mg", "40mg", "unknown"]))], storage=st)
+    km = solvi.Knowledge()
+    wrong = km.tell(("drugX", "max_dose", "40mg"), source="spec", by="typo")
+    s.ask({"knowledge": km.snapshot(about="drugX")})
+    km.store.retract(wrong, why="typo")
+    km.tell(("drugX", "max_dose", "20mg"), source="spec", by="fix")
+    ans = lambda init: s.ask(init, store=False).results["dose"].answer   # noqa: E731
+    ch, _ = km.store.redecide(st, {wrong}, ans)
+    assert [(c["old"], c["new"]) for c in ch] == [("40mg", "unknown")]   # the default: the journal at the decision
+    ch, _ = km.store.redecide(st, {wrong}, ans, upto="now")
+    assert [(c["old"], c["new"]) for c in ch] == [("40mg", "20mg")]
