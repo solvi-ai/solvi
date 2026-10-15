@@ -2731,8 +2731,14 @@ The proxy (stable since 1.1: `solvi.serve.run_proxy`, `Proxy`, `Upstream`; until
 passes the guard before it is forwarded. A denied call is an error result with the reasons; an escalated one asks the
 user through the client when it supports MCP elicitation (an approve yes / no form; `--escalate deny` turns that off),
 else it is an error result. Each result's `_meta.solvi` has the outcome, the stored id and the trace hash; `--facts
-'{"role": "viewer"}'` gives the policies their facts. The proxy does not see the user's messages: grounded arguments are
-looked up in the tool outputs of the session. An allowed call is forwarded with the arguments as the guard validated
+'{"role": "viewer"}'` gives the policies their facts. MCP does not pass the conversation to a server, so by default the proxy
+does not see the user's messages: grounded arguments are looked up in the tool outputs of the session (on a benchmark of
+agent tool calls that refused most legitimate calls whose values the user had typed). `--context-from-client`
+(`run_proxy(context_from_client=True)`) opens a channel for them: the client sends a notification
+`notifications/solvi/context` with `{"role": "user", "text": "..."}` (or `{"messages": [...]}`), or puts such messages
+in `_meta["solvi/context"]` of a `tools/call`; roles user, assistant and system (tool outputs come only from the
+server). Turn it on only for a client that builds these messages from what the user typed — whoever sends them can
+authorize calls. An allowed call is forwarded with the arguments as the guard validated
 them (coerced to the schema's types — `"no"` for a boolean is sent as `false`, so what the checks read is what the
 server gets; arguments the client did not send are not added). The session keeps the last `--context-messages` (50) tool
 outputs, at most `--context-chars` (100 000) characters in all (0: no limit): each decision's trace records the context
