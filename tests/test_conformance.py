@@ -530,3 +530,28 @@ def test_check_specialist_on_the_charts_specialist_and_on_a_random_render():
             return super().render(checked) + f"<!-- {random.random()} -->"
     with pytest.raises(cf.ConformanceError, match="identical bytes"):
         cf.check_specialist(Noisy(), [PRESS])
+
+
+def _corridor_clone(env, state):
+    c = Corridor()
+    c.pos = state["pos"]
+    return c
+
+
+def test_a_faithful_clone_conforms():
+    out = cf.check_environment(Corridor, policy=lambda s, acts: "right", clone=_corridor_clone)
+    assert out["clones"] == out["steps"] > 0
+
+
+def test_a_clone_that_shares_the_original_is_caught():
+    with pytest.raises(cf.ConformanceError, match="original"):
+        cf.check_environment(Corridor, policy=lambda s, acts: "right", clone=lambda env, state: env)
+
+
+def test_a_clone_at_the_wrong_state_is_caught():
+    def off_by_one(env, state):
+        c = Corridor()
+        c.pos = state["pos"] + 1
+        return c
+    with pytest.raises(cf.ConformanceError, match="clone"):
+        cf.check_environment(Corridor, policy=lambda s, acts: "right", clone=off_by_one)
