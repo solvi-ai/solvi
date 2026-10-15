@@ -492,9 +492,9 @@ class LawSet:
     with a precision between the two is retired by the check its own test runs, and the next mismatch accepts it again.
 
     support_on: the rows a candidate's support, hits and precision are counted on — "applied" (the default): where it
-    would be the applied law, its condition's rows less those a more specific (or, at equal length, an earlier) active
-    law already claims, the rows its net is counted on too; "matched": every row its condition matches (before 1.2). A
-    default whose exceptions are already laws is judged on the rows they leave it: a default right on 45 of its 45 rows
+    would be the applied law, its condition's rows less those a more specific (or, at equal length, one `ties` puts
+    first) active law already claims, the rows its net is counted on too; "matched": every row its condition matches
+    (before 1.2). A default whose exceptions are already laws is judged on the rows they leave it: a default right on 45 of its 45 rows
     with 10 rows of a known exception under it is 45 / 45, not 45 / 55 (refused at min_precision 0.9 under "matched"),
     and its precision at acceptance is the precision its first `check` recounts.
     readmit: "any" (the default) — a retired law may be accepted again by the next test; "grown" — not on a buffer
@@ -522,15 +522,20 @@ class LawSet:
     mismatch proposing it again — does not raise it (it did before 1.2: the same 56 candidates scored three times on an
     unchanged buffer made N 168).
 
-    acceptance: "sized" (the default with sized=True), "fixed" (sized=False) or "exact" — for few-shot buffers, where the
-    sized rule cannot pass anything (3 groups × 6 rows, a deterministic one-atom law: 0 of 20 learned): a candidate
+    acceptance: "sized" (the default with sized=True), "fixed" (sized=False) or "exact" — for few-shot buffers, where
+    the sized rule cannot pass anything (3 groups × 6 rows, a deterministic one-atom law: 0 of 20 learned): a candidate
     passes when it is right on every held-out row where it applies, with support ≥ min_support, and net > 0; no
     binomial bound, so nothing bounds the false accepts over many candidates (with min_support=2 the same few-shot task
     learned the law in 20 of 20) — give it an independent check through `confirm`. Overrides `sized`.
     confirm: `confirm(candidate)` → bool, an external check (a probe, a person, a second data set) asked about each
     candidate that passed, best first, before it is accepted; a refusal sets the candidate aside for this test.
 
-    disagree: "first" (default: the most specific matching law, ties to the earlier) or "abstain" (`predict` returns
+    ties: the order between laws of equal length — "earlier" (the default: the earlier accepted law speaks) or "newer"
+    (the later one does: a law learned after the world changed is not hidden behind an older one of the same length).
+    The order is used everywhere a law is chosen: `applied`/`predict`, the rows a candidate would take in the test,
+    `hypothesis` and `admit_by_probes`; more specific laws always come first.
+
+    disagree: "first" (default: the most specific matching law, ties by `ties`) or "abstain" (`predict` returns
     `Undetermined` where laws none of which is an exception of another disagree; see `predict`).
 
     cost: the search-cost record — candidates (proposed for mismatches), tests (candidates scored on a buffer),
@@ -542,7 +547,8 @@ class LawSet:
                  min_precision: float = 0.9, retire_below: float = 0.8, retire_min: int = 5, cap: int = 300,
                  sized: bool = True, delta: float = 0.1, space: int | None = None,
                  null: str | float = "base", disagree: str = "first", support_on: str = "applied",
-                 readmit: str = "any", acceptance: str | None = None, confirm: Callable | None = None):
+                 readmit: str = "any", acceptance: str | None = None, confirm: Callable | None = None,
+                 ties: str = "earlier"):
         if disagree not in ("first", "abstain"):
             raise ValueError(f"disagree is 'first' or 'abstain', not {disagree!r}")
         if not 0.0 < float(delta) < 1.0:
@@ -579,6 +585,9 @@ class LawSet:
         if readmit not in ("any", "grown"):
             raise ValueError(f"readmit is 'any' or 'grown', not {readmit!r}")
         self.support_on, self.readmit = support_on, readmit
+        if ties not in ("earlier", "newer"):
+            raise ValueError(f"ties is 'earlier' or 'newer', not {ties!r}")
+        self.ties = ties
         self.refused_readmit = 0           # candidates refused because they were retired on a buffer of this size
         self._retired_at: dict = {}        # (action, condition, effect) → buffer size at retirement (None: not seen)
         self.abstained = 0                 # predictions that abstained (disagree="abstain")
@@ -598,8 +607,8 @@ class LawSet:
         return sorted(self.laws + self.retired, key=lambda law: law.seq)
 
     def applied(self, state, action) -> Law | None:
-        """The law that speaks for `action` in `state`: the first matching active law (most specific first, ties to the
-        earlier one), or None."""
+        """The law that speaks for `action` in `state`: the first matching active law (most specific first, ties by the
+        set's `ties`), or None."""
         true = None
         k = _key(action)
         for law in self.laws:
@@ -635,8 +644,8 @@ class LawSet:
     def predict(self, state, action, base: Callable | None = None, *, disagree: str | None = None):
         """The first matching law's effect applied to the state, or the base predictor's answer. disagree="abstain"
         (or the set's own `disagree`): where the maximal matching laws disagree (`conflict`), an `Undetermined` instead
-        — the abstention is counted in `abstained`. The default "first" keeps most specific first, ties to the
-        earlier law.
+        — the abstention is counted in `abstained`. The default "first" keeps most specific first, ties by the set's
+        `ties`.
 
         A version space in miniature: two laws that both passed their test and neither of which is an exception of
         the other cover this state and say different things — the order between them is a tie-break, not evidence."""
@@ -658,7 +667,7 @@ class LawSet:
         """The predictor this set would be with `candidate` accepted (nothing is changed): for the probe planner."""
         extra = Law(id="?", action=candidate.action, condition=tuple(candidate.condition), effect=candidate.effect,
                     seq=self._seq + 1)
-        laws = sorted(self.laws + [extra], key=lambda law: (-len(law.condition), law.seq))
+        laws = sorted(self.laws + [extra], key=self._order)
 
         def predict(state, action):
             true = set(self.grammar.true(state, action))
@@ -713,7 +722,7 @@ class LawSet:
         cond = tuple(candidate.condition)
         m = buffer.match(candidate.action, cond) & allowed
         E = self._effect_mask(buffer, candidate.action, candidate.effect)
-        take = m & ~cov[min(len(cond), self.grammar.k + 1)]
+        take = m & ~cov[min(len(cond) + (self.ties == "newer"), self.grammar.k + 1)]
         return (take if self.support_on == "applied" else m), take, E, ok
 
     def score(self, candidate: Candidate, buffer: Buffer, exclude=None, _view=None) -> tuple[int, int, int]:
@@ -783,7 +792,8 @@ class LawSet:
             self.capped += 1
             return []
         active0 = {(_key(law.action), law.condition, _key(law.effect)) for law in self.laws}
-        keys = [k for k in ((_key(c.action), tuple(c.condition), _key(c.effect)) for c in candidates) if k not in active0]
+        keys = [k for k in ((_key(c.action), tuple(c.condition), _key(c.effect)) for c in candidates)
+                if k not in active0]
         scored = len(keys)
         buffer.count_tested(keys)
         self.cost["tests"] += scored
@@ -921,7 +931,7 @@ class LawSet:
             if _key(c.action) != _key(a):
                 return cur, False, False
             hold = set(c.condition) <= T
-            applied = hold and len(c.condition) > shadow
+            applied = hold and (len(c.condition) >= shadow if self.ties == "newer" else len(c.condition) > shadow)
             return (self.apply(c.effect, x) if applied else cur), applied, hold
 
         def refutes(c, x, a, obs, inf):
@@ -1053,8 +1063,12 @@ class LawSet:
                   support=support, hits=hits, precision=(hits / support) if support else None, net=net, born=born,
                   proposer=c.proposer, sources=sources, seq=self._seq)
         self.laws.append(law)
-        self.laws.sort(key=lambda x: (-len(x.condition), x.seq))
+        self.laws.sort(key=self._order)
         return law
+
+    def _order(self, law):
+        """The set's order: most specific first, then by `ties` (seq: the order of acceptance)."""
+        return (-len(law.condition), law.seq if self.ties == "earlier" else -law.seq)
 
     # ----------------------------------------------------------------------------------- retirement
     def check(self, buffer: Buffer, action=None) -> list[Law]:

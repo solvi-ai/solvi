@@ -13,8 +13,8 @@
     laws.predict(state, "do")                         # the most specific matching law, else the base
     laws.to_knowledge(ks, {"env": "grid"})            # "rule" items of kind "law", sources and evidence; retired → retire()
 
-The loop. Before every transition the set predicts (most specific matching law first, ties to the earlier law, else the
-base predictor). A wrong prediction — a mismatch — asks the proposer for candidates "for this action, under this
+The loop. Before every transition the set predicts (most specific matching law first, ties to the earlier law — or,
+`ties="newer"`, the later — else the base predictor). A wrong prediction — a mismatch — asks the proposer for candidates "for this action, under this
 condition, the effect is this". A candidate is accepted only by a test on held-out transitions of other groups than the
 one it was proposed from (another world, another session, another path): support ≥ min_support, precision ≥
 min_precision, and it removes more errors than it adds where it would be the applied law (net > 0); of the passing
