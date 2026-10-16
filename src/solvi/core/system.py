@@ -1492,8 +1492,9 @@ def _read_of_trace(trace):
 
 def _combine_failed(catalog, q, failed):
     """Several false hard checks govern q (catalog order) → the list whose first decides: as given under
-    Catalog(combine="first"), with a warning when their answers differ; under "strictest" the one whose answer comes
-    last in q's options (no `then` answer for q: an abstention, strictest of all)."""
+    Catalog(combine="first"); under "strictest" (the default since 1.2) the one whose answer comes last in q's options
+    (no `then` answer for q: an abstention, strictest of all), and the first declared where the options give no order.
+    A warning names them when their answers differ, unless the mode was chosen and applies."""
     import warnings
     keys = []
     for f, part in failed:
@@ -1508,14 +1509,20 @@ def _combine_failed(catalog, q, failed):
         return failed
     desc = ", ".join(f"{f} → " + ("abstain" if a is _ABSTAIN else "a function" if callable(a) else
                                   "an unusable answer" if a is _BAD else repr(a)) for (f, _), a in zip(failed, keys))
-    mode = getattr(catalog, "combine", "first")
-    if mode == "first" and getattr(catalog, "combine_chosen", False):
+    mode = getattr(catalog, "combine", "strictest")
+    chosen = getattr(catalog, "combine_chosen", False)
+    if mode == "first" and chosen:
         return failed                                 # Catalog(combine="first"): the declaration order is the priority
     opts = list(q.answer.options or [])
     if mode == "strictest" and opts and all(a is _ABSTAIN or (a is not _BAD and not callable(a) and a in opts)
                                             for a in keys):
         rank = [math.inf if a is _ABSTAIN else opts.index(a) for a in keys]
         best = max(range(len(failed)), key=lambda i: (rank[i], -i))
+        if not chosen:                                # the 1.2 default: said once per such decision, as before
+            warnings.warn(f"question {q.name!r}: several hard checks are false with different `then` answers ({desc}); "
+                          f"the strictest by the question's option order, {failed[best][0]}, decides (the default since "
+                          "1.2; Catalog(combine=\"first\") keeps the declaration order, Catalog(combine=\"strictest\") "
+                          "silences this)", UserWarning, stacklevel=2)
         return [failed[best]] + [x for i, x in enumerate(failed) if i != best]
     warnings.warn(f"question {q.name!r}: several hard checks are false with different `then` answers ({desc}); the "
                   f"first declared, {failed[0][0]}, decides"
