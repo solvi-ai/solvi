@@ -814,6 +814,9 @@ the corrected answers; the default answers «what would the decision have been w
 **Keep regression cases from your records:** `testing.cases_from_store(storage, n=...)` plus
 `testing.boundary(cases, system=...)` before changing a catalog; hand-written cases rarely sit on a threshold's edge.
 
+**Many cases at once (mutation runs):** `solvi test --fast` gives the same answers and statuses about 3.7× faster on a
+small catalog; keep the full run, with its replay check, for the committed suite.
+
 **Isolate cases that can crash or hog memory:** `solvi test --isolate --max-mem 2G` costs about 90 ms per case on a
 small task (process start, imports, System build); leave room above the imports — numpy with a threaded BLAS reserves
 about 1 GB of address space at import.
