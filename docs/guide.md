@@ -3563,7 +3563,11 @@ decision (the same trace and hashes) with `res.cached == {"of": <the first decis
 Stored, a served decision is a compact record with `meta={"cache_of": <that id>}`: `verify()` checks it and
 `replay_all` re-runs it from its input and compares every step's hash, like any compact record — an impure part or a
 changed catalog shows up there. A catalog with a model-backed part refuses `cache=`; an ask with another order, a
-learning system, answer heads, a stateful guarantee or a strategist of your own runs without it.
+learning system, answer heads, a stateful guarantee or a strategist of your own runs without it. `aask` uses the same
+cache as `ask` (one decision serves both); a decision in which a part timed out is not kept. `ask_text` and
+`aask_text` use it too: the text is still read each time (the entry point and its fields, which may call a model), and
+the flow is served when the read is the same — the same text, entry point, fields with their quotes and parsers, and
+the same dialogue changes.
 
 | ms per ask, cache hit ÷ no cache ([benchmarks/ask_speed.py](../benchmarks/ask_speed.py) cases) | not stored | SQLite store |
 |---|---|---|

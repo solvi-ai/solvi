@@ -130,3 +130,117 @@ def test_other_orders_and_a_learning_system_bypass_it():
     s.learn = True                                       # a learning system observes every ask: no cache
     s.ask(S1)
     assert len(calls) == 3
+
+
+# --- aask and ask_text share the cache, with the same rules
+def run(coro):
+    import asyncio
+    return asyncio.run(coro)
+
+
+def test_aask_is_served_from_the_cache_and_shares_it_with_ask():
+    calls = []
+    s = leave(calls)
+    a, b = run(s.aask(dict(S1))), run(s.aask(dict(S1)))
+    assert len(calls) == 1 and a.cached is None and b.cached == {"of": None}
+    assert [r.hash for r in b.trace.records] == [r.hash for r in a.trace.records]
+    c = s.ask(dict(S1))                                  # aask and ask give the same decision: one cache
+    assert len(calls) == 1 and c.cached == {"of": None} and c["approve"].answer == "approve"
+    run(s.aask(dict(S2)))                                # another input: a miss
+    assert len(calls) == 2
+    s.questions["approve"].min_confidence = 0.99         # the questions changed: a miss
+    run(s.aask(dict(S2)))
+    assert len(calls) == 3
+
+
+def test_aask_off_by_default_and_a_stored_hit_replays(tmp_path):
+    calls = []
+    s = leave(calls, cache=None)
+    run(s.aask(S1)), run(s.aask(S1))
+    assert len(calls) == 2
+    store = JSONLStorage(tmp_path / "d.jsonl")
+    s = leave(calls := [], storage=store)
+    a, b = run(s.aask(dict(S1))), run(s.aask(dict(S1)))
+    assert len(calls) == 1 and b.cached == {"of": a.stored_id}
+    assert store.record(b.stored_id)["meta"]["cache_of"] == a.stored_id
+    assert store.verify()["ok"] and store.replay_all(s) == []
+
+
+def test_abstentions_are_cached_as_ask_caches_them():
+    calls = []
+    s = leave(calls)
+    st = {"start": 1, "end": 3}                          # no balance: the required check cannot run, the question abstains
+    a, b = s.ask(dict(st)), s.ask(dict(st))
+    assert a["approve"].answer is None and b["approve"].answer is None
+    assert len(calls) == 1 and b.cached == {"of": None}
+    c = run(s.aask(dict(st)))
+    assert c["approve"].answer is None and len(calls) == 1 and c.cached == {"of": None}
+
+
+def test_a_timed_out_aask_is_not_cached():
+    import asyncio
+    calls = []
+    cat = Catalog()
+
+    @cat.fn
+    async def slow(x):
+        calls.append(x)
+        await asyncio.sleep(0.2 if len(calls) == 1 else 0)
+        return x
+
+    @cat.rule("q")
+    def q(slow) -> bool:
+        return slow > 0
+    s = System(cat, [Question("q", "?", Answer.yes_no())], cache=8)
+    a = run(s.aask({"x": 1}, timeout=0.05))
+    assert a["q"].answer is None                          # timed out: abstains, and is not kept
+    b = run(s.aask({"x": 1}, timeout=0.05))
+    assert len(calls) == 2 and b.cached is None and b["q"].answer == "yes"
+    c = run(s.aask({"x": 1}, timeout=0.05))
+    assert len(calls) == 2 and c.cached == {"of": None}
+
+
+def shop(cache=8, storage=None):
+    from solvi.core.textin import TextIn
+    calls = []
+    cat = Catalog()
+
+    @cat.fn
+    def known(order_id: str) -> bool:
+        calls.append(order_id)
+        return order_id.startswith("A-")
+
+    @cat.rule("cancel")
+    def cancel(known: bool) -> str:
+        return "cancelled" if known else "keep"
+    s = System(cat, [Question("cancel", "Cancel an order", Answer.choice(["cancelled", "keep"]))], cache=cache,
+               storage=storage)
+    return s, TextIn(s, None, patterns={"order_id": r"[A-Z]-\d+"}), calls
+
+
+def test_ask_text_is_served_from_the_cache(tmp_path):
+    store = JSONLStorage(tmp_path / "d.jsonl")
+    s, tin, calls = shop(storage=store)
+    a = s.ask_text("cancel A-12 please", textin=tin, question="cancel")
+    b = s.ask_text("cancel A-12 please", textin=tin, question="cancel")
+    assert len(calls) == 1 and a.cached is None and b.cached == {"of": a.stored_id}
+    assert b["cancel"].answer == a["cancel"].answer == "cancelled" and b.read.state == {"order_id": "A-12"}
+    assert [r.hash for r in b.trace.records] == [r.hash for r in a.trace.records]
+    s.ask_text("cancel A-12 now", textin=tin, question="cancel")      # another text (its hash is a given fact): a miss
+    assert len(calls) == 2
+    c = run(s.aask_text("cancel A-12 please", textin=tin, question="cancel"))
+    assert len(calls) == 2 and c.cached == {"of": a.stored_id}
+    assert store.verify()["ok"] and store.replay_all(s) == []          # replay re-runs the light records too
+    s2, tin2, calls2 = shop(cache=None)
+    s2.ask_text("cancel A-12 please", textin=tin2, question="cancel")
+    s2.ask_text("cancel A-12 please", textin=tin2, question="cancel")
+    assert len(calls2) == 2
+
+
+def test_ask_text_misses_when_the_read_differs():
+    from solvi.core.textin import TextIn
+    s, tin, calls = shop()
+    s.ask_text("cancel A-12 please", textin=tin, question="cancel")
+    other = TextIn(s, None, patterns={"order_id": r"[A-Z]-\d"})       # same text, another reading of its field
+    r = s.ask_text("cancel A-12 please", textin=other, question="cancel")
+    assert len(calls) == 2 and r.cached is None and r.read.state == {"order_id": "A-1"}
