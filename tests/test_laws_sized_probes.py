@@ -1,4 +1,4 @@
-"""solvi.experimental.laws and .skills, wave 2: acceptance sized by the candidates tested, admission by discriminating
+"""solvi.experimental.laws and .skills: acceptance sized by the candidates tested, admission by discriminating
 probes, abstention when consistent laws disagree, and the search-cost record.
 
 Synthetic worlds only: every law and every base rate is known, so a false accept is known exactly."""

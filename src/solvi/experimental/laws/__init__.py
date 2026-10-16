@@ -124,7 +124,7 @@ to beat 0.9 at tens of thousands of candidates. The need: a deterministic law ne
 (support ≥ 5, precision ≥ 0.9) accepted a law in 100 of 100 buffers at an effect rate of 70%, the sized rule with the
 base null in 0 of 100 (at 3%: 0 of 100 for both); a deterministic two-atom law at a base rate of 3% (1,000 rows) was
 accepted in 100 of 100 buffers with the base null on a median of 29 rows, in 0 of 100 with a fixed null of 0.9
-(tests/test_laws_w2.py). A buffer too small for its null accepts nothing — the rule working, not failing: declare
+(tests/test_laws_sized_probes.py). A buffer too small for its null accepts nothing — the rule working, not failing: declare
 `space=` or pass `sized=False` knowingly (the fixed thresholds; the measurements above ran so, and their false
 accepts are the known price). Each Law records `tested`, `null`, `need`, `level` and `admitted` ("test", "probes",
 "hand").
