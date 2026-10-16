@@ -33,3 +33,24 @@ def test_shop_order_fit_and_ask():
     order = {"customer": "c2", "items": [("B", 12, 80.0)], "stock": S.STOCK, "orders_db": db,
              "billing_country": "DE", "shipping_country": "DE", "payment_status": "pending"}
     assert s.ask(order)["ship_now"].answer == "no"            # hard check "paid"
+
+
+def test_build_head_update_through_changes():
+    import warnings
+    ex = load("26_build_head_update")
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        from solvi.experimental.changes import Canaries, Change, KnownFailures, Pipeline, SliceGuard
+    head = ex.BuildHead("v0")
+    must = [c["state"] for c in ex.POOL if head.live.ask(c["state"]).answer is None][:20]
+    stages = [KnownFailures(), SliceGuard(ex.slices, min_n=30),
+              Canaries.drawn(ex.honesty, ex.POOL, 100, baseline={"confident_error_rate": 0.02}, tolerance=0.0,
+                             perfect=None)]
+    pipe = Pipeline(stages, None, targets=[head], approval={"update": "gate"}, refusals=must, order="cheap_first")
+    assert pipe.propose(ex.update("more", "more")).promoted and head.name == "more"
+    bad = pipe.propose(ex.update("late_yes", "bad labels"))
+    assert bad.status == "rejected"
+    again = pipe.propose(ex.update("late_yes", "again"))
+    assert again.status == "rejected" and again.stage == "failure_memory"
+    assert pipe.rollback(0, why="test") == [1] and head.name == "v0"
+    assert isinstance(Change, type)
