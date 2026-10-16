@@ -221,6 +221,30 @@ STATUS: dict[str, dict] = {
                "record is tested on a synthetic corridor only, and skills are not admitted by discriminating probes "
                "(laws are: LawSet.admit_by_probes)",
                "script": "benchmarks/skills_toy.py"},
+    "ood": {"since": "1.2",
+            "what": "a watch next to System.calibrate's default Platt scaling (watch=), the known black-box shift "
+            "test (Rabanser, Günnemann and Lipton, NeurIPS 2019) on the decider's answers: shift(batch), a "
+            "per-feature two-sample Kolmogorov-Smirnov test of a batch's confidence, margin and options' "
+            "entropy against the calibration answers, Bonferroni at alpha, says the answers' features differ "
+            "from the reference; \"out of domain\" in why for one answer far from them (a max-softmax style "
+            "score, Hendrycks and Gimpel 2017, as a Mahalanobis distance). It sees the decider's confidence "
+            "profile, not the content: for inputs from outside the calibration set use OpenSetGate, for the "
+            "share answered alone and the answer mix DriftMonitor",
+            "missing": "measured once on intent classification with solvi-base (raw confidences, next to Platt "
+            "calibration; alpha 0.01; 10 directed pairs of CLINC150, Banking77, HWU64 and Bitext customer "
+            "support): with 200-answer batches (shift), 0.99–1.0 of the batches from another dataset flagged "
+            "on every pair and at most 0.05 of in-domain batches (one domain at that bar, 0.03–0.05 over two "
+            "draws of the windows; 0.01 or less for the others); with 50-answer batches, a mean of 0.76 and "
+            "0.30–0.48 on four pairs, +0.18 [0.05, 0.34] over a dev-tuned two-sided mean-confidence test at "
+            "the watch's own in-domain rate of about 1 % (worse on one pair) and on par with it at 5 %. On "
+            "half of the pairs the mean confidence rose, which a test for a fall of confidence cannot see. "
+            "Held-out intents of the same dataset were mostly not flagged (CLINC150, Banking77: under 1 % of "
+            "batches), while a rephrasing of the same domain (Banking77 and Bitext retail banking) was "
+            "flagged like another dataset; the per-answer note marked on average 10 % of another dataset's "
+            "answers. All four datasets are in or near the decider's training mix and their option sets "
+            "differ (20 of 27–150 labels); still missing: a benchmark script in benchmarks/ and a decider "
+            "that has not seen the data",
+            "script": None},
 }
 for _s in STATUS.values():
     _s["deadline"] = DEADLINE
