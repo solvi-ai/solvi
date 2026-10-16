@@ -26,9 +26,11 @@ class LongSpanExtractor:
     def __init__(self, model_name="answerdotai/ModernBERT-large", max_len=1024, stride=128, max_span=96, device=None):
         """stride: overlap between adjacent windows in tokens (as in transformers); max_span: maximum answer length in tokens."""
         from ..._loader import optional
-        what = "LongSpanExtractor (torch only: solvi[onnx] covers the decider, not this extractor)"
-        torch = optional("torch", "model", what)
-        tf = optional("transformers", "model", what)
+        try:
+            torch = optional("torch", "model", "LongSpanExtractor")
+            tf = optional("transformers", "model", "LongSpanExtractor")
+        except ImportError as e:                 # the onnx extra runs the decider without torch, not this extractor
+            raise ImportError(f"{e} (solvi[onnx] covers the decider, not this extractor)") from e
         AutoModel, AutoTokenizer = tf.AutoModel, tf.AutoTokenizer
         self.torch = torch
         self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
