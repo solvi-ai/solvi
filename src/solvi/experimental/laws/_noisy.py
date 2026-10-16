@@ -129,7 +129,8 @@ def admit_noisy(ls, cands, ask: Callable[[Any, Any], Any], *, pool: list, safe, 
     rows = list(asked)
     if buffer is not None:
         rows = [r for r in buffer.rows(c.action, exclude)] + rows
-    sup = [r for r in rows if _key(r.action) == _key(c.action) and set(c.condition) <= set(ls.grammar.true(r.state, r.action))]
+    sup = [r for r in rows if _key(r.action) == _key(c.action)
+           and set(c.condition) <= set(ls.grammar.true(r.state, r.action))]
     hits = sum(1 for r in sup if E(ls.apply(c.effect, r.state), r.observed))
     net = sum(1 for r in sup if E(ls.apply(c.effect, r.state), r.observed)
               and not E(ls.predict(r.state, r.action, disagree="first"), r.observed))
