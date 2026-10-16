@@ -3746,7 +3746,9 @@ catalog](#citing-the-clause-a-rule-implements)) has `"cites": [{"clause", "quote
 with `diff(store, new_system, only={decision_id})`: `rep.extraneous` lists the ids of the other decisions it changes
 (answer, status or guard — a decision now forced by the exception counts) and `rep.exact` is True when there are none;
 `solvi.core.versions.decision_diff(..., only=)` does the same over the decisions whose answer moves ([versions of a
-document](#versions-of-a-document-and-their-impact-solvicoreversions)).
+document](#versions-of-a-document-and-their-impact-solvicoreversions)). `diff(store, new_system, facts=True)` also lists in
+`rep.facts` every decision whose facts or checks changed — also where no answer did yet — with each step's old and new
+value and why (`solvi.core.store.diff.fact_changes`; compact records are compared on their answers only).
 
 Each stored decision's recorded input is asked again for the same questions (`store=False`: the new system's own storage
 is not written) and compared with the stored response: answer, status, the guard that settled it, the safeguard events

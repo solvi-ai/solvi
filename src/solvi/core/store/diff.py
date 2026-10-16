@@ -225,6 +225,7 @@ class DiffReport:
     only: list | None = None                      # diff(only=): the decisions the change is allowed to change
     extraneous: list = field(default_factory=list)   # ids of the changed decisions not in `only` (in `changed` order)
     exact: bool = False                           # `only` given, nothing outside it changed, every decision re-ran
+    facts: list | None = None                     # diff(facts=True): [{"id", "seq", "time", "facts": [step change]}]
 
     @property
     def ok(self):
@@ -246,8 +247,11 @@ class DiffReport:
         return out
 
     def to_dict(self):
-        return {"total": self.total, "changed": self.changed, "errors": self.errors, "catalog": self.catalog,
-                "by_question": self.by_question(), "only": self.only, "extraneous": self.extraneous, "exact": self.exact}
+        out = {"total": self.total, "changed": self.changed, "errors": self.errors, "catalog": self.catalog,
+               "by_question": self.by_question(), "only": self.only, "extraneous": self.extraneous, "exact": self.exact}
+        if self.facts is not None:
+            out["facts"] = self.facts
+        return out
 
     def __str__(self):
         n = len(self.changed)
@@ -258,6 +262,14 @@ class DiffReport:
         ap = self.catalog.get("added_parts")
         if ap:
             lines.append("  parts that ran now and not then: " + ", ".join(ap))
+        if self.facts is not None:
+            names = {}
+            for d in self.facts:
+                for f in d["facts"]:
+                    names[f["name"]] = names.get(f["name"], 0) + 1
+            lines.append(f"  {len(self.facts)} decision(s) with a changed fact"
+                         + (" (" + ", ".join(f"{k} {v}" for k, v in sorted(names.items(), key=lambda t: -t[1])) + ")"
+                            if names else ""))
         if self.only is not None:
             lines.append("  exact: only the allowed decisions change" if self.exact else
                          f"  {len(self.extraneous)} decision(s) changed outside the allowed ones: "
@@ -322,7 +334,24 @@ def _compact_change(s, system, confidence):
     return out
 
 
-def diff(storage, system, confidence=0.01, limit=None, only=None, **filters):
+def fact_changes(old, new):
+    """The facts and checks whose output differs between two responses to the same input, in flow order → [{"step",
+    "name", "old", "new", "why"}] (as causes gives them). Answers, plans and guards are left out, and so is a step
+    that ran in only one of them (an early exit, a changed flow): there is no output of the other to compare."""
+    olds, news = _records(old), _records(new)
+    out = []
+    for r in new.trace.records:
+        n = r.name
+        a = olds.get(n)
+        if a is None or n.startswith("answer:") or r.kind in ("head", "plan", "textin", "guard", "then"):
+            continue
+        b = news[n]
+        if _out(a) != _out(b):
+            out.append(_why(n, a, b, old, new))
+    return list({d["name"]: d for d in out}.values())
+
+
+def diff(storage, system, confidence=0.01, limit=None, only=None, *, facts=False, **filters):
     """Re-run stored decisions with `system` (e.g. a new catalog or model) and report what changes → DiffReport.
     Each stored decision is loaded (typed values restored with `system`), its recorded input is asked again for the same
     questions (store=False: nothing is written to the system's own storage), and the two responses are compared (see
@@ -333,9 +362,14 @@ def diff(storage, system, confidence=0.01, limit=None, only=None, **filters):
     decision re-ran (a decision that could not be re-run, listed in `errors`, may have changed: then `exact` is False).
     A cause whose part (in `system`) cites what it implements (`clause=` / `cite=` on its decorator) carries "cites":
     [{"clause", "quote"}] — the chain clause → part → decision.
+    facts: True — also `facts`: every re-run decision whose facts or checks changed (fact_changes), whether or not an
+    answer did — a fix that moves an intermediate number without moving an answer yet shows here; compact records
+    hold no facts and are compared on their answers only.
     The system's learned parts may learn from these asks as from any other (System(learn=...))."""
     from ..provenance import catalog_fingerprint
     rep = DiffReport()
+    if facts:
+        rep.facts = []
     now = catalog_fingerprint(system.catalog)
     rep.catalog = {"new": now["fp"], "stored": {}, "changed_parts": [], "added_parts": []}
     changed_parts, added_parts = set(), set()
@@ -371,6 +405,10 @@ def diff(storage, system, confidence=0.01, limit=None, only=None, **filters):
             continue
         was = {r.name for r in old.trace.records} | {n for n, _ in old.trace.skipped}
         added_parts |= {r.name for r in new.trace.records if r.name not in was and r.kind not in ("head", "plan", "textin", "guard", "then")}
+        if facts:
+            fc = fact_changes(old, new)
+            if fc:
+                rep.facts.append({"id": s.id, "seq": s.seq, "time": s.time, "facts": fc})
         ch = compare(old, new, confidence)
         if ch:
             _add_cites(ch, system.catalog, new)
@@ -620,4 +658,4 @@ class Shadow:
         return "\n".join(lines)
 
 
-__all__ = ["causes", "compare", "diff", "DiffReport", "part_cites", "Shadow"]
+__all__ = ["causes", "compare", "diff", "DiffReport", "fact_changes", "part_cites", "Shadow"]
