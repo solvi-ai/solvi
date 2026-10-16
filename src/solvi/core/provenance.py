@@ -365,6 +365,44 @@ def _code_fp(f, seen, memo):
     return fp
 
 
+def code_callees(f):
+    """The functions a function's code fingerprint takes in directly — the functions it closes over and those of its own
+    module it reads as globals — → {qualified name: code_fingerprint(callee)} ({} for none, or for a callable object).
+    A callee's own fingerprint holds its callees in turn, so a change deep down shows as the direct callee that leads to
+    it. What `diff` uses to tell "a function it calls changed" from a change of the part's own code."""
+    import inspect
+    if f is None:
+        return {}
+    f = inspect.unwrap(f)
+    if inspect.ismethod(f):
+        f = f.__func__
+    if not inspect.isfunction(f):
+        return {}
+    out = {}
+    for cell in f.__closure__ or ():
+        try:
+            v = cell.cell_contents
+        except ValueError:
+            continue
+        if inspect.isfunction(v) and v is not f:
+            out[v.__qualname__] = code_fingerprint(v)
+    g = getattr(f, "__globals__", {}) or {}
+    for name in _code_names(f.__code__):
+        v = g.get(name)
+        if inspect.isfunction(v) and v is not f and \
+                fp_module(v.__module__, v.__qualname__) == fp_module(f.__module__, f.__qualname__):
+            out[v.__qualname__] = code_fingerprint(v)
+    return out
+
+
+def part_callees(part):
+    """code_callees over a part's code: its function, or each alternative producer's → {qualified name: fingerprint}."""
+    out = {}
+    for a in part.alternatives or [part]:
+        out.update(code_callees(a.func))
+    return out
+
+
 _MUTABLE = (dict, list, set, bytearray)
 _FIRST = {}             # (id of a module's globals, name) → (the container, its value as first fingerprinted)
 
@@ -462,7 +500,8 @@ def part_fingerprint(part):
 
 
 def catalog_fingerprint(catalog):
-    """→ {"fp": the catalog's fingerprint, "parts": {name: fingerprint}} over every part, answer rule ("answer:<question>")
+    """→ {"fp": the catalog's fingerprint, "parts": {name: fingerprint}, "calls": {name: {callee: fingerprint}} (the
+    parts that call functions of their own module, see code_callees)} over every part, answer rule ("answer:<question>")
     and constraint ("constraint:<name>"). Cached on the catalog while its parts are the same objects (a part edited in place
     after that is not noticed: register a new one). A helper that many parts call is hashed once per call (see
     code_fingerprint)."""
@@ -477,11 +516,12 @@ def catalog_fingerprint(catalog):
     token = var.set({}) if var.get() is None and _MEMO_ON else None   # one memo for every part's code
     try:
         parts = {n: part_fingerprint(p) for n, p in items}
+        calls = {n: c for n, c in ((n, part_callees(p)) for n, p in items) if c}
     finally:
         if token is not None:
             var.reset(token)
     out = {"fp": digest(sorted(parts.items())) if combine == "first" else digest(sorted(parts.items()), ("combine", combine)),
-           "parts": parts}
+           "parts": parts, "calls": calls}
     catalog._fp_cache = (key, out)
     return out
 
@@ -669,7 +709,7 @@ def snippet(init, quote, width=60):
     return t if len(t) <= width else t[: width - 1] + "…"
 
 
-__all__ = ["catalog_fingerprint", "classify", "code_fingerprint", "digest", "ESCALATED", "find_normalized", "fingerprint",
+__all__ = ["catalog_fingerprint", "classify", "code_callees", "code_fingerprint", "digest", "ESCALATED", "find_normalized", "fingerprint",
            "FUZZY", "INSTRUCTION", "KINDS", "matches", "matches_normalized", "MEMORY", "model_id", "model_info",
            "NORM_FORM", "norm_view", "normalized", "NOT_GROUNDED", "OUTSIDE_OPTIONS", "QUOTE_MODES", "QUOTE_OUTSIDE",
            "quote_match_problem", "quote_mode", "QUOTES_LITERAL", "QUOTES_NORMALIZED", "snippet", "TIMED_OUT",
