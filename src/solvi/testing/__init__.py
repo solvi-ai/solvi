@@ -212,7 +212,7 @@ def _deadline(seconds):
         signal.signal(signal.SIGALRM, old)
 
 
-def run_case(system, case, state, store=False, timeout=None, reruns=0):
+def run_case(system, case, state, store=False, timeout=None, reruns=0, fast=False):
     """Ask one case and compare → CaseResult (with its status: see CaseResult). Nothing is written to the system's own
     storage (a test input is not a decision) unless store=True. Exceptions from ask are reported as a crash (status
     "error"), not raised. A case that cannot fail is a problem too: a key that is not one of CASE_KEYS (a misspelled
@@ -220,11 +220,14 @@ def run_case(system, case, state, store=False, timeout=None, reruns=0):
     timeout: seconds the case may take (ask and replay; None: no limit) — a longer one is stopped and reported with
     status "timeout" (by SIGALRM: POSIX and the main thread only; code stuck in a C call is stopped when it returns).
     reruns: a failing case is asked that many times more (never stored); answers that differ from the first run's make
-    it "nondeterministic" rather than a regression."""
+    it "nondeterministic" rather than a regression.
+    fast=True: the answers are decided as ask decides them but without its record keeping (System._decide: no hashes,
+    fingerprints or safeguard events, nothing stored or counted) and the trace is not replayed — for many cases (a
+    mutation run); a case that expects safeguards, a store=True run and a system without _decide are asked in full."""
     started = time.perf_counter()
     try:
         with _deadline(timeout):
-            out = _run_case(system, case, state, store)
+            out = _run_case(system, case, state, store, fast)
     except CaseTimeout as e:
         out = CaseResult(case.get("name", "?"), [f"timeout: {e}"], status="timeout")
         out.ms = (time.perf_counter() - started) * 1000
@@ -233,7 +236,7 @@ def run_case(system, case, state, store=False, timeout=None, reruns=0):
         for k in range(reruns):
             try:
                 with _deadline(timeout):
-                    res = system.ask(copy.deepcopy(state), case.get("ask"), **_store_kw(system, False))
+                    res = _fast(system, case, store, fast)[0](copy.deepcopy(state), case.get("ask"))
             except (Exception, CaseTimeout):  # noqa: BLE001, S112 — a re-run that fails says nothing more
                 continue
             again = {q: [_show(r.answer), r.status] for q, r in res.results.items()}
@@ -244,7 +247,16 @@ def run_case(system, case, state, store=False, timeout=None, reruns=0):
     return out
 
 
-def _run_case(system, case, state, store):
+def _fast(system, case, store, fast):
+    """The asking function of a case and whether it is the fast one: System._decide under fast=True when it can stand
+    for ask (see run_case), else ask."""
+    if fast and not store and "safeguards" not in case and callable(getattr(system, "_decide", None)):
+        return system._decide, True
+    kw = _store_kw(system, store)
+    return (lambda state, questions: system.ask(state, questions, **kw)), False
+
+
+def _run_case(system, case, state, store, fast=False):
     name = case.get("name", "?")
     out = CaseResult(name)
     odd = sorted(k for k in case if k not in CASE_KEYS and k != "gold")
@@ -255,8 +267,9 @@ def _run_case(system, case, state, store):
     expected = case.get("expected")
     if not (expected or case.get("status") or case.get("safeguards") or isinstance(case.get("safeguards"), list)):
         out.problems.append("the case expects nothing: give \"expected\", \"status\" or \"safeguards\"")
+    ask, quick = _fast(system, case, store, fast)
     try:
-        res = system.ask(state, case.get("ask"), **_store_kw(system, store))
+        res = ask(state, case.get("ask"))
     except Exception as e:  # noqa: BLE001
         out.problems.append(f"crash: {type(e).__name__}: {e}\n{traceback.format_exc(limit=-3)}")
         out.status = "error"
@@ -298,6 +311,9 @@ def _run_case(system, case, state, store):
             got = sorted(fired.get(q, ()))
             if got != sorted(set(kinds)):
                 out.problems.append(f"{q}: expected safeguards {sorted(set(kinds))}, fired {got}")
+    if quick:                                        # fast: no record keeping, so no replay
+        out.status = "regression" if len(out.problems) > n_case else "invalid" if n_case else "ok"
+        return out
     rep = res.trace.replay(system)
     if not rep["ok"]:
         out.problems.append(f"trace replay failed: {rep['mismatches'][:3]}")
@@ -308,7 +324,7 @@ def _run_case(system, case, state, store):
     return out
 
 
-def run_file(path, fuzz_n=0, seed=0, store=False, timeout=None, reruns=0, isolate=False, max_mem=None):
+def run_file(path, fuzz_n=0, seed=0, store=False, timeout=None, reruns=0, isolate=False, max_mem=None, fast=False):
     """Run every case of a cases file → FileResult (with fuzz_n > 0, each case is also fuzzed; crashes are problems).
     store=True: the cases (never the fuzz mutations) are saved to the system's storage, when it has one.
     timeout: seconds each case may take (see run_case; None: no limit). reruns: a failing case is asked that many times
@@ -321,11 +337,17 @@ def run_file(path, fuzz_n=0, seed=0, store=False, timeout=None, reruns=0, isolat
     per case. max_mem (needs isolate=True): the most memory a case's process may use — bytes, or "512M" / "2G" —
     enforced as its address space (RLIMIT_AS: numpy with a threaded BLAS alone reserves about 1 GB of it), and a case
     that runs out has status "memory". Where RLIMIT_AS is not enforced (macOS, Windows) the process's peak resident
-    memory is compared with max_mem after the case instead, and a UserWarning says so."""
+    memory is compared with max_mem after the case instead, and a UserWarning says so.
+    fast=True: each case's answers are decided without ask's record keeping and its trace is not replayed (see run_case):
+    the same answers and statuses, several times faster on a cheap catalog — for many cases, such as a mutation run.
+    What it does not check: that the trace replays (a step that does not recompute is not reported as nondeterministic)
+    and the safeguards (a case that expects safeguards is asked in full). Not with store=True."""
     path = Path(path)
     out = FileResult(path)
     if max_mem is not None and not isolate:
         raise ValueError("max_mem= caps the process a case runs in: it needs isolate=True")
+    if fast and store:
+        raise ValueError("fast=True keeps no records: it cannot store the cases (store=True)")
     if isolate:
         from ._isolate import parse_mem, run_isolated
         try:
@@ -334,7 +356,8 @@ def run_file(path, fuzz_n=0, seed=0, store=False, timeout=None, reruns=0, isolat
             out.error = f"{type(e).__name__}: {e}"
             return out
         cap = parse_mem(max_mem)
-        out.cases, out.error, notes = run_isolated(path, cases, timeout, reruns, store, fuzz_n, seed, cap, CaseResult)
+        out.cases, out.error, notes = run_isolated(path, cases, timeout, reruns, store, fuzz_n, seed, cap, CaseResult,
+                                                   fast)
         if cap and notes:
             import warnings
             warnings.warn(f"max_mem is not enforced here ({'; '.join(sorted(notes))}): a case's peak resident memory "
@@ -353,7 +376,7 @@ def run_file(path, fuzz_n=0, seed=0, store=False, timeout=None, reruns=0, isolat
             out.cases.append(CaseResult(case.get("name", f"#{i + 1}"), [f"prepare failed: {type(e).__name__}: {e}"],
                                         status="error"))
             continue
-        r = run_case(system, case, state, store, timeout, reruns)
+        r = run_case(system, case, state, store, timeout, reruns, fast)
         if fuzz_n:
             found = [f"fuzz {c}" for c in fuzz(system, state, fuzz_n, seed + i)]
             r.problems += found
@@ -371,9 +394,9 @@ def _isolated_child(req):
     child(req, sys.modules[__name__])
 
 
-def run_path(paths, fuzz_n=0, seed=0, store=False, timeout=None, reruns=0, isolate=False, max_mem=None):
+def run_path(paths, fuzz_n=0, seed=0, store=False, timeout=None, reruns=0, isolate=False, max_mem=None, fast=False):
     """Every cases file under the paths → [FileResult] (see run_file)."""
-    return [run_file(f, fuzz_n, seed, store, timeout, reruns, isolate, max_mem) for f in find(paths)]
+    return [run_file(f, fuzz_n, seed, store, timeout, reruns, isolate, max_mem, fast) for f in find(paths)]
 
 
 # --------------------------------------------------------------------------------------------------- fuzzing
@@ -469,11 +492,13 @@ def main(argv=None):
                     "stuck case does not stop the run, and no case sees another's module state")
     ap.add_argument("--max-mem", default=None, metavar="SIZE", help="with --isolate: the most memory a case's process "
                     "may use (bytes, or 512M / 2G); a case that needs more fails with status memory")
+    ap.add_argument("--fast", action="store_true", help="decide the cases without record keeping and skip the trace "
+                    "replay check (faster for many cases; safeguards cases are still asked in full)")
     ap.add_argument("--json", action="store_true", help="print the results as JSON")
     ap.add_argument("-q", "--quiet", action="store_true", help="print failures and the summary only")
     a = ap.parse_args(argv)
     try:
-        files = run_path(a.paths, a.fuzz, a.seed, a.store, a.timeout, a.reruns, a.isolate, a.max_mem)
+        files = run_path(a.paths, a.fuzz, a.seed, a.store, a.timeout, a.reruns, a.isolate, a.max_mem, a.fast)
     except (FileNotFoundError, ValueError) as e:
         print(f"solvi test: {e}", file=sys.stderr)
         return 2
