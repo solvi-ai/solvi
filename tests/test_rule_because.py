@@ -65,3 +65,4 @@ def test_plain_rules_keep_their_why():
         return income >= 10000
     s = System(cat, [Question("approve", "Approve?", Answer.yes_no())])
     assert s.ask({"income": 2000.0})["approve"].why == "income = 2000.0"
+
