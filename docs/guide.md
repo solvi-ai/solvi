@@ -608,6 +608,13 @@ def repair_days(doc: str) -> Estimate[0, 3, 7, 14]:
   the support (`quoted` for plain code, `quoted_by_model` for a model). `Question(require_evidence=True)`: an answer without
   a supporting quote abstains — safeguard **evidence missing** (`guard="evidence_missing"`, `system.stats`); a span is its
   own evidence, and "not stated" needs none.
+- **The branch and the numbers in `why`** (opt-in). A rule's `why` lists its inputs and their values; to say which branch
+  it took, return `because(value, "B = P ≠ D", p=0.38)` (`from solvi.core import because, missing`): `why` then reads
+  `because B = P ≠ D (p=0.38); direct = 176.0; ...`. A fact function may return `because(...)` too — its reason follows the
+  fact's value in each reading rule's `why` (`p_abstain = 0.38 (two of three checks agree; agree=2, of=3)`) — and
+  `missing("the program did not run")` for a fact with no value: the rule reads None and `why` says
+  `proposed = missing (the program did not run)` instead of a NaN stand-in. Both are recorded in the trace
+  (`record.extra["because"]`, `["numbers"]`, `["missing"]`) and checked on replay.
 - **Span** (`Span[T]`, `Answer.span(source="doc", type=None)`): the rule returns a `Quote` (its text must be literally at its
   offsets, whatever the part) or the text (located in `source`). The answer is the text read as `T`: by pydantic
   (`"149.90"` → 149.9, `"2026-07-21"`), and for a date or a number (`date`, `int`, `float`, `Decimal`) otherwise by the

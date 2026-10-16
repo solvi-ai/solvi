@@ -174,6 +174,35 @@ class Decision:
             return 1.0
 
 
+def because(value, text, **numbers):
+    """A value with the reason its part chose it — the branch taken and the numbers it rested on: `return because("unknown",
+    "B = P ≠ D", p=0.38)`. Opt-in: from a rule the reason leads the answer's `why` ("because B = P ≠ D (p=0.38); ..."); from
+    a fact function it is shown after that fact's value in the `why` of each rule that reads it. Recorded in the trace
+    (`record.extra["because"]`, `["numbers"]`) and checked on replay. numbers: plain values (int, float, str, bool) → a Claim."""
+    text = str(text)
+    nums = {str(k): (v if isinstance(v, (int, float, str, bool)) or v is None else repr(v)) for k, v in numbers.items()}
+    return Claim(value, extra={"because": text, **({"numbers": nums} if nums else {})})
+
+
+def missing(reason):
+    """A fact with no value, and why: `return missing("the program did not run")` in place of a NaN stand-in. The fact is
+    None for the parts that read it (a rule decides what no value means) and each rule's `why` shows "x = missing (the
+    program did not run)"; the reason is recorded in the trace (`record.extra["missing"]`). → a Claim."""
+    return Claim(None, extra={"missing": str(reason)})
+
+
+def because_text(extra):
+    """A record's `extra` → its reason as text ("B = P (p=0.38)"; "missing (why)"), or None when it has none."""
+    if not isinstance(extra, dict):
+        return None
+    if "missing" in extra:
+        return f"missing ({extra['missing']})"
+    if "because" not in extra:
+        return None
+    nums = extra.get("numbers") or {}
+    return extra["because"] + ("; " + ", ".join(f"{k}={v!r}" for k, v in nums.items()) if nums else "")
+
+
 def unwrap(v):
     """A part's output → (plain value, quote (start, end, source) or None, confidence, probs or None)."""
     if isinstance(v, Quote):
@@ -1139,9 +1168,9 @@ class Catalog:
         raise KeyError(f"{name} is not a producer of {fact}")
 
 
-__all__ = ["ExperimentalWarning", "NOT_STATED", "accept", "accepts", "Answer", "AnswerType", "bin_labels", "Catalog", "check_evidence", "cites_of", "Claim",
+__all__ = ["ExperimentalWarning", "NOT_STATED", "accept", "accepts", "Answer", "AnswerType", "because", "because_text", "bin_labels", "Catalog", "check_evidence", "cites_of", "Claim",
            "cuts_number", "Decision", "evidence_rows", "find_whole", "ground", "group_func", "has_evidence", "locate",
-           "NOT_STATED_KEY", "NotStated", "Part", "plain_json", "PRIMITIVES", "Question", "question_data", "Quote",
+           "missing", "NOT_STATED_KEY", "NotStated", "Part", "plain_json", "PRIMITIVES", "Question", "question_data", "Quote",
            "Serial", "Unknown", "unknown_key", "unwrap", "validated"]
 
 _group_func = group_func          # the name before 1.1

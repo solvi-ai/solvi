@@ -113,6 +113,28 @@ def experimental_of(system):
     return sorted(names)
 
 
+
+def _rule_why(rule, r, vals, by):
+    """A rule's `why`: its inputs with their values — each with the reason its fact function gave (solvi.core.because /
+    missing) — led by the rule's own reason when it gave one."""
+    from .catalog import because_text
+    parts = []
+    for x in rule.inputs:
+        said = because_text(by[x].extra) if x in by else None
+        if said and said.startswith("missing (") and vals.get(x) is None:
+            parts.append(f"{x} = {said}")
+        else:
+            parts.append(f"{x} = {srepr(vals.get(x))}" + (f" ({said})" if said else ""))
+    own = because_text(r.extra)
+    if own:
+        b = r.extra["because"] if "because" in r.extra else None
+        nums = (r.extra.get("numbers") or {}) if b is not None else {}
+        lead = (f"because {b}" + (" (" + ", ".join(f"{k}={v!r}" for k, v in nums.items()) + ")" if nums else "")
+                if b is not None else own)
+        parts.insert(0, lead)
+    return "; ".join(parts)
+
+
 class System:
     """A catalog and its questions: `ask(state)` plans the flow (the strategist), runs the parts, applies the checks,
     rules, heads, guarantees and constraints, and returns a Response with its hash-chained trace; `fit`, `teach`,
@@ -849,7 +871,7 @@ class System:
                               guard="timeout" if late else "grounding" if grounding else None)
             pc = path_confidence(self.catalog, trace, rule.inputs, pcache)
             conf = min(pc, r.confidence)
-            why = "; ".join(f"{x} = {srepr(vals.get(x))}" for x in rule.inputs)
+            why = _rule_why(rule, r, vals, by)
             src = rule.func.__name__ if rule.func is not None else rule.name
             if r.value is None:                       # the rule itself declined to answer (e.g. a split vote): a deliberate abstention
                 return Result(None, 0.0, f"the rule abstained (returned None); {why}", "abstain", provenance=r.origin,

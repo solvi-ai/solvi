@@ -680,6 +680,11 @@ def _recompute(part, r, args, init, catalog=None):
             was = (r.extra or {}).get("reasons")
             if got != was:
                 return [(r.step, r.name, f"reasons {was} ≠ recomputed {got}")]
+            for k in ("because", "numbers", "missing"):     # solvi.core.because / missing: the reason given
+                got = (v.extra or {}).get(k) if isinstance(v, Claim) else None
+                was = (r.extra or {}).get(k)
+                if got != was:
+                    return [(r.step, r.name, f"recorded {k} {was!r} ≠ recomputed {got!r}")]
     if r.error is not None:
         if why is None:
             return [(r.step, r.name, f"recorded error {r.error!r}, but the step recomputes fine")]
