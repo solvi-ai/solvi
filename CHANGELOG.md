@@ -505,6 +505,31 @@ started from a failing test built on the reproduction; the numbers are before �
   replay check (1,000 cases of a small catalog: 0.09 s against 0.33 s); safeguard cases are still asked in full; not with
   `store=True`.
 
+- **Learn-then-test: two sequential procedures for the threshold grid, `calibrate(..., procedure="fallback")` and
+  `procedure="fixed"`** (also `System.guarantee(..., procedure=)`, `ltt_threshold(procedure=)`,
+  `solvi.core.calibration.ltt_certified`; opt-in, the default Bonferroni unchanged). The same promise — error among the
+  answers given alone ≤ e with probability ≥ 1 − delta — tested from the highest threshold down instead of every
+  threshold at delta / 64. `"fixed"` tests each threshold at the full delta and stops at the first failure
+  (fixed-sequence testing, Bauer 1991; Learn then Test, Angelopoulos et al. 2021). `"fallback"` puts half of delta on
+  the first threshold and spreads half over the rest; a certified threshold passes its level on, a failure does not end
+  the descent (the fallback procedure, Wiens 2003, Wiens and Dmitrienko 2005; the chain graph of Bretz et al. 2009; the
+  same procedure appears in Learn then Test, App. E). Both start at the highest threshold with enough answered cases to
+  pass at all — a rule on counts, fixed before the labels are read. Measured once, delta = 0.1, on the max-probability
+  scores of five intent classifiers (solvi-base on CLINC150 and on Banking77; solvi-base, solvi-large and a TF-IDF
+  model on a second Banking77 split; pool error rates 3–32 %), error targets 0.01–0.1, 300 or 1,000 calibration
+  examples drawn 500 times per cell, scored on the whole pool: the fallback answered +0.10 more of the inputs on
+  average than the default (per classifier +0.03 to +0.18; +0.12 at n = 300, +0.09 at n = 1,000) and +0.07 more than a
+  Bonferroni over 8 thresholds tuned on separate calibration pools; in no cell did it answer less than the default on
+  average (more in 32 of 40, the same in 8 where both answer nothing or everything); the promise was broken in at most
+  5.0 % of draws in any cell (the default: 0.2 %). The fixed sequence answers more still (+0.13 over the default) but
+  less than the default in 3 of 40 cells (down to −0.08, when a wrong case sits among the first ones answered); the
+  fallback is the one to take unless that is acceptable. Price of the fallback against the fixed sequence: −0.028
+  pooled, −0.055 at n = 300 and ≈ 0 at n = 1,000; where e × n is about 3 or less (e = 0.01 with 300 examples) it
+  certifies nothing where the fixed sequence certified up to 0.58, and at e = 0.02 with 300 examples it answered 0.43
+  where the fixed sequence answered 0.58 on one classifier. Not measured: other signal types, other delta, grids other
+  than the ≤ 64 quantiles; the interval of the pooled gain over the draws is ±0.002, the spread over classifiers and
+  cells is the larger uncertainty (most of the gain sits in the cells with a small e or a small n).
+
 ### Docs
 
 - `LongSpanExtractor` without torch: its ImportError names `solvi[model]` for training and
