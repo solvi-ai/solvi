@@ -44,6 +44,7 @@ solvi test gallery/ --fuzz 30             # also 30 mutated inputs per case (see
 solvi test . --store                      # also save the cases' decisions to the system's own store
 solvi test . --timeout 5 --reruns 2       # stop a case after 5 s; ask a failing case twice more
 solvi test . --isolate --max-mem 2G       # each case in its own process, at most 2 GB of memory
+solvi test . --fast                       # many cases (a mutation run): no record keeping, no replay check
 ```
 
 From Python, use `solvi.testing.run_path(paths)` to get a `FileResult` per file and a `CaseResult` per case (`ok`,
@@ -64,7 +65,14 @@ allocation past it raises MemoryError and the case has status `memory`. The cap 
 the whole process — Python, solvi, the task and the case — and numpy with a threaded BLAS reserves about 1 GB of it at
 import, so leave room. macOS and Windows do not enforce RLIMIT_AS: there the process's peak resident memory is compared
 with the cap after the case instead (a case over it still fails with `memory`, but it was not stopped), and a warning
-says so. To run the cases inside your own pytest suite, one test is enough:
+says so.
+
+`--fast` (`run_path(paths, fast=True)`) decides each case as `ask` does — the same answers and statuses — but without
+its record keeping (no hashes, fingerprints or safeguard events) and without the replay check: on 1,000 cases of a
+small rule catalog, 0.09 s against 0.34 s. It does not tell a step that fails to recompute (`nondeterministic` needs
+`--reruns` then), a case that expects safeguards is still asked in full, and it cannot be combined with `--store`.
+Use it for runs of many cases, such as checking mutants of the code; keep the full run for the suite you commit.
+To run the cases inside your own pytest suite, one test is enough:
 
 ```python
 from solvi.testing import run_path

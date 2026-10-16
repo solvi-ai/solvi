@@ -123,7 +123,7 @@ def child(req, t):
         say("result", case=_dump(r))
         return
     say("ready")
-    r = _as_memory(run_case(system, case, state, req["store"], None, req["reruns"]), req["max_mem"])
+    r = _as_memory(run_case(system, case, state, req["store"], None, req["reruns"], req.get("fast", False)), req["max_mem"])
     r = _over(r, req["max_mem"], peak_rss(), note)
     say("result", case=_dump(r))
     if req["fuzz_n"]:
@@ -143,14 +143,14 @@ def _reader(stream, q):
     q.put(None)
 
 
-def run_isolated(path, cases, timeout, reruns, store, fuzz_n, seed, max_mem, CaseResult):
+def run_isolated(path, cases, timeout, reruns, store, fuzz_n, seed, max_mem, CaseResult, fast=False):
     """The parent's side: every case of a cases file in its own process → ([CaseResult], file error or None, notes)."""
     import tempfile
     out, notes = [], set()
     for i, case in enumerate(cases):
         name = case.get("name", f"#{i + 1}") if isinstance(case, dict) else f"#{i + 1}"
         req = {"sys_path": list(sys.path), "path": str(path), "index": i, "store": store, "reruns": reruns,
-               "fuzz_n": fuzz_n, "seed": seed, "max_mem": max_mem}
+               "fuzz_n": fuzz_n, "seed": seed, "max_mem": max_mem, "fast": fast}
         with tempfile.TemporaryFile() as err:
             started = time.perf_counter()
             proc = subprocess.Popen([sys.executable, "-c", BOOT], stdin=subprocess.PIPE, stdout=subprocess.PIPE,  # noqa: S603 — our runner, a fixed argv
