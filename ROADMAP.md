@@ -81,7 +81,7 @@ for one pre-registered check, run once, before it enters the library.
 | **Own code and callee both named** | When both a called function and the part's own code changed, only the callee is named: an own-code fingerprint per part to say both | done (1.2) |
 | **`query(run=...)` on stores** | A store filter by run id (today: `chronology(..., run=)` or `Stored.run`); a thread pool started inside `run_context` needs `contextvars.copy_context()` | done (1.2) |
 | **Changes: narrows / widens over the rule's text** | `Consistency(probes=)` measures only on the probes; a proof over the rule's text (an SMT solver over the rule language) would cover every input | done (1.2, opt-in, `solvi[smt]`): a Python subset (comparisons, boolean ops, arithmetic, literal-set membership) proved with z3, anything else "unknown" and measured on the probes; 29 % of gallery threshold-mutant proofs decided, 0 contradictions. Open: calls, subscripts and `x is None` |
-| **ONNX inference path for `LongSpanExtractor`** | Export the encoder and pointer heads once with torch, predict with onnxruntime + tokenizers (today the `onnx` extra covers the decider only) | planned |
+| **ONNX inference path for `LongSpanExtractor`** | Export the encoder and pointer heads once with torch, predict with onnxruntime + tokenizers: `LongSpanExtractor.load(..., backend="onnx")`; 50 / 50 same spans as torch on the published extract-base | done (1.2) |
 
 ## Next (1.2): from use over the automated tests of a live web application
 
