@@ -152,6 +152,14 @@ started from a failing test built on the reproduction; the numbers are before �
 
 ### Added
 
+- **Changes (experimental): narrows / widens proved over the rule's text** (opt-in, `pip install "solvi[smt]"` →
+  z3-solver; not a hard dependency). `prove_direction(before, after)` translates a Python subset of both rules —
+  comparisons, `and` / `or` / `not`, arithmetic on numbers, membership in literal sets, `if` / `else`, local
+  assignments — to SMT and answers "widens", "narrows", "both", "same" with a witness input, or "unknown" with the
+  construct it could not read. `Consistency(prove=True, before=...)` uses it (the candidate's rule is `change.code`);
+  an unknown proof falls back to `probes=`. Without z3 the stage says how to install it. On the gallery's rules with
+  every comparison threshold shifted or made strict (`benchmarks/changes_prove.py`): 151 of 526 proofs decided (29 %),
+  median 0.6 ms (p95 6.6 ms) per proof, 57 witnesses and 45,300 random inputs with 0 contradictions.
 -  **Laws (experimental): `Buffer(window=N)`, `LawSet(recent=M, readmit="grown")`, `LawSet(memo=True)`,
   `LawSet.proposals`** (opt-in; defaults unchanged). A windowed buffer keeps its last N rows and scores exactly as a
   fresh buffer of them; the sized rule's N never decreases when rows leave, and a candidate counts again once the window
