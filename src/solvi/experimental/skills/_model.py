@@ -176,8 +176,24 @@ def _actions_at(actions, world, state):
     return list(actions)
 
 
-def plan(model: ExactModel, state, goal: Callable[[Any], bool], *, actions=None, horizon: int = 10,
-         budget: int = 10_000, cost: Callable[[Any, Any], float] | None = None, beam: int | None = None) -> Plan | None:
+def _goal_of(goal):
+    """goal(state) or goal(state, path) → a function of (state, path): a goal with two required positional parameters
+    reads the actions that led to the state too."""
+    import inspect
+    try:
+        ps = [p for p in inspect.signature(goal).parameters.values()
+              if p.kind == p.VAR_POSITIONAL
+              or (p.kind in (p.POSITIONAL_ONLY, p.POSITIONAL_OR_KEYWORD) and p.default is p.empty)]
+    except (TypeError, ValueError):                     # a builtin without a signature: one argument
+        ps = []
+    if len(ps) >= 2 or any(p.kind == p.VAR_POSITIONAL for p in ps):
+        return goal
+    return lambda st, path: goal(st)
+
+
+def plan(model: ExactModel, state, goal: Callable[..., bool], *, actions=None, horizon: int = 10,
+         budget: int = 10_000, cost: Callable[[Any, Any], float] | None = None, beam: int | None = None,
+         collect: int | None = None, distinct: Callable[[Any], Any] | None = None):
     """Search the exact model from `state` for a sequence of actions after which `goal(state)` holds → a Plan, or None.
 
     Every candidate step is taken on a copy of a fork — the real environment is never stepped. A refused step is not a
@@ -187,21 +203,52 @@ def plan(model: ExactModel, state, goal: Callable[[Any], bool], *, actions=None,
     `beam=b` breadth-first keeping the `b` cheapest nodes per depth (an approximation). `actions`: None (the
     environment's `actions(state)`), a list, or a function of the state. `budget` bounds the simulated steps; when it is
     used up, or nothing within `horizon` reaches the goal, the result is None and `model.last["why"]` says which
-    ("budget", "horizon", "exhausted"). Deterministic given the model."""
+    ("budget", "horizon", "exhausted"). Deterministic given the model.
+
+    goal: a function of the state, or of (state, path) — two positional parameters: the actions that led to it too.
+    collect=k (opt-in): the version space — the search goes on past the first plan and returns a list of up to k plans
+    whose ends differ by `distinct(end state)` (default: the end state's key), the first found for each (in search
+    order: fewest actions, or cheapest with `cost=`); fewer than k (possibly none) when the search ends first, with
+    `model.last["why"]` "found" (k collected), "budget", "horizon" or "exhausted". `model.last["complete_depth"]`
+    (breadth-first without a beam): the last depth searched in full — "no other plan up to depth d" rather than "the
+    budget ran out"."""
     key = model.key
     start = key(state)
-    if goal(state):
-        model.last = {"why": "found", "searched": 0}
-        return Plan((), (), 0.0, 0, start, start, simulation_hash(start, []), goal)
+    g = _goal_of(goal)
+    dkey = distinct if distinct is not None else key
+    plans, kinds = [], set()
     used = 0
+
+    def last(why, depth=None):
+        model.last = {"why": why, "searched": used, **({"complete_depth": depth} if depth is not None else {}),
+                      **({"plans": len(plans)} if collect is not None else {})}
+
+    def hit(path, states, trace, c, end_state):
+        """A plan reaching the goal: True when the search stops here."""
+        p = Plan(tuple(path), tuple(states), float(c), used, start, key(end_state), simulation_hash(start, trace), goal)
+        if collect is None:
+            plans.append(p)
+            return True
+        d = dkey(end_state)
+        d = d if isinstance(d, (str, int, float, bool, type(None))) else _hash(_plain(d))
+        if d not in kinds:
+            kinds.add(d)
+            plans.append(p)
+        return len(plans) >= int(collect)
+
+    def out(why, depth=None):
+        last(why, depth)
+        if collect is not None:
+            return plans
+        return plans[0] if plans else None
+
+    if collect is not None and int(collect) < 1:
+        raise ValueError("collect is a number of plans (≥ 1)")
+    if g(state, ()) and hit((), (), (), 0.0, state):
+        return out("found", 0)
     visited = {start}
     root = model.fork(state)
     step_cost = cost or (lambda s, a: 1.0)
-
-    def found(path, states, trace, c):
-        model.last = {"why": "found", "searched": used}
-        return Plan(tuple(path), tuple(states), float(c), used, start, key(states[-1]), simulation_hash(start, trace),
-                    goal)
 
     if cost is not None and beam is None:                        # uniform cost
         heap = [(0.0, 0, root, state, (), (), ())]
@@ -210,73 +257,76 @@ def plan(model: ExactModel, state, goal: Callable[[Any], bool], *, actions=None,
         cut = False
         while heap:
             c, _, world, st, path, states, trace = heapq.heappop(heap)
-            if path and goal(st):
-                return found(path, states, trace, c)
+            if path and g(st, path) and hit(path, states, trace, c, st):
+                return out("found")
             if len(path) >= horizon:
                 cut = True
                 continue
             for a in _actions_at(actions, world, st):
                 if used >= budget:
-                    model.last = {"why": "budget", "searched": used}
-                    return None
+                    return out("budget")
                 child = model.copy(world, st)
-                out = model.step(child, a)
+                o = model.step(child, a)
                 used += 1
-                if not out.accepted:
+                if not o.accepted:
                     continue
-                k = key(out.state)
+                k = key(o.state)
                 c2 = c + float(step_cost(st, a))
                 if k in best and best[k] <= c2:
                     continue
                 best[k] = c2
                 tr = trace + ((a, True, k),)
-                if out.done and not goal(out.state):
+                if o.done and not g(o.state, path + (a,)):
                     continue
-                heapq.heappush(heap, (c2, n, child, out.state, path + (a,), states + (out.state,), tr))
+                heapq.heappush(heap, (c2, n, child, o.state, path + (a,), states + (o.state,), tr))
                 n += 1
-        model.last = {"why": "horizon" if cut else "exhausted", "searched": used}
-        return None
+        return out("horizon" if cut else "exhausted")
 
     frontier = [(0.0, root, state, (), (), ())]
+    full = 0 if beam is None else None                  # the last depth searched in full (a beam searches none in full)
     for _depth in range(int(horizon)):
         nxt = []
         for c, world, st, path, states, trace in frontier:
             for a in _actions_at(actions, world, st):
                 if used >= budget:
-                    model.last = {"why": "budget", "searched": used}
-                    return None
+                    return out("budget", full)
                 child = model.copy(world, st)
-                out = model.step(child, a)
+                o = model.step(child, a)
                 used += 1
-                if not out.accepted:
+                if not o.accepted:
                     continue
-                k = key(out.state)
+                k = key(o.state)
                 if k in visited:
                     continue
                 visited.add(k)
                 c2 = c + float(step_cost(st, a))
-                p2, s2, t2 = path + (a,), states + (out.state,), trace + ((a, True, k),)
-                if goal(out.state):
-                    return found(p2, s2, t2, c2)
-                if out.done:
+                p2, s2, t2 = path + (a,), states + (o.state,), trace + ((a, True, k),)
+                if g(o.state, p2) and hit(p2, s2, t2, c2, o.state):
+                    return out("found", full)
+                if o.done:
                     continue
-                nxt.append((c2, child, out.state, p2, s2, t2))
+                nxt.append((c2, child, o.state, p2, s2, t2))
         if beam is not None:
             nxt = sorted(nxt, key=lambda x: x[0])[:int(beam)]          # stable: ties keep the search order
+        else:
+            full = _depth + 1
         frontier = nxt
         if not frontier:
-            model.last = {"why": "exhausted", "searched": used}
-            return None
-    model.last = {"why": "horizon", "searched": used}
-    return None
+            return out("exhausted", full)
+    return out("horizon", full)
 
 
-def verify(model: ExactModel, state, plan: Plan, goal: Callable[[Any], bool] | None = None) -> Check:
+def verify(model: ExactModel, state, plan, goal: Callable[..., bool] | None = None) -> Check:
     """Re-simulate `plan` on a fresh fork from `state` and check it → a Check. Every step must be accepted and the
     episode must not end before the last one; the goal (`goal`, else the plan's own) must hold at the end; and when the
     plan was found from this very state (its start key), every state must be the one it predicted (so its simulation
     hash is the same). A plan counts as verified only by this re-simulation on the code world — never by what a model
-    says about it."""
+    says about it. plan: a Plan, or a plain sequence of actions (nothing predicted: the steps and the goal are checked).
+    goal: of the state, or of (state, path) as for `plan`."""
+    if not isinstance(plan, Plan):
+        if isinstance(plan, (str, bytes)) or not hasattr(plan, "__iter__"):
+            raise TypeError("verify takes a Plan or a sequence of actions")
+        plan = Plan(tuple(plan))
     goal = goal if goal is not None else plan.goal
     start = model.key(state)
     exact = bool(plan.start) and plan.start == start and len(plan.predicted) == len(plan.actions)
@@ -297,7 +347,7 @@ def verify(model: ExactModel, state, plan: Plan, goal: Callable[[Any], bool] | N
         if out.done and i < n - 1:
             return Check(False, f"the episode ended at step {i + 1} of {n}", st, h, i + 1)
     h = simulation_hash(start, trace)
-    if goal is not None and not goal(st):
+    if goal is not None and not _goal_of(goal)(st, tuple(plan.actions)):
         return Check(False, "the goal does not hold at the end", st, h, n)
     if exact and plan.simulation and h != plan.simulation:
         return Check(False, "the simulation differs from the one that found the plan", st, h, n)
