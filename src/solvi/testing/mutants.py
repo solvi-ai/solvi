@@ -335,3 +335,6 @@ def main(argv=None):
             for m in r.survivors():
                 print(f"  survived  line {m.line:<4} {m.kind:<9} {m.description}")
     return 2 if failed else 0
+
+
+__all__ = ["KINDS", "Mutant", "Report", "generate", "main", "run"]
