@@ -747,13 +747,20 @@ class RefusalRegression:
     pipeline whose target can answer declares a set. The set follows the policy version: a document version may
     rightly change what goes to a person, so declare the set of the version in force.
 
+    cumulative (opt-in): the version in force moves with every promotion, so a chain of changes each losing up to the
+    allowance adds up ("salami"). With cumulative=True the inputs are also compared with the original version: which
+    of them it refused is pinned (by example id) the first time this stage measures — or given as `original`, {id:
+    refused} (a dict, or `original(change, ctx)` → one; pass it to keep the pin across processes) — and a change is
+    refused too when the inputs refused originally and answered by the candidate are more than the allowance
+    (recorded as "lost_original"; inputs the original never saw are compared with the version in force only).
+
     Not switchable: Pipeline inserts this stage (before Approval) for every change whose target can answer, when it
     is not among the stages; a stage of yours (other tolerances) is used in its place. Its refusal is final under every
     approval level (like the static stage's: a person's "person" level does not make it advisory)."""
     name = "refusal_regression"
 
     def __init__(self, *, refusals=(), refused: Callable | None = None, question: str | None = None,
-                 tolerance: float = 0.0, count_tolerance: int = 0):
+                 tolerance: float = 0.0, count_tolerance: int = 0, cumulative: bool = False, original=None):
         if not 0.0 <= float(tolerance) <= 1.0:
             raise ValueError(f"tolerance is a share in [0, 1], not {tolerance!r}")
         if int(count_tolerance) < 0:
@@ -761,6 +768,17 @@ class RefusalRegression:
         self.refusals, self.question = refusals, question
         self.refused = refused or (lambda a: is_refusal(a, question))
         self.tolerance, self.count_tolerance = float(tolerance), int(count_tolerance)
+        self.cumulative, self.original, self._pinned = bool(cumulative), original, None
+
+    def _original(self, change, ctx, ids, rb):
+        """{example id: refused by the original version}: given, or pinned from the version in force at the first run."""
+        if self.original is not None:
+            o = self.original(change, ctx) if callable(self.original) else self.original
+            return {str(k): bool(v) for k, v in o.items()}, False
+        if self._pinned is None:
+            self._pinned = dict(zip(ids, rb))
+            return self._pinned, True
+        return self._pinned, False
 
     def held_set(self, change, ctx):
         """The should-abstain inputs for this change and how many each source gave → (inputs, {source: count})."""
@@ -802,6 +820,16 @@ class RefusalRegression:
         m = {**base, "measured": True, "refused_before": nb, "refused_after": na, "share_before": nb / n,
              "share_after": na / n, "lost": len(lost), "lost_examples": lost[:10], "allowed": allowed}
         where = ", ".join(f"{k} {v}" for k, v in sources.items())
+        if self.cumulative:
+            ids = [_example_id(x, i) for i, x in enumerate(xs)]
+            orig, pinned_now = self._original(change, ctx, ids, rb)
+            lost_o = [k for k, a in zip(ids, ra) if orig.get(k) and not a]
+            m.update({"lost_original": len(lost_o), "lost_original_examples": lost_o[:10],
+                      "original_pinned_now": pinned_now})
+            if len(lost_o) > allowed:
+                return StageVerdict.refuse(
+                    f"refusal regression against the original version ({where}; {n} inputs): the change answers "
+                    f"{len(lost_o)} the original refused (allowed {allowed}): {lost_o[:5]}", m)
         if len(lost) > allowed:
             return StageVerdict.refuse(
                 f"refusal regression on the should-abstain set ({where}; {n} inputs): the change answers {len(lost)} of "
