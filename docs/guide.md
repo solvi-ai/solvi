@@ -5926,6 +5926,11 @@ on every change: the share refused on the should-abstain set before and after; a
 before is refused. Without a declared set (`refusals=` on the pipeline, on CleanCases / Confirmation, or on the stage)
 the change is held for a person: "no should-abstain set declared for a target that can answer". The set follows the
 policy version — a document version may rightly change what goes to a person.
+Two opt-ins close what the default leaves open (defaults unchanged). `RefusalRegression(coverage="sampled",
+sample=k, pool=...)` also draws k inputs at random from past inputs (a list, `pool(change, ctx)`, or a TraceStorage)
+for every change, and those the version in force refuses join the set: a proposer that tuned a change to the declared
+set meets inputs it has not seen (the seed is recorded). `RefusalRegression(missing_answer="refuse")` among the stages
+refuses a change whose target cannot answer (a knowledge item with no `answer_of=`), which otherwise passes unmeasured.
 
 **Labels** come only from outside the model: corrections from `"human"`, `"outcome"` and `"rule"` sources; any other
 source is refused and listed (`target.labels()["rejected"]`), and the stored decisions are never read as labels. Each

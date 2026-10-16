@@ -858,17 +858,43 @@ class RefusalRegression:
     refused too when the inputs refused originally and answered by the candidate are more than the allowance
     (recorded as "lost_original"; inputs the original never saw are compared with the version in force only).
 
+    coverage (opt-in): "declared" (default) measures the declared set only, so a proposer who sees it can tune a change
+    to keep exactly those inputs refused. "sampled" also draws `sample` inputs at random from `pool` — a list of past
+    inputs, `pool(change, ctx)` → inputs, or a TraceStorage (the inputs of its recorded decisions) — for every change;
+    those the version in force refuses join the set (source "sampled"). The draw uses `seed` (None: a fresh seed per
+    change, recorded with the measurement so it can be repeated) and is recorded: drawn, refused, their ids.
+
+    missing_answer (opt-in): the pipeline inserts this stage only for a change whose target can answer, so a change
+    to a knowledge item with no `answer_of=` passes unmeasured. "skip" (default) keeps that: a stage of yours among
+    the stages admits such a change unmeasured. "refuse": a stage of yours among the stages runs on every change and
+    refuses one whose refusals cannot be measured (no answer_of= and no answerer on its target) — declare answer_of=
+    for the pipeline, or a target with an answerer, for every change you want through.
+
     Not switchable: Pipeline inserts this stage (before Approval) for every change whose target can answer, when it
     is not among the stages; a stage of yours (other tolerances) is used in its place. Its refusal is final under every
     approval level (like the static stage's: a person's "person" level does not make it advisory)."""
     name = "refusal_regression"
+    COVERAGES = ("declared", "sampled")
+    MISSING = ("skip", "refuse")
 
     def __init__(self, *, refusals=(), refused: Callable | None = None, question: str | None = None,
-                 tolerance: float = 0.0, count_tolerance: int = 0, cumulative: bool = False, original=None):
+                 tolerance: float = 0.0, count_tolerance: int = 0, cumulative: bool = False, original=None,
+                 coverage: str = "declared", sample: int = 50, pool=None, seed: int | None = None,
+                 missing_answer: str = "skip"):
         if not 0.0 <= float(tolerance) <= 1.0:
             raise ValueError(f"tolerance is a share in [0, 1], not {tolerance!r}")
         if int(count_tolerance) < 0:
             raise ValueError(f"count_tolerance is a count ≥ 0, not {count_tolerance!r}")
+        if coverage not in self.COVERAGES:
+            raise ValueError(f"coverage is one of {self.COVERAGES}, not {coverage!r}")
+        if missing_answer not in self.MISSING:
+            raise ValueError(f"missing_answer is one of {self.MISSING}, not {missing_answer!r}")
+        if coverage == "sampled" and pool is None:
+            raise ValueError('coverage="sampled" draws from pool=: give past inputs, pool(change, ctx) or a TraceStorage')
+        if coverage == "sampled" and int(sample) < 1:
+            raise ValueError(f"sample is a count ≥ 1, not {sample!r}")
+        self.coverage, self.sample, self.pool, self.seed = coverage, int(sample), pool, seed
+        self.missing_answer = missing_answer
         self.refusals, self.question = refusals, question
         self.refused = refused or (lambda a: is_refusal(a, question))
         self.tolerance, self.count_tolerance = float(tolerance), int(count_tolerance)
@@ -902,14 +928,50 @@ class RefusalRegression:
         take(self.name, self.refusals)
         return out, sources
 
+    def _sampled(self, change, ctx, before):
+        """coverage="sampled": `sample` inputs drawn from the pool; those the version in force refuses → (inputs, ids,
+        what was drawn)."""
+        import random
+        pool = self.pool
+        if callable(getattr(pool, "iter", None)):                 # a TraceStorage: the inputs of its decisions
+            pool = [s.input for s in pool.iter() if getattr(s, "input", None) is not None]
+        elif callable(pool):
+            pool = pool(change, ctx)
+        pool = list(pool or ())
+        seed = self.seed if self.seed is not None else random.SystemRandom().randrange(2 ** 31)
+        drawn = random.Random(seed).sample(pool, min(self.sample, len(pool)))
+        from ...core.runtime import vhash
+        xs, ids = [], []
+        for x in drawn:
+            if self.refused(before(x)):
+                xs.append(x)
+                ids.append(str(x["id"]) if isinstance(x, dict) and "id" in x else "s:" + vhash(x)[:12])
+        return xs, ids, {"coverage": "sampled", "seed": seed, "pool": len(pool), "sampled_drawn": len(drawn),
+                         "sampled_refused": len(xs), "sampled_ids": ids[:10]}
+
     def run(self, change, ctx):
+        pipe = getattr(ctx, "pipeline", None)
+        if self.missing_answer == "refuse" and pipe is not None and not pipe.answers(change):
+            return StageVerdict.refuse(
+                "refusal regression cannot measure this change: its target cannot answer (no answer_of= for the "
+                "pipeline and no answerer on the target), and missing_answer='refuse'",
+                {"measured": False, "missing_answer": "refuse", "artifact": change.artifact})
         xs, sources = self.held_set(change, ctx)
-        base = {"n": len(xs), "sources": sources, "tolerance": self.tolerance, "count_tolerance": self.count_tolerance}
+        ids = [_example_id(x, i) for i, x in enumerate(xs)]
+        drew = {}
+        if self.coverage == "sampled" and pipe is not None:
+            before = pipe.answerer(None, ctx, change)
+            if before is not None:
+                sx, sids, drew = self._sampled(change, ctx, before)
+                if sx:
+                    xs, ids = xs + sx, ids + sids
+                    sources = {**sources, "sampled": len(sx)}
+        base = {"n": len(xs), "sources": sources, "tolerance": self.tolerance, "count_tolerance": self.count_tolerance,
+                **drew}
         if not xs:
             return StageVerdict.hold("no should-abstain set declared for a target that can answer: nothing to measure "
                                      "refusal on (declare Pipeline(refusals=), CleanCases / Confirmation(refusals=) or "
                                      "RefusalRegression(refusals=)); a person decides", {**base, "measured": False})
-        pipe = ctx.pipeline
         before, after = pipe.answerer(None, ctx, change), pipe.answerer(change, ctx, change)
         if before is None:
             return StageVerdict.admit("nothing in force before the change: no refusal to lose", {**base, "measured": False})
@@ -918,14 +980,13 @@ class RefusalRegression:
                                        {**base, "measured": False})
         rb = [bool(self.refused(before(x))) for x in xs]
         ra = [bool(self.refused(after(x))) for x in xs]
-        lost = [_example_id(x, i) for i, (b, a, x) in enumerate(zip(rb, ra, xs)) if b and not a]
+        lost = [k for k, b, a in zip(ids, rb, ra) if b and not a]
         n, nb, na = len(xs), sum(rb), sum(ra)
         allowed = max(self.count_tolerance, int(self.tolerance * n))
         m = {**base, "measured": True, "refused_before": nb, "refused_after": na, "share_before": nb / n,
              "share_after": na / n, "lost": len(lost), "lost_examples": lost[:10], "allowed": allowed}
         where = ", ".join(f"{k} {v}" for k, v in sources.items())
         if self.cumulative:
-            ids = [_example_id(x, i) for i, x in enumerate(xs)]
             orig, pinned_now = self._original(change, ctx, ids, rb)
             lost_o = [k for k, a in zip(ids, ra) if orig.get(k) and not a]
             m.update({"lost_original": len(lost_o), "lost_original_examples": lost_o[:10],
