@@ -153,7 +153,7 @@ def run_isolated(path, cases, timeout, reruns, store, fuzz_n, seed, max_mem, Cas
                "fuzz_n": fuzz_n, "seed": seed, "max_mem": max_mem}
         with tempfile.TemporaryFile() as err:
             started = time.perf_counter()
-            proc = subprocess.Popen([sys.executable, "-c", BOOT], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+            proc = subprocess.Popen([sys.executable, "-c", BOOT], stdin=subprocess.PIPE, stdout=subprocess.PIPE,  # noqa: S603 — our runner, a fixed argv
                                     stderr=err, text=True)
             proc.stdin.write(json.dumps(req) + "\n")
             proc.stdin.close()
