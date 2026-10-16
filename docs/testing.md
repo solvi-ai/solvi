@@ -43,6 +43,7 @@ solvi test gallery/ --json                # results as data
 solvi test gallery/ --fuzz 30             # also 30 mutated inputs per case (see below)
 solvi test . --store                      # also save the cases' decisions to the system's own store
 solvi test . --timeout 5 --reruns 2       # stop a case after 5 s; ask a failing case twice more
+solvi test . --isolate --max-mem 2G       # each case in its own process, at most 2 GB of memory
 ```
 
 From Python, use `solvi.testing.run_path(paths)` to get a `FileResult` per file and a `CaseResult` per case (`ok`,
@@ -50,8 +51,20 @@ From Python, use `solvi.testing.run_path(paths)` to get a `FileResult` per file 
 status, safeguard or the replay is not what the case expects), `nondeterministic` (a step of the fresh trace does not
 recompute on replay, or — with `--reruns N` / `run_path(paths, reruns=N)` — asking the case again gave other answers),
 `timeout` (longer than `--timeout S` / `timeout=S` seconds; stopped with SIGALRM, so POSIX and the main thread only),
-`error` (ask raised) or `invalid` (the case cannot fail: an unknown key, nothing expected). `FileResult.counts()` gives
-the numbers per status, and the summary line of `solvi test` lists them. To run the cases inside your own pytest suite, one test is enough:
+`memory` (more than `--max-mem`, see below), `error` (ask raised) or `invalid` (the case cannot fail: an unknown key,
+nothing expected). `FileResult.counts()` gives the numbers per status, and the summary line of `solvi test` lists them.
+
+`--isolate` (`run_path(paths, isolate=True)`) runs each case in a fresh Python process: the task is imported and the
+System built there, never in the runner. No case sees module state another case left behind, and a case that ends the
+interpreter (a crash in an extension, `os._exit`) fails alone with status `error` while the next case runs. With
+`--timeout` the case's process is killed when the time is up, so a case stuck inside a C call stops too, and it works
+where SIGALRM does not. The price is a process start, the imports and the System's build per case (about 90 ms per case
+on a small task). `--max-mem SIZE` (`max_mem="2G"`, or bytes; needs `--isolate`) caps the case's process: an
+allocation past it raises MemoryError and the case has status `memory`. The cap is the address space (RLIMIT_AS) of
+the whole process — Python, solvi, the task and the case — and numpy with a threaded BLAS reserves about 1 GB of it at
+import, so leave room. macOS and Windows do not enforce RLIMIT_AS: there the process's peak resident memory is compared
+with the cap after the case instead (a case over it still fails with `memory`, but it was not stopped), and a warning
+says so. To run the cases inside your own pytest suite, one test is enough:
 
 ```python
 from solvi.testing import run_path
@@ -76,11 +89,17 @@ Cases do not have to be written by hand. `testing.cases_from_store(storage, n=No
 status, the questions asked. The same input twice is one case; with `n`, every distinct outcome comes first. Running them
 after a change is a regression test against what the System actually decided.
 
-`testing.boundary(cases, n=50, system=None)` makes inputs at the edges of what the cases show: per field, a number just
-past the largest and smallest seen, 0, -1, a huge one; empty, one-character, long, non-ASCII or padded text, the same
-accents decomposed (NFD) and a compatibility ligature ("ﬁß"); None where the field has shown None and a value of another
-type the field has shown (7 → "7": the str / int confusion of states loaded from JSON); an empty, one-element or long
-list; the same one level into dicts and lists. The changes are taken in turn from each kind and, within a kind, from the
+`testing.boundary(cases, n=50, system=None, thresholds=None)` makes inputs at the edges of what the cases show: per
+field, a number just past the largest and smallest seen, 0, -1, a huge positive and a huge negative one; empty,
+one-character, long, non-ASCII or padded text, the same accents decomposed (NFD) and a compatibility ligature ("ﬁß");
+None where the field has shown None and a value of another type the field has shown (7 → "7": the str / int confusion
+of states loaded from JSON); an empty, one-element or long list, a long list or set of distinct values (a repeated
+element does not reach code that dedupes or indexes), a dict with many keys; the same one level into dicts and lists.
+With `system=`, a number is also cut at each constant a rule compares the field with: `amount >= 100` gives 99, 100 and
+101, `score > 0.5` the nearest floats on either side of 0.5 and 0.5 itself. The constants are read from the parts'
+source where an argument is compared with a number or a numeric constant of the module or closure (`amount > LIMIT`);
+an expression (`x * 2 > 100`), an item (`row["x"] > 1`) and the helpers a part calls are not read. `thresholds=` gives
+them by hand (`{"amount": [100]}`) or turns them off (`False`). The changes are taken in turn from each kind and, within a kind, from the
 first case of each input shape (field → type) first, so many cases of one shape do not crowd out the others. With `system=`, each input is asked (never stored)
 and its current answers are pinned as `expected`, so a later change that moves an answer at an edge — a threshold
 `amount < 100` becoming `<= 100` — fails a case even when the hand-written cases all pass. Inputs whose ask raises are
@@ -94,6 +113,28 @@ cases = testing.cases_from_store(system.storage, n=200)
 cases += testing.boundary(cases, n=100, system=system)
 open("recorded.cases.json", "w").write(json.dumps({"task": "task.py", "cases": cases}, indent=1))
 ```
+
+### Metamorphic cases
+
+Some answers have no fixed expected value at a new input, but must keep a relation to the answer at a known one: the
+same dose whether the weight is given in kilograms or grams, the same route whatever the order of the items. A
+`testing.Relation(name, transform, expect=None)` says this: `transform(state)` gives the changed state (or None when it
+does not apply), `expect(answers)` the answers the changed state must give, from the source state's answers (by
+default the same answers). `testing.metamorphic(cases, relations, system=None)` makes the cases: each case's state
+transformed, with `expected` from the System's current answers on the source state (with `system=`, never stored) or
+from the case's own `expected`. A System that breaks the relation fails them as regressions, though no hand-written case
+pins the converted input.
+
+```python
+to_grams = testing.Relation("kg to g",
+                            lambda s: {**s, "weight": s["weight"] * 1000, "unit": "g"} if s["unit"] == "kg" else None)
+heavier = testing.Relation("much heavier", lambda s: {**s, "weight": s["weight"] + 500},
+                           expect=lambda a: {"heavy": "yes"})          # only "heavy" is checked
+cases += testing.metamorphic(cases, [to_grams, heavier], system=system)
+```
+
+Numbers are compared up to rounding (1e-9), so a relation that scales a numeric answer gives it scaled in `expect`; a
+rounded answer is rounded there too.
 
 ## Fuzzing
 

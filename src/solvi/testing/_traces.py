@@ -1,8 +1,10 @@
 """Regression cases from what a System has decided: `cases_from_store` turns recorded decisions into cases (their
 inputs and the answers given), `boundary` makes inputs at the edges of what the cases show — per field the values seen,
-then empty / single / long text and its Unicode forms, 0, -1, one past the smallest and largest number, None and
-another type where the field has shown them, an empty or one-element list, one level into dicts and lists — and, given
-the System, pins its current answers on them as the expected ones. Both give case dicts in the cases.json format (see
+then empty / single / long text and its Unicode forms, 0, -1, one past the smallest and largest number, a huge
+positive and negative one, either side of a rule's threshold, None and another type where the field has shown them, an
+empty, one-element or long list (of distinct values too), many dict keys, one level into dicts and lists — and, given
+the System, pins its current answers on them as the expected ones; `metamorphic` transforms the cases' states (a
+unit conversion) and expects the answers a `Relation` says they must keep. All give case dicts in the cases.json format (see
 solvi.testing), so `solvi test` and `run_case` run them."""
 from __future__ import annotations
 
@@ -115,6 +117,24 @@ def _number(v, p):
                 ("the largest seen", hi), ("the smallest seen", lo)]
     out += [("one above", v + 1), ("one below", v - 1)]
     out.append(("huge", BIG if isinstance(v, int) else 1e300))
+    out.append(("huge negative", -BIG if isinstance(v, int) else -1e300))
+    return out
+
+
+def _thresholds(v, cs):
+    """One below, at and one above each rule constant the field is compared with → [(what, value)]: ±1 for an int
+    field and a whole constant, else the nearest floats on either side."""
+    import math
+    out = []
+    for c in cs:
+        if isinstance(v, int) and float(c).is_integer():
+            c = int(c)
+            below, above = c - 1, c + 1
+        else:
+            c = float(c)
+            below, above = math.nextafter(c, -math.inf), math.nextafter(c, math.inf)
+        out += [(f"below a rule threshold ({c!r})", below), (f"at a rule threshold ({c!r})", c),
+                (f"above a rule threshold ({c!r})", above)]
     return out
 
 
@@ -152,21 +172,93 @@ def _by_type(v, p, depth=0):
         return _number(v, p)
     if isinstance(v, str):
         return _text(v) + [("another value seen", x) for x in (p.values if p else ()) if isinstance(x, str) and x != v]
+    if isinstance(v, (set, frozenset)):
+        out = [("empty set", type(v)())]
+        many = _distinct(sorted(v, key=repr)[0] if v else None)
+        if many is not None:
+            out.append(("long set of distinct values", type(v)(many)))
+        return out
     if isinstance(v, list):
         out = [("empty list", []), ("one element", v[:1])] if v else []
         if v:
             out.append(("long list", [v[i % len(v)] for i in range(LONG)]))
+            many = _distinct(v[0])
+            if many is not None:
+                out.append(("long list of distinct values", many))
             if depth < 1:
                 for what, x in _variants(v[0], p.elem if p else None, depth + 1):
                     out.append((f"first element: {what}", [x] + v[1:]))
         return out
     if isinstance(v, dict) and depth < 1:
         out = [("empty dict", {})]
+        if v:
+            k0, x0 = next(iter(v.items()))
+            keys = _distinct(k0)
+            if keys is not None:
+                extra = [k for k in keys if k not in v][:max(LONG - len(v), 0)]
+                out.append(("many keys", {**v, **{k: copy.deepcopy(x0) for k in extra}}))
         for k, x in v.items():
             for what, y in _variants(x, (p.keys.get(k) if p else None), depth + 1):
                 out.append((f"{k}: {what}", {**v, k: y}))
         return out
     return []
+
+
+def _distinct(example):
+    """LONG distinct values of the example's type (texts or ints), or None for another type: a long list, set or set of
+    dict keys whose elements are all different (a repeated element does not reach code that dedupes or indexes)."""
+    if isinstance(example, str):
+        return [f"{example}{i}" for i in range(LONG)]
+    if isinstance(example, int) and not isinstance(example, bool):
+        return [example + i for i in range(LONG)]
+    return None
+
+
+def _rule_thresholds(catalog):
+    """{field: [numbers]}: the constants the catalog's parts compare their inputs with — `amount >= 100`,
+    `0.5 < score <= LIMIT` (a number the module or the closure holds) — read from each part's source, inputs named as
+    the function's arguments. A comparison of an expression (`x * 2 > 100`) or of an item (`row["x"] > 1`) is not
+    read; nor are the functions a part calls."""
+    import ast
+    import inspect
+    import textwrap
+    out = {}
+    parts = list(getattr(catalog, "parts", {}).values()) + list(getattr(catalog, "rules", {}).values())
+    funcs = []
+    for p in parts:
+        funcs += [a.func for a in p.alternatives] if getattr(p, "alternatives", None) else [p.func]
+    for f in funcs:
+        try:
+            f = inspect.unwrap(f)
+            if not inspect.isfunction(f):
+                continue
+            tree = ast.parse(textwrap.dedent(inspect.getsource(f)))
+        except (OSError, TypeError, SyntaxError, IndentationError, ValueError):
+            continue
+        args = set(inspect.signature(f).parameters)
+        env = dict(f.__globals__)
+        for name, cell in zip(f.__code__.co_freevars, f.__closure__ or ()):
+            try:
+                env[name] = cell.cell_contents
+            except ValueError:
+                pass
+
+        def number(node):
+            v = node.value if isinstance(node, ast.Constant) else env.get(node.id) if isinstance(node, ast.Name) \
+                else -number(node.operand) if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.USub) \
+                and number(node.operand) is not None else None
+            return v if isinstance(v, (int, float)) and not isinstance(v, bool) else None
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Compare):
+                continue
+            ops = [node.left] + node.comparators
+            for a, b in zip(ops, ops[1:]):
+                for x, y in ((a, b), (b, a)):
+                    if isinstance(x, ast.Name) and x.id in args and number(y) is not None:
+                        cs = out.setdefault(x.id, [])
+                        if number(y) not in cs:
+                            cs.append(number(y))
+    return out
 
 
 def _store_kw(system):
@@ -205,20 +297,28 @@ def _by_shape(states):
     return first + rest
 
 
-def boundary(cases, n=50, system=None):
+def boundary(cases, n=50, system=None, thresholds=None):
     """Inputs at the edges of what the cases show → up to n new case dicts (name, state, note "boundary: <field>:
     <what>"): each case's state with one field changed — to a value just past the range the cases show, 0, -1, a huge
-    number; empty, one-character, long, non-ASCII, padded text, its accents decomposed (NFD) and a compatibility
-    ligature; None where the field has shown None, a value of another type the field has shown (the value itself
-    converted when it converts: 7 → "7"); an empty, one-element or long list; one level into dicts and lists.
+    number and a huge negative one; one below, at and one above each constant a rule compares the field with
+    (`amount >= 100` → 99, 100, 101; see thresholds); empty, one-character, long, non-ASCII, padded text, its accents
+    decomposed (NFD) and a compatibility ligature; None where the field has shown None, a value of another type the
+    field has shown (the value itself converted when it converts: 7 → "7"); an empty, one-element or long list, a long
+    list or set of distinct values, a dict with many keys; one level into dicts and lists.
     Deduplicated, without the cases' own states, taken in turn from each kind of change and, within a kind, from the
     first case of each input shape (field → type) first, then the shortest and the longest case, then the rest; the
     same for the same cases (no randomness).
     system: the current answers are pinned — "expected" and "status" from asking each input (never stored), so the
     cases fail when a later change moves an answer at an edge. An input whose ask raises is left out (fuzz reports
     those), so is one whose answers differ when asked again or whose trace does not replay (nondeterministic); a
-    UserWarning says how many. Without a system the cases have no expectations: fill them in before running."""
+    UserWarning says how many. Without a system the cases have no expectations: fill them in before running.
+    thresholds: {field: [numbers]} to cut at; None (default) — the constants the system's catalog compares each field
+    with, read from the parts' source where a top-level input is compared with a number or a numeric constant (none
+    without a system); False — none."""
     states = _by_shape([c["state"] for c in cases if isinstance(c.get("state"), dict)])
+    if thresholds is None:
+        thresholds = _rule_thresholds(getattr(system, "catalog", None)) if system is not None else {}
+    thresholds = thresholds or {}
     prof = {}
     for st in states:
         for k, v in st.items():
@@ -227,13 +327,15 @@ def boundary(cases, n=50, system=None):
     by_kind = {}
     for i, st in enumerate(states):
         for k, v in st.items():
-            for what, x in _variants(v, prof.get(k)):
+            cut = _thresholds(v, thresholds.get(k, ())) if isinstance(v, (int, float)) and not isinstance(v, bool) \
+                else []
+            for what, x in _variants(v, prof.get(k)) + cut:
                 new = {**copy.deepcopy(st), k: x}
                 key = _key(new)
                 if key in seen:
                     continue
                 seen.add(key)
-                kind = what.split(": ")[-1]
+                kind = what.split(": ")[-1].split(" (")[0]
                 by_kind.setdefault(kind, []).append({"name": f"boundary {len(seen)}", "state": new,
                                                      "note": f"boundary: {k}: {what}"})
     queues = list(by_kind.values())                   # in turn from each kind of change
@@ -275,4 +377,78 @@ def boundary(cases, n=50, system=None):
     return kept
 
 
-__all__ = ["boundary", "cases_from_store"]
+# --- metamorphic cases
+class Relation:
+    """A metamorphic relation: a transform of a case's state and what the answers must be after it.
+
+    name: what it is ("kg to g"), used in the cases' names and notes.
+    transform: state → the transformed state (a new dict; the state given is a copy), or None when the relation does not
+    apply to that state (a weight already in grams).
+    expect: the source state's answers {question: answer, as in cases.json; None for an abstention} → the answers the
+    transformed state must give, for the questions it names (a question left out is not checked). Default: the same
+    answers for every question — a unit conversion, a reordering, a renaming that must not change the decision. The
+    answers are compared as in a case: numbers up to rounding (1e-9), so a relation that scales a number gives it scaled."""
+
+    def __init__(self, name, transform, expect=None):
+        if not callable(transform) or (expect is not None and not callable(expect)):
+            raise TypeError("Relation(name, transform, expect=None): transform and expect are functions")
+        self.name, self.transform, self.expect = str(name), transform, expect
+
+    def __repr__(self):
+        return f"Relation({self.name!r})"
+
+
+def metamorphic(cases, relations, system=None):
+    """Metamorphic cases: per case and relation, the case's state transformed and the answers the relation says it must
+    give → [case dict] in the cases.json format (name "<relation> <i>", note "metamorphic: <relation> of <case name>",
+    "expected" and "ask" for the questions the relation checks), so `solvi test` and run_case run them. A System that
+    breaks the relation — reads grams as kilograms — fails them as regressions, though no hand-written case pins the
+    transformed input.
+
+    The source answers: with system=, the answers it gives now for the case's state (asked, never stored); else the
+    case's own "expected". A relation that does not apply (transform → None) makes no case; a transform that raises, and
+    a case with no answers to start from, make none either, and a UserWarning says how many. Deterministic: cases in
+    order, relations in order within a case."""
+    rels = [relations] if isinstance(relations, Relation) else list(relations)
+    out, made, raised, empty = [], {}, 0, 0
+    for i, case in enumerate(cases):
+        state = case.get("state")
+        if not isinstance(state, dict):
+            continue
+        name = case.get("name", f"#{i + 1}")
+        source = None
+        for rel in rels:
+            try:
+                new = rel.transform(copy.deepcopy(state))
+            except Exception:  # noqa: BLE001 — a relation that does not fit this state's shape
+                raised += 1
+                continue
+            if new is None:
+                continue
+            if source is None:
+                source = _source_answers(case, system)
+            if not source:
+                empty += 1
+                break
+            want = (rel.expect or dict)(copy.deepcopy(source))
+            if not want:
+                continue
+            made[rel.name] = made.get(rel.name, 0) + 1
+            out.append({"name": f"{rel.name} {made[rel.name]}", "state": new, "expected": dict(want), "ask": sorted(want),
+                        "note": f"metamorphic: {rel.name} of {name}"})
+    if raised or empty:
+        warnings.warn(f"metamorphic: {raised} transform(s) raised, {empty} case(s) had no answers to compare with "
+                      "(no system= and no \"expected\")", UserWarning, stacklevel=2)
+    return out
+
+
+def _source_answers(case, system):
+    if system is None:
+        return dict(case.get("expected") or {})
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        res = system.ask(copy.deepcopy(case["state"]), case.get("ask"), **_store_kw(system))
+    return _answers(res)[0]
+
+
+__all__ = ["boundary", "cases_from_store", "metamorphic", "Relation"]

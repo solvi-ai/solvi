@@ -57,3 +57,61 @@ def test_deterministic_and_seed_states_left_out():
     a = testing.boundary(seeds, n=100)
     assert a == testing.boundary(seeds, n=100)
     assert not any(c["state"] in [s["state"] for s in seeds] for c in a)
+
+
+# --- thresholds from the rules' constants; huge negative numbers; long distinct lists, sets and dict keys
+LIMIT = 250
+
+
+def _threshold_system():
+    from solvi import Answer, Catalog, Question, System
+    cat = Catalog()
+
+    @cat.rule("big")
+    def big(amount, score) -> bool:
+        return amount >= 100 and 0.5 < score <= LIMIT
+
+    return System(cat, [Question("big", "Big?", Answer.yes_no())])
+
+
+def test_thresholds_from_the_rules_constants():
+    system = _threshold_system()
+    seeds = [{"state": {"amount": 3, "score": 0.9}}, {"state": {"amount": 7, "score": 0.7}}]
+    out = testing.boundary(seeds, n=500, system=system)
+    amounts = {c["state"]["amount"] for c in out if "rule threshold" in c["note"] and "amount" in c["note"]}
+    assert {99, 100, 101} <= amounts                  # amount >= 100: one below, at and one above, as ints
+    scores = {c["state"]["score"] for c in out if "rule threshold" in c["note"] and "score" in c["note"]}
+    assert 0.5 in scores and any(0.49 < s < 0.5 for s in scores) and any(0.5 < s < 0.51 for s in scores)
+    assert 250 in scores or 250.0 in scores           # a module constant the rule compares with
+    # the answers flip at the threshold, and the pinned answers say so
+    at = {c["state"]["amount"]: c["expected"]["big"] for c in out
+          if c["note"].startswith("boundary: amount: ") and "rule threshold" in c["note"] and c["state"]["score"] == 0.9}
+    assert at[99] == "no" and at[100] == "yes"
+    # off, and given by hand
+    off = testing.boundary(seeds, n=500, system=system, thresholds=False)
+    assert not any("rule threshold" in c["note"] for c in off)
+    hand = testing.boundary(seeds, n=500, thresholds={"amount": [42]})
+    assert {41, 42, 43} <= {c["state"]["amount"] for c in hand if "rule threshold" in c["note"]}
+    # without a system and without thresholds=: none (there are no rules to read)
+    assert not any("rule threshold" in c["note"] for c in testing.boundary(seeds, n=500))
+
+
+def test_huge_negative_numbers():
+    out = testing.boundary([{"state": {"x": 5, "y": 1.5}}], n=500)
+    assert {"x": -2 ** 63, "y": 1.5} in [c["state"] for c in out]
+    assert {"x": 5, "y": -1e300} in [c["state"] for c in out]
+
+
+def test_long_distinct_lists_sets_and_dict_keys():
+    seeds = [{"state": {"tags": ["a", "b"], "ids": [1, 2], "seen": {"x"}, "counts": {"a": 1}}}]
+    out = testing.boundary(seeds, n=1000)
+    by = {c["note"]: c["state"] for c in out}
+    tags = by["boundary: tags: long list of distinct values"]["tags"]
+    assert len(tags) == len(set(tags)) == testing._traces.LONG and all(isinstance(t, str) for t in tags)
+    ids = by["boundary: ids: long list of distinct values"]["ids"]
+    assert len(set(ids)) == testing._traces.LONG and all(isinstance(t, int) for t in ids)
+    seen = by["boundary: seen: long set of distinct values"]["seen"]
+    assert isinstance(seen, set) and len(seen) == testing._traces.LONG
+    assert by["boundary: seen: empty set"]["seen"] == set()
+    counts = by["boundary: counts: many keys"]["counts"]
+    assert len(counts) == testing._traces.LONG and counts["a"] == 1
