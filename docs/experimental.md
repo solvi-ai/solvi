@@ -312,12 +312,13 @@ flags sooner (24 decisions on average) but with 14 of 100 false flags: a Gaussia
 level-matched, and a level-matched comparison was not run. AuditWatch's merit is that it holds its false-alarm level.
 Condition: the reference was the check run on 800 random decisions, all checked; with only the audited share of a
 reference (about 80 items) the threshold widens and detection is slower than measured here.
+One task family (intent routing, a TF-IDF + logistic-regression router, a nearest-neighbour second opinion) and one
+break size (odds × 6 while the CUSUM is tuned to × 2; a doubling will be slower). A break confined to the decisions
+the policy never buys was not planted, so "sees what the bought check cannot" is untested. A flag says the check
+disagrees with the system more often, not which of them broke.
 
-- **Missing:** one task family (intent routing, a TF-IDF + logistic-regression router, a nearest-neighbour second
-  opinion) and one break size (odds × 6 while the CUSUM is tuned to × 2; a doubling will be slower, unmeasured); a
-  short reference unmeasured; a break confined to the decisions the policy never buys was not planted, so "sees what
-  the bought check cannot" is untested. A flag says the check disagrees with the system more often, not which of them
-  broke.
+- **Missing:** one task family and one break size measured (docs/experimental.md); a smaller break, a short
+  reference and a break confined to the decisions the policy never checks are unmeasured
 - **Script:** none yet. **Deadline:** 1.2.
 - API: `solvi.experimental.audit` (`AuditWatch`).
 
