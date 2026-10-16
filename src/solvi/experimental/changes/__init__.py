@@ -98,13 +98,15 @@ approval levels and rollback — infrastructure, not a claim that its gates admi
 
 What is not done:
 - no rewind over an Environment (Confirmation.on_evidence takes the replay as a callback);
-- no narrows / widens classifier (Consistency takes it as a callback; Z3 over lawlang is planned);
+- narrows / widens is measured only on probe inputs through the answerers (Consistency(probes=), opt-in) or
+  taken from a callback; a classifier over the rule's text (Z3 over lawlang) is planned;
 - no regression-scenario stage (`solvi test` cases.json);
 - the should-abstain set is declared by the caller: none is derived (stored abstentions are not one — a correction
   may rightly make the system answer them), and an empty set holds the change for a person;
 - no scope flag on a world change for rules from experience;
 - no validity periods in compile Versions (nor the change-type classifier in the compiler);
-- the research harness's untrusted-code process sandbox is not ported (Static uses the compiler's sandbox check);
+- Static only checks code; IsolatedTests (opt-in, _isolated.py) runs it on test cases in the compiler's process
+  sandbox (solvi.experimental.compile.sandbox.run), the expected answers kept in the parent;
 - a held change lives only in this process's memory until it is ruled on (its journal records survive, the Change
   object does not); Pipeline.expire_held(max_age) rules on the ones that waited too long."""
 from __future__ import annotations
@@ -114,6 +116,7 @@ from typing import Any, Callable
 
 from ...core.runtime import vhash
 from .. import warn_on_import
+from ._isolated import IsolatedTests, strict_equal
 from ._journal import ChangeJournal, EvalLocked, EvaluatorLock, MemoryStorage
 from ._paired import paired_bootstrap, run_episode
 from ._stages import (DEFAULT_APPROVAL, LEVELS, REFUSAL_WORDS, Approval, Canaries, CleanCases, catalog_of, Confirmation,
@@ -232,7 +235,26 @@ class Result:
                                    + (f": {v.reason}" if v.reason else "") for v in self.verdicts])
 
 
-FINAL = ("static", "approval", RefusalRegression.name)   # stages whose refusal is never advisory
+FINAL = ("static", "approval", RefusalRegression.name)
+ORDERS = ("given", "cheap_first")
+# What a built-in stage costs to run, roughly (Pipeline(order="cheap_first") sorts by it): reading the journal or the
+# store is cheap, replaying recorded cases is moderate, a sandbox, a honesty run or slices are dear, fresh worlds dearest.
+STAGE_COSTS = {"failure_memory": 1.0, "static": 1.0, "consistency": 1.0, "approval": 1.0, "confirmation": 10.0,
+               "clean_cases": 10.0, "impact": 10.0, "refusal_regression": 10.0, "canaries": 100.0, "slices": 100.0,
+               "isolated_tests": 100.0, "fresh_environments": 1000.0}
+DEFAULT_COST = 10.0
+
+
+def stage_cost(stage, costs=None):
+    """A stage's cost: `costs[name]` (Pipeline(costs=)), else its `cost` attribute (set it on any stage: `st.cost = 5`),
+    else STAGE_COSTS for a built-in, else DEFAULT_COST."""
+    name = getattr(stage, "name", None)
+    if costs and name in costs:
+        return float(costs[name])
+    c = getattr(stage, "cost", None)
+    if isinstance(c, (int, float)) and not isinstance(c, bool):
+        return float(c)
+    return STAGE_COSTS.get(name, DEFAULT_COST)   # stages whose refusal is never advisory
 SEARCH_UNCONFIRMED = "search proposal: confirmation on its evidence did not run"
 
 
@@ -263,7 +285,11 @@ class Pipeline:
     or None, ctx)` → a callable input → answer (None: the answerer in force), which makes every change answering (else
     a change answers when its target has `answerer(change or None, ctx)`); raise_stage_errors: a stage that raises ends the
     proposal with status "error" (journaled; not a rejection, so the failure memory does not keep it) — True: journaled,
-    then the exception is raised.
+    then the exception is raised. order: "given" (default: the stages run as listed) or "cheap_first" (opt-in: sorted by
+    cost, ties in the given order, Approval last — the pipeline stops at the first refusal, so evidence that is dear to
+    collect is not paid for a change a cheap stage refuses; the order is journaled with the proposal). A stage's cost:
+    costs={name: cost}, else its `cost` attribute, else STAGE_COSTS for a built-in, else DEFAULT_COST (see stage_cost).
+    A stage that reads another's verdict (ctx.verdicts) must not cost less than that one.
 
     RefusalRegression is not switchable: for every change whose target can answer it runs (inserted before Approval
     when it is not among the stages; yours is used in its place) and is journaled; there is no argument to remove it."""
@@ -271,7 +297,10 @@ class Pipeline:
     experimental = True
 
     def __init__(self, stages, storage, *, store=None, approval=None, targets=(), refusals=(), answer_of=None,
-                 raise_stage_errors=False):
+                 raise_stage_errors=False, order="given", costs=None):
+        if order not in ORDERS:
+            raise ValueError(f"order is one of {ORDERS}, not {order!r}")
+        self.order, self.costs = order, dict(costs or {})
         self.stages = list(stages)
         for s in self.stages:
             if not callable(getattr(s, "run", None)) or not getattr(s, "name", None):
@@ -313,6 +342,8 @@ class Pipeline:
         if self.answers(change) and not any(isinstance(s, RefusalRegression) for s in st):
             i = next((k for k, s in enumerate(st) if isinstance(s, Approval)), len(st))
             st.insert(i, self._refusal)
+        if self.order == "cheap_first":                # stable: ties keep the given order; Approval decides last
+            st.sort(key=lambda s: (isinstance(s, Approval), stage_cost(s, self.costs)))
         return st
 
     # ------------------------------------------------------------------------------------------------ proposing
@@ -321,8 +352,9 @@ class Pipeline:
         if not isinstance(change, Change):
             raise TypeError("propose takes a Change")
         parent = self.current if change.parent is None else change.parent
+        extra = {"order": [s.name for s in self.stages_for(change)]} if self.order != "given" else {}
         rec = self.journal.write("propose", change=change.to_dict(), fingerprint=change.fingerprint(), parent=parent,
-                                 source=change.source, artifact=change.artifact)
+                                 source=change.source, artifact=change.artifact, **extra)
         return self._run(change, rec["id"], 0, {}, parent)
 
     def rule(self, change_id, ruling, *, by) -> Result:
@@ -534,7 +566,7 @@ class Pipeline:
 
 __all__ = ["allowed", "Approval", "ARTIFACTS", "Canaries", "catalog_of", "Change", "CHANGE_TYPES", "ChangeJournal", "CleanCases",
            "Confirmation", "Consistency", "Context", "DEFAULT_APPROVAL", "EvalLocked", "EvaluatorLock",
-           "FreshEnvironments", "gate_of", "gates_of", "hazard_body", "hazard_gate", "identity", "IDENTITY_KEYS", "Impact", "is_refusal", "KnowledgeTarget",
+           "FreshEnvironments", "gate_of", "IsolatedTests", "gates_of", "hazard_body", "hazard_gate", "identity", "IDENTITY_KEYS", "Impact", "is_refusal", "KnowledgeTarget",
            "KnownFailures", "REFUSAL_WORDS", "RefusalRegression",
-           "LearningTarget", "LEVELS", "MemoryStorage", "paired_bootstrap", "Pipeline", "Promoted", "Refused", "Result", "run_episode", "ShipWatch", "SliceGuard", "SOURCES",
-           "Stage", "Static", "STORE_SOURCE", "StageVerdict", "VersionsTarget"]
+           "LearningTarget", "LEVELS", "ORDERS", "stage_cost", "STAGE_COSTS", "DEFAULT_COST", "MemoryStorage", "paired_bootstrap", "Pipeline", "Promoted", "Refused", "Result", "run_episode", "ShipWatch", "SliceGuard", "SOURCES",
+           "Stage", "Static", "STORE_SOURCE", "StageVerdict", "strict_equal", "VersionsTarget"]
