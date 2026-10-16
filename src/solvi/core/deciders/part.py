@@ -682,12 +682,13 @@ class DecisionPart:
             raise ValueError("calibration needs labelled examples")
         if signal not in ("auto", "act", "confidence"):
             raise ValueError('signal must be "auto", "act" or "confidence"')
-        gold = [self._answer_key(y) for _, y in ex]
+        from ..catalog import label_options              # a label with several right answers (AnyOf): any of them
+        gold = [[self._answer_key(o) for o in label_options(y)] for _, y in ex]
         conf, act, ok, ds = [], [], [], []
         for (z, a), y in zip(self._read([t for t, _ in ex]), gold):    # a long input: the window a decision reads
             d = self.model._decision(self.spec, z)
             ds.append(d)
-            ok.append(float(self._answer_key(d.value) == y))
+            ok.append(float(self._answer_key(d.value) in y))
             conf.append(d.conf)
             act.append(None if a is None else self.model.act_probability(self.spec, d, a))
         self._source = one_source(ds)                 # mixed log-probabilities and written numbers: refused
@@ -870,12 +871,17 @@ class DecisionPart:
         _, _, _, ds = self._labelled(examples, "confidence")
         ordinal = self.kind in ("score", "number")
         scores, sizes = [], []
+        from ..catalog import label_options
         for d, (_, y) in zip(ds, examples):
             keys = list(d.probs)
-            g = Unknown if y is Unknown else self.spec.label(y)
-            if g not in keys:
-                raise ValueError(f"{y!r}: this question cannot answer it (its answers: {keys})")
-            scores.append(float(set_scores([d.probs[k] for k in keys], ordinal, Unknown in keys)[keys.index(g)]))
+            sc = set_scores([d.probs[k] for k in keys], ordinal, Unknown in keys)
+            best = []                                # several right answers (AnyOf): the set covers any one of them
+            for o in label_options(y):
+                g = Unknown if o is Unknown else self.spec.label(o)
+                if g not in keys:
+                    raise ValueError(f"{o!r}: this question cannot answer it (its answers: {keys})")
+                best.append(float(sc[keys.index(g)]))
+            scores.append(min(best))
         q = conformal_quantile(scores, 1 - coverage)
         self.conformal_set = {"coverage": coverage, "quantile": q, "n": len(scores), "ordinal": ordinal}
         for d in ds:

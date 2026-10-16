@@ -3379,6 +3379,12 @@ system.guarantee("correct", examples, max_error=0.3, answer="yes", folds=5)
 system.guarantee("refund", False)                                  # remove it
 ```
 
+A label with several right answers — the dialog closes by the button or by Escape — is `AnyOf("button", "escape")`
+(`from solvi.core import AnyOf`): `system.guarantee`, `solvi.build` and a decision part's `act_guard`,
+`calibrate_for` and `conformal` count an answer right when it is any of them (with `correct=`, your judge is asked per
+option), so another right answer is not counted as an error and does not lower the share answered alone. What is
+fitted on such a label (`solvi.build`'s head or learner) learns the first option. A plain label is the one right answer.
+
 Which promise each method makes, for inputs like the calibration examples (the same stream, not a new domain):
 
 | method | given as | promise |

@@ -570,6 +570,9 @@ class Combination:
                        f"the calibration examples of part {lf.name!r}")
 
     def _right(self, v, y):
+        from ..catalog import AnyOf
+        if isinstance(y, AnyOf):                          # several right answers: right if it is any of them
+            return any(self._right(v, o) for o in y.options)
         sp = self.spec
         if isinstance(v, Quote):
             v = v.value

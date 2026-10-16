@@ -69,7 +69,7 @@ import math
 import random
 import warnings
 
-from ..core.catalog import Answer, Catalog, Question
+from ..core.catalog import Answer, AnyOf, Catalog, Question, first_label, label_options
 
 SPLIT_FIT = 0.75            # the share fitted on when System 1 is fitted here
 SPLIT_SELECT = 1 / 3        # the share a signal is chosen on when a rule answers and its confidence does not vary
@@ -264,6 +264,14 @@ def _judge(q, correct):
     return right
 
 
+def _any_of(correct, question):
+    """correct(answer, label) for labels with several right answers (AnyOf): right when it is right for any option —
+    by `correct` when given, else by equality of the normalized answers (`question()`: the Question, once known)."""
+    def right(ans, label):
+        return any(_judge(question(), correct)(ans, o) for o in label_options(label))
+    return right
+
+
 def _rows(system, qname, examples, signal, correct):
     """System 1 (no guarantee) on labelled examples → (signals, right, lost) as System.guarantee reads them."""
     from ..core.guarantees.guarantee import QuestionGuard, _add_checkpoints, _calibration_rows, _drop_checkpoints
@@ -370,7 +378,9 @@ def build(question, examples, *, catalog=None, learner=None, slow=None, reads=No
     refitted without some options for the open-set gate). slow: the slow path (module docs); reads: the given keys a
     model slow path reads. max_risk= or max_error=: the promise. signal: the guarantee's signal (default: chosen, see
     the module docs). correct: a function (answer, label) → bool when a label is not simply the right answer (a label
-    that says "right" / "wrong" of System 1's answer, a quote that overlaps). novel: "auto", True or False. budget /
+    that says "right" / "wrong" of System 1's answer, a quote that overlaps); a label `solvi.core.AnyOf(a, b)` has
+    several right answers — any of them counts as right in every calibration, and System 1 is fitted on the first.
+    novel: "auto", True or False. budget /
     total: solvi.core.dispatch.Budget per decision / for the dispatcher's life; price: dollars per million input and output
     tokens (needed for dollars). storage: a path or a TraceStorage — every decision and the policy, hash-chained.
     split: (fit, guarantee, dispatch) shares (with slow=, a dispatch share of 0 calibrates System 1 on all the rest and
@@ -403,6 +413,8 @@ def build(question, examples, *, catalog=None, learner=None, slow=None, reads=No
     examples = [tuple(e) for e in examples]
     if not examples or not all(len(e) == 2 and isinstance(e[0], dict) for e in examples):
         raise ValueError("examples are [(state dict, correct answer), ...]")
+    if any(isinstance(y, AnyOf) for _, y in examples):       # several right answers: right when it is any of them
+        correct = _any_of(correct, lambda: q)
     given_keys = list(examples[0][0].keys())
     raw_states = [st for st, _ in examples]   # split="hash" hashes these (before a knowledge snapshot is added)
     snap_of, knowledge_desc = _knowledge_source(knowledge)
@@ -484,6 +496,7 @@ def build(question, examples, *, catalog=None, learner=None, slow=None, reads=No
         if mode == "head":
             s.fit(qname, ex)
         return s, cat_question
+    fit_raw, fit_ex = fit_ex, [(st, first_label(y)) for st, y in fit_ex]   # fitted on one answer: an AnyOf's first
     system, q = make_system(fit_ex)
     if mode == "learner":
         desc1 = f"the given learner's decision part, fitted on {len(fit_ex)} examples"
@@ -495,7 +508,7 @@ def build(question, examples, *, catalog=None, learner=None, slow=None, reads=No
     else:
         desc1 = f"the catalog's rule for {qname!r}, as written"
     if mode == "given" and fit_ex:              # nothing is fitted on them: they calibrate
-        rest, fit_ex = fit_ex + rest, []
+        rest, fit_ex = fit_raw + rest, []
         rest_g = sg
         rest_u, lo = su, 0.0
 
@@ -722,7 +735,8 @@ def _rule_answer(cat, qname):
 def _open_set(make_system, system, q, qname, fit_ex, g_ex, sig_name, correct, level, delta, seed, folds=3):
     """The leave-options-out simulation and the gate → (OpenSetGate, info)."""
     from ..core.guarantees.openset import OpenSetGate
-    norm = q.answer.normalize
+    def norm(y):                                   # a label with several right answers: grouped by its first
+        return q.answer.normalize(first_label(y))
     ks, kr, _ = _rows(system, qname, g_ex, sig_name, correct)
     keep = [i for i, s in enumerate(ks) if math.isfinite(s)]
     ks, kr = [ks[i] for i in keep], [kr[i] for i in keep]

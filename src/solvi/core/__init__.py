@@ -20,7 +20,7 @@ reports, signatures) and response; system (System); slow (generation, agreement,
 and the slow path); knowledge (the knowledge store, write gates, action model, risk policies, agenda, failure memory,
 world map, episodes, memory of corrections). A module imports only its own area's tier or the ones
 below it. In 0.9 `solvi.core` was the catalog module; its public names are still here."""
-from .catalog import (NOT_STATED, NOT_STATED_KEY, PRIMITIVES, Answer, AnswerType, Catalog, Claim, Decision,
+from .catalog import (NOT_STATED, NOT_STATED_KEY, PRIMITIVES, Answer, AnswerType, AnyOf, Catalog, Claim, Decision,
                       ExperimentalWarning, NotStated, because, missing, Part, Question, Quote, Serial, Unknown, accept, accepts, bin_labels,
                       check_evidence, cuts_number, evidence_rows, find_quote, find_whole, ground, has_evidence, locate,
                       plain_json, question_data, unknown_key, unwrap, validated)
@@ -88,7 +88,7 @@ def __dir__():
     return sorted(set(globals()) | set(EXTENSION_POINTS))
 
 
-__all__ = ["ExperimentalWarning", "NOT_STATED", "accept", "accepts", "Answer", "AnswerType", "because", "bin_labels", "Catalog",
+__all__ = ["ExperimentalWarning", "NOT_STATED", "accept", "accepts", "Answer", "AnswerType", "AnyOf", "because", "bin_labels", "Catalog",
            "check_evidence", "Claim", "cuts_number", "Decision", "evidence_rows", "find_quote", "find_whole", "ground",
            "has_evidence", "locate", "missing", "NOT_STATED_KEY", "NotStated", "Part", "plain_json", "PRIMITIVES", "Question",
            "question_data", "Quote", "Serial", "Unknown", "unknown_key", "unwrap", "validated",

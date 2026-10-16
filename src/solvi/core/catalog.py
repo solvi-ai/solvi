@@ -174,6 +174,43 @@ class Decision:
             return 1.0
 
 
+@dataclass(frozen=True, init=False)
+class AnyOf:
+    """A label with several right answers: `(state, AnyOf("close", "escape"))` — the dialog is closed by the button or by
+    Escape, and either answer is right. Calibration (`solvi.build`, `System.guarantee`, `act_guard`) counts an answer
+    right when it is any of them, so another right answer is not counted as an error. What is fitted on such a label
+    learns the first option (put the preferred one first). A plain label is the one right answer, as before."""
+    options: tuple
+
+    def __init__(self, *options):
+        if len(options) == 1 and isinstance(options[0], (list, tuple, set, frozenset)):
+            options = tuple(options[0])
+        if not options:
+            raise ValueError("AnyOf needs at least one right answer")
+        object.__setattr__(self, "options", tuple(options))
+
+    @property
+    def first(self):
+        """The preferred right answer: what a learner is fitted on."""
+        return self.options[0]
+
+    def __iter__(self):
+        return iter(self.options)
+
+    def __repr__(self):
+        return "AnyOf(" + ", ".join(map(repr, self.options)) + ")"
+
+
+def label_options(y):
+    """A label → the tuple of its right answers (an AnyOf's options; a plain label: itself alone)."""
+    return y.options if isinstance(y, AnyOf) else (y,)
+
+
+def first_label(y):
+    """A label as a learner is fitted on it: an AnyOf's first option, a plain label itself."""
+    return y.first if isinstance(y, AnyOf) else y
+
+
 def because(value, text, **numbers):
     """A value with the reason its part chose it — the branch taken and the numbers it rested on: `return because("unknown",
     "B = P ≠ D", p=0.38)`. Opt-in: from a rule the reason leads the answer's `why` ("because B = P ≠ D (p=0.38); ..."); from
@@ -1168,7 +1205,7 @@ class Catalog:
         raise KeyError(f"{name} is not a producer of {fact}")
 
 
-__all__ = ["ExperimentalWarning", "NOT_STATED", "accept", "accepts", "Answer", "AnswerType", "because", "because_text", "bin_labels", "Catalog", "check_evidence", "cites_of", "Claim",
+__all__ = ["AnyOf", "ExperimentalWarning", "first_label", "label_options", "NOT_STATED", "accept", "accepts", "Answer", "AnswerType", "because", "because_text", "bin_labels", "Catalog", "check_evidence", "cites_of", "Claim",
            "cuts_number", "Decision", "evidence_rows", "find_whole", "ground", "group_func", "has_evidence", "locate",
            "missing", "NOT_STATED_KEY", "NotStated", "Part", "plain_json", "PRIMITIVES", "Question", "question_data", "Quote",
            "Serial", "Unknown", "unknown_key", "unwrap", "validated"]
