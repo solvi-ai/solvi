@@ -780,7 +780,7 @@ def test_help_and_the_unknown_command_error_list_every_command(capsys):
     text = capsys.readouterr().out
     listed = text.split("positional arguments:")[1].split("option")[0]
     for cmd in ("verify", "replay", "diff", "report", "serve", "check", "ask", "calibrate", "models", "init", "test",
-                "honesty", "hook"):
+                "honesty", "mutants", "hook"):
         assert f" {cmd} " in listed or f"{cmd}," in listed, cmd
     assert main(["bogus"]) == 2
     err = capsys.readouterr().err

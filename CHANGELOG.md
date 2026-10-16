@@ -152,6 +152,23 @@ started from a failing test built on the reproduction; the numbers are before �
 
 ### Added
 
+- **Catalog mutants: `solvi mutants PATH` / `solvi.testing.mutants.run(cases)`.** Passing cases do not say whether
+  they would fail if the catalog were wrong. Each mutant is the task file with one small fault — a comparison flipped
+  (`<` → `>=`) or moved by its edge (`<` → `<=`), a threshold constant nudged up or down, an if/else swapped, a check
+  that always passes or a guard that never raises — run against the cases with `run_file(fast=True)`; the report gives
+  the share caught (killed / (killed + survived); a mutant that cannot be built is left out) and each survivor with its
+  line. The original files are never written (the mutant runs from a copy of the task's directory, so a `system`
+  factory next to the task loads it too). On the fifteen gallery entries (9–16 cases each): 0.56 of 801 mutants
+  caught (0.39–0.81 per entry), 36 s in all (3 ms to 330 ms per mutant); flipped comparisons are caught 0.81 of the
+  time, moved edges 0.24 and nudged constants 0.26 — the cases rarely sit on a threshold.
+- **`RefusalRegression(coverage="sampled", sample=k, pool=..., seed=None)` and `missing_answer="refuse"`** (opt-in;
+  defaults unchanged). The stage measured only the declared should-abstain set, so a change tuned to it passed: a
+  threshold moved from 0.5 to 0.45 kept the four declared inputs refused and was promoted, though it answers four past
+  inputs the policy refused; with `coverage="sampled"` each change also meets k inputs drawn from past inputs (a list,
+  `pool(change, ctx)` or a TraceStorage) that the version in force refuses, and it is refused (seed, drawn and refused
+  counts recorded). A change to a knowledge item with no `answer_of=` passed unmeasured; a
+  `RefusalRegression(missing_answer="refuse")` among the stages refuses it instead.
+
 -  **Laws (experimental): `Buffer(window=N)`, `LawSet(recent=M, readmit="grown")`, `LawSet(memo=True)`,
   `LawSet.proposals`** (opt-in; defaults unchanged). A windowed buffer keeps its last N rows and scores exactly as a
   fresh buffer of them; the sized rule's N never decreases when rows leave, and a candidate counts again once the window

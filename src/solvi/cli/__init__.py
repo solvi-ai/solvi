@@ -2,6 +2,7 @@
 
     solvi test PATH...        decision regression tests from cases.json files (solvi.testing)
     solvi honesty SET.json    honesty numbers of a labelled set, gated against a baseline (solvi.testing.honesty)
+    solvi mutants PATH...     small faults made in the catalog: which ones the cases do not catch (solvi.testing.mutants)
     solvi verify | replay | diff over a TraceStorage:
 
     solvi verify decisions.db [--anchor COUNT:HASH] [--signature SIG.json] [--sign SIG.json]
@@ -364,6 +365,7 @@ def ask_parser(sub):
 
 COMMANDS = {"test": ("solvi.testing", "decision regression tests from cases.json files"),
             "honesty": ("solvi.testing.honesty", "honesty numbers of a labelled set, gated against a baseline"),
+            "mutants": ("solvi.testing.mutants", "small faults made in a catalog: the share its cases catch"),
             "hook": ("solvi.experimental.hooks", "a coding agent's hooks (experimental): check edits against rules, pick a "
                      "skill, install them")}
 
