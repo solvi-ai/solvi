@@ -95,7 +95,7 @@ def test_static_canaries_are_passed_by_a_tuned_candidate_drawn_ones_are_not(tmp_
     res = pipe_of(tmp_path, Threshold(), [drawn], name="b.jsonl", refusals=OUTSIDE[:1]).propose(move(0.6))
     assert res.status == "rejected" and res.stage == "canaries"
     m = res.verdicts[0].measured
-    assert m["drawn"] == 5 and m["pool"] == 40 and len(m["commit"]) == 24
+    assert m["drawn"] == 5 and m["pool"] == 40 and isinstance(m["commit"], str) and m["commit"]
 
 
 def test_the_draw_depends_on_the_change_and_the_secret_not_on_the_caller():

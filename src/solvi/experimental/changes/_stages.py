@@ -692,7 +692,13 @@ class Canaries:
     (solvi.testing.honesty.compare); held — a flag, not a success — when `perfect(metrics)` says the score is
     suspiciously perfect (default: every case answered and none wrong, on a set built so that a perfect score proves
     access to the answers: a removed test, a reference the candidate should not see). Ready-made:
-    Canaries.honesty(system_of, cases) asks the candidate system the cases (honesty.load_set(path)["cases"])."""
+    Canaries.honesty(system_of, cases) asks the candidate system the cases (honesty.load_set(path)["cases"]).
+
+    Canaries.drawn(run_cases, pool, k) (opt-in): a fixed set is one a proposer that sees it can tune to; this one draws
+    k cases per change from a pool, seeded by the stage's secret (random per stage unless `secret=` is given) and the
+    change's journal id, so neither the caller nor the proposer picks or predicts them; run_cases(change, ctx, cases) →
+    metrics. Recorded: "drawn", "pool", and "commit" — a hash of the drawn ids (with the secret the draw can be
+    re-made and checked; the ids themselves are not journaled). It helps only while the proposer does not see the pool."""
     name = "canaries"
 
     def __init__(self, run: Callable, *, baseline: dict | None = None, tolerance: float = 0.02,
@@ -702,13 +708,38 @@ class Canaries:
     def run(self, change, ctx):
         from ...testing.honesty import compare
         m = dict(self._run(change, ctx))
+        drawn = {k: m.pop(k) for k in ("drawn", "pool", "commit") if k in m}
         worse = compare(m, self.baseline, self.tolerance) if self.baseline else []
-        meas = {"metrics": m, "worse": worse}
+        meas = {"metrics": m, "worse": worse, **drawn}
         if worse:
             return StageVerdict.refuse("honesty got worse: " + "; ".join(worse), meas)
         if self.perfect is not None and self.perfect(m):
             return StageVerdict.hold("a suspiciously perfect score on the canaries: a flag for a person, not a success", meas)
         return StageVerdict.admit("", meas)
+
+    @classmethod
+    def drawn(cls, run_cases: Callable, pool, k: int, *, secret: bytes | None = None, **kw):
+        pool = list(pool)
+        if not 0 < int(k) <= len(pool):
+            raise ValueError(f"k is in 1..{len(pool)} (the pool's size), not {k!r}")
+        import os
+        key = os.urandom(16) if secret is None else bytes(secret)
+
+        def draw(ctx):
+            import hashlib
+            import random
+            h = hashlib.sha256(key + str(getattr(ctx, "change_id", "")).encode()).digest()
+            return random.Random(int.from_bytes(h[:8], "big")).sample(range(len(pool)), int(k))
+
+        def run(change, ctx):
+            idx = draw(ctx)
+            cases = [pool[i] for i in idx]
+            from ...core.runtime import vhash
+            return {**dict(run_cases(change, ctx, cases)), "drawn": len(cases), "pool": len(pool),
+                    "commit": vhash(sorted(_example_id(c, i) for c, i in zip(cases, idx)))}
+        st = cls(run, **kw)
+        st.draw = lambda ctx: [_example_id(pool[i], i) for i in draw(ctx)]
+        return st
 
     @classmethod
     def honesty(cls, system_of: Callable, cases, *, risk: float = 0.10, **kw):
