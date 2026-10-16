@@ -533,7 +533,7 @@ def test_two_parts_asking_the_same_question_keep_their_own_fit():
 
 def test_a_journal_with_1_1_0_adaptation_keys_verifies_and_replays(tmp_path):
     """tests/fixtures/fit_1_1_0 was written with the adaptation keyed by the question alone (1.1.0): with one part per
-    question the keys, the fingerprints and the replay are unchanged."""
+    question the keys, the fingerprints and the replay are unchanged (under combine="first", the rule 1.1 decided by)."""
     import shutil
     import sys
 
@@ -542,6 +542,7 @@ def test_a_journal_with_1_1_0_adaptation_keys_verifies_and_replays(tmp_path):
     sys.path.insert(0, str(data))
     try:
         import task as fit_task
+        fit_task.COMBINE = "first"                                     # the rule 1.1 decided by
         fp = json.loads((data / "fingerprints.json").read_text())
         part = fit_task.fitted_part()
         assert part.model.fingerprint() == fp["model"] and part.fingerprint() == fp["part"]
@@ -559,6 +560,12 @@ def test_a_journal_with_1_1_0_adaptation_keys_verifies_and_replays(tmp_path):
             old = store.get(s.id, system)
             assert old.trace.replay(system)["ok"]
             assert old["category"].answer == system.ask(st, store=False)["category"].answer
+        # the 1.2 default ("strictest") is marked in the catalog fingerprint: against it, what 1.1 stored shows as
+        # made by another catalog
+        fit_task.COMBINE = None
+        default = fit_task.system()
+        assert default.fingerprint()["catalog"] != fp["system"]["catalog"]
+        assert all(store.get(s.id, default).trace.replay(default)["catalog"] == "changed" for s in store.iter())
         store.close()
     finally:
         sys.path.remove(str(data))

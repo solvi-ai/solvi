@@ -85,12 +85,14 @@ started from a failing test built on the reproduction; the numbers are before â†
   `Catalog(combine=None)` behaves as `"strictest"`: the answer that comes last in the question's options decides,
   whatever the declaration order, with a warning naming the checks; `Catalog(combine="first")` keeps the declaration
   order (the old default), `Catalog(combine="strictest")` chooses the new rule without the warning; where the options
-  give no order the first declared still decides, with the warning. Fingerprints: the default stays unmarked,
-  `"first"` is now marked and an explicit `"strictest"` no longer is. The learned hard-check order now waits for every
+  give no order the first declared still decides, with the warning. Fingerprints: the default (and an explicit
+  `"strictest"`) is marked, so every catalog fingerprint built on the default changes once and a decision stored under
+  1.1 replays or re-decides against the 1.2 default as made by another catalog; an explicit `"first"` keeps 1.1's
+  fingerprint (the same rule). The learned hard-check order now waits for every
   governing check before settling, so its answers match the default order. Options not listed mildest â†’ strictest
   (e.g. `allow, deny, escalate`) need `combine="first"` or reordered options.
 - Guard keeps its own rule for several failed checks: its catalog sets `combine="first"` (a failed deny policy declared
-  first wins over an escalation, as before); its catalog fingerprint changes once.
+  first wins over an escalation, as before); its catalog fingerprint is 1.1's.
 
 ### Added
 

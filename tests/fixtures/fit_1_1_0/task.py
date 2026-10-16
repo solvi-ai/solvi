@@ -33,6 +33,11 @@ STATES = [{"note": "train to the client, travel"}, {"note": "meals with the team
           {"note": "software licence and meals"}]
 
 
+# None (the catalog default) when make.py wrote the files; the tests set "first", the rule 1.1 decided by (solvi 1.2
+# defaults to "strictest" and marks it in the catalog fingerprint)
+COMBINE = None
+
+
 def fitted_part(fit=False):
     """The part on a fresh model with the adaptation 1.1.0 wrote (adaptations.json, read back as a user's file is —
     the fit's numbers are the file's, not this machine's); fit=True refits on EXAMPLES and teaches one correction
@@ -48,6 +53,6 @@ def fitted_part(fit=False):
 
 
 def system(storage=None):
-    cat = Catalog()
+    cat = Catalog() if COMBINE is None else Catalog(combine=COMBINE)
     part = fitted_part()
     return System(cat, [part.question(cat)], storage=storage)

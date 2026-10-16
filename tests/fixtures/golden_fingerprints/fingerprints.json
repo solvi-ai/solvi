@@ -1,6 +1,6 @@
 {
  "examples/11_answer_types_and_constraints": {
-  "catalog": "680ff6186fa3adb7",
+  "catalog": "6f425adbc468d138",
   "models": {},
   "parts": {
    "answer:risks": "11604089ab423474",
@@ -13,7 +13,7 @@
   "questions": "2ba005352832615a"
  },
  "examples/12_grounded_audit": {
-  "catalog": "6324437264c77f07",
+  "catalog": "2313aa719e2c7390",
   "models": {},
   "parts": {
    "amount": "1aff5fcab7fc7b75",
@@ -26,7 +26,7 @@
   "questions": "4f9a73342fe801b8"
  },
  "examples/13_decide_model": {
-  "catalog": "b9ade8ceab1da781",
+  "catalog": "76d7b910339c074f",
   "models": {
    "answer:team": "5b6c7299a1f7249c"
   },
@@ -41,7 +41,7 @@
   "questions": "a0247fafdfeab997"
  },
  "examples/14_typed_catalog": {
-  "catalog": "9c215a8cb8665032",
+  "catalog": "428fcbb4cc58afae",
   "models": {},
   "parts": {
    "answer:duty": "df68ddf8ad0e48d6",
@@ -55,7 +55,7 @@
   "questions": "2bf0ca7448cf179e"
  },
  "examples/15_typed_decisions": {
-  "catalog": "264db16f14e88447",
+  "catalog": "20bb7dfc095e391b",
   "models": {
    "answer:angry": "05a4bbbff3fb33a0",
    "answer:team": "fe86011e54305fa2",
@@ -75,7 +75,7 @@
   "questions": "b554bf50d790234b"
  },
  "examples/16_primitives:decider": {
-  "catalog": "4ab9f151a499c4c2",
+  "catalog": "ad7868f1e1e8b3c4",
   "models": {
    "answer:amount": "e8bcab82891d638a",
    "answer:contact": "25ee407f6bc302d4",
@@ -93,7 +93,7 @@
   "questions": "37d2fc8c65db0e6c"
  },
  "examples/16_primitives:rules": {
-  "catalog": "24f4ef0953ee5b68",
+  "catalog": "22e9c90ee9962833",
   "models": {},
   "parts": {
    "answer:amount": "c72bab133c7857ed",
@@ -106,7 +106,7 @@
   "questions": "f9a4bcb291304e9a"
  },
  "gallery/01_support_triage": {
-  "catalog": "a005290db1d58427",
+  "catalog": "e94e92d7b3d2236c",
   "models": {
    "intent_class": "1555c164950e5955",
    "intent_rule_line": "1555c164950e5955"
@@ -135,7 +135,7 @@
   "questions": "be438e4b22afe264"
  },
  "gallery/02_email_routing": {
-  "catalog": "dfec4235c0d870ed",
+  "catalog": "6a71d611f5857abe",
   "models": {
    "team_votes": "a66dde49e5b19e0e"
   },
@@ -154,7 +154,7 @@
   "questions": "e6fc3c7f1351b71d"
  },
  "gallery/03_content_guard": {
-  "catalog": "81c0398fb2bf7b80",
+  "catalog": "cff42b2f8a49e8b8",
   "models": {},
   "parts": {
    "answer:harm": "f757d3ccf59a6d00",
@@ -181,7 +181,7 @@
   "questions": "9abec11ff8c6b7da"
  },
  "gallery/04_security_alert": {
-  "catalog": "826cc8b9e4e5e867",
+  "catalog": "c4fb811f6d284605",
   "models": {},
   "parts": {
    "admin_travel_plausible": "c88e70bfb810dd16",
@@ -200,7 +200,7 @@
   "questions": "6b31f312f4c9194f"
  },
  "gallery/05_agent_trace_audit": {
-  "catalog": "ddab1cd53d1ddc72",
+  "catalog": "d28dad179eab187d",
   "models": {},
   "parts": {
    "answer:rotate_secrets": "43a6e9cd062425b3",
@@ -221,7 +221,7 @@
   "questions": "fc85956bc415f464"
  },
  "gallery/06_release_rollout": {
-  "catalog": "25e86d4979dd1f06",
+  "catalog": "497e94d41baf7694",
   "models": {},
   "parts": {
    "answer:decision": "1e573514b8eb9292",
@@ -240,7 +240,7 @@
   "questions": "da455c71a0dd2431"
  },
  "gallery/07_kyc_aml": {
-  "catalog": "6b816560c113a752",
+  "catalog": "db4fef911240fee0",
   "models": {},
   "parts": {
    "adverse_media": "57668060aeefb66a",
@@ -262,7 +262,7 @@
   "questions": "265765b3ec432f37"
  },
  "gallery/08_clinical_screening": {
-  "catalog": "0fb61175802a9151",
+  "catalog": "7d03d29fe2a642ff",
   "models": {},
   "parts": {
    "acvpu_score": "f713a96ffa502a3a",
@@ -285,7 +285,7 @@
   "questions": "874c12d30d353f1c"
  },
  "gallery/09_credit_adverse_action": {
-  "catalog": "7de381c0f424829d",
+  "catalog": "87d0f03dc9f44cb4",
   "models": {},
   "parts": {
    "adult": "40877a2df2c1e001",
@@ -303,7 +303,7 @@
   "questions": "2a5c8368a306117f"
  },
  "gallery/10_procurement_3way_match": {
-  "catalog": "a1d7b79b2eb1953a",
+  "catalog": "c2b0f7f196da45ef",
   "models": {},
   "parts": {
    "answer:duplicate": "8de7a588096e712a",
@@ -325,7 +325,7 @@
   "questions": "9f0549b1f9c2f698"
  },
  "gallery/11_refund_double_charge": {
-  "catalog": "46b6fcda67020e73",
+  "catalog": "dd3ee74c0570831a",
   "models": {},
   "parts": {
    "answer:customer_claims_double": "796de181f0b2cc49",
@@ -345,7 +345,7 @@
   "questions": "8737cba82289bd59"
  },
  "gallery/12_predictive_maintenance": {
-  "catalog": "1f0a3b1bf8d3370c",
+  "catalog": "25df569f4e8d8566",
   "models": {},
   "parts": {
    "answer:health": "63b0318cb5d33ed7",
@@ -369,7 +369,7 @@
   "questions": "b221ddf8930f4a3d"
  },
  "gallery/13_pre_edit_rule_check": {
-  "catalog": "fae64d36745f78d8",
+  "catalog": "ab0516ccdc192c5f",
   "models": {
    "no_pii_in_logs (no_pii_in_logs_decider)": "da76c912c62fb4c2",
    "require_role (require_role_decider)": "3bf7635d369f34ef"
@@ -399,7 +399,7 @@
   "questions": "da61329913030f90"
  },
  "gallery/14_review_triage": {
-  "catalog": "67fa52f7b64b5e2f",
+  "catalog": "bc7d6a5aa4b9a8c2",
   "models": {
    "migration_or_deletion (migration_or_deletion_decider)": "03fac8bacc1699e9",
    "public_api (public_api_decider)": "5c26583860267f0b",
@@ -434,7 +434,7 @@
   "questions": "2813235024a34e19"
  },
  "gallery/15_skill_picker": {
-  "catalog": "0b743c494193307b",
+  "catalog": "003544e983b88e25",
   "models": {
    "picked (skill_decider)": "9af75be603b8fe16"
   },
@@ -447,7 +447,7 @@
   "questions": "2fe3e87e1b2fc497"
  },
  "golden/auto_built": {
-  "catalog": "0a6336d0ef5e20f4",
+  "catalog": "760520ca4ce163fa",
   "models": {},
   "parts": {
    "answer:ok": "08c97a0dba5364fd",
@@ -457,9 +457,9 @@
   },
   "questions": "b7331e3e6ca9a310"
  },
- "golden/auto_built:slow": "80ef0a05b9f9a389",
+ "golden/auto_built:slow": "94603a14bcde6a4d",
  "golden/decisions": {
-  "catalog": "5dd8636bd71cb4d4",
+  "catalog": "5a7a272e84bdf787",
   "models": {
    "answer:amount": "53784a661af3c448",
    "answer:channels": "5873d501ea4a4e9b",
@@ -489,7 +489,7 @@
   "questions": "f7d789747682afc4"
  },
  "golden/head": {
-  "catalog": "3d004d37cadd114f",
+  "catalog": "e270ba51f74c6de5",
   "models": {
    "answer:ok": "246ddf5b09980104"
   },
@@ -501,7 +501,7 @@
   "questions": "478c90e635450a50"
  },
  "golden/llm_decider": {
-  "catalog": "99b6e9403554b9a6",
+  "catalog": "874c2315063ea721",
   "models": {
    "answer:kind": "a25f748449b08a1e"
   },
@@ -511,7 +511,7 @@
   "questions": "141ed1993f263716"
  },
  "golden/rule_list": {
-  "catalog": "d08a4952645160c4",
+  "catalog": "91412ff5a1258473",
   "models": {
    "answer:ok": "4fe31d9407610f78"
   },
@@ -524,7 +524,7 @@
   "questions": "9d68c4b708196274"
  },
  "golden/typed_rules": {
-  "catalog": "a66bf9a827f7f14f",
+  "catalog": "28306501ed14e1a3",
   "models": {},
   "parts": {
    "amount_text": "b4555040022cfd04",
@@ -550,7 +550,7 @@
  "objects/generator_part": "eb3983b73088f511",
  "objects/vote": "7f1ca1c3041e5663",
  "stand/abtbuy": {
-  "catalog": "e59b2da3a7e4ba7c",
+  "catalog": "6d0e9c8561f031c3",
   "models": {},
   "parts": {
    "a_brand": "b9fa0fd9f84aa04f",
@@ -581,7 +581,7 @@
   "questions": "08a66f81d7d9bb26"
  },
  "stand/bird": {
-  "catalog": "64de5705c558b964",
+  "catalog": "ff70ab21157c3092",
   "models": {
    "candidates": "150ee8f6aad4caba"
   },
@@ -601,7 +601,7 @@
   "questions": "7271b74cfef4e63e"
  },
  "stand/credit:v1": {
-  "catalog": "1ea4af4c45735cb4",
+  "catalog": "1609cb277f5094b8",
   "models": {},
   "parts": {
    "amount_points": "1c9262aca0f9dc69",
@@ -619,7 +619,7 @@
   "questions": "437be53c870a9d2b"
  },
  "stand/credit:v2": {
-  "catalog": "a94160acbf634bdc",
+  "catalog": "4018d11c7fccdf38",
   "models": {},
   "parts": {
    "amount_points": "1c9262aca0f9dc69",
@@ -638,7 +638,7 @@
   "questions": "437be53c870a9d2b"
  },
  "stand/credit:v2_young": {
-  "catalog": "c02112eb51076c38",
+  "catalog": "795908ef6d5df8f1",
   "models": {},
   "parts": {
    "amount_points": "1c9262aca0f9dc69",
@@ -658,7 +658,7 @@
   "questions": "437be53c870a9d2b"
  },
  "stand/cuad": {
-  "catalog": "da4c5c7233feac5c",
+  "catalog": "bf20c27791b04ccc",
   "models": {},
   "parts": {
    "answer:clause": "b270bcfaf92d0415",
@@ -667,7 +667,7 @@
   "questions": "c9cf0cd4a2466364"
  },
  "stand/nab": {
-  "catalog": "4ab856b2e652dd7b",
+  "catalog": "c7c9fadcce5034d6",
   "models": {},
   "parts": {
    "above_floor": "0a8edadac530f611",
@@ -681,7 +681,7 @@
   "questions": "a12c0978795c5942"
  },
  "stand/naturalplan:calendar": {
-  "catalog": "ebdea1bf7ed141d5",
+  "catalog": "c6b60664e9cb3baf",
   "models": {},
   "parts": {
    "answer:accept": "f354c8e2d6c938ae",
@@ -698,7 +698,7 @@
   "questions": "74908a3f7b747c73"
  },
  "stand/naturalplan:meeting": {
-  "catalog": "14fb8fbfa0630574",
+  "catalog": "4a04c472038ed2ee",
   "models": {},
   "parts": {
    "answer:accept": "f354c8e2d6c938ae",
@@ -712,7 +712,7 @@
   "questions": "cea1f163c78d54f5"
  },
  "stand/naturalplan:trip": {
-  "catalog": "e4a98d5d272f5a21",
+  "catalog": "60ed5053958f92f0",
   "models": {},
   "parts": {
    "all_cities": "8e79b8e90979cc58",

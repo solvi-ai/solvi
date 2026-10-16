@@ -520,8 +520,9 @@ def catalog_fingerprint(catalog):
     finally:
         if token is not None:
             var.reset(token)
-    # the default ("strictest" since 1.2) leaves the fingerprint as it was; "first" is marked
-    out = {"fp": digest(sorted(parts.items())) if combine == "strictest" else digest(sorted(parts.items()), ("combine", combine)),
+    # "first" (the rule up to 1.1) leaves the fingerprint as 1.1 computed it; any other rule, the 1.2 default "strictest"
+    # included, is marked: a decision stored under 1.1 replays against the 1.2 default as made by another catalog
+    out = {"fp": digest(sorted(parts.items())) if combine == "first" else digest(sorted(parts.items()), ("combine", combine)),
            "parts": parts, "calls": calls}
     catalog._fp_cache = (key, out)
     return out
