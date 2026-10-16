@@ -154,6 +154,22 @@ def test_retract_source_takes_back_only_what_that_writer_alone_supports():
     assert ks.pending_retest(lie)                      # its whole support was taken back: told again, it waits
 
 
+def test_knowledge_value_reads_the_fact_valid_at_a_world_time():
+    import solvi
+    km = solvi.Knowledge()
+    km.tell(("drugX", "max_dose", "10mg"), source="spec", by="label-2023", valid=("2023-01-01", "2024-06-01"))
+    km.tell(("drugX", "max_dose", "20mg"), source="spec", by="label-2024", valid=("2024-06-01", None))
+    km.tell(("drugX", "form", "tablet"), source="spec", by="label")                # no valid: holds at any time
+    snap = km.snapshot(about="drugX")                  # both intervals are facts in a snapshot without valid_at
+    assert solvi.Knowledge.value(snap, "drugX", "max_dose") in ("10mg", "20mg")   # unchanged: whichever row is first
+    assert solvi.Knowledge.value(snap, "drugX", "max_dose", valid_at="2023-05-01") == "10mg"
+    assert solvi.Knowledge.value(snap, "drugX", "max_dose", valid_at="2025-01-01") == "20mg"
+    assert solvi.Knowledge.value(snap, "drugX", "max_dose", "none", valid_at="2020-01-01") == "none"
+    assert solvi.Knowledge.value(snap, "drugX", "form", valid_at="2020-01-01") == "tablet"
+    rows = {r["body"]["o"]: r for r in snap["facts"]}
+    assert rows["20mg"]["valid"] == ["2024-06-01", None] and "valid" not in rows["tablet"]   # rows carry their valid
+
+
 # --- re-deciding after a correction
 def test_redecide_on_the_current_journal_gives_the_corrected_answer(tmp_path):
     import solvi

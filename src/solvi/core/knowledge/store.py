@@ -861,7 +861,8 @@ class KnowledgeStore:
         `relation`; `scope`; `kinds`, default every kind) — "facts" (active and not stale) and "hints" (hypotheses,
         expired or stale items, with why) — the ids they rest on, the store's fingerprint and journal position, and the
         query (so redecide can rebuild it). Disputed, refuted and retracted items are not given. valid_at: a world time —
-        an item whose `valid` does not cover it is a hint ("not valid at ..."), not a fact."""
+        an item whose `valid` does not cover it is a hint ("not valid at ..."), not a fact. A row of an item with a `valid`
+        carries it ("valid": [since, until])."""
         self._settle()
         q = {"about": about, "relation": relation, "scope": scope, "kinds": None if kinds is None else list(kinds)}
         if valid_at is not None:
@@ -881,6 +882,9 @@ class KnowledgeStore:
                 continue
             st = self.status(iid)
             row = {"id": iid, "kind": it.kind, "body": it.body, "source": it.asserts[-1]["source"]}
+            v = self.valid(iid)
+            if v is not None:                            # the validity a reader filters on (Knowledge.value(valid_at=))
+                row["valid"] = v
             if st == "active" and valid_at is not None and not covers(self.valid(iid), valid_at):
                 hints.append({**row, "why": f"not valid at {valid_at}"})
             elif st == "active" and not self.stale(iid):

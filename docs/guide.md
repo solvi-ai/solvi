@@ -4618,7 +4618,10 @@ under its guarantee, named by `of=<stored decision>` and checked in the store. A
 is journaled: the system's own answers never become knowledge, by construction. `ks.item(id)` is the full record:
 kind, body, scope, source, who, evidence, `derived_from`, confidence counts (confirmations, refutations, uses, uses
 that were wrong, a guarantee level), status, version and `supersedes`, and two time ranges — when it held in the world
-(`valid=(since, until)`, as you give it) and when the store learned and invalidated it (journal positions).
+(`valid=(since, until)`, as you give it) and when the store learned and invalidated it (journal positions). Values on
+validity intervals that do not overlap are facts together; `snapshot(valid_at=t)` keeps as facts only those valid at
+`t`, a snapshot row carries its item's `valid`, and a rule reads the value at a world time with
+`solvi.Knowledge.value(snapshot, s, r, valid_at=t)` (without `valid_at` it reads the first matching row).
 
 Contradictions resolve by rank: an observation refutes whatever it contradicts (the world changed), a higher-ranked
 source (outcome > person > spec > verified) refutes a lower one, a producer's new version (`supersedes=`) refutes the
