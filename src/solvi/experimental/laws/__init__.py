@@ -175,6 +175,12 @@ back»: one law for a value that persists instead of one per value). `LawSet(h.g
 `Tracker` (`h.tracker()`) builds each step's `Context` along a stream and `reset()`s per episode; predict on
 `tracker.context(state)`. The extra atoms enlarge the space the sized acceptance divides its error over.
 
+Per-law confidence (opt-in). `LawConfidence(lawset, buffer)`: each active law's posterior precision on its held-out
+rows, `exact` only with no miss on ≥ 60 rows, and at most one tail split — the atom where its misses concentrate, kept
+when Fisher's exact test passes at alpha / atoms tested — with a shrunk confidence on each side. `of(state, action)` →
+(value, law, confidence); `predict(state, action, below=t)` returns `Abstained` where the applied law's confidence is
+below t. A tail no atom tracks gives per-law, not per-state, abstention.
+
 What is not done:
 - no grammar that cannot be enumerated (where the mismatch should matter most) has been measured;
 - the sized rule, admission by probes and abstention are measured on synthetic worlds only: not yet on the game
@@ -189,6 +195,7 @@ from __future__ import annotations
 from .. import warn_on_import
 from ._coarse import BackoffBase, OutcomeClass, coarse
 from ._compile import CompiledCheck, check_compiled, load_module
+from ._confidence import Abstained, LawConfidence, LawStats, fisher_p
 from ._history import Context, History, Past, Same, Tracker
 from ._core import (Admission, Atom, Buffer, CallableProposer, Candidate, Delta, Enumerate, Grammar, Law, LawSet, Proposer,
                     RandomProposer, Step, Transition, Undetermined, sized_level, sized_need)
@@ -198,10 +205,10 @@ from ._rank import (FEATURES, BagOfAtomsRanker, FeatureRanker, HandoverRanker, J
 
 warn_on_import(__name__)
 
-__all__ = ["Admission", "Atom", "BackoffBase", "BagOfAtomsRanker", "Buffer", "CallableProposer", "Candidate",
+__all__ = ["Abstained", "Admission", "Atom", "BackoffBase", "BagOfAtomsRanker", "Buffer", "CallableProposer", "Candidate",
            "CompiledCheck", "Context", "Delta", "Enumerate",
-           "FEATURES", "FeatureRanker", "Grammar", "HandoverRanker", "History", "JointRanker", "Law", "LawSet", "PriorRanker", "Probe",
+           "FEATURES", "FeatureRanker", "Grammar", "HandoverRanker", "History", "JointRanker", "Law", "LawConfidence", "LawSet", "LawStats", "PriorRanker", "Probe",
            "OutcomeClass", "Past", "Proposer", "RandomProposer",
            "RankedProposer", "Same", "Step", "SyntheticTask", "Transition", "atom_features", "atom_kind", "candidate_features",
-           "check_compiled", "checks_to", "coarse", "discriminate", "eig", "load_module", "sized_level", "sized_need", "split",
+           "check_compiled", "checks_to", "coarse", "discriminate", "eig", "fisher_p", "load_module", "sized_level", "sized_need", "split",
            "synthetic_task", "Tracker", "Undetermined"]
