@@ -112,7 +112,7 @@ status.
 pip install solvi              # core: numpy, scipy, pydantic (imported only for typed parts and serialization)
 pip install "solvi[model]"     # + torch, transformers, for the ModernBERT extractors (solvi.extract_*) and the decider
 pip install "solvi[onnx]"      # + onnxruntime, tokenizers: the decider (solvi.core.deciders) on CPU without torch
-                               #   (the decider only: LongSpanExtractor and solvi.extract_* still need [model])
+                               #   and LongSpanExtractor's prediction (backend="onnx"); training needs [model]
 pip install "solvi[serve]"     # + fastapi, uvicorn: solvi serve over HTTP
 pip install "solvi[mcp]"       # + the official MCP SDK for solvi serve --mcp (without it, a built-in stdio server is used)
 pip install "solvi[duckdb]"    # + duckdb: stored decisions in a DuckDB file; "solvi[postgres]" for PostgreSQL
@@ -5007,8 +5007,25 @@ reachable from the stage at which the recorded player first reached it. The repl
 
 With `pip install "solvi[model]"`, solvi provides a ModernBERT extractor, `LongSpanExtractor`. It predicts a start and an end
 position in the text, so the extracted value is always a substring of the document with exact offsets. It gives you
-plain functions `doc -> Quote` to register with `cat.extract`. It runs on torch for prediction too: `solvi[onnx]` covers
-the decider only, and there is no ONNX path for this extractor.
+plain functions `doc -> Quote` to register with `cat.extract`. Training needs torch; prediction also runs without it,
+on `solvi[onnx]` (onnxruntime + tokenizers):
+
+```python
+ex = LongSpanExtractor.load("solvi-ai/extract-base", backend="onnx")   # downloads the JSON files and onnx/ only
+cat.extract(ex.field("total", "the total amount paid"))
+```
+
+- `backend="auto"` (the default) takes torch when torch and transformers are installed, as before, and the ONNX backend
+  otherwise; `"torch"` and `"onnx"` choose one.
+- The ONNX backend reads the checkpoint's `onnx/model_fp16.onnx` (else `model.onnx`, `model_fp32.onnx`; or
+  `onnx_file=`): the encoder and the span head in one graph. The windows, "no answer" and span decoding are the same
+  code as with torch. On 50 SQuAD v2 questions (30 one-window, 20 multi-window) extract-base's fp16 export gave the
+  same span as torch on all 50 (see the [benchmarks](benchmarks.md#the-extractor-on-onnx)).
+- It predicts only: `fit`, `save` and `embed` raise and name the torch backend. A model you fine-tuned gets its
+  export with `tools/export_onnx.py` of the solvi repository (needs torch once); it writes `onnx/` and the tokenizer
+  files into a folder this backend loads, and compares the spans with torch on your texts.
+- Its fingerprint hashes the ONNX file and `tokenizer.json`, not the torch weights: a trace answered with one backend
+  does not replay as the same model with the other.
 
 Labels are character spans: for each training document and field, `(start, end)` of the value in the text, or `None` if
 the field is absent. extract-base's model card suggests labelling about 25–100 documents per task and fine-tuning. A

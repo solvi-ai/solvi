@@ -27,7 +27,7 @@ dependencies = ["numpy", "scipy", "pydantic>=2"]
 
 [project.optional-dependencies]
 model = ["torch", "transformers"]   # model-based extraction from text (solvi.extract_*) and the decider (solvi.core.deciders) — torch backends
-onnx = ["onnxruntime", "tokenizers", "huggingface_hub"]   # the decider without torch (backend="onnx"); not the extractors (LongSpanExtractor: [model])
+onnx = ["onnxruntime", "tokenizers", "huggingface_hub"]   # the decider and LongSpanExtractor's prediction without torch (backend="onnx"); training: [model]
 smt = ["z3-solver>=4.12"]   # solvi.experimental.changes: narrows / widens proved over a rule's text (Consistency(prove=True))
 serve = ["fastapi>=0.100", "uvicorn"]   # solvi serve: the questions over HTTP, POST /v1/systemone
 mcp = ["mcp>=2"]   # solvi serve --mcp with the official MCP SDK (without it: a built-in stdio server)
