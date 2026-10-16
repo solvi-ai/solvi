@@ -168,6 +168,13 @@ level (`[("front", "wood"), ("front",), ()]`, the action always part of the key)
 off to more general levels; `explain` names the level used. Fit it before the set uses it, on rows the laws are not
 tested on.
 
+History atoms (opt-in). `History(grammar, depth=1, actions=..., observed=..., same=True)` lifts a grammar to contexts —
+the present state plus the last `depth` steps — with atoms "t-1:<atom>" (the state before), "t-1:action=<a>",
+"t-1:observed=<v>" and "t-1:start" (the episode has just begun), and the effect `Same(1)` («what was observed one step
+back»: one law for a value that persists instead of one per value). `LawSet(h.grammar, **h.kwargs(base=...))`; a
+`Tracker` (`h.tracker()`) builds each step's `Context` along a stream and `reset()`s per episode; predict on
+`tracker.context(state)`. The extra atoms enlarge the space the sized acceptance divides its error over.
+
 What is not done:
 - no grammar that cannot be enumerated (where the mismatch should matter most) has been measured;
 - the sized rule, admission by probes and abstention are measured on synthetic worlds only: not yet on the game
@@ -182,6 +189,7 @@ from __future__ import annotations
 from .. import warn_on_import
 from ._coarse import BackoffBase, OutcomeClass, coarse
 from ._compile import CompiledCheck, check_compiled, load_module
+from ._history import Context, History, Past, Same, Tracker
 from ._core import (Admission, Atom, Buffer, CallableProposer, Candidate, Delta, Enumerate, Grammar, Law, LawSet, Proposer,
                     RandomProposer, Step, Transition, Undetermined, sized_level, sized_need)
 from ._probes import Probe, discriminate, eig, split
@@ -191,9 +199,9 @@ from ._rank import (FEATURES, BagOfAtomsRanker, FeatureRanker, HandoverRanker, J
 warn_on_import(__name__)
 
 __all__ = ["Admission", "Atom", "BackoffBase", "BagOfAtomsRanker", "Buffer", "CallableProposer", "Candidate",
-           "CompiledCheck", "Delta", "Enumerate",
-           "FEATURES", "FeatureRanker", "Grammar", "HandoverRanker", "JointRanker", "Law", "LawSet", "PriorRanker", "Probe",
-           "OutcomeClass", "Proposer", "RandomProposer",
-           "RankedProposer", "Step", "SyntheticTask", "Transition", "atom_features", "atom_kind", "candidate_features",
+           "CompiledCheck", "Context", "Delta", "Enumerate",
+           "FEATURES", "FeatureRanker", "Grammar", "HandoverRanker", "History", "JointRanker", "Law", "LawSet", "PriorRanker", "Probe",
+           "OutcomeClass", "Past", "Proposer", "RandomProposer",
+           "RankedProposer", "Same", "Step", "SyntheticTask", "Transition", "atom_features", "atom_kind", "candidate_features",
            "check_compiled", "checks_to", "coarse", "discriminate", "eig", "load_module", "sized_level", "sized_need", "split",
-           "synthetic_task", "Undetermined"]
+           "synthetic_task", "Tracker", "Undetermined"]
