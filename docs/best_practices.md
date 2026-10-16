@@ -818,7 +818,9 @@ from 0 to 8 %). Give the gate a "check" or "ask" action.
 **A budget holds the price, not the risk:** the average cost was held at 12.9–14.4 of 15 with utility unchanged.
 
 **Calibrate novelty on real out-of-scope examples, not perturbations.** Imitated novelty gave 28 % coverage, mixing
-it with real cases 30 %; about 100 real cases were needed for 60 %. `OpenSetGate.calibrate(novel_scores=)` takes them.
+it with real cases 30 %; about 100 real cases were needed for 60 %. `OpenSetGate.calibrate(novel_scores=)` takes them,
+and `build(novel=[state, ...])` feeds System 1's signal on them to the gate in place of the simulation (it warns below
+100 and when labelled examples are among them).
 
 **For detection, restart the test.** An e-process started once adapts slowly after a long quiet prefix (detected in
 0 of 200 seeds, a delay of 185 of 187 steps); `DriftMonitor`'s CUSUM restarts — use it, or a Shiryaev–Roberts
