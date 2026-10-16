@@ -19,7 +19,8 @@ examples (exchangeable with them: the same stream, not a new domain):
     "crc"        max_risk=r     P(answered alone and wrong) ≤ r — a share of ALL inputs, answered or escalated; on average
                             over calibration sets (conformal risk control: (wrong answered + 1) / (n + 1) ≤ r)
     "ltt"        max_error=e    the error AMONG the answers given alone ≤ e, with probability ≥ 1 − delta over the
-                            calibration set (learn-then-test: a binomial test per threshold, Bonferroni over ≤ 64)
+                            calibration set (learn-then-test: a binomial test per threshold, Bonferroni over ≤ 64;
+                            procedure="fixed": fixed-sequence, from the highest threshold down)
     "empirical"  max_error=e    none: the error among the answered was ≤ e on the calibration examples only
 
 max_risk= selects "crc", max_error= selects "ltt" (method="empirical" to ask for the plain one). groups= gives a threshold per
@@ -60,7 +61,7 @@ class GuaranteeWarning(UserWarning):
 
 
 # ------------------------------------------------------------------------------------------------ the promise texts
-def promise_text(method, level, delta=None, groups=False, n_groups=1):
+def promise_text(method, level, delta=None, groups=False, n_groups=1, procedure="bonferroni"):
     """What a method promises, in words (recorded with every decision it gates)."""
     if method == "empirical":
         return (f"none: the error among the answers given alone was ≤ {level:g} on the calibration examples only"
@@ -74,8 +75,9 @@ def promise_text(method, level, delta=None, groups=False, n_groups=1):
         return (f"P(answered alone and wrong) ≤ {level:g} within every group at once ({n_groups} groups), with probability "
                 f"≥ {1 - delta:g}, for inputs like the calibration examples")
     where = f" within every group at once ({n_groups} groups)" if groups else ""
+    how = " (fixed-sequence learn-then-test)" if procedure == "fixed" else ""
     return (f"error among the answers given alone ≤ {level:g}{where} with probability ≥ {1 - delta:g}, for inputs like "
-            "the calibration examples")
+            f"the calibration examples{how}")
 
 
 # ------------------------------------------------------------------------------------------------ choosing a threshold
@@ -89,10 +91,11 @@ def _curve(s, w):
     return grid, k, cw[k]
 
 
-def _search(s, w, method, level, delta, min_support, bound_delta=None):
+def _search(s, w, method, level, delta, min_support, bound_delta=None, procedure="bonferroni"):
     """The lowest threshold that keeps the method's promise on these examples → (threshold, why or None). bound_delta:
-    conformal risk control as a binomial bound at that level (groups with delta)."""
-    from ..calibration import _binom_cdf, loss_budget, ltt_grid
+    conformal risk control as a binomial bound at that level (groups with delta). procedure: learn-then-test's multiple
+    testing over its grid ("bonferroni" or "fixed": calibration.ltt_certified)."""
+    from ..calibration import loss_budget, ltt_certified, ltt_grid
     n = len(s)
     if n == 0:
         return math.inf, "no calibration examples"
@@ -111,9 +114,8 @@ def _search(s, w, method, level, delta, min_support, bound_delta=None):
         good = np.zeros(len(grid), bool)
         if len(g):
             pos = {float(t): i for i, t in enumerate(grid)}
-            for t in g:
-                i = pos[float(t)]
-                good[i] = ok_support[i] and k[i] > 0 and _binom_cdf(float(m[i]), int(k[i]), level) <= delta / len(g)
+            ix = np.array([pos[float(t)] for t in g])
+            good[ix] = ltt_certified(k[ix], m[ix], level, delta, procedure, min_support) & ok_support[ix]
     hit = np.flatnonzero(good)
     if len(hit) and np.isfinite(grid[hit[0]]):
         return float(grid[hit[0]]), None
@@ -176,12 +178,14 @@ class Promise:
     examples; `record()`: what every gated decision records."""
     stateful = False
 
-    def __init__(self, method, level, delta, threshold, nodes, by, report, why, min_group, signal="signal"):
+    def __init__(self, method, level, delta, threshold, nodes, by, report, why, min_group, signal="signal",
+                 procedure="bonferroni"):
         self.method, self.level, self.delta = method, float(level), delta
         self.threshold, self.nodes, self.by, self.min_group = float(threshold), nodes, by, min_group
         self.report, self.why, self.signal = report, why, signal
+        self.procedure = procedure
         self.promise = promise_text(method, level, delta if (method == "ltt" or nodes) else None, nodes is not None,
-                                    len(nodes or {()}))
+                                    len(nodes or {()}), procedure)
 
     def threshold_of(self, group=None):
         """The threshold for an input of this group (a value or a path; the deepest calibrated group on its path, else
@@ -203,6 +207,8 @@ class Promise:
         out["risk" if self.method == "crc" else "error"] = self.level
         if self.method == "ltt" or (self.nodes is not None and self.delta is not None):
             out["delta"] = self.delta
+        if getattr(self, "procedure", "bonferroni") != "bonferroni":
+            out["procedure"] = self.procedure
         if self.nodes is not None:
             out["groups"], out["min_group"] = self.by, self.min_group
         if self.report.get("warnings"):
@@ -219,7 +225,7 @@ class Promise:
 
 
 def calibrate(scores, correct, *, max_error=None, max_risk=None, method=None, delta=0.10, groups=None, min_group=100,
-              min_support=10, weak="raise", signal="signal"):
+              min_support=10, weak="raise", signal="signal", procedure="bonferroni"):
     """A threshold with a promise on any scalar signal: answer alone when signal ≥ threshold. scores: the signal per
     calibration example (None / NaN / −inf: never answered alone; +inf: always — a forced answer); correct: was the answer
     right (booleans). max_risk= → conformal risk control ("crc"), max_error= → learn-then-test ("ltt"), or method="empirical"
@@ -227,8 +233,10 @@ def calibrate(scores, correct, *, max_error=None, max_risk=None, method=None, de
     binomial bound of conformal risk control per group (delta=None there: on average per group). groups: one group (a
     value or a path) per example; min_group: a group with fewer examples is pooled with its parent. min_support: a
     threshold must have this many examples at or above it. weak: "raise" (default) or "warn" when the signal does not
-    separate right from wrong. → Promise (its threshold is inf — everything escalates — when none keeps the promise;
-    report["why"] says why)."""
+    separate right from wrong. procedure: learn-then-test's multiple testing over its grid — "bonferroni" (default: each
+    of ≤ 64 thresholds at delta / their number) or "fixed" (fixed-sequence: from the highest threshold down at the full
+    delta, stopping at the first that fails; calibration.ltt_certified) — the same promise, usually more answered.
+    → Promise (its threshold is inf — everything escalates — when none keeps the promise; report["why"] says why)."""
     from ..calibration import check_rate, group_nodes
     error, risk = max_error, max_risk
     if (error is None) == (risk is None):
@@ -244,6 +252,9 @@ def calibrate(scores, correct, *, max_error=None, max_risk=None, method=None, de
                        zero=method == "empirical")
     if method == "ltt" or (groups is not None and delta is not None):
         check_rate("delta", delta)
+    from ..calibration import LTT_PROCEDURES
+    if procedure not in LTT_PROCEDURES:
+        raise ValueError(f"procedure must be one of {LTT_PROCEDURES}, not {procedure!r}")
     if weak not in ("raise", "warn"):
         raise ValueError('weak must be "raise" or "warn"')
     s = np.array([-math.inf if v is None or (isinstance(v, float) and math.isnan(v)) else float(v) for v in scores])
@@ -267,7 +278,7 @@ def calibrate(scores, correct, *, max_error=None, max_risk=None, method=None, de
         notes.append(f"separation not tested: {sep['n_right']} right and {sep['n_wrong']} wrong among the gated "
                      f"examples (fewer than {MIN_CLASS} of one)")
     if groups is None:
-        t, why = _search(s, w, method, level, delta, min_support)
+        t, why = _search(s, w, method, level, delta, min_support, procedure=procedure)
         nodes, by = None, None
         rep = _stats(s, w, t)
     else:
@@ -282,7 +293,8 @@ def calibrate(scores, correct, *, max_error=None, max_risk=None, method=None, de
             if method == "crc":
                 tt, wy = _search(s[ix], w[ix], "crc", level, None, min_support, bound_delta=d)
             else:
-                tt, wy = _search(s[ix], w[ix], method, level, d if method == "ltt" else None, min_support)
+                tt, wy = _search(s[ix], w[ix], method, level, d if method == "ltt" else None, min_support,
+                                 procedure=procedure)
             st = _stats(s[ix], w[ix], tt) if len(ix) else {"threshold": tt, "n": 0, "answered": 0.0, "error": 0.0,
                                                          "risk": 0.0, "support": 0}
             st["pooled"] = sorted({"/".join(map(str, p)) for p, o in zip(map(_path, paths), owner) if o == node and p != node})
@@ -307,14 +319,16 @@ def calibrate(scores, correct, *, max_error=None, max_risk=None, method=None, de
     base = float(w.mean())
     rep.update(method=method, separation=sep, base_error=base, warnings=notes,
                promise=promise_text(method, level, delta if (method == "ltt" or groups is not None) else None,
-                                    groups is not None, len(nodes or {()})))
+                                    groups is not None, len(nodes or {()}), procedure))
+    if method == "ltt":
+        rep["procedure"] = procedure
     if method == "crc":
         rep["must_escalate_at_least"] = max(0.0, (base - level) / (1 - level))
     if why:
         rep["why"] = why
     if sep["n_wrong"] + sep["n_right"] < len(s):
         rep["not_gated"] = int(len(s) - sep["n_wrong"] - sep["n_right"])    # forced (+inf) or never answered (−inf)
-    return Promise(method, level, delta, t, nodes, by, rep, why, min_group, signal)
+    return Promise(method, level, delta, t, nodes, by, rep, why, min_group, signal, procedure)
 
 
 def _path(p):
@@ -483,7 +497,7 @@ def _fold_heads(system, question, examples, folds, seed):
 
 def guard_question(system, question, examples=None, *, max_error=None, max_risk=None, method=None, delta=0.10, signal=None,
                    answer=None, groups=None, min_group=100, min_support=10, correct=None, folds=None, seed=0,
-                   weak="raise", promise=None, corrections=None, sources=None):
+                   weak="raise", promise=None, corrections=None, sources=None, procedure="bonferroni"):
     """Put a calibrated threshold with a stated promise on a question of `system` (System.guarantee): every later answer
     is let through alone only when its signal ≥ the threshold, else the question abstains with the reason; the promise,
     the signal and the threshold are recorded with every answer. examples: [(init_state, correct answer)], not used to fit
@@ -526,7 +540,7 @@ def guard_question(system, question, examples=None, *, max_error=None, max_risk=
         rep = _guard_question(system, question, examples, max_error=max_error, max_risk=max_risk, method=method,
                               delta=delta, signal=signal, answer=answer, groups=groups, min_group=min_group,
                               min_support=min_support, correct=correct, folds=folds, seed=seed, weak=weak,
-                              promise=promise, corrections=corrections, sources=sources)
+                              promise=promise, corrections=corrections, sources=sources, procedure=procedure)
     except Exception as e:
         old, added, q = before
         if q is not None:
@@ -550,7 +564,7 @@ def guard_question(system, question, examples=None, *, max_error=None, max_risk=
 
 
 def _guard_question(system, question, examples, *, max_error, max_risk, method, delta, signal, answer, groups,
-                    min_group, min_support, correct, folds, seed, weak, promise, corrections, sources):
+                    min_group, min_support, correct, folds, seed, weak, promise, corrections, sources, procedure="bonferroni"):
     """guard_question without the log."""
     if examples is False:
         old = system.guards.pop(question, None)
@@ -580,7 +594,7 @@ def _guard_question(system, question, examples, *, max_error, max_risk, method, 
                 warnings.simplefilter("always")
                 promise = calibrate(sig, ok, max_error=max_error, max_risk=max_risk, method=method, delta=delta,
                                     groups=None if groups is None else grp, min_group=min_group, min_support=min_support,
-                                    weak=weak, signal=guard.describe_signal())
+                                    weak=weak, signal=guard.describe_signal(), procedure=procedure)
         except BaseException:
             _drop_checkpoints(system, guard)
             raise
