@@ -66,7 +66,8 @@ for one pre-registered check, run once, before it enters the library.
 | **Changes: `SliceGuard`'s pinned original kept across processes** | `SliceGuard(pin_file=, pinned=)` (experimental): a write-once file with its SHA-256 in the verdict, pinned next to `EvaluatorLock`'s pins | done (1.2) |
 | **The gated update cycle as one stand** | Random audit labels + the Shadow harm stop on a drift replay over public intent sets; the Shadow part is done | open |
 | **Audit labels used first** | `guarantee(corrections=True)` reading the randomly audited sample first; `build` suggesting an audit rate when the report has no random labels | open |
-| **`build(split="hash")` as the default** | Old examples keep their share when examples are added; a default change because it moves which examples calibrate what | later release |
+| **A build-head update example that holds across seeds** | `examples/26_build_head_update.py` promotes its "more data" update only with the shuffle split at seed 0 (1 of 5 seeds with the shuffle, 0 of 5 with the hash split): the refit loses a refusal the change pipeline guards; it is pinned to that setting until the example is made robust | open |
+| **`build(split="hash")` as the default** | Old examples keep their share when examples are added; a default change because it moves which examples calibrate what (about 41% of the examples change share; `split="shuffle"` rebuilds 1.1's split) | done (1.2) |
 | **Cache for `aask` / `ask_text`** | `aask`, `ask_text` and `aask_text` use the pure-decision cache shared with `ask` | done (1.2) |
 | **Stores: a faster `verify`** | `verify(deep=False)` skips re-checking stored responses and keeps every chain check; a modest gain, 1.15–1.41× on 5,000 small records (re-reading and re-hashing dominate) | done (1.2) |
 | **MCP proxy: an authenticated context channel** | The client's context channel is trust-on-client; a signed or host-authenticated one when MCP has it | open |
