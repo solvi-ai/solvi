@@ -837,6 +837,22 @@ a bitemporal journal writes about 1,000× dearer. A signature proves the sender,
 run passed with a stolen key); disagreement with outcomes should down-weight a source, and only evidence of tampering
 make it a forger (a rule on outcomes accused an honest lab in 52 % of runs).
 
+**Votes of one model family are not independent.** Multiplying the probabilities of a base and a large model of one
+family as if they were separate witnesses is badly calibrated: on Banking77 the naive product had ECE 0.118. A single
+temperature on the product, tuned on a dev set, brought it to 0.026 — better than a combiner that models the
+correlation (0.053). Tune one temperature on the combined score, or add a check of another family.
+
+**Order questions to a person by how many items each answer unblocks, not first-in-first-out.** On a queue of
+escalations with dependencies, ranking by the decisions an answer unblocks resolved about 4× more items per answer than
+FIFO; a simple count of each question's downstream items got most of that (the full ranking was only 1.18× better),
+and re-ranking after every answer added nothing over ranking once.
+
+**Raise `Certificate`'s alarm level for long streams; the right level depends on the promise.** The default alarm
+(1/δ) fires on most stable streams far inside the promise: 67 % of 300 streams with a failure rate of 5 % under a
+promise of 20 % alarmed. The smallest level that kept stable streams quiet was about 300 for a promise of 0.2–0.3,
+1000 for 0.1 and 3000 for 0.05 — and at 0.05 that level then missed real breaks. Pick `alarm=` for your promise and
+stream length, and check its false alarms on a replay of a stable stream.
+
 **Laws cover little where outcomes are stochastic** (about 2 % coverage in Crafter; in Freeciv 0.576 / 0.860 against
 0.963 for a lookup table), and short matches (30 steps or fewer) give no laws at all. The gain of "measure until
 resolved" comes in the first ~20 measurements. `learn_order` saved 7 % of the cost at 2.9× the time on cheap checks —
