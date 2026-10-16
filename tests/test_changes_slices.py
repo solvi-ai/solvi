@@ -150,3 +150,39 @@ def test_arguments_are_checked():
         SliceGuard(lambda ch, ctx: {}, alpha=1.5)
     with pytest.raises(ValueError):
         SliceGuard(lambda ch, ctx: {}, tol=-0.1)
+
+
+def test_a_pin_file_keeps_the_original_across_processes(tmp_path):
+    steps = [shift(i, rare=0.012) for i in range(8)]
+    t = Shifts()                                      # a new guard per change: a new process each time, the pin in memory
+    through = sum(pipe_of(t, SliceGuard(measure_of(t), tol=0.03)).propose(c).promoted for c in steps)
+    assert through >= 7                               # every process pins its own "original": the salami goes through
+
+    pin = tmp_path / "slices_original.json"
+    t = Shifts()
+    out = [pipe_of(t, SliceGuard(measure_of(t), tol=0.03, pin_file=pin)).propose(c) for c in steps]
+    first = next(i for i, r in enumerate(out) if not r.promoted)
+    assert "vs original" in out[first].reason and t.shift["rare"] <= 0.03 + 0.012 + 1e-9
+    m0 = next(v for v in out[0].verdicts if v.stage == "slices").measured
+    sha = m0["original_file"]["sha256"]
+    assert m0["original_pinned_now"] and m0["original_file"]["path"] == str(pin)
+    m1 = next(v for v in out[1].verdicts if v.stage == "slices").measured
+    assert not m1["original_pinned_now"] and m1["original_file"]["sha256"] == sha
+
+    t2 = Shifts()                                     # with its hash pinned: an edited file refuses, a missing one too
+    ok = pipe_of(t2, SliceGuard(measure_of(t2), tol=0.03, pin_file=pin, pinned=sha)).propose(shift(9, main=0.0))
+    assert ok.promoted
+    pin.chmod(0o644)
+    pin.write_text(pin.read_text().replace("0.", "0.0", 1))
+    res = pipe_of(t2, SliceGuard(measure_of(t2), tol=0.03, pin_file=pin, pinned=sha)).propose(shift(10, main=0.0))
+    assert res.status == "rejected" and res.stage == "slices" and "changed" in res.reason
+    pin.unlink()
+    res = pipe_of(t2, SliceGuard(measure_of(t2), tol=0.03, pin_file=pin, pinned=sha)).propose(shift(11, main=0.0))
+    assert res.status == "rejected" and "missing" in res.reason and not pin.exists()
+
+
+def test_a_pin_file_needs_the_original_pinned_from_the_version_in_force(tmp_path):
+    with pytest.raises(ValueError, match="pin_file"):
+        SliceGuard(lambda c, x: {}, original=False, pin_file=tmp_path / "p.json")
+    with pytest.raises(ValueError, match="pin_file"):
+        SliceGuard(lambda c, x: {}, pinned="ab" * 32)

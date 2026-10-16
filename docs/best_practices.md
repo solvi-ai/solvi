@@ -885,7 +885,8 @@ shuffle). Routes still move with the thresholds; `solvi diff` shows them.
 
 **Check a change pipeline's gates once with `testing.conformance.check_pipeline`** on your own change schema. An
 aggregate gate passes harm in a small slice and salami (eight steps of +0.012 on a 40-case slice each pass against the
-version in force); add `SliceGuard` with the original pinned, and give `KnownFailures(key=...)` what the change *does*,
+version in force); add `SliceGuard` with the original pinned (`pin_file=` when proposals run in separate processes, with its hash
+`pinned=` next to the evaluator's pins), and give `KnownFailures(key=...)` what the change *does*,
 not a seed or salt it carries, so a replay under new identities is refused after its first rejection.
 
 **Watch a shipped change per slice, against its promise.** `pipe.watch(version, promise)` reverts only that version
