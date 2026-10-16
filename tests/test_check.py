@@ -2,6 +2,7 @@
 type conflicts, constraints that cannot all hold, silent defaults in functions that read the input; and the command's
 exit statuses."""
 import json
+from pathlib import Path
 from typing import Literal
 
 from solvi import Answer, Catalog, Question, System
@@ -535,6 +536,7 @@ def test_names_that_nothing_computes_and_the_input_model_does_not_declare():
 def test_solvi_check_takes_a_task_directory_or_file_as_solvi_test_does(capsys):
     """`solvi check gallery/01_support_triage/task.py:system` exited 2 (the task has no `system`), and task.py:cat skipped
     every question check."""
-    assert main(["check", "gallery/01_support_triage"]) == 0
-    assert main(["check", "gallery/09_credit_adverse_action/task.py"]) == 0
+    gallery = Path(__file__).resolve().parent.parent / "gallery"   # the repo's gallery, whatever the cwd
+    assert main(["check", str(gallery / "01_support_triage")]) == 0
+    assert main(["check", str(gallery / "09_credit_adverse_action" / "task.py")]) == 0
     assert "no_rule" in capsys.readouterr().out                    # its questions were checked
