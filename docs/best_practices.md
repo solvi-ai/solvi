@@ -107,6 +107,13 @@ after a sudden jump to most of the traffic nothing keeps the promise for the fir
 the flag. Its signal has to tell outside from known: an act head trained with left-out options did, a plain confidence
 did not.
 
+**The drift monitor needs 500 calibration examples.** `build` watches drift by default only when the guarantee has
+at least 500 calibration examples (about 2 000 examples with the default split, 4 000 with a slow path); below that
+nothing watches the stream unless `monitor=True`, and only `explain()` says so. Measured on four intent sets with
+1 000-decision streams: 0–1 % false flags observed at 500 (95 % upper bound 3.6–5.4 %), 6–24 % on two sets at 25–200;
+the shift caught in 89–100 % of streams at 500, 59–79 % on the other two sets at 50–200. A flag stays until
+`reset_drift()`.
+
 **Watch for drift.** A calibrated threshold keeps its promise under a shifted stream by escalating more, with no error
 raised. `DriftMonitor()` with its defaults flags such changes within a few dozen decisions. In a simulation
 ([benchmarks/drift_simulation.py](../benchmarks/drift_simulation.py)) a fall of the share answered alone from 73% to

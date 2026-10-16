@@ -4499,6 +4499,23 @@ wake the slow path (default: all); an input whose signal is left out goes to a p
 | `drift` | the open-set gate has flagged a change of the stream, or a `DriftMonitor` (`monitor=`) has | check |
 | `supervise` | a sampled share of the answers System 1 gives alone (`supervise=0.05`) | check |
 
+Drift is watched by default (`build(monitor="auto")`, since 1.2) only when the guarantee has at least 500 calibration
+examples (about 2 000 examples with the default split, 4 000 with a slow path). Below that `build` attaches no monitor
+and nothing is watched, flagged or said at build or decision time — only `explain()` shows "Drift: none: …"; pass
+`monitor=True` to watch anyway, `monitor=None` to switch it off, or give the guarantee more examples. After a flag
+System 1's answers are checked by the slow path or go to a person until `reset_drift()`. Measured once, on four
+intent-classification sets (Banking77, HWU64, Bitext customer support and retail banking) with a TF-IDF +
+logistic-regression System 1, no slow path, 100 replays of 1 000 decisions per set and size: at 500 examples unchanged
+streams were flagged in 0–1 % of replays (95 % upper bound 3.6–5.4 %) and a planted shift — 30 % of requests from
+unseen intents — was caught in 89–100 %, a median 17–157 decisions after it began. On Banking77 and HWU64 a part of
+those catches (33 of 89 and 26 of 93) came through the answers System 1 gives alone, which counted only because the
+guarantee answered about 78 % alone there; a guarantee that certifies little alone catches less on such tasks (0.6–0.8,
+as at 50–100 examples). At 200 examples or fewer both bars failed: the two Bitext sets, where System 1 is near-certain, gave
+6–24 % false flags, and Banking77 and HWU64 caught the shift in only 59–79 % of replays — so 500 is set by both. A
+monitor with a short reference cries wolf (control charts with estimated parameters, Jones, Champ and Rigdon 2004); the
+number is this monitor's measured safe point on one kind of shift and one System 1, not a law — on other data or longer
+streams, measure.
+
 **think**: System 1's answer is not given alone. The slow path's accepted answer is given (`think="s2"`), or only when
 it equals what System 1 would have answered (`think="agree"`: two different readers agree; otherwise a person). **check**:
 System 1's answer stands; the slow path answers too, and a disagreement is recorded (`res.disagreement`,

@@ -95,7 +95,8 @@ def test_the_drift_flag_warns_once_when_no_slow_path_checks_system_1():
 def test_build_can_attach_a_drift_monitor():
     ex = _examples(600, 0, near=0.1, far=0.01)
     ds = solvi.build(Q, ex, catalog=_cat(), max_risk=0.05)
-    assert ds.dispatcher.monitor is None                        # the default is unchanged
+    assert ds.dispatcher.monitor is None                        # default "auto": too few calibration examples
+    assert "Drift: none: monitor=\"auto\"" in ds.explain()     # and only explain() says so
     ds = solvi.build(Q, ex, catalog=_cat(), max_risk=0.05, monitor=True)
     mon = ds.dispatcher.monitor
     assert isinstance(mon, DriftMonitor) and len(mon.reference) > 0
@@ -108,9 +109,10 @@ def test_build_can_attach_a_drift_monitor():
 def test_build_monitor_auto_turns_on_only_with_enough_calibration_examples():
     from solvi.solutions import decisions
     big = _examples(4 * decisions.MONITOR_MIN_REFERENCE + 40, 1, near=0.1, far=0.01)
-    ds = solvi.build(Q, big, catalog=_cat(), max_risk=0.05, monitor="auto")
+    ds = solvi.build(Q, big, catalog=_cat(), max_risk=0.05)    # "auto" is the default
     mon = ds.dispatcher.monitor
     assert isinstance(mon, DriftMonitor) and len(mon.reference) >= decisions.MONITOR_MIN_REFERENCE
+    assert solvi.build(Q, big, catalog=_cat(), max_risk=0.05, monitor=None).dispatcher.monitor is None
     small = _examples(decisions.MONITOR_MIN_REFERENCE // 2, 1, near=0.1, far=0.01)
     ds = solvi.build(Q, small, catalog=_cat(), max_risk=0.1, monitor="auto")
     assert ds.dispatcher.monitor is None
