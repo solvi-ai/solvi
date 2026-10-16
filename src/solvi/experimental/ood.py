@@ -29,7 +29,7 @@ mostly pass (for inputs from outside the calibration set: solvi.core.guarantees.
 answered alone and the answer mix: DriftMonitor); a rephrasing of the same domain can be flagged like another domain.
 Confidence can rise under a shift as well as fall, which a monitor for a drop of confidence misses. The per-answer note
 catches few answers of a new regime; test batches of about 200 answers with `shift` (small batches miss more). alpha is
-nominal (asymptotic KS p-values, three Bonferroni tests).
+nominal (asymptotic Kolmogorov-Smirnov p-values, three Bonferroni tests).
 
 What it cannot see. A regime whose answers look like the calibration answers (the same spread of confidences, margins
 and entropies) but whose errors differ passes both checks: only labels show it. A shift is a warning, not a guarantee.

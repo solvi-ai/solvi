@@ -186,6 +186,28 @@ started from a failing test built on the reproduction; the numbers are before �
   calibration, restarting a detector, wrapping a strong agent, context-wide taint, the change pipeline vs relabelling,
   the knowledge store, laws on stochastic worlds, deterministic copies of an environment) and notes on the new parts
   (cache, Shadow, audit labels, hash split, clone hooks, change-pipeline attacks, slow backends).
+- `solvi.experimental.injection.InjectionDetector` (opt-in, no shipped weights): a per-sentence logistic detector over
+  the fixed rule families plus hashed word n-grams, fitted on your labelled tool outputs and thresholded on your
+  ordinary ones (`fit`, `calibrate(max_flag_rate=)`, `spans`). Measured once on InjecAgent injected tool outputs: the
+  fixed rules behind `injection_spans` find 23% of 248 held-out injections, the fitted detector 76% while flagging fewer
+  ordinary texts (1.8% against 4.2%). The gain stays within the injection family it was fitted on: a plain TF-IDF
+  baseline does the same, half of the gain is one address repeated across that dataset (without it +0.19, 95% CI
+  +0.06…+0.38), and on 140 AgentDojo-style injections the rules find 78%, the detector 53%. The default is unchanged.
+- `solvi.experimental.ood.ShiftWatch`: an opt-in shift flag next to `System.calibrate`'s Platt scaling
+  (`watch=ShiftWatch()`), the known black-box shift test (per-feature two-sample Kolmogorov-Smirnov with Bonferroni on
+  the decider's confidence, top-2 margin and entropy; Rabanser et al. 2019) with a per-answer note in `why`. It reports
+  that the answers' features differ from the calibration answers, not that inputs are out of domain. Measured once on
+  intent classification (10 directed pairs of four datasets, alpha 0.01): 200-answer batches from another dataset
+  flagged 0.99–1.0 of the time, in-domain at most 0.05; 50-answer batches mean 0.76 (0.30–0.48 on four pairs); +0.18
+  [0.05, 0.34] over a two-sided mean-confidence test at about 1 % false flags, on par at 5 %. Held-out intents of the
+  same dataset mostly pass (use `OpenSetGate`); a rephrasing of the same domain is flagged like another dataset.
+- ROADMAP: measured verdicts for the 1.2 checks — correlation-aware combination, a hierarchical calibrator, numeric
+  formula laws, Guard taint per message and `effect=`, an escalation queue ranked by value and a promise-free
+  Certificate alarm level were measured and not merged (reasons in the ROADMAP).
+- Best practices: votes of one model family are not independent (naive product ECE 0.118 against 0.026 with one tuned
+  temperature); order questions to a person by how many items an answer unblocks, not first-in-first-out (about 4×
+  more resolved per answer); raise `Certificate`'s `alarm=` for long streams, by the promise; a fitted injection
+  detector holds on the family it was fitted on; a regime change can raise confidence as well as lower it.
 
 ## 1.1.1 — 2026-10-11 — fixes from use, and four learning items with their measurements
 

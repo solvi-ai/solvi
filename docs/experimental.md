@@ -242,7 +242,7 @@ Kolmogorov–Smirnov test with Bonferroni on a classifier's outputs — applied 
 (the raw confidence, the margin between the two best options, the options' normalized entropy). `shift(batch)` says
 whether a batch's answer features differ from the calibration answers'; "out of domain" in `why` marks one answer far
 from them, a max-softmax style score (Hendrycks and Gimpel, ICLR 2017) as a Mahalanobis distance above the reference's
-own 1 − alpha quantile. Alpha is nominal (asymptotic KS p-values, three Bonferroni tests). Since 1.2.
+own 1 − alpha quantile. Alpha is nominal (asymptotic Kolmogorov-Smirnov p-values, three Bonferroni tests). Since 1.2.
 
 What it sees is the decider's confidence profile, not the content: it reports "the answers' features differ from the
 reference", not "the inputs are out of domain". Intents the decider has never seen, phrased like the calibration ones,
