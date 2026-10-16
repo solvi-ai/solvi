@@ -80,7 +80,7 @@ question across cases (N seeded permutations, default 5, averaged; `--seed`; no 
 confident_error_rate is at least 0.05 below the control's and at most half of it. A null gold is shuffled like any other
 gold (an answer given where the shuffled gold is null is a confident error; an abstention never is); a question with one
 gold in every case is listed under `uncontrolled` and left out of the verdict (`discriminates` is null when nothing can
-be controlled). The control does not change `ok` or the exit code. On the core set: 4.9% real against 54% control.
+be controlled). The control does not change `ok` or the exit code. On the core set (one run): 4.9% real against 54% control.
 
 ## Updating the baseline
 

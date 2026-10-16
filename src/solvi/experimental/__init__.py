@@ -221,7 +221,7 @@ STATUS: dict[str, dict] = {
                "record is tested on a synthetic corridor only, and skills are not admitted by discriminating probes "
                "(laws are: LawSet.admit_by_probes)",
                "script": "benchmarks/skills_toy.py"},
-    "injection": {"since": "1.2", "what": "a calibrated detector of instruction-like text in tool outputs: a "
+    "injection": {"since": "1.2", "what": "a detector of instruction-like text in tool outputs, fitted and thresholded on your own texts: a "
                   "per-sentence logistic score over the fixed detector's rule families and hashed word n-grams, "
                   "fitted on labelled texts, its threshold set on ordinary texts to a chosen false-flag rate",
                   "missing": "measured once on injected tool outputs of one public benchmark (InjecAgent): on 248 "

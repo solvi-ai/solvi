@@ -3,7 +3,7 @@
 A source has to go: a person asks for their data to be erased, a supplier's feed turns out to be wrong, a writer is
 exposed. What it told must stop counting, every decision that rested on it must be looked at again, and the record of
 all this must stay verifiable. In solvi that is one call on the knowledge store, plus an explicit erasure of personal
-data in the decision records when the law asks for it.
+data in the decision records when a regulation requires it.
 
 ## One call: `KnowledgeStore.forget`
 

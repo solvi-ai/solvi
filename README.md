@@ -401,6 +401,13 @@ request or given as a fact, and the arguments must validate against the tool's s
 (`solvi.core.contract`, `Catalog.contract(...)`: an answer whose type does not match the question, or that echoes the
 given fact, abstains).
 
+## Coming from 1.1
+
+- **Several failed hard checks:** the strictest `then` answer now decides; `Catalog(combine="first")` restores 1.1, and every catalog fingerprint built on the default changes once.
+- **`solvi.build` splits examples by a hash** (`split="hash"`): a system rebuilt on 1.2 is fitted and calibrated on other examples; `split="shuffle"` rebuilds 1.1's split exactly.
+- **Drift is watched by default** once the guarantee has 500 calibration examples (`build(monitor="auto")`); `monitor=None` turns it off, `Dispatcher(on_drift="accept")` keeps the old routing.
+- **Three smaller defaults:** `Certificate`'s alarm (`alternatives=None` restores it), a failed `System.guarantee` call keeps the guarantee in force, `LongSpanExtractor.load` is `backend="auto"` (`backend="torch"` pins it). Details: [CHANGELOG.md](CHANGELOG.md#120--2026-10-17--stricter-defaults-mutants-for-your-cases-the-extractor-without-torch).
+
 ## Coming from 0.9
 
 Every 0.9 import path still works in 1.0.x and 1.1: it imports the same module and warns (`SolviDeprecationWarning`)
