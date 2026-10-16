@@ -144,6 +144,10 @@ than the surviving class where it would apply (x0 ∨ x1 with a base saying Fals
 or base are wrong where it probes may refute a right candidate (a candidate is refuted only where it is the applied law
 and wrong, or where it does not hold, the set is wrong and its effect is what happened).
 
+Interventions. `intervention(state_before, state_after, actions)` → one `Delta` per action: the prediction before and
+after with the law behind each (`explain`), the change, and `covered` — False where the base predictor, not a law,
+speaks on either side, so an effect the laws never tested is marked a guess.
+
 Abstention. `predict(state, action, disagree="abstain")` (or `LawSet(..., disagree="abstain")`) returns `Undetermined`
 where the most specific matching laws — those no other matching law's condition strictly contains — predict different
 outcomes: both passed their test, neither is an exception of the other, and the order between them would only be a
@@ -169,7 +173,7 @@ from __future__ import annotations
 
 from .. import warn_on_import
 from ._compile import CompiledCheck, check_compiled, load_module
-from ._core import (Admission, Atom, Buffer, CallableProposer, Candidate, Enumerate, Grammar, Law, LawSet, Proposer,
+from ._core import (Admission, Atom, Buffer, CallableProposer, Candidate, Delta, Enumerate, Grammar, Law, LawSet, Proposer,
                     RandomProposer, Step, Transition, Undetermined, sized_level, sized_need)
 from ._probes import Probe, discriminate, split
 from ._rank import (FEATURES, BagOfAtomsRanker, FeatureRanker, HandoverRanker, JointRanker, PriorRanker, RankedProposer,
@@ -177,7 +181,8 @@ from ._rank import (FEATURES, BagOfAtomsRanker, FeatureRanker, HandoverRanker, J
 
 warn_on_import(__name__)
 
-__all__ = ["Admission", "Atom", "BagOfAtomsRanker", "Buffer", "CallableProposer", "Candidate", "CompiledCheck", "Enumerate",
+__all__ = ["Admission", "Atom", "BagOfAtomsRanker", "Buffer", "CallableProposer", "Candidate", "CompiledCheck", "Delta",
+           "Enumerate",
            "FEATURES", "FeatureRanker", "Grammar", "HandoverRanker", "JointRanker", "Law", "LawSet", "PriorRanker", "Probe",
            "Proposer", "RandomProposer",
            "RankedProposer", "Step", "SyntheticTask", "Transition", "atom_features", "atom_kind", "candidate_features",
