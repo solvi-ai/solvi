@@ -81,6 +81,7 @@ nav:
           - solvi.check: api/check.md
           - solvi.testing: api/testing.md
           - solvi.testing.corrupt: api/testing.md
+          - solvi.testing.history: api/testing.md
           - solvi.testing.conformance: api/conformance.md
           - solvi.testing.honesty: api/honesty.md
           - solvi.solutions: api/solutions.md
