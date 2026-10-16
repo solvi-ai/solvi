@@ -71,7 +71,7 @@ from collections import defaultdict
 from contextlib import contextmanager
 
 from ..runtime import vhash
-from .gates import RANK, SOURCES, Verdict, default_gates, with_source_gate
+from .gates import RANK, SOURCES, Verdict, WriterGate, default_gates, with_source_gate
 
 KINDS = ("fact", "rule", "skill", "action", "episode")
 NEEDS_PROMOTION = ("rule", "skill", "action")         # behaviour-changing kinds: a hypothesis until the gates promote it
@@ -211,12 +211,17 @@ class KnowledgeStore:
     storage: where the journal is kept — None (in memory), a path (solvi.core.store.open_storage: .jsonl, .db, .duckdb,
     postgresql://) or a TraceStorage (the decisions' store itself, so knowledge and decisions share one hash chain); an
     existing journal there is replayed. gates: the write gates (solvi.core.knowledge.gates; default SourceGate and
-    ConsistencyGate); the source check runs first whatever is given. defaults: reconfirm_after per (kind, source)."""
+    ConsistencyGate); the source check runs first whatever is given. defaults: reconfirm_after per (kind, source).
+    writers: {writer: source (or sources), ...} — opt-in: a source (a rank) is then taken only from a writer (`by=`)
+    registered with it; any other item is refused with the reason (gates.WriterGate, run right after the source
+    check). None (default): any writer may declare any source, as before."""
 
-    def __init__(self, storage=None, *, gates=None, defaults=None, _replay=True):
+    def __init__(self, storage=None, *, gates=None, defaults=None, writers=None, _replay=True):
         from ..store import open_storage
         self.storage = open_storage(storage)
         self.gates = with_source_gate(gates if gates is not None else default_gates())
+        if writers is not None:
+            self.gates.insert(1, WriterGate(writers))       # right after the source check
         self.defaults = dict(RECONFIRM_DEFAULTS if defaults is None else defaults)
         self._lock = threading.RLock()
         self._mem = _MemoryJournal() if self.storage is None else None
@@ -428,7 +433,7 @@ class KnowledgeStore:
                 v = g.admit(self, prop, shadow)
                 v.gate = v.gate or getattr(g, "name", type(g).__name__)
                 verdicts.append(v)
-                if not v.admit and (v.gate == "source" or kind not in NEEDS_PROMOTION or v.gate == "consistency"):
+                if not v.admit and (v.gate in ("source", "writers", "consistency") or kind not in NEEDS_PROMOTION):
                     self._write("refused", item=prop["id"], item_kind=kind, source=source, by=prop["by"],
                                 why=f"{v.gate}: {v.reason}")
                     return None

@@ -91,6 +91,16 @@ def test_combine_is_validated_and_enters_the_fingerprint():
     assert _system().fingerprint()["catalog"] != _system("first").fingerprint()["catalog"]
 
 
+def test_the_strictest_default_changes_the_fingerprint_from_1_1():
+    # 1.1 decided with "first" and left it out of the fingerprint: an explicit "first" keeps that fingerprint, the 1.2
+    # default does not, so a decision stored under 1.1 replays against the default as made by another catalog
+    from solvi.core.provenance import catalog_fingerprint, digest
+    for combine in (None, "strictest", "first"):
+        cat = _system(combine).catalog
+        unmarked = digest(sorted(catalog_fingerprint(cat)["parts"].items()))
+        assert (catalog_fingerprint(cat)["fp"] == unmarked) == (combine == "first")
+
+
 def test_combine_first_chosen_explicitly_keeps_the_order_without_a_warning():
     s = _system("first")
     with warnings.catch_warnings():

@@ -9,6 +9,11 @@ from typing import Literal
 from solvi import Catalog, Question, System
 
 
+# None (the catalog default) when make.py wrote the files; the tests set "first", the rule those versions decided by
+# (solvi 1.2 defaults to "strictest" and marks it in the catalog fingerprint)
+COMBINE = None
+
+
 def free_side(free: list, facing: str) -> str:
     """The step to take instead: the first free side that is not where we face."""
     return next((d for d in free if d != facing), free[0])
@@ -16,7 +21,7 @@ def free_side(free: list, facing: str) -> str:
 
 def system(storage=None):
     """A fresh System."""
-    cat = Catalog()
+    cat = Catalog() if COMBINE is None else Catalog(combine=COMBINE)
 
     @cat.fn
     def free(walls: list) -> list:

@@ -69,7 +69,9 @@ def named_in(goal):
 
 
 # ---------------------------------------------------------------------------------------------------- System 1
-fast = Catalog()
+# combine="first": the rule for several failed hard checks the bundled recording was made under (solvi 1.1); with the
+# 1.2 default ("strictest", marked in the catalog fingerprint) the recording would replay as made by another catalog
+fast = Catalog(combine="first")
 
 
 @fast.fn
@@ -119,7 +121,7 @@ def behind(here_type, key):
 
 
 def slow_catalog(llm=None):
-    slow = Catalog()
+    slow = Catalog(combine="first")             # as the recording was made (see `fast`)
 
     @slow.fn
     def wanted(view: dict) -> list:

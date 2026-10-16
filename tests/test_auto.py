@@ -43,8 +43,9 @@ def test_a_head_is_fitted_and_its_promise_calibrated_on_examples_it_did_not_see(
     ex = _pairs(800)
     s = build(Q, ex, catalog=_catalog(), max_risk=0.05, storage=tmp_path / "d.jsonl")
     assert s.choices["mode"] == "head"
-    assert s.choices["split"]["to fit System 1"] == 600 and s.choices["split"]["to calibrate System 1's guarantee"] == 200
-    assert "high" in s.system.heads["ok"].features
+    sp = s.choices["split"]                       # the default hash split: about 3/4 to fit, the rest to calibrate
+    assert sp["to fit System 1"] + sp["to calibrate System 1's guarantee"] == 800 and 560 <= sp["to fit System 1"] <= 640
+    assert set(s.system.heads["ok"].features) <= {"x", "margin", "high"} and s.system.heads["ok"].features
     out = [s.ask(st) for st, _ in _pairs(300, seed=1)]
     assert {r.by for r in out} <= {"s1", "human"}
     alone = [r for r in out if r.by == "s1"]
@@ -82,7 +83,7 @@ def test_a_rule_with_a_constant_confidence_gets_the_fact_that_separates_right_fr
     s = build(Q, ex, catalog=cat, max_risk=0.03)
     assert s.choices["mode"] == "given"
     assert s.system.guards["ok"].signal == "margin"
-    assert s.choices["split"]["to choose the signal"] == 300
+    assert 250 <= s.choices["split"]["to choose the signal"] <= 350          # about 1/3 of 900, cut by hash
     assert "margin" in s.explain() and "AUROC" in s.explain()
 
 
@@ -114,9 +115,10 @@ def test_a_slow_path_gets_the_slice_only_where_calibration_says_so():
 
     s = build(Q, ex, catalog=_catalog(), max_risk=0.05, slow=oracle, reads="x", total=Budget(calls=10_000), min_slice=5)
     sp = s.choices["split"]
-    assert sp["to calibrate System 1's guarantee"] == sp["to calibrate the dispatcher"] == 150
+    g, d = sp["to calibrate System 1's guarantee"], sp["to calibrate the dispatcher"]
+    assert g + d == 1200 - sp["to fit System 1"] and 0.4 < d / (g + d) < 0.6     # half each, cut by hash
     assert "dispatch" in s.calibration and s.dispatcher.policy is not None
-    assert "probe on the dispatcher's 150 examples" in s.explain()
+    assert f"probe on the dispatcher's {d} examples" in s.explain()
     assert "slice" in s.explain()
     out = [s.ask(st) for st, _ in _pairs(200, seed=5)]
     assert {r.by for r in out} <= {"s1", "s2", "human"}
@@ -217,7 +219,7 @@ def test_a_slow_path_with_no_slice_open_gives_its_share_back_to_system_1():
     ex = _texts(1600, WORDS)
     s = build("topic", ex, learner=_learner, max_error=0.10, slow=lambda state: "w0", reads="text")
     sp = s.choices["split"]
-    assert sp["to calibrate the dispatcher"] == 0 and sp["to calibrate System 1's guarantee"] == 400
+    assert sp["to calibrate the dispatcher"] == 0 and sp["to calibrate System 1's guarantee"] == 1600 - sp["to fit System 1"]
     assert s.dispatcher.policy is None and set(s.dispatcher.wake) == {"drift", "supervise"}
     assert "No slice is open to the slow path" in s.explain() and "calibrated System 1 instead" in s.explain()
     s.gate.reset()
@@ -225,11 +227,19 @@ def test_a_slow_path_with_no_slice_open_gives_its_share_back_to_system_1():
     assert {r.by for r in out} <= {"s1", "human"}
 
 
-def test_the_example_runs_and_hands_the_notes_slice_to_the_slow_path(capsys):
+def test_the_example_runs_and_says_who_takes_the_slice_it_hands_over(capsys):
+    """Whether the slice opens to the slow path depends on the calibration sample (2 of 5 seeds, either split): the
+    example's explanation and its answers must agree either way."""
+    import re
     from examples_loader import load
     load("24_one_entry_point")
     out = capsys.readouterr().out
-    assert "Is a slice open to it? The probe" in out and "replay failures: 0" in out and "'s2': 0" not in out
+    assert "Is a slice open to it? The probe" in out and "replay failures: 0" in out
+    to_slow = re.search(r"calibration examples\): the slow path", out) is not None
+    to_person = "break the promise on these examples: every slice goes to a person" in out
+    assert to_slow != to_person
+    s2 = int(re.search(r"'s2': (\d+)", out).group(1))
+    assert (s2 > 0) == to_slow
 
 
 # ------------------------------------------------------------------------------------------------ groups: a split by source
@@ -292,7 +302,12 @@ def test_groups_split_by_source_and_the_promise_holds_on_unseen_groups():
     ex, gs = _screens(120, 8, seed=1)
     fresh, _ = _screens(80, 8, seed=2, first=1000)
     plain = build("close", ex, learner=_screen_learner, max_risk=0.10, novel=False)
-    grouped = build("close", ex, learner=_screen_learner, max_risk=0.10, novel=False, groups=gs)
+    fitted = []
+
+    def screen_learner(fit):
+        fitted.append(fit)
+        return _screen_learner(fit)
+    grouped = build("close", ex, learner=screen_learner, max_risk=0.10, novel=False, groups=gs)
     by_key = build("close", ex, learner=_screen_learner, max_risk=0.10, novel=False,
                    groups=lambda st: st["text"].split()[0])
     assert by_key.choices["split"] == grouped.choices["split"]
@@ -300,16 +315,13 @@ def test_groups_split_by_source_and_the_promise_holds_on_unseen_groups():
     assert r_plain > 0.15                                        # the random split's promise does not hold on new screens
     assert r_grouped <= 0.10 + 0.02                              # the grouped one does (up to sampling)
     g = grouped.choices["groups"]
-    assert g["n"] == 120 and g["fit"] + g["calibrate"] == 120 and g["fit"] == 90
+    assert g["n"] == 120 and g["fit"] + g["calibrate"] == 120 and 78 <= g["fit"] <= 102     # about 3/4, cut by hash
     assert "split by group" in grouped.explain() and "split by group" not in plain.explain()
-    # no screen on both sides
-    n_fit = grouped.choices["split"]["to fit System 1"]
-    import random as _r
-    kinds = list(dict.fromkeys(gs))
-    _r.Random(0).shuffle(kinds)
-    rank = {k: i for i, k in enumerate(kinds)}
-    order = sorted(range(len(ex)), key=lambda i: rank[gs[i]])
-    assert not {gs[i] for i in order[:n_fit]} & {gs[i] for i in order[n_fit:]}
+    # no screen on both sides: every screen System 1 was fitted on is in the fit share whole (8 examples each)
+    from collections import Counter
+    on_fit = Counter(st["text"].split()[0] for st, _ in fitted[0])
+    assert len(on_fit) == g["fit"] and set(on_fit.values()) == {8}
+    assert len(fitted[0]) == grouped.choices["split"]["to fit System 1"]
     with pytest.raises(ValueError, match="one group per example"):
         build("close", ex, learner=_screen_learner, max_risk=0.10, novel=False, groups=gs[:-1])
     with pytest.raises(ValueError, match="at least two"):

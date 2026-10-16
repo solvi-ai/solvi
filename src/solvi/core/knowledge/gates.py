@@ -15,6 +15,8 @@ Built in (stable):
   SourceGate        the source check: "person", "outcome", "spec", or "verified" — a System 2 answer that answered
                     alone under its guarantee, named by `of=` and checked in the store's TraceStorage. Never the system's
                     own unverified answer. It runs first in every store, whatever gates are given (by construction).
+  WriterGate        (opt-in: KnowledgeStore(writers={writer: source})) a source is a rank bound to its writer: a
+                    writer not registered, or declaring a source it is not registered with, is refused.
   ConsistencyGate   premises must exist and be present (not retracted or refuted), and a derived item may not hold
                     another value on its own premise's key (it would refute its support). Contradictions between items
                     are not a refusal: the store resolves them (outcome > person > spec > verified; else a dispute).
@@ -92,6 +94,39 @@ class SourceGate:
             raise UntrustedLabel("a verified item is a fact {s, r, o} whose relation is the question and whose object "
                                  "is the decision's answer")
         store.storage._check_vouched(body["r"], body["o"], of)
+
+
+class WriterGate:
+    """The writers registry (opt-in, KnowledgeStore(writers=) / Knowledge(writers=)): a source is a rank (who wins a
+    contradiction), and without a registry it is whatever the writer declares. With one — {writer: source, ...}, a
+    source or a collection of sources per writer — an item is admitted only when its `by` is a registered writer and its
+    declared source is one registered for that writer; a writer not in the registry, or one declaring another source
+    (an outcome from a writer registered as "verified"), is refused with the reason in the journal. Who `by` is stays
+    the caller's word: bind the registry to the writers your code itself names (an authenticated user, a service), not
+    to a name taken from the input."""
+    name = "writers"
+
+    def __init__(self, writers):
+        reg = {}
+        for w, src in dict(writers).items():
+            allowed = (src,) if isinstance(src, str) else tuple(src)
+            bad = [x for x in allowed if x not in RANK]
+            if not allowed or bad:
+                raise ValueError(f"writers: {w!r} → {src!r}: a writer is registered with sources from {sorted(RANK)}")
+            reg[str(w)] = frozenset(allowed)
+        self.writers = reg
+
+    def admit(self, store, item, shadow=None):
+        by, src = item.get("by"), item.get("source")
+        allowed = self.writers.get(by) if by is not None else None
+        if allowed is None:
+            return Verdict(False, f"writer {by!r} is not in the writers registry: its source {src!r} (a rank) is not "
+                                  "taken on its own word", gate=self.name)
+        if src not in allowed:
+            return Verdict(False, f"writer {by!r} declares source {src!r}, but is registered with "
+                                  f"{', '.join(sorted(allowed, key=lambda x: -RANK[x]))}: a rank it is not registered "
+                                  "for is refused", gate=self.name)
+        return Verdict(True, gate=self.name)
 
 
 class ConsistencyGate:

@@ -79,10 +79,14 @@ System 1 is the catalog's rule for the question if it has one, your own fitted p
 the facts the catalog computes (`System.fit`). The signal its guarantee reads is chosen (the act probability, the
 confidence, or — for a rule — the computed number that best separates right from wrong); a choice among more than two
 options gets an open-set gate for answers no example shows. A slow path gets a share of the examples to be calibrated
-on only when System 1 actually hands it something; inputs the open-set gate holds back go to a person. Every piece is
+on only when System 1 actually hands it something; inputs the open-set gate holds back go to a person. Each example's
+share (fit, guarantee, dispatcher) is set by a hash of its state salted by `seed=` (`split="hash"`, the default since
+1.2), so adding examples later leaves every old one where it was; `split="shuffle"` is the seeded shuffle of 1.1 and
+`split=(fit, guarantee, dispatch)` sets the shares. Every piece is
 the one described further on (`System.fit`, `System.guarantee`, `solvi.core.guarantees.openset`, `solvi.core.dispatch`), and everything
 stays replayable. On four tasks of the [task stand](../benchmarks/tasks/README.md) (Banking77, Abt-Buy, CUAD,
-RAGTruth) it matched or beat the hand-written setups with every promise kept on eval, in a quarter to half of the code;
+RAGTruth) it matched or beat the hand-written setups (measured with the 1.1 shuffle split) with every promise kept on
+eval, in a quarter to half of the code;
 its eval numbers sat closer to the promised level than theirs (risk 9.3% of 10% on RAGTruth), its drift flag came later,
 and the slow path was rarely given anything ([`examples/24_one_entry_point.py`](../examples/24_one_entry_point.py) runs
 without a model).
@@ -4727,6 +4731,15 @@ rule, a skill or an action (behaviour-changing kinds) is promoted with every gat
 later gate holds stays a hypothesis. A shadow measurement of a behaviour-changing item — its gain on held-out cases,
 the share of past decisions it would change — reaches every gate as `add(..., shadow=...)`; a gate that admits on it
 is yours to write (the experimental change pipeline measures candidates in its stages and passes the numbers that way).
+
+A source is a rank — outcome > person > spec > verified decides a contradiction — and by default it is what the writer
+declares: any caller that says `source="outcome"` refutes a written spec without a dispute. To bind ranks to writers,
+give a registry (opt-in since 1.2): `Knowledge(writers={"crm": "person", "billing": "outcome", "environment":
+"outcome"})` (or `KnowledgeStore(writers=...)`; a writer may have several sources). `WriterGate` then runs right after
+the source check and refuses — never holds — an item whose `by=` is not registered or declares a source it is not
+registered with, with the reason in the journal. `by=` is still your code's word: register the writers your code
+itself names (an authenticated user, a service), not names read from the input. `Knowledge.observe` writes as
+"environment" with source "outcome", so register it when an agent writes to the same knowledge.
 
 ### The action model: what the environment accepts
 

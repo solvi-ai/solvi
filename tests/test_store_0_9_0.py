@@ -17,6 +17,8 @@ def task():
     sys.path.insert(0, str(DATA))
     try:
         import task
+        task.COMBINE = "first"           # the rule this version decided by (1.2 defaults to "strictest")
+        task.SPLIT = "shuffle"           # the split this version made (1.2 defaults to "hash")
         yield task
     finally:
         sys.path.remove(str(DATA))
@@ -40,6 +42,14 @@ def test_every_fingerprint_of_0_9_0_holds(task):
     assert part.min_confidence == pytest.approx(json.loads((DATA / "calibration.json").read_text())["escalate_below"])
     assert task.system(calibration=DATA / "calibration.json").fingerprint() == fp["system"]
     assert task.dispatch().system.fingerprint() == fp["dispatch_system"]
+
+
+def _only_the_config_moved(bad):
+    """Since 1.2 the catalog build() makes for the slow path takes the "strictest" default, which its fingerprint marks:
+    every stored dispatch shows the dispatcher configured otherwise, and nothing else."""
+    assert len(bad) == 30
+    assert all(problems == [("config", "the dispatcher is not configured as it was for this decision")]
+               for _, _, problems in bad)
 
 
 @pytest.mark.parametrize("name", ["decisions.jsonl", "decisions.db"])
@@ -78,7 +88,7 @@ def test_the_dispatch_store_of_solvi_build_written_by_0_9_0_verifies_and_replays
     auto = task.dispatch(copy / "dispatch.jsonl")
     stored = list(auto.dispatcher.stored())
     assert len(stored) == 30 and {d.by for d in stored} == {"s1", "s2"}
-    assert auto.replay_all() == []
+    _only_the_config_moved(auto.replay_all())
     again = [auto.dispatcher.ask(st) for st in task.ASKED]                 # the same answers by the same paths
     assert [(d.answer, d.by) for d in again] == [(d.answer, d.by) for d in stored]
     auto.storage.close()
@@ -98,5 +108,20 @@ def test_the_stores_replay_after_every_module_moved_with_the_table(task, copy):
             assert old.replay(system)["catalog"] == "same"
         store.close()
         auto = task.dispatch(copy / "dispatch.jsonl")
-        assert auto.replay_all() == []
+        _only_the_config_moved(auto.replay_all())
         auto.storage.close()
+
+
+def test_under_the_strictest_default_the_stored_decisions_replay_as_made_by_another_catalog(task, copy):
+    # 1.2 decides several failed hard checks by the strictest answer and marks that in the catalog fingerprint: what an
+    # earlier version stored is shown as changed against the default, and as the same against combine="first"
+    from solvi.core.store import open_storage
+    store = open_storage(str(copy / "decisions.jsonl"))
+    task.COMBINE = None
+    default = task.system(calibration=DATA / "calibration.json")
+    stored = list(store.iter())
+    assert all(store.get(s.id, default).trace.replay(default)["catalog"] == "changed" for s in stored)
+    task.COMBINE = "first"
+    first = task.system(calibration=DATA / "calibration.json")
+    assert all(store.get(s.id, first).trace.replay(first)["catalog"] == "same" for s in stored)
+    store.close()

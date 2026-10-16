@@ -326,7 +326,7 @@ SURFACES = {
     "solvi.core.knowledge": ["ActionModel", "Agenda", "ConservativeActionModel", "ConsistencyGate", "FailureMemory",
                              "KINDS", "KnowledgeStore", "LearnedGate", "MISSING", "Prediction", "Protect",
                              "RECONFIRM_DEFAULTS", "RiskBudget", "RiskDecision", "RiskPolicy", "SourceGate", "SOURCES",
-                             "Verdict", "Vocabulary", "WorldMap", "WriteGate"],
+                             "Verdict", "Vocabulary", "WorldMap", "WriteGate", "WriterGate"],
     "solvi.models": ["cached", "cached_path", "decider", "DecideModel", "kind_of", "llm", "load", "ModelError",
                      "PUBLISHED", "pull", "resolve", "systemone"],
     "solvi.solutions.decisions": ["DecisionSystem", "build"],
