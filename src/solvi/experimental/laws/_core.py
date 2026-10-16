@@ -10,6 +10,7 @@ import random
 import warnings
 from dataclasses import dataclass, field
 from functools import lru_cache
+from collections import deque
 from itertools import combinations
 from typing import Any, Callable, Iterable, Protocol
 
@@ -146,9 +147,20 @@ class Buffer:
     support and precision on the rows of every group but one are a few AND operations. The proposing transition's group
     is left out of every test (`exclude=`). tested: how many distinct candidates (action, condition, effect) have been
     scored on this buffer, by every law set that tested on it — the N the sized acceptance divides its error by; scoring
-    the same candidate again does not raise it."""
+    the same candidate again does not raise it.
 
-    def __init__(self, grammar: Grammar):
+    window: keep only the last `window` rows (all actions together, in arrival order); older rows leave as new ones
+    arrive and every bitset is re-based (bit 0 is always the oldest row kept). `left` counts the rows that left;
+    `version` changes with every row added or dropped. The sized rule's N after rows leave: it never decreases (the
+    bound is over every candidate tested on the stream, not on the rows kept), and a candidate scored again counts
+    again once the window has turned over since it was last counted — `window` rows added since then, so it is judged
+    on other rows: a new test. Within one turnover a re-score is not counted, as on a buffer without a window. Without
+    a window (the default) nothing leaves and N counts distinct candidates as before."""
+
+    def __init__(self, grammar: Grammar, window: int | None = None):
+        if window is not None and int(window) < 1:
+            raise ValueError("window is a number of rows ≥ 1, or None")
+        self.window = int(window) if window is not None else None
         self.grammar = grammar
         self._rows: dict[Any, list[Transition]] = {}            # action → its rows, in order
         self._atoms: dict[Any, dict[str, int]] = {}             # action → atom → bitset
@@ -160,7 +172,11 @@ class Buffer:
         self._late: set = set()                                  # (action, atom) indexed on the rows before it
         self.n = 0
         self.tested = 0                                          # distinct candidates scored on this buffer, in all
-        self._tested: set = set()                                # their (action, condition, effect) keys
+        self._tested: dict = {}                                  # their (action, condition, effect) keys → when
+        self.added = 0                                           # rows ever added
+        self.left = 0                                            # rows that left the window
+        self.version = 0
+        self._arrival: deque = deque()                           # the action of each row kept, oldest first
 
     def add(self, t: Transition):
         a = _key(t.action)
@@ -178,6 +194,43 @@ class Buffer:
             self._seen.add(g)
             self._order.append(t.group)
         self.n += 1
+        self.added += 1
+        self.version += 1
+        if self.window is not None:
+            self._arrival.append(a)
+            while self.n > self.window:
+                self._drop_oldest()
+
+    def _drop_oldest(self):
+        """The oldest row leaves: its action's bitsets shift down one bit (bit 0 is the oldest row kept)."""
+        a = self._arrival.popleft()
+        rows = self._rows[a]
+        t = rows.pop(0)
+        self._width[a].pop(0)
+        atoms = self._atoms.get(a, {})
+        for name in list(atoms):
+            m = atoms[name] >> 1
+            if m:
+                atoms[name] = m
+            else:
+                del atoms[name]
+        groups = self._groups.get(a, {})
+        for g in list(groups):
+            m = groups[g] >> 1
+            if m:
+                groups[g] = m
+            else:
+                del groups[g]
+        for ck in [ck for ck in self._cache if ck[0] == a]:
+            m, done = self._cache[ck]
+            self._cache[ck] = (m >> 1, max(0, done - 1))
+        g = _key(t.group)
+        if not any(g in gs for gs in self._groups.values()):
+            self._seen.discard(g)
+            self._order = [x for x in self._order if _key(x) != g]
+        self.n -= 1
+        self.left += 1
+        self.version += 1
 
     def extend(self, ts: Iterable[Transition]):
         for t in ts:
@@ -186,12 +239,19 @@ class Buffer:
     def __len__(self):
         return self.n
 
+    def _new_test(self, k) -> bool:
+        """Would scoring candidate key k now raise N: never counted, or (with a window) counted before the window
+        last turned over."""
+        at = self._tested.get(k)
+        return at is None or (self.window is not None and self.added - at >= self.window)
+
     def count_tested(self, keys: Iterable) -> int:
-        """Add candidate keys (action, condition, effect) to the tested ones → how many were new (N grows by these)."""
+        """Add candidate keys (action, condition, effect) to the tested ones → how many were new (N grows by these;
+        with a window, a key counted `window` or more rows ago counts again)."""
         new = 0
         for k in keys:
-            if k not in self._tested:
-                self._tested.add(k)
+            if self._new_test(k):
+                self._tested[k] = self.added
                 new += 1
         self.tested += new
         return new
@@ -310,6 +370,7 @@ class Law:
     level: float | None = None
     null: float | None = None
     admitted: str = "test"
+    recent: Any = field(default=None, repr=False)      # the last observations (1 right, 0 wrong) with LawSet(recent=)
 
     def holds(self, true: Iterable[str]) -> bool:
         t = set(true)
@@ -525,7 +586,8 @@ class LawSet:
     under "matched"), and its precision at acceptance is the precision its first `check` recounts.
     readmit: "any" (the default) — a retired law may be accepted again by the next test; "grown" — not on a buffer
     that has not grown since its retirement (the same evidence that retired it; refusals counted in
-    `refused_readmit`). A retirement from `observe` outside `step` does not see the buffer: it is stamped with the
+    `refused_readmit`); on a `Buffer(window=W)` not before W rows were added since (the rows it was accepted on may
+    still be in the window: retired by recent observations, it would pass again on the stale rows). A retirement from `observe` outside `step` does not see the buffer: it is stamped with the
     buffer's size at the next `test`, which errs toward waiting.
 
     The sized acceptance (sized=True). Fixed thresholds do not see how many candidates were tried on one buffer: on a
@@ -574,7 +636,14 @@ class LawSet:
 
     cost: the search-cost record — candidates (proposed for mismatches), tests (candidates scored on a buffer),
     accepted, probes (asked by `admit_by_probes`), simulated (0 here; a model-based learner adds its steps) — report it
-    next to accuracy."""
+    next to accuracy; `proposals` is the same count as `solvi.core.slow.Proposals` (proposed = dropped + refuted +
+    admitted).
+
+    recent: None (the default) — a law's running precision counts every observation since its acceptance (plus its
+    held-out rows), so a law right on 1,000 rows needs about 250 wrong ones before it falls below 0.8 after the world
+    changes; a number M — once a law has M observations since its acceptance, only the last M count (pair it with
+    `Buffer(window=)` on a stream whose laws change). memo: keep scores until the buffer or the active laws change
+    (`memo_hits`)."""
 
     def __init__(self, grammar: Grammar, *, base: Callable | None = None, apply: Callable | None = None,
                  effects: Callable | None = None, proposer: Proposer | None = None, min_support: int = 5,
@@ -583,7 +652,7 @@ class LawSet:
                  null: str | float = "base", disagree: str = "first", support_on: str = "applied",
                  readmit: str = "any", acceptance: str | None = None, confirm: Callable | None = None,
                  ties: str = "earlier", tol: float | None = None, rtol: float | None = None,
-                 same: Callable[[Any, Any], bool] | None = None):
+                 same: Callable[[Any, Any], bool] | None = None, recent: int | None = None, memo: bool = False):
         if disagree not in ("first", "abstain"):
             raise ValueError(f"disagree is 'first' or 'abstain', not {disagree!r}")
         if not 0.0 < float(delta) < 1.0:
@@ -623,6 +692,14 @@ class LawSet:
         if ties not in ("earlier", "newer"):
             raise ValueError(f"ties is 'earlier' or 'newer', not {ties!r}")
         self.ties = ties
+        if recent is not None and int(recent) < max(1, self.retire_min):
+            raise ValueError(f"recent is None or a number of observations ≥ retire_min ({self.retire_min})")
+        self.recent = int(recent) if recent is not None else None
+        self.memo = bool(memo)
+        self.memo_hits = 0
+        self._memo: dict = {}
+        self._memo_at = None
+        self._laws_version = 0
         from ._probes import sameness
         self.same = sameness(tol, same, rtol=rtol)          # None: exact equality
         self._cmp = None if self.same is None else (("same", id(same)) if same is not None else ("tol", tol, rtol))
@@ -638,6 +715,13 @@ class LawSet:
         self._seq = 0
         self._last_tested = 0
         self._base_key = ("base", id(base)) if self._cmp is None else ("base", id(base), self._cmp)
+
+    @property
+    def proposals(self):
+        """What the proposer offered and what the test did with it (`solvi.core.slow.Proposals`): dropped by the
+        grammar, refuted (proposed for a mismatch and not accepted), admitted."""
+        from ...core.slow.proposals import of_lawset
+        return of_lawset(self)
 
     # ----------------------------------------------------------------------------------- prediction
     def agrees(self, predicted, observed) -> bool:
@@ -806,9 +890,22 @@ class LawSet:
         """(support, hits, net) of a candidate on the held-out rows (every group but `exclude`): the rows it is counted
         on — where it would be the applied law (support_on="applied", the default), or every row its condition matches
         ("matched") — those of them its effect predicts right, and the errors it removes minus the errors it adds where
-        it would be the applied law."""
+        it would be the applied law. memo=True: kept until the buffer (a row added or dropped) or the active laws
+        change; a repeated score on the same state is a lookup (`memo_hits`)."""
+        if self.memo:
+            at = (id(buffer), buffer.version, self._laws_version, _key(exclude))
+            if at != self._memo_at:
+                self._memo, self._memo_at = {}, at
+            k = (_key(candidate.action), tuple(candidate.condition), _key(candidate.effect))
+            got = self._memo.get(k)
+            if got is not None:
+                self.memo_hits += 1
+                return got
         m, take, E, ok = self._rows_of(candidate, buffer, exclude, _view)
-        return m.bit_count(), (m & E).bit_count(), (take & E).bit_count() - (take & ok).bit_count()
+        out = m.bit_count(), (m & E).bit_count(), (take & E).bit_count() - (take & ok).bit_count()
+        if self.memo:
+            self._memo[k] = out
+        return out
 
     NULL_FLOOR = 0.05
 
@@ -862,7 +959,7 @@ class LawSet:
         candidates = list(candidates)
         self.last_retired = []
         if self.readmit == "grown" and self._retired_at:
-            candidates = self._not_readmitted(candidates, len(buffer))
+            candidates = self._not_readmitted(candidates, buffer)
         if not candidates:
             return []
         if len(self.laws) >= self.cap:
@@ -920,16 +1017,29 @@ class LawSet:
             self.last_retired += self.check(buffer, c.action)
         return out
 
-    def _not_readmitted(self, candidates, size):
-        """The candidates without the laws retired on a buffer of this size or larger (readmit="grown"); retirements
-        not yet stamped are stamped with `size`."""
+    @staticmethod
+    def _clock(buffer):
+        """What a retirement is stamped with: the buffer's size, or with a window the rows ever added."""
+        return buffer.added if buffer.window is not None else len(buffer)
+
+    @staticmethod
+    def _blocked(at, buffer):
+        """readmit="grown": the buffer has not grown since the stamp — with a window, not `window` rows added since
+        (the rows that retired the law, or that it was accepted on, may still be in it)."""
+        if buffer.window is not None:
+            return buffer.added - at < buffer.window
+        return len(buffer) <= at
+
+    def _not_readmitted(self, candidates, buffer):
+        """The candidates without the laws retired on this buffer since it last grew (readmit="grown"); retirements
+        not yet stamped are stamped now."""
         for k, at in self._retired_at.items():
             if at is None:
-                self._retired_at[k] = size
+                self._retired_at[k] = self._clock(buffer)
         out = []
         for c in candidates:
             at = self._retired_at.get((_key(c.action), tuple(c.condition), _key(c.effect)))
-            if at is not None and size <= at:
+            if at is not None and self._blocked(at, buffer):
                 self.refused_readmit += 1
                 continue
             out.append(c)
@@ -1287,6 +1397,7 @@ class LawSet:
                   proposer=c.proposer, sources=sources, seq=self._seq)
         self.laws.append(law)
         self.laws.sort(key=self._order)
+        self._laws_version += 1
         return law
 
     def _order(self, law):
@@ -1312,14 +1423,22 @@ class LawSet:
                         gone = law
                 if gone is None:
                     break
-                h, n = gone.running()
+                h, n = self.running(gone)
                 self.retire(gone, why=f"held-out precision {h}/{n} below {self.retire_below}")
                 retired.append(gone)
-        self._stamp(retired, len(buffer))
+        self._stamp(retired, self._clock(buffer))
         return retired
 
+    def running(self, law: Law) -> tuple[int, int]:
+        """(hits, n) the retirement judges: `law.running()`, or with recent=M, once the law has M observations since
+        its acceptance, only the last M of them."""
+        r = law.recent
+        if self.recent is not None and r is not None and len(r) >= self.recent:
+            return sum(r), len(r)
+        return law.running()
+
     def _falls(self, law):
-        h, n = law.running()
+        h, n = self.running(law)
         return n >= self.retire_min and h < self.retire_below * n
 
     def observe(self, t: Transition) -> list[Law]:
@@ -1329,9 +1448,14 @@ class LawSet:
         if law is None or (law.born is not None and _key(t.group) == _key(law.born)):
             return []
         law.n += 1
-        law.hits_after += int(self.agrees(self.apply(law.effect, t.state), t.observed))
+        hit = int(self.agrees(self.apply(law.effect, t.state), t.observed))
+        law.hits_after += hit
+        if self.recent is not None:
+            if law.recent is None:
+                law.recent = deque(maxlen=self.recent)
+            law.recent.append(hit)
         if self._falls(law):
-            h, n = law.running()
+            h, n = self.running(law)
             self.retire(law, why=f"held-out precision {h}/{n} below {self.retire_below}")
             return [law]
         return []
@@ -1340,6 +1464,7 @@ class LawSet:
         """Take a law out of use (kept in `retired` with the reason)."""
         if law in self.laws:
             self.laws.remove(law)
+            self._laws_version += 1
             law.status, law.why = "retired", why
             self.retired.append(law)
             self._stamp([law], None)
@@ -1351,7 +1476,7 @@ class LawSet:
         law = self.applied(t.state, t.action)
         predicted = self.predict(t.state, t.action, disagree="first")
         retired = self.observe(t)
-        self._stamp(retired, len(buffer))
+        self._stamp(retired, self._clock(buffer))
         miss = predicted != t.observed if self.same is None else not self.agrees(predicted, t.observed)
         st = Step(t, predicted, law, miss, retired=retired)
         if miss:
@@ -1413,7 +1538,7 @@ class LawSet:
         hits short of min_precision · support for "min_precision", else 0."""
         c = candidate
         k = (_key(c.action), tuple(c.condition), _key(c.effect))
-        N = max(1, buffer.tested + (k not in buffer._tested))
+        N = max(1, buffer.tested + buffer._new_test(k))
         sup, hits, net = self.score(c, buffer, exclude)
         null = (self.base_rate(buffer, c.action, c.effect, exclude) if isinstance(self.null, str) else self.null)
         need = (max(self.min_support, sized_need(N, self.delta, null, self.space)) if self.sized
@@ -1428,7 +1553,7 @@ class LawSet:
         if k in {(_key(law.action), law.condition, _key(law.effect)) for law in self.laws}:
             return fail("active", "it is already an active law")
         at = self._retired_at.get(k) if self.readmit == "grown" else None
-        if at is not None and len(buffer) <= at:
+        if at is not None and self._blocked(at, buffer):
             return fail("readmit", f"it was retired on a buffer of {at} rows and the buffer has not grown since "
                                    f"({len(buffer)} rows)")
         if len(self.laws) >= self.cap:
