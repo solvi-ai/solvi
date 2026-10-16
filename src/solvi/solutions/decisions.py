@@ -42,7 +42,12 @@ New kinds of input (novel="auto"): when the answer is a choice among more than t
 (a head or learner=), answers no example shows can come — an intent nobody labelled. The leave-options-out simulation
 (`solvi.core.guarantees.openset.leave_out`: System 1 fitted three times without a third of the options) sizes an `OpenSetGate` that
 keeps max_error (or max_risk, as the stricter max_error at the same level) on a stream with a share of such inputs and
-flags the change. novel=False: a plain guarantee; novel=True: the gate or an error.
+flags the change. novel=False: a plain guarantee; novel=True: the gate or an error. novel=[state, ...]: real
+out-of-scope inputs (requests no option fits, collected from the stream) size the gate instead of the simulation, for
+any answer — System 1's signal on them is what an outside input looks like. Real ones are better: imitated novelty gave
+28 % coverage, imitated mixed with real 30 %, about 100 real ones 60 % (docs/best_practices.md), so the simulation is
+not added to them; fewer than 100 are warned about, fewer than 30 refused, and labelled examples among them warned
+about (they are in scope).
 
 The promise: max_risk= (P(answered alone and wrong) ≤ it, conformal risk control) or max_error= (the error among the
 answers given alone ≤ it with probability ≥ 1 − delta, learn-then-test) — on System 1 by `System.guarantee`, and with a
@@ -370,7 +375,9 @@ def build(question, examples, *, catalog=None, learner=None, slow=None, reads=No
     refitted without some options for the open-set gate). slow: the slow path (module docs); reads: the given keys a
     model slow path reads. max_risk= or max_error=: the promise. signal: the guarantee's signal (default: chosen, see
     the module docs). correct: a function (answer, label) → bool when a label is not simply the right answer (a label
-    that says "right" / "wrong" of System 1's answer, a quote that overlaps). novel: "auto", True or False. budget /
+    that says "right" / "wrong" of System 1's answer, a quote that overlaps). novel: "auto", True, False, or a list
+    of real out-of-scope states (dicts like the examples' states; at least 30, about 100 recommended) that calibrate
+    the open-set gate in place of the simulation (module docs). budget /
     total: solvi.core.dispatch.Budget per decision / for the dispatcher's life; price: dollars per million input and output
     tokens (needed for dollars). storage: a path or a TraceStorage — every decision and the policy, hash-chained.
     split: (fit, guarantee, dispatch) shares (with slow=, a dispatch share of 0 calibrates System 1 on all the rest and
@@ -398,11 +405,30 @@ def build(question, examples, *, catalog=None, learner=None, slow=None, reads=No
     if (max_risk is None) == (max_error is None):
         raise ValueError("give the promise as max_risk= (P(answered alone and wrong)) or max_error= (the error among the "
                          "answers given alone)")
-    if novel not in ("auto", True, False):
-        raise ValueError('novel is "auto", True or False')
+    real_novel = None
+    if isinstance(novel, (list, tuple)):
+        real_novel = list(novel)
+        if not all(isinstance(st, dict) for st in real_novel):
+            raise ValueError("novel= as a list holds real out-of-scope states: dicts like the examples' states")
+    elif novel not in ("auto", True, False):
+        raise ValueError('novel is "auto", True, False or a list of real out-of-scope states')
     examples = [tuple(e) for e in examples]
     if not examples or not all(len(e) == 2 and isinstance(e[0], dict) for e in examples):
         raise ValueError("examples are [(state dict, correct answer), ...]")
+    if real_novel is not None:
+        from ..core.guarantees.guarantee import GuaranteeWarning
+        if len(real_novel) < 30:
+            raise ValueError(f"novel= gave {len(real_novel)} out-of-scope states: the gate needs at least 30")
+        seen = {_canon(st) for st, _ in examples}
+        inside = sum(_canon(st) in seen for st in real_novel)
+        if inside:
+            warnings.warn(f"{inside} of the {len(real_novel)} out-of-scope states in novel= are also labelled examples: "
+                          "they are in scope, and counting them as outside lowers the gate's threshold for nothing",
+                          GuaranteeWarning, stacklevel=2)
+        if len(real_novel) < 100:
+            warnings.warn(f"novel= gave {len(real_novel)} real out-of-scope states; about 100 were needed for 60 % "
+                          "coverage where they were measured (fewer leave the gate cautious)", GuaranteeWarning,
+                          stacklevel=2)
     given_keys = list(examples[0][0].keys())
     raw_states = [st for st, _ in examples]   # split="hash" hashes these (before a knowledge snapshot is added)
     snap_of, knowledge_desc = _knowledge_source(knowledge)
@@ -413,6 +439,8 @@ def build(question, examples, *, catalog=None, learner=None, slow=None, reads=No
         else:
             snap_once = snap_of
         examples = [(_with_knowledge(st, snap_once), y) for st, y in examples]
+        if real_novel is not None:
+            real_novel = [_with_knowledge(st, snap_once) for st in real_novel]
     cat = catalog if catalog is not None else Catalog()
     qname = question if isinstance(question, str) else question.name
     if learner is not None:
@@ -550,7 +578,7 @@ def build(question, examples, *, catalog=None, learner=None, slow=None, reads=No
     if novel is True and not can_novel:
         raise ValueError("novel=True needs a choice among more than two options and System 1 fitted here (a head or "
                          "learner=): the simulation refits it without some options")
-    want_gate = novel is True or (novel == "auto" and can_novel)
+    want_gate = real_novel is not None or novel is True or (novel == "auto" and can_novel)
 
     def promise_s1(cal_ex):
         """Calibrate System 1's promise on cal_ex → (gate or None, its description, novel description, reports)."""
@@ -558,24 +586,32 @@ def build(question, examples, *, catalog=None, learner=None, slow=None, reads=No
         rep_all, ndesc = {}, None
         if want_gate:
             try:
-                g, info = _open_set(make_system, system, q, qname, fit_ex, cal_ex, sig_name, correct, level, delta, seed)
+                if real_novel is not None:
+                    g, info = _open_set_real(system, qname, cal_ex, real_novel, sig_name, correct, level, delta, seed)
+                    ndesc = (f"System 1's signal on {info['novel']} real out-of-scope examples stands for inputs no "
+                             f"option fits (novel=; {info['given'] - info['novel']} it abstained on left out)")
+                else:
+                    g, info = _open_set(make_system, system, q, qname, fit_ex, cal_ex, sig_name, correct, level, delta,
+                                        seed)
+                    ndesc = (f"System 1 was refitted 3 times without a third of the options ({info['groups']} left "
+                             "out); its signal on their examples stands in for inputs no option fits")
                 rep_all["openset"] = g.report
                 system.guarantee(qname, promise=g, signal=sig_name)
-                ndesc = (f"System 1 was refitted 3 times without a third of the options ({info['groups']} left out); its "
-                         f"signal on their examples stands in for inputs no option fits. An open-set gate keeps the error "
+                ndesc += (f". An open-set gate keeps the error "
                          f"among the answers given alone ≤ {level:g} on streams with a share of such inputs (estimated from "
                          f"the recent signals, at least {g.min_share:g}) and flags a change of the stream")
                 if max_risk is not None:
                     ndesc += f" (max_risk {max_risk:g} is kept as the stricter max_error {max_risk:g})"
                 r0 = g.report.get(f"at_share_{g.min_share:g}") or {}
                 gd = {"promise": g.promise,
-                      "how": (f"Calibrated on {len(cal_ex)} examples ({info['known']} known, {info['novel']} simulated new); "
+                      "how": (f"Calibrated on {len(cal_ex)} examples ({info['known']} known, {info['novel']} "
+                              f"{'real' if real_novel is not None else 'simulated'} new); "
                               f"at the minimum share the threshold is {r0.get('threshold', math.inf):.4g} and answers "
                               f"{r0.get('answered_known', 0):.1%} of the known examples alone."
                               if r0 else "No threshold keeps the promise: everything goes to a person.")}
                 return g, gd, ndesc, rep_all
             except ValueError as e:
-                if novel is True:
+                if novel is True or real_novel is not None:
                     raise
                 ndesc = f"not simulated: {e}"
         rep = system.guarantee(qname, cal_ex, max_risk=max_risk, max_error=max_error, signal=sig_name, delta=delta,
@@ -743,6 +779,18 @@ def _open_set(make_system, system, q, qname, fit_ex, g_ex, sig_name, correct, le
         us += [s for s in sig if math.isfinite(s)]
     gate = OpenSetGate.calibrate(ks, kr, us, max_error=level, delta=delta, seed=seed)
     return gate, {"known": len(ks), "novel": len(us), "groups": " / ".join(str(len(g)) for g in groups)}
+
+
+def _open_set_real(system, qname, g_ex, outside, sig_name, correct, level, delta, seed):
+    """The gate on real out-of-scope states: System 1's signal on them is the outside signal → (OpenSetGate, info)."""
+    from ..core.guarantees.openset import OpenSetGate
+    ks, kr, _ = _rows(system, qname, g_ex, sig_name, correct)
+    keep = [i for i, s in enumerate(ks) if math.isfinite(s)]
+    ks, kr = [ks[i] for i in keep], [kr[i] for i in keep]
+    sig, _, _ = _rows(system, qname, [(st, None) for st in outside], sig_name, lambda answer, label: False)
+    us = [s for s in sig if math.isfinite(s)]           # an abstention never reaches the gate
+    gate = OpenSetGate.calibrate(ks, kr, us, max_error=level, delta=delta, seed=seed)
+    return gate, {"known": len(ks), "novel": len(us), "given": len(outside)}
 
 
 def __getattr__(name):

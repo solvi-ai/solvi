@@ -541,7 +541,9 @@ class FreshEnvironments:
     (None: the current agent); select / confirm: seeds, or functions (change, ctx) → seeds — two disjoint sets of worlds
     never used before (draw them fresh per candidate; never the held-out evaluation seeds, see EvaluatorLock); score:
     row → number, higher is better (default: 1 when the episode did not fail); progress: row → number (default the
-    episode's info["progress"]).
+    episode's info["progress"]). on_episode_start: a function (policy, seed) called before every episode, with the
+    policy about to play and the world's seed — to reset a policy's memory between worlds, seed its own randomness or
+    log; None (default): nothing.
 
     The bar, in order: (1) selection — the mean paired gain on `select` is > 0; (2) the candidate's rules never crash
     (a policy that raises); (3) replay — the candidate replays its first `replay` selection worlds with the same
@@ -552,8 +554,12 @@ class FreshEnvironments:
 
     def __init__(self, env: Callable, agent: Callable, *, select, confirm, score: Callable | None = None,
                  progress: Callable | None = None, max_steps: int = 200, boot: int = 2000, seed: int = 0,
-                 min_lower: float = 0.0, progress_tolerance: float = 0.0, replay: int = 2):
+                 min_lower: float = 0.0, progress_tolerance: float = 0.0, replay: int = 2,
+                 on_episode_start: Callable | None = None):
+        if on_episode_start is not None and not callable(on_episode_start):
+            raise TypeError("on_episode_start is a function (policy, seed) or None")
         self.env, self.agent, self.select, self.confirm = env, agent, select, confirm
+        self.on_episode_start = on_episode_start
         self.score = score or (lambda r: 0.0 if r["failed"] else 1.0)
         self.progress = progress or (lambda r: r["progress"])
         self.max_steps, self.boot, self.seed = max_steps, boot, seed
@@ -564,7 +570,12 @@ class FreshEnvironments:
 
     def _play(self, policy, seeds):
         from ._paired import run_episode
-        return [run_episode(self.env(), policy, s, max_steps=self.max_steps) for s in seeds]
+        rows = []
+        for s in seeds:
+            if self.on_episode_start is not None:
+                self.on_episode_start(policy, s)
+            rows.append(run_episode(self.env(), policy, s, max_steps=self.max_steps))
+        return rows
 
     def run(self, change, ctx):
         from ._paired import paired_bootstrap

@@ -211,8 +211,13 @@ def guarantor_points(other_debtors):
   into that question's flow by the strategist (since 1.0; the step's reason says `hard check for <question> (then)`), so
   `then=` alone wires it — no `requires=` needed, and the other questions' flows stay as they were. A strategist of your
   own that leaves such a check out is refused when the `System` is built. To make sure a hard check without `then` is
-  always in a question's flow, list it in the question's `requires`. When several hard checks fail, the first one declared in the catalog decides:
-  declare the most important first. A question's flow does not depend on which other questions are asked in the same
+  always in a question's flow, list it in the question's `requires`. When several hard checks governing a question
+  fail with different `then` answers, the strictest decides — the answer that comes last in the question's options, so
+  list them from mildest to strictest (a governing check with no `then` answer for it abstains, strictest of all) — and
+  a warning names them; `Catalog(combine="strictest")` chooses this without the warning. **Changed in 1.2**: before,
+  the first one declared in the catalog decided; `Catalog(combine="first")` keeps that (declare the most important
+  first). Where the options give no order (a `then` function among them, or a question without options) the first
+  declared decides, with the warning. A question's flow does not depend on which other questions are asked in the same
   request, and neither does its answer — except through a constraint between answers, which applies only when all its
   questions are asked.
 
@@ -3281,9 +3286,10 @@ check (`system.order_model`: Laplace counts, then a FastHead refitted every 50 r
 values of `init_state` (and one level of dicts, e.g. `invoice.currency`). `learn_order(features=[...])` adds cheap computed
 facts; they are computed before the hard checks.
 
-Answers are identical to the default order. When several hard checks fail, the first one declared in the catalog decides;
-so a question is settled by a failed check only after every hard check that governs it and is declared earlier has been
-evaluated. Those earlier checks are scheduled next, since evaluating them settles the question whatever they return. Records
+Answers are identical to the default order. When several hard checks fail, the strictest decides (since 1.2), so a
+question is settled by a failed check only after every hard check that governs it has been evaluated; under
+`Catalog(combine="first")` the first one declared in the catalog decides, so only those declared earlier must have been
+evaluated. Those checks are scheduled next, since evaluating them settles the question whatever they return. Records
 stay in flow order. What changes is only which steps run: `res.trace.skipped` lists the rest, and
 `res.trace.explain_order()` (also printed by `show`) says why each hard check ran when it did:
 
@@ -3754,7 +3760,10 @@ catalog](#citing-the-clause-a-rule-implements)) has `"cites": [{"clause", "quote
 with `diff(store, new_system, only={decision_id})`: `rep.extraneous` lists the ids of the other decisions it changes
 (answer, status or guard — a decision now forced by the exception counts) and `rep.exact` is True when there are none;
 `solvi.core.versions.decision_diff(..., only=)` does the same over the decisions whose answer moves ([versions of a
-document](#versions-of-a-document-and-their-impact-solvicoreversions)).
+document](#versions-of-a-document-and-their-impact-solvicoreversions)). `diff(store, new_system, facts=True)` gives each changed
+decision in `rep.changed` a `"facts": {fact: {"old", "new"}}` and also lists a decision whose facts changed while no answer
+did yet (with `"questions": {}`; `solvi.core.store.diff.fact_changes`; compact records are compared on their answers
+only). `diff(store, new_system, incremental=True)` re-runs only the decisions something they rest on changed under.
 
 Each stored decision's recorded input is asked again for the same questions (`store=False`: the new system's own storage
 is not written) and compared with the stored response: answer, status, the guard that settled it, the safeguard events
@@ -3988,7 +3997,10 @@ What it shows, per question:
 
 - **Who answered.** The answers given alone and what gave them — a rule (its name), a model decision (the model's id),
   a learned head, or a hard check that forced the answer — and the inputs handed over, by the safeguard that held them
-  back. With a dispatcher (`solvi.core.dispatch`, `storage=`), who gave the final answer: System 1, the slow path or a
+  back. A forced answer is credited to its check whether or not the check changed it, so the forced ones are split
+  (`forced_split`): the check changed the answer (the question's own answer in the trace differs), the answer would
+  have been the same, or not known — under `early_exit=True` (the default) a failed hard check skips the question's own
+  answer and the record holds no value to compare; build the System with `early_exit=False` to count them. With a dispatcher (`solvi.core.dispatch`, `storage=`), who gave the final answer: System 1, the slow path or a
   person, by action (accept, think, check) and by the slice System 1 handed over.
 - **What it cost.** The time of every decision, the model calls and tokens the traces record, and dollars where they
   are known (the dispatcher records them, and so does a generator built with `price=`; for other model calls pass

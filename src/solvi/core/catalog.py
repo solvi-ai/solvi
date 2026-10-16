@@ -894,17 +894,18 @@ class Catalog:
         (0.9: the text as written, up to whitespace runs). It applies to the parts registered after it is set.
         sensitive: names of given facts no part may read (age, sex, ...) — `solvi check` (solvi.check.lint) reports a part
         that reads one, directly or through a fact computed from one, as an error; nothing changes at ask time.
-        combine: which of several false hard checks governing one question decides it — None (default: the first
-        declared, and when their `then` answers differ a warning names them), "first" (the same, chosen: no warning —
-        the declaration order is the priority) or "strictest" (the answer that comes last in
-        the question's options, so list them from mildest to strictest; a governing check with no `then` answer for
-        the question abstains and is strictest of all; with a `then` function among them, or no options, the first
-        declared decides, with the warning)."""
+        combine: which of several false hard checks governing one question decides it — None (default since 1.2: as
+        "strictest", and when their `then` answers differ a warning names them and the one that decided), "strictest"
+        (the same, chosen: no warning) — the answer that comes last in the question's options, so list them from
+        mildest to strictest; a governing check with no `then` answer for the question abstains and is strictest of
+        all; with a `then` function among them, or no options, the first declared decides, with the warning — or
+        "first" (the first declared decides, no warning: the declaration order is the priority; the default before
+        1.2)."""
         from .provenance import quote_mode
         if combine not in (None, "first", "strictest"):
             raise ValueError('combine must be "first" or "strictest"')
-        self.combine = combine or "first"
-        self.combine_chosen = combine is not None    # "first" given explicitly: the order is meant, no warning
+        self.combine = combine or "strictest"
+        self.combine_chosen = combine is not None    # given explicitly: the choice is meant, no warning
         self.quotes = quote_mode(quotes)
         self.sensitive: frozenset[str] = frozenset([sensitive] if isinstance(sensitive, str) else sensitive or ())
         self.parts: dict[str, Part] = {}
@@ -1053,7 +1054,8 @@ class Catalog:
         str` — whose argument names are the facts it reads (typed like any part's); it runs only when the check is
         False, its value must be one of the question's answers (else the question abstains), and it is recorded in the
         trace (record kind "then") and re-checked by replay. When several hard checks governing a question are False,
-        the first declared decides (Catalog(combine="strictest"): the strictest answer by the question's option order).
+        the strictest answer by the question's option order decides (since 1.2; Catalog(combine="first"): the first
+        declared).
         `cite`, `clause`: as for extract. family: where the check's evidence comes from (a model family such as
         "gpt", "code", "human", a data source); shares_call_with: the part or question whose model call the check
         re-reads (a self-check in the same response). Both are metadata: nothing changes at ask time and the

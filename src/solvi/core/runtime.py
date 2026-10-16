@@ -1588,8 +1588,8 @@ class _Run:
 
 def _learned_hard_checks(run):
     """Hard checks one at a time, most expected saving first. A question is settled by a failed hard check only when every
-    hard check governing it and declared earlier in the catalog has been evaluated and passed — so the check that decides is
-    the same as with the default order (the first declared failed one). Stops when no unevaluated hard check is in the flow
+    hard check governing it has been evaluated (Catalog(combine="first"): every one declared earlier in the catalog, and
+    passed) — so the check that decides is the same as with the default order. Stops when no unevaluated hard check is in the flow
     of a question that is still open. A generator of phases (see _Run.phases)."""
     catalog, flow, init_state, order, costs = run.catalog, run.flow, run.init_state, run.order, run.costs
     steps, names, index, done, vals = run.steps, run.names, run.index, run.done, run.vals
@@ -1608,9 +1608,18 @@ def _learned_hard_checks(run):
             ancestors(index[f], acc)
         yield sorted(acc)
 
+    strictest = getattr(catalog, "combine", "strictest") != "first"   # the strictest of the failed ones decides
+
     def settle():
         for q in list(live):
-            for i in governing.get(q, ()):
+            gs = governing.get(q, ())
+            if strictest:                               # settled only once every check governing q is evaluated
+                failed = [i for i in gs if i in done and done[i].value is False]
+                if failed and all(i in done for i in gs):
+                    live.discard(q)
+                    settled_by[q] = names[failed[0]]
+                continue
+            for i in gs:
                 if i not in done:
                     break
                 if done[i].value is False:

@@ -12,6 +12,9 @@ What it shows, per question, from the records the library already writes:
 
 - who answered: the decisions answered alone, by what (a rule, a model decision with the model's id, a fitted head, a
   hard check that forced the answer) and how many were handed over (abstained), by the safeguard that held them back;
+  of the forced answers, how many the check changed (the question's own answer, in the trace, differs), how many would
+  have been the same without it, and how many cannot say: under `early_exit=True` (the default) a failed hard check
+  skips the question's own answer, so the record holds no value to compare — `System(early_exit=False)` records it;
   with `solvi.core.dispatch`, who gave the final answer (System 1, the slow path, a person), by which action and slice;
 - what it cost: the time of every decision, the model calls and tokens the traces record (dollars where the
   dispatcher or a generator built with `price=` recorded them, or with `price=`), the dispatcher's spend split between
@@ -234,6 +237,15 @@ def _who(res, q, recs):
     return f"{kind}: {m.get('id') or res.get('source') or '?'}"
 
 
+def _forced_kind(ans, q, recs):
+    """A forced answer against the question's own answer in the trace → "changed", "unchanged" or "unknown" (the
+    question's own step was skipped — early_exit — or gave no value)."""
+    rec = next((r for r in recs if r.get("name") == f"answer:{q}"), None)
+    if rec is None or rec.get("missing") or rec.get("error") is not None or "value" not in rec:
+        return "unknown"
+    return "unchanged" if _cj(rec["value"]) == _cj(ans) else "changed"
+
+
 def _system1(asks, labels, question, price, drift_window, monitor):
     per_q, cost = {}, _cost([], 0.0, price)
     obs = {}
@@ -249,6 +261,7 @@ def _system1(asks, labels, question, price, drift_window, monitor):
             if question is not None and q != question:
                 continue
             p = per_q.setdefault(q, {"asked": 0, "alone": 0, "forced": 0, "abstained": 0, "answered_by": {},
+                                     "forced_split": {"changed": 0, "unchanged": 0, "unknown": 0},
                                      "abstained_by": {}, "promises": {}, "unguarded_alone": 0, "_labels": [],
                                      "recorded_drift": []})
             p["asked"] += 1
@@ -261,6 +274,8 @@ def _system1(asks, labels, question, price, drift_window, monitor):
                 p["forced" if status == "forced" else "alone"] += 1
                 w = _who(r, q, recs)
                 p["answered_by"][w] = p["answered_by"].get(w, 0) + 1
+                if status == "forced":
+                    p["forced_split"][_forced_kind(ans, q, recs)] += 1
             g = (r.get("extra") or {}).get("guarantee")
             fp = None
             if isinstance(g, dict) and g.get("promise"):
@@ -501,6 +516,11 @@ def render(d):
         L.append(f"  answered alone      {p['alone']} ({_pct(p['alone'], p['asked'])})")
         if p["forced"]:
             L.append(f"  forced by a check   {p['forced']} ({_pct(p['forced'], p['asked'])})")
+            fs = p.get("forced_split") or {}
+            L.append(f"    the check changed the answer {fs.get('changed', 0)}; would have been the same "
+                     f"{fs.get('unchanged', 0)}"
+                     + (f"; not known {fs['unknown']} (early_exit skipped the question's own answer: "
+                        "System(early_exit=False) records it)" if fs.get("unknown") else ""))
         if p["answered_by"]:
             L.append("  who answered        " + "; ".join(f"{w} {n}" for w, n in
                                                          sorted(p["answered_by"].items(), key=lambda t: -t[1])))

@@ -83,3 +83,24 @@ def test_coverage_ignore_and_a_varied_pool_do_not_warn():
         assert adm.status == "accepted" and adm.untested == []
     with pytest.raises(ValueError):
         ls.admit_by_probes(cands, world, probes=pool, coverage="maybe")
+
+
+def test_intervention_gives_the_predicted_effect_of_an_intervention_with_its_laws_and_uncovered_marks():
+    from solvi.experimental.laws import Candidate, Delta
+    ls, _, _ = craft(table_always=False)
+    law = ls.add(Candidate("make", ("near_table", "wood1"), 1))
+    none = ls.add(Candidate("make", ("near_table",), 0))                # near the table without wood: a law says 0
+    before, after = {"t": True, "w": 0, "st": 0}, {"t": True, "w": 2, "st": 0}    # the intervention: wood added
+    d = ls.intervention(before, after, ["make", "rest"])
+    assert [x.action for x in d] == ["make", "rest"] and all(isinstance(x, Delta) for x in d)
+    m, r = d
+    assert (m.before, m.after, m.change, m.changed) == (0, 1, 1, True)
+    assert (m.law_before, m.law_after, m.covered) == (none, law, True)
+    assert (r.before, r.after, r.change, r.changed, r.covered) == (0, 0, 0, False, False)  # the base: not covered
+    far = ls.intervention({"t": False, "w": 0, "st": 0}, after, ["make"])[0]
+    assert far.law_before is None and far.covered is False and far.change == 1
+    u = ls.intervention(before, after, "make", disagree="abstain")[0]       # one action may be given alone
+    assert u.covered is True
+    ls.add(Candidate("make", ("wood1", "stone1"), 2))                   # disagrees with `law` where both apply
+    u = ls.intervention(before, {"t": True, "w": 2, "st": 1}, ["make"], disagree="abstain")[0]
+    assert isinstance(u.after, Undetermined) and u.change is None and u.changed is None and u.covered is False
