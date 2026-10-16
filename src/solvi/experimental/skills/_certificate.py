@@ -26,12 +26,20 @@ class Certificate:
     D ≥ `alarm` (default 1/delta) the process restarts — uncertified, wealth 1 — and must reach the need again. At 5%
     one failure alone is an alarm; at 30% it takes three in a row.
 
+    alternatives: an opt-in alarm that bets on breaks of a stated size instead — a tuple of failure-rate multiples r of
+    the promise (e.g. (1.5, 2, 3)). The detector is then the mean over r of the Bernoulli likelihood-ratio CUSUMs
+    against the rate r·promise (a failure multiplies one by r, an ok by (1 − r·promise)/(1 − promise); each restarts
+    from 1 when it falls below 1). At a failure rate equal to the promise each product is a test martingale, so the
+    mean is an e-detector: P(an alarm within L outcomes) ≤ L/alarm. A burst of failures far rarer than r·promise is
+    not what it bets on, so a unit well inside its promise rarely alarms. Its default level is 5/delta (50 at the
+    default delta), chosen on simulated streams at promises 0.05–0.3 with alternatives (1.5, 2).
+
     scope: whose outcomes one process pools — "skill" (each skill its own, the default), "goal" (the skills of one
     goal) or "set" (every skill): a pooled process certifies the pool's failure rate, not each skill's; each skill keeps
     its own process too, whose alarm retires that skill alone."""
 
     def __init__(self, promise: float = 0.05, delta: float = 0.1, *, bet: float = 0.9, scope: str = "skill",
-                 alarm: float | None = None):
+                 alarm: float | None = None, alternatives: tuple | None = None):
         if not 0.0 < float(promise) < 1.0:
             raise ValueError("promise is a failure rate strictly between 0 and 1")
         if not 0.0 < float(delta) < 1.0:
@@ -41,9 +49,19 @@ class Certificate:
         if scope not in SCOPES:
             raise ValueError(f"scope is one of {SCOPES}, not {scope!r}")
         self.promise, self.delta, self.bet, self.scope = float(promise), float(delta), float(bet), scope
-        self.alarm = float(alarm) if alarm is not None else 1.0 / self.delta
+        if alarm is None:
+            alarm = (5.0 if alternatives is not None else 1.0) / self.delta
+        self.alarm = float(alarm)
         if self.alarm <= 1.0:
             raise ValueError("alarm is a level above 1")
+        self.alternatives = None
+        if alternatives is not None:
+            rs = tuple(float(r) for r in alternatives)
+            if not rs or any(not r > 1.0 for r in rs):
+                raise ValueError("alternatives are failure-rate multiples of the promise, each above 1")
+            if any(r * self.promise >= 1.0 for r in rs):
+                raise ValueError("alternatives: r · promise must stay below 1 (a failure rate)")
+            self.alternatives = rs
         self.gain = math.log1p(self.bet * self.promise / (1.0 - self.promise))
         self.loss = math.log1p(-self.bet)
 
@@ -57,8 +75,11 @@ class Certificate:
         return EProcess(self)
 
     def to_dict(self) -> dict:
-        return {"promise": self.promise, "delta": self.delta, "bet": self.bet, "scope": self.scope,
-                "alarm": self.alarm, "need": self.need}
+        d = {"promise": self.promise, "delta": self.delta, "bet": self.bet, "scope": self.scope,
+             "alarm": self.alarm, "need": self.need}
+        if self.alternatives is not None:
+            d["alternatives"] = list(self.alternatives)
+        return d
 
     def __repr__(self):
         return f"Certificate(promise={self.promise}, delta={self.delta}, scope={self.scope!r}, need={self.need})"
@@ -73,6 +94,7 @@ class EProcess:
         self.log_wealth = 0.0
         self.certified = False
         self.detector = 1.0
+        self._lr = None if cert.alternatives is None else [0.0] * len(cert.alternatives)   # log CUSUM per alternative
         self.n = 0
         self.failures = 0
         self.alarms = 0
@@ -100,8 +122,15 @@ class EProcess:
             self.certified = newly = True
         alarm = False
         if alone:
-            mu = 0.5 / c.promise
-            self.detector = max(self.detector, 1.0) * (1.0 + mu * ((0.0 if ok else 1.0) - c.promise))
+            if self._lr is None:
+                mu = 0.5 / c.promise
+                self.detector = max(self.detector, 1.0) * (1.0 + mu * ((0.0 if ok else 1.0) - c.promise))
+            else:
+                p = c.promise
+                for j, r in enumerate(c.alternatives):
+                    step = math.log((1.0 - r * p) / (1.0 - p)) if ok else math.log(r)
+                    self._lr[j] = max(self._lr[j], 0.0) + step
+                self.detector = sum(math.exp(min(x, 700.0)) for x in self._lr) / len(self._lr)
             if self.detector >= c.alarm:
                 alarm = True
                 self.restart()
@@ -111,6 +140,8 @@ class EProcess:
     def restart(self):
         """Back to a fresh process: uncertified, wealth 1, the detector reset."""
         self.log_wealth, self.certified, self.detector, self.since = 0.0, False, 1.0, 0
+        if self._lr is not None:
+            self._lr = [0.0] * len(self._lr)
 
     def remaining(self) -> int:
         """Clean outcomes still needed to certify (0 when certified)."""
