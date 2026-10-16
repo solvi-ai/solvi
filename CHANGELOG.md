@@ -152,6 +152,15 @@ started from a failing test built on the reproduction; the numbers are before â†
 
 ### Added
 
+- **`LongSpanExtractor` predicts without torch** (`solvi[onnx]`: onnxruntime + tokenizers).
+  `LongSpanExtractor.load(path_or_id, backend="onnx")` reads the checkpoint's `onnx/model_fp16.onnx` (or `model.onnx`,
+  `onnx_file=`) and `tokenizer.json`, and downloads only the JSON files and `onnx/` of a Hugging Face id; windows, "no
+  answer" and span decoding are the torch path's code. `backend="auto"`, the new default of `load`, keeps torch whenever
+  torch and transformers are installed and takes ONNX otherwise (it raised before). `fit`, `save` and `embed` stay on
+  torch and say so. On 50 SQuAD v2 questions the published extract-base's fp16 export gave the same span as torch on all
+  50 (largest span-score difference 0.0035). `tools/export_onnx.py` now writes a folder this backend loads (`onnx/` and
+  the tokenizer files) and compares through it, with the largest logit difference.
+
 -  **Laws (experimental): `Buffer(window=N)`, `LawSet(recent=M, readmit="grown")`, `LawSet(memo=True)`,
   `LawSet.proposals`** (opt-in; defaults unchanged). A windowed buffer keeps its last N rows and scores exactly as a
   fresh buffer of them; the sized rule's N never decreases when rows leave, and a candidate counts again once the window
@@ -427,8 +436,8 @@ started from a failing test built on the reproduction; the numbers are before â†
 
 ### Docs
 
-- The `solvi[onnx]` extra covers the decider only; `LongSpanExtractor` needs torch (`solvi[model]`) for prediction
-  too, and its ImportError says so.
+- `LongSpanExtractor` without torch: its ImportError names `solvi[model]` for training and
+  `load(..., backend="onnx")` (`solvi[onnx]`) for prediction.
 
 ## 1.1.1 â€” 2026-10-11 â€” fixes from use, and four learning items with their measurements
 

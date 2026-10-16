@@ -1,0 +1,11 @@
+{
+ "kind": "long",
+ "max_len": 32,
+ "stride": 8,
+ "max_span": 16,
+ "thr_default": 0.5,
+ "thr": {
+  "iban": 0.9
+ },
+ "base_model": "tiny"
+}

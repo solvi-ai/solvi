@@ -27,7 +27,7 @@ dependencies = ["numpy", "scipy", "pydantic>=2"]
 
 [project.optional-dependencies]
 model = ["torch", "transformers"]   # model-based extraction from text (solvi.extract_*) and the decider (solvi.core.deciders) — torch backends
-onnx = ["onnxruntime", "tokenizers", "huggingface_hub"]   # the decider without torch (backend="onnx"); not the extractors (LongSpanExtractor: [model])
+onnx = ["onnxruntime", "tokenizers", "huggingface_hub"]   # the decider and LongSpanExtractor's prediction without torch (backend="onnx"); training: [model]
 serve = ["fastapi>=0.100", "uvicorn"]   # solvi serve: the questions over HTTP, POST /v1/systemone
 mcp = ["mcp>=2"]   # solvi serve --mcp with the official MCP SDK (without it: a built-in stdio server)
 duckdb = ["duckdb>=1.0"]   # solvi.DuckDBStorage: decisions in a DuckDB file (analytics next to JSONL / Parquet)
