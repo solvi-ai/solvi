@@ -93,6 +93,10 @@ started from a failing test built on the reproduction; the numbers are before â†
   (e.g. `allow, deny, escalate`) need `combine="first"` or reordered options.
 - Guard keeps its own rule for several failed checks: its catalog sets `combine="first"` (a failed deny policy declared
   first wins over an escalation, as before); its catalog fingerprint is 1.1's.
+- A failed `System.guarantee` call keeps the guarantee in force before it: the call still raises its error, a
+  `GuaranteeWarning` says the old guarantee stays, and `guard_history` logs the attempt with `"kept"`. Before, the
+  failed call had already removed the old guarantee (the question answered unguarded), and a call that failed after
+  the signal's facts were added left them as required parts of the question.
 
 ### Added
 
@@ -275,7 +279,7 @@ started from a failing test built on the reproduction; the numbers are before â†
   simulation, for any answer kind; fewer than 30 are refused, fewer than 100 or labelled examples among them are
   warned about.
 - `System.guard_history`: every `System.guarantee` attempt logged â€” installed (and whether it replaced one), failed
-  (with the error; a failed attempt removes the guarantee in force), removed.
+  (with the error, and whether the guarantee in force was kept), removed.
 - `solvi.core.AnyOf(a, b)`: a label with several right answers; `solvi.build`, `System.guarantee`, `act_guard`,
   `calibrate_for` and conformal sets count any of them as right (opt-in).
 - `solvi.core.because(value, text, **numbers)` and `solvi.core.missing(reason)` (opt-in): a rule's `why` names the

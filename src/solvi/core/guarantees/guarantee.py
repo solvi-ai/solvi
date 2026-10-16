@@ -508,21 +508,37 @@ def guard_question(system, question, examples=None, *, max_error=None, max_risk=
     for an attached promise, its report).
 
     Every call is logged in `system.guard_history`, in order: {"question", "time" (seconds since the epoch), "outcome"
-    ("installed", "failed" or "removed"), "replaced" (a guarantee was in force before the call — a failed attempt
-    removes it too, so none is then in force), "method", "n", "threshold", "answered", "promise" (installed), "error"
-    (failed: the exception's type and message)}."""
+    ("installed", "failed" or "removed"), "replaced" (a guarantee was in force before the call), "method", "n",
+    "threshold", "answered", "promise" (installed), "error" (failed: the exception's type and message), "kept" (failed: a
+    guarantee was in force and stays in force)}. A failed call raises its error and leaves the question as it was:
+    the guarantee in force before it (if any) stays in force, with a GuaranteeWarning saying so (since 1.2; before, a
+    failed call removed it)."""
     import time
     log = getattr(system, "guard_history", None)
     if log is None:
         log = system.guard_history = []
-    entry = {"question": question, "time": time.time(), "replaced": question in getattr(system, "guards", {})}
+    guards = getattr(system, "guards", {})
+    entry = {"question": question, "time": time.time(), "replaced": question in guards}
+    # what a failed attempt puts back: the guarantee in force, its added checkpoints and the question as it was
+    before = (guards.get(question), list(getattr(guards.get(question), "added", None) or []),
+              getattr(system, "questions", {}).get(question))
     try:
         rep = _guard_question(system, question, examples, max_error=max_error, max_risk=max_risk, method=method,
                               delta=delta, signal=signal, answer=answer, groups=groups, min_group=min_group,
                               min_support=min_support, correct=correct, folds=folds, seed=seed, weak=weak,
                               promise=promise, corrections=corrections, sources=sources)
     except Exception as e:
-        log.append({**entry, "outcome": "failed", "error": f"{type(e).__name__}: {e}"})
+        old, added, q = before
+        if q is not None:
+            system.questions[question] = q
+        kept = old is not None
+        if kept:
+            old.added = added
+            system.guards[question] = old
+        log.append({**entry, "outcome": "failed", "kept": kept, "error": f"{type(e).__name__}: {e}"})
+        if kept:
+            warnings.warn(f"System.guarantee({question!r}) failed ({type(e).__name__}: {e}): the guarantee in force "
+                          f"before the call stays in force", GuaranteeWarning, stacklevel=3)
         raise
     if examples is False:
         log.append({**entry, "outcome": "removed"})

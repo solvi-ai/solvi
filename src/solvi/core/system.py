@@ -1272,7 +1272,8 @@ class System:
         error among the answers given alone ≤ it with probability ≥ 1 − delta, learn-then-test) or method="empirical";
         on the answer's confidence, a computed fact or any signal (signal=), one-sided (answer=), per group (groups=).
         Below the threshold the question abstains with the reason; the promise is recorded with every answer.
-        examples=False removes it. Every attempt is logged in `self.guard_history` (installed, failed, removed). → the
+        examples=False removes it. A failed call raises and keeps the guarantee in force before it (with a warning).
+        Every attempt is logged in `self.guard_history` (installed, failed, removed). → the
         calibration report. See solvi.core.guarantees.guarantee.guard_question."""
         from .guarantees.guarantee import guard_question
         return guard_question(self, question, examples, **kw)
