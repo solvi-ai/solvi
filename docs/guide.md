@@ -2521,6 +2521,16 @@ the old approval does not cover it: ask again or reject it with the new reasons.
 (`d.policy_only`); an escalation by provenance or instruction-like text, an unreadable schema, the authorizer or a
 check that could not be evaluated always needs a person for that very call.
 
+**Who approved, and who wrote.** The guard takes message roles as your app gives them. Two opt-in verifiers bind them to
+a person. `Guard(user_verifier=approval_verifier(keys))` makes `resolve(d, approve=True, approval=token)` need a token
+from `sign_approval(d, reviewer, key)` for that very call; the store records the verified reviewer.
+`Guard(message_verifier=signed_messages(keys))` does the same for the user's words: a «user» message counts as the
+user's only when its `"signature"` field (from `sign_message(text, sender, key)`, made where the person types, not in
+the agent's process) verifies over its text; an unsigned or refused one is read as a tool output, so it grounds no
+`ground_from=("user",)` argument and gets the injection checks. `session.add("user", text, signature=...)` and the MCP
+proxy's context channel carry the signature. A signature proves who wrote the words, not that they are new: without
+`max_age=` a signed message stays valid in any conversation. Without these verifiers (the default) nothing changes.
+
 **Tool outputs fed back.** `session = guard.session(context, facts)`; `session.call(proposal)` checks and makes calls in a
 conversation and appends each made call's result to it as a tool output — so a later call's grounding and injection checks
 see what the tools returned (an IBAN found by a lookup can be paid; one found only in a web page that says "ignore previous
@@ -3563,7 +3573,11 @@ decision (the same trace and hashes) with `res.cached == {"of": <the first decis
 Stored, a served decision is a compact record with `meta={"cache_of": <that id>}`: `verify()` checks it and
 `replay_all` re-runs it from its input and compares every step's hash, like any compact record — an impure part or a
 changed catalog shows up there. A catalog with a model-backed part refuses `cache=`; an ask with another order, a
-learning system, answer heads, a stateful guarantee or a strategist of your own runs without it.
+learning system, answer heads, a stateful guarantee or a strategist of your own runs without it. `aask` uses the same
+cache as `ask` (one decision serves both); a decision in which a part timed out is not kept. `ask_text` and
+`aask_text` use it too: the text is still read each time (the entry point and its fields, which may call a model), and
+the flow is served when the read is the same — the same text, entry point, fields with their quotes and parsers, and
+the same dialogue changes.
 
 | ms per ask, cache hit ÷ no cache ([benchmarks/ask_speed.py](../benchmarks/ask_speed.py) cases) | not stored | SQLite store |
 |---|---|---|
