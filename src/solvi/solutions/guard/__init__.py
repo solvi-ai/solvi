@@ -2060,8 +2060,11 @@ class Guard:
     # --- checking and calling
     def _signed(self, m):
         """Does message_verifier accept this user message? (a refusal by raising counts as no)"""
+        verify = self.message_verifier
+        if verify is None:  # only called with a verifier set
+            return False
         try:
-            return bool(self.message_verifier(m))
+            return bool(verify(m))
         except Exception:  # noqa: BLE001 — a verifier's refusal: the message is not the user's
             return False
 
