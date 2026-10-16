@@ -2530,6 +2530,15 @@ only the ones inside the instruction: no value is taken on trust from a context 
 instruction-like passages whole, and a tool output that carried such text before the cut is flagged (`Message.tainted`),
 so its taint survives even when the cut kept none of it.
 
+**Tools allowed for a task.** `guard.session(context, facts, allowed_tools=[...])` (or `check` / `call(...,
+allowed_tools=)`) denies a catalog tool outside the list before the tool's own checks, as a replayable decision of its
+own; `None`, the default, keeps today's behaviour. How much it helps depends on how good the list is. Measured once on
+AgentDojo with one agent model (534 attacks, 89 benign tasks): a list taken from each task's reference solution plus
+the read tools cut attack success from 0.33 to 0.07 with no loss of benign utility; a list written by a simple keyword
+rule over the task text cut it to 0.11 but lost 3.4 points of benign utility (95 % CI −9 to +1), because it refused
+calls the task needed; on top of hand-declared tool effects, the same rule cut attack success from 0.022 to 0.007 at
+−1.1 points. Give it the tools you know the task needs; a guessed list costs completed tasks.
+
 **The store.** With `storage=`, every decision is saved with its trace and `meta["guard"]`: tool, outcome, reasons,
 whether solvi ran the tool, and its error or the hash of its result (the result itself is not stored). `guard.replay(id)`
 re-computes a stored decision with the tool's current checks (`"catalog": "changed"` when they changed since),
