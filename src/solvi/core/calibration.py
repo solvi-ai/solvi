@@ -202,24 +202,61 @@ def ltt_grid(score, size=LTT_GRID):
     return u
 
 
-def ltt_threshold(score, wrong, error=0.10, delta=0.10, grid=None):
+LTT_PROCEDURES = ("bonferroni", "fixed")
+
+
+def ltt_certified(k, m, error, delta, procedure="bonferroni", min_support=1):
+    """Which thresholds of a learn-then-test grid are certified: k[i] answered alone and m[i] of them wrong at the i-th
+    threshold (thresholds ascending, so k does not increase along the grid) → booleans, one per threshold. Each threshold
+    is the null "the error among the answered > error", rejected by a binomial test. procedure="bonferroni": every
+    threshold tested at delta / len(grid); "fixed": fixed-sequence testing — from the highest threshold down, each at
+    the full delta, stopping at the first that fails (the order is fixed before the labels are read, so the chance of
+    certifying any threshold whose error is above `error` stays ≤ delta). The descent starts at the highest threshold
+    with at least max(min_support, k0) answered, k0 the fewest cases that can pass with no wrong one
+    ((1 − error)^k0 ≤ delta): a choice from the counts alone, not the labels, so the order is still fixed before the
+    test. Thresholds with fewer answered than min_support are never certified."""
+    if procedure not in LTT_PROCEDURES:
+        raise ValueError(f"procedure must be one of {LTT_PROCEDURES}, not {procedure!r}")
+    k, m = np.asarray(k, int), np.asarray(m, float)
+    good = np.zeros(len(k), bool)
+    if not len(k):
+        return good
+    if procedure == "bonferroni":
+        for i in range(len(k)):
+            good[i] = k[i] >= max(1, min_support) and _binom_cdf(float(m[i]), int(k[i]), error) <= delta / len(k)
+        return good
+    k0 = max(1, int(min_support), int(math.ceil(math.log(delta) / math.log1p(-error) - 1e-9)))
+    started = False
+    for i in range(len(k) - 1, -1, -1):
+        if not started:
+            if k[i] < k0:
+                continue
+            started = True
+        if _binom_cdf(float(m[i]), int(k[i]), error) <= delta:
+            good[i] = True
+        else:
+            break
+    return good
+
+
+def ltt_threshold(score, wrong, error=0.10, delta=0.10, grid=None, procedure="bonferroni"):
     """Learn-then-test: the lowest threshold t on a fixed grid such that the error AMONG the cases answered alone
     (score ≥ t) is ≤ error with probability ≥ 1 − delta over the calibration examples (binomial test, Bonferroni over the
-    grid). A stronger promise than crc_threshold, so it often allows no automatic answers at all (inf). grid=None: at
-    most 64 quantiles of the distinct calibration scores (ltt_grid; before 0.7 a fixed linspace(0.2, 0.995, 32), which
-    let nothing through for a decider whose scores sit above 0.995)."""
+    grid; procedure="fixed": fixed-sequence testing from the highest threshold down, each at the full delta — see
+    ltt_certified). A stronger promise than crc_threshold, so it often allows no automatic answers at all (inf).
+    grid=None: at most 64 quantiles of the distinct calibration scores (ltt_grid; before 0.7 a fixed linspace(0.2,
+    0.995, 32), which let nothing through for a decider whose scores sit above 0.995)."""
     check_rate("error", error)
     check_rate("delta", delta)
     s, w = _arrays(score, wrong)
     grid = ltt_grid(s) if grid is None else np.asarray(grid, float)
     if not len(grid):
         return float("inf")
-    for t in sorted(grid):
-        auto = s >= t
-        k = int(auto.sum())
-        if k and _binom_cdf(float(w[auto].sum()), k, error) <= delta / len(grid):
-            return float(t)
-    return float("inf")
+    grid = np.sort(grid)
+    k = np.array([int((s >= t).sum()) for t in grid])
+    m = np.array([float(w[s >= t].sum()) for t in grid])
+    hit = np.flatnonzero(ltt_certified(k, m, error, delta, procedure))
+    return float(grid[hit[0]]) if len(hit) else float("inf")
 
 
 def conformal_quantile(scores, alpha):
@@ -430,5 +467,5 @@ def group_name(path):
 
 
 __all__ = ["GroupBy", "accuracy_at", "certify_groups", "check_rate", "conformal_quantile", "coverage_at", "crc_threshold", "ece",
-           "evaluate", "group_name", "group_nodes", "group_path", "group_thresholds", "loss_budget", "ltt_grid", "ltt_threshold",
+           "evaluate", "group_name", "group_nodes", "group_path", "group_thresholds", "loss_budget", "ltt_certified", "ltt_grid", "ltt_threshold",
            "node_of", "reliability", "separation", "set_scores", "summary", "threshold_for"]
