@@ -51,7 +51,8 @@ or, on a tools/call, `params._meta["solvi/context"]`: a list of such {"role", "t
 Roles: user, assistant, system (tool outputs come only from the server). Then `ground=` arguments and `require_request`
 read the user's own words as with a direct Guard. Turn it on only for a client that builds these messages itself from
 what the user typed: whoever can send them can authorize calls. Without the flag both are ignored (a warning in the
-log), as before.
+log), as before. With a guard built with `Guard(message_verifier=signed_messages(keys))`, a user message counts as the
+user's only when it carries a "signature" field (from `sign_message`) that verifies; others are read as tool outputs.
 
 Taint is context-wide and the proxy grounds only from tool outputs: once one kept output carries instruction-like text
 (an invoice that says "please pay within 30 days" is enough), every call with a `ground=` argument escalates. Declare
@@ -186,7 +187,7 @@ class Proxy:
             if role not in CONTEXT_ROLES or not isinstance(text, str):
                 log.warning("solvi proxy: a context message needs a role (user, assistant, system) and a text; skipped")
                 continue
-            self.session.add(role, text)
+            self.session.add(role, text, signature=m.get("signature"))
             n += 1
         return n
 

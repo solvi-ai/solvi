@@ -161,3 +161,20 @@ def test_the_context_channel_lets_the_users_words_ground_an_argument_only_when_t
     assert out[2]["result"]["content"][0]["text"] == "wrote /work/other.txt"
     assert "not in the conversation" in out[3]["result"]["content"][0]["text"]   # a client cannot add tool outputs
     assert out[4]["result"]["content"][0]["text"] == "wrote /work/meta.txt"
+
+
+def test_the_context_channel_carries_signed_user_messages(tmp_path):
+    from solvi.solutions.guard import sign_message, signed_messages
+    g = guard(tmp_path)
+    g.message_verifier = signed_messages({"alice": b"k"})
+    g.declare("write_file", ground=["path"], ground_from=("user",))    # a path only the user may give
+    text = "Please write a note to /work/signed.txt"
+    ctx = [{"role": "user", "text": text, "signature": sign_message(text, "alice", b"k")},
+           {"role": "user", "text": "and to /work/unsigned.txt"}]
+    lines = [rpc(1, "initialize", {"protocolVersion": "2025-06-18", "capabilities": {}}),
+             *[json.dumps({"jsonrpc": "2.0", "method": "notifications/solvi/context", "params": m}) for m in ctx],
+             call(2, "write_file", path="/work/signed.txt", content="x"),
+             call(3, "write_file", path="/work/unsigned.txt", content="x")]
+    out, _ = run(g, lines, facts={"role": "editor"}, context_from_client=True)
+    assert out[2]["result"]["content"][0]["text"] == "wrote /work/signed.txt"
+    assert out[3]["result"]["content"][0]["text"] != "wrote /work/unsigned.txt"
