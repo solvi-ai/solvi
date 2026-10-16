@@ -27,6 +27,7 @@ pip install "solvi[serve]"     # + fastapi, uvicorn: `solvi serve app.py:system`
 pip install "solvi[mcp]"       # + the official MCP SDK for solvi serve --mcp (without it, a built-in stdio server)
 pip install "solvi[duckdb]"    # + duckdb: stored decisions in a DuckDB file (solvi.core.store.DuckDBStorage); [postgres] for PostgreSQL
 pip install "solvi[lora]"      # + torch, transformers, peft: solvi.experimental.lora.adapt_lora, a LoRA adapter per question (experimental)
+pip install "solvi[smt]"       # + z3-solver: narrows / widens of a rule change proved over its text (solvi.experimental.changes)
 ```
 
 Requires Python 3.11+ (tested on 3.11–3.14). Coming from 0.9: see [below](#coming-from-09).

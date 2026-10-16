@@ -50,8 +50,8 @@ STATUS: dict[str, dict] = {
                 "clause), admitted 12 of 12 exact exceptions, held every widening one for a person and refused 8 of 8 "
                 "exceptions that touched other decisions, 0 extraneous changes, 14 versions replayed; on a bank-request "
                 "stream with a person's labels every one of 22 candidates passed every stage — the run with the gates equals the run without them — so the stages added nothing there — the module is journal, impact analysis, approval levels and "
-                "rollback; still missing: the narrows / widens classifier over rule conditions, a regression-scenario "
-                "stage, and a script for the bank-request stream (the credit numbers: benchmarks/changes_credit.py)",
+                "rollback; still missing: narrows / widens proved over rule code outside a Python subset (calls, "
+                "subscripts, loops: measured on probes instead), a regression-scenario stage, and a script for the bank-request stream (the credit numbers: benchmarks/changes_credit.py)",
                 "script": "benchmarks/changes_credit.py"},
     "laws": {"since": "1.1", "what": "laws of an environment from prediction mismatches: a grammar of atoms you "
              "write, candidates from each mismatch, acceptance only by a held-out test on other groups (worlds, "

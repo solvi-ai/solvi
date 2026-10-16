@@ -34,6 +34,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Protocol, runtime_checkable
 
+# ───────────────────────────────────────────────────────────── what counts as a refusal (stage 10 reads it)
+from ._refusal import REFUSAL_WORDS, is_refusal
+
 DECISIONS = ("admit", "refuse", "hold")
 SOURCES = ("document", "outcome", "person", "search")          # the four sources of change
 LEVELS = ("gate", "gate+person", "person")
@@ -315,12 +318,36 @@ class Consistency:
     decides. "widens" when the candidate answers a probe the version in force refused, else "narrows" when it refuses
     one that was answered, else "same"; recorded with the counts ("widened", "narrowed", "probes"). A classify given
     too is a claim: recorded as "claimed", and the direction is "widens" when either says so. When the answerers
-    cannot be had the direction is "widens" ("unmeasured": a person looks)."""
+    cannot be had the direction is "widens" ("unmeasured": a person looks).
+
+    prove (opt-in, needs the smt extra: pip install "solvi[smt]"): the direction is proved over the rule's text
+    (prove_direction: z3 over a subset of Python — comparisons, and / or / not, arithmetic on numbers, membership in
+    literal sets). The candidate's rule is `change.code` (else the source of `change.check`), the rule in force is
+    `before=` (its text or function); prove may instead be `prove(change, ctx)` → (rule in force, candidate rule). A
+    proof is recorded as "proof" (proved, witness inputs, sorts, ms); a decided proof sets the direction ("both" →
+    "widens") and the probes are not asked; "unknown" (a construct outside the subset, no rule in force, the solver
+    gave up) falls back to the probes when given, else to classify. types=, outcome=: as in prove_direction."""
     name = "consistency"
 
-    def __init__(self, *, classify: Callable | None = None, probes=None, refused: Callable | None = None):
+    def __init__(self, *, classify: Callable | None = None, probes=None, refused: Callable | None = None,
+                 prove=False, before=None, types: dict | None = None, outcome=None):
         self.classify, self.probes = classify, probes
         self.refused = refused or is_refusal
+        self.prove, self.before, self.types, self.outcome = prove, before, types, outcome
+        if prove:
+            from ._prove import require_z3
+            require_z3()                              # an ImportError that says how to install it, at construction
+
+    def _proof(self, change, ctx):
+        from ._prove import prove_direction
+        if callable(self.prove):
+            before, after = self.prove(change, ctx)
+        else:
+            before, after = self.before, change.code if change.code is not None else change.check
+        if before is None or after is None:
+            return {"proved": "unknown", "reason": "no rule text " + ("in force" if before is None else "of the candidate")}
+        kw = {} if self.outcome is None else {"outcome": self.outcome}
+        return prove_direction(before, after, types=self.types, refused=self.refused, **kw)
 
     def _measure(self, change, ctx):
         xs = list(self.probes(change, ctx) if callable(self.probes) else self.probes)
@@ -344,12 +371,19 @@ class Consistency:
                 m.update(d)
             else:
                 m["direction"] = d
-        if self.probes is not None:                   # the library's measurement; the caller's direction is a claim
+        proof = self._proof(change, ctx) if self.prove else None
+        if proof is not None and proof["proved"] != "unknown":   # proved over the text; the caller's direction is a claim
+            claimed = m.pop("direction", None)
+            d = "widens" if proof["proved"] in ("widens", "both") or claimed == "widens" else proof["proved"]
+            m.update(direction=d, claimed=claimed, proof=proof)
+        elif self.probes is not None:                 # the library's measurement; the caller's direction is a claim
             claimed = m.pop("direction", None)
             got = self._measure(change, ctx)
             if claimed == "widens":
                 got["direction"] = "widens"
             m.update(got, claimed=claimed)
+        if proof is not None and proof["proved"] == "unknown":
+            m["proof"] = proof
         if change.artifact != "item" or ctx.store is None:
             return StageVerdict.admit("not a knowledge item", m or None)
         from ...core.knowledge.gates import ConsistencyGate
@@ -794,36 +828,6 @@ class Canaries:
 
 
 # ───────────────────────────────────────────────────────────── 10. refusal regression (new; not switchable)
-REFUSAL_WORDS = frozenset({"abstain", "abstained", "abstains", "escalate", "escalated", "hand over", "handover",
-                           "hand_over", "handed over", "defer", "deferred", "unknown", "i don't know", "don't know"})
-
-
-def is_refusal(answer, question=None):
-    """Did an answer refuse or hand over? None; a solvi Response (the question's result, or any question when
-    `question` is None, has status "abstain"); a result or a dict whose status is "abstain" / "escalate"; a
-    Decision whose `escalate` is set; a string such as "abstain", "escalate", "hand over", "unknown" (REFUSAL_WORDS,
-    any case). A domain answer like "refuse" (a loan refused) or "no" is an answer, not a refusal: pass your own
-    `refused=` to RefusalRegression when your system hands over with another word (e.g. "review")."""
-    if answer is None:
-        return True
-    results = getattr(answer, "results", None)
-    if isinstance(results, dict):                                     # a Response
-        rs = [results[question]] if question is not None and question in results else list(results.values())
-        return any(is_refusal(r) for r in rs)
-    if isinstance(answer, dict):
-        st = answer.get("status")
-        return isinstance(st, str) and st.lower() in ("abstain", "escalate", "escalated", "handover")
-    st = getattr(answer, "status", None)
-    if isinstance(st, str) and st.lower() in ("abstain", "escalate", "escalated", "handover"):
-        return True
-    esc = getattr(answer, "escalate", None)
-    if isinstance(esc, str) and esc:
-        return True
-    if isinstance(answer, str):
-        return answer.strip().lower() in REFUSAL_WORDS
-    return False
-
-
 def _example_id(x, i):
     if isinstance(x, dict) and "id" in x:
         return str(x["id"])
