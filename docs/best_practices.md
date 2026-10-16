@@ -72,6 +72,10 @@ flight, a meeting out of reach) usable on partial candidates and list them in `p
 where the orders of the parts are too many to try — the largest 10-city trip took 11,414 asks, where 10 cities can be
 visited in 10! ≈ 3.6 million orders.
 
+**Counterfactuals over a few enumerated fields: try them all.** `solvi.core.explain.search(..., domains=...,
+exhaustive=200)` re-runs every combination and returns every counterfactual (`complete`); on a three-input rule it was
+1.5–1.6× faster than the probing search in one run. Numeric inputs keep the probing search.
+
 ## Guarantees and calibration
 
 **Calibrate on your own stream.** A threshold shipped with a checkpoint holds on the checkpoint's data. The
@@ -759,6 +763,11 @@ cannot stop a request that solvi is about to send.
 **After a change of the catalog, replay before you trust old traces.** A renamed part, a new input or a retrained
 model each make old decisions non-reproducible; `solvi diff` shows which stored decisions would change and why.
 
+**Index a large store before repeated audits, and diff only what moved.** For repeated `quarantine` / `where_is` on a
+large store, build `store.provenance_index()` once: it reads only the records that read or hold the fact. For a catalog
+change that touches a few parts, `diff(..., incremental=True)` re-runs only the decisions those parts sit under; use the
+full diff when parts are non-deterministic, call external sources, or only `Catalog(combine=)` changed.
+
 ## Checks, drift and knowledge over time (from a second external review)
 
 **A check from the same model call is not a check.** In the review's measurement a check made by the same call
@@ -894,6 +903,10 @@ aggregate gate passes harm in a small slice and salami (eight steps of +0.012 on
 version in force); add `SliceGuard` with the original pinned (`pin_file=` when proposals run in separate processes, with its hash
 `pinned=` next to the evaluator's pins), and give `KnownFailures(key=...)` what the change *does*,
 not a seed or salt it carries, so a replay under new identities is refused after its first rejection.
+
+**Run the expensive stages last.** Put `IsolatedTests`, `FreshEnvironments`, `SliceGuard` and `Canaries` after the
+cheap stages, or use `Pipeline(order="cheap_first")`, so expensive evidence is not paid for a change a cheap stage
+refuses.
 
 **Watch a shipped change per slice, against its promise.** `pipe.watch(version, promise)` reverts only that version
 when one slice's evidence is enough; in a synthetic stand it reverted 60 of 60 harmful rollouts and 0 of 60 clean ones,
