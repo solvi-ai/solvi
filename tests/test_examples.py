@@ -36,21 +36,25 @@ def test_shop_order_fit_and_ask():
 
 
 def test_build_head_update_through_changes():
+    """The example's outcomes on every build seed 0–4 (not one picked seed)."""
     import warnings
     ex = load("26_build_head_update")
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         from solvi.experimental.changes import Canaries, Change, KnownFailures, Pipeline, SliceGuard
-    head = ex.BuildHead("v0")
-    must = [c["state"] for c in ex.POOL if head.live.ask(c["state"]).answer is None][:20]
-    stages = [KnownFailures(), SliceGuard(ex.slices, min_n=30),
-              Canaries.drawn(ex.honesty, ex.POOL, 100, baseline={"confident_error_rate": 0.02}, tolerance=0.0,
-                             perfect=None)]
-    pipe = Pipeline(stages, None, targets=[head], approval={"update": "gate"}, refusals=must, order="cheap_first")
-    assert pipe.propose(ex.update("more", "more")).promoted and head.name == "more"
-    bad = pipe.propose(ex.update("late_yes", "bad labels"))
-    assert bad.status == "rejected"
-    again = pipe.propose(ex.update("late_yes", "again"))
-    assert again.status == "rejected" and again.stage == "failure_memory"
-    assert pipe.rollback(0, why="test") == [1] and head.name == "v0"
+    for seed in range(5):
+        ex.SEED = seed
+        head = ex.BuildHead("v0")
+        assert all(head.live.ask(s).answer is None for s in ex.MUST_HAND_OVER)
+        stages = [KnownFailures(), SliceGuard(ex.slices, tol=0.02, min_n=30),
+                  Canaries.drawn(ex.honesty, ex.POOL, 100, baseline={"confident_error_rate": 0.02}, tolerance=0.0,
+                                 perfect=None)]
+        pipe = Pipeline(stages, None, targets=[head], approval={"update": "gate"}, refusals=ex.MUST_HAND_OVER,
+                        order="cheap_first")
+        assert pipe.propose(ex.update("more", "more")).promoted and head.name == "more", seed
+        bad = pipe.propose(ex.update("late_yes", "bad labels"))
+        assert bad.status == "rejected" and bad.stage == "slices", (seed, bad.stage)
+        again = pipe.propose(ex.update("late_yes", "again"))
+        assert again.status == "rejected" and again.stage == "failure_memory"
+        assert pipe.rollback(0, why="test") == [1] and head.name == "v0"
     assert isinstance(Change, type)
