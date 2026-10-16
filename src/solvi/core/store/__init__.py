@@ -91,7 +91,7 @@ def _body(rec):
 
 
 KEPT = ("v", "kind", "seq", "time", "prev", "init_hash", "catalog", "records", "flow", "producers", "models", "guards",
-        "safeguards", "teach", "source", "of", "of_hash", "by", "note", "segment")
+        "safeguards", "teach", "source", "of", "of_hash", "by", "note", "segment", "run")
 """The fields of a record that are never erased (redact leaves them; a redaction record is made of them)."""
 
 
@@ -257,6 +257,82 @@ def entry(resp, meta=None, record="full"):
     return e
 
 
+# --- runs: one id across stores and processes, and the decision a record follows from
+_RUN = None                                       # a contextvars.ContextVar, made on first use
+
+
+def _run_var():
+    global _RUN
+    if _RUN is None:
+        import contextvars
+        _RUN = contextvars.ContextVar("solvi_run", default=None)
+    return _RUN
+
+
+@contextlib.contextmanager
+def run_context(run=None, parent=None):
+    """Within it, every record solvi writes to a store (decisions, corrections, knowledge, dispatch and change records —
+    JSONLStorage and the SQL stores, any of them) carries "run": {"id": run, "parent": parent} — hashed into the chain
+    like the rest — so the records of one run, written to several stores, can be put in one order (chronology).
+    run: the run's id (default: inherited from an enclosing run_context, else a new random one); give the same id to
+    the other processes of a run. parent: the id of the decision the records inside follow from (a nested
+    `with run_context(parent=decision_id):` keeps the run id). → an object with .id and .parent. Opt-in: outside a
+    run_context nothing is added, and readers take records without "run" as before. A store of your own sees the field
+    when its _append writes the body it is given."""
+    outer = _run_var().get()
+    if run is None:
+        import uuid
+        run = outer["id"] if outer else uuid.uuid4().hex[:16]
+    cur = {"id": str(run), "parent": None if parent is None else str(parent)}
+    token = _run_var().set(cur)
+    try:
+        yield _RunInfo(cur["id"], cur["parent"])
+    finally:
+        _run_var().reset(token)
+
+
+@dataclass(frozen=True)
+class _RunInfo:
+    id: str
+    parent: str | None
+
+
+def current_run():
+    """The run_context in force → {"id", "parent"} or None."""
+    cur = _run_var().get() if _RUN is not None else None
+    return None if cur is None else dict(cur)
+
+
+def _stamp(body):
+    """The body with the current run (see run_context), unless none is in force, it has one, or it is store bookkeeping."""
+    if _RUN is None or "run" in body or body.get("kind") in ("redaction", "segment"):
+        return body
+    cur = _RUN.get()
+    return body if cur is None else {**body, "run": dict(cur)}
+
+
+def chronology(*stores, run=None, kinds=None):
+    """The records of several stores in one order → [{"store", "id", "seq", "time", "kind", "run", "parent"}] by time
+    (ties: the order the stores are given, then seq). stores: TraceStorage objects (or KnowledgeStore / anything with a
+    `.storage` that is one), or one dict {name: store} — "store" is then the name, else the position. run: only the
+    records of this run id; kinds: only these kinds. Records written outside a run_context have run None."""
+    named = list(stores[0].items()) if len(stores) == 1 and isinstance(stores[0], dict) else list(enumerate(stores))
+    keep = None if kinds is None else ({kinds} if isinstance(kinds, str) else set(kinds))
+    rows = []
+    for order, (name, st) in enumerate(named):
+        st = st if hasattr(st, "iter") and hasattr(st, "_append") else getattr(st, "storage", None)
+        if st is None:
+            continue
+        for s in st.iter(None, redacted=True):
+            r = s.data.get("run") if isinstance(s.data.get("run"), dict) else {}
+            if (run is not None and r.get("id") != run) or (keep is not None and s.kind not in keep):
+                continue
+            rows.append((s.time, order, s.seq, {"store": name, "id": s.id, "seq": s.seq, "time": s.time, "kind": s.kind,
+                                                "run": r.get("id"), "parent": r.get("parent")}))
+    rows.sort(key=lambda x: x[:3])
+    return [r[3] for r in rows]
+
+
 class CompactRecord(ValueError):
     """A stored decision kept compact (record="compact"): its trace is not in the store, so it cannot be loaded as a
     Response. TraceStorage.rederive(id, system) re-runs it from the recorded input and checks every step against the
@@ -299,6 +375,18 @@ class Stored:
     def meta(self):
         from ..schema import untag_floats
         return untag_floats(self.data.get("meta"))
+
+    @property
+    def run(self):
+        """The id of the run that wrote this record (see run_context), or None."""
+        r = self.data.get("run")
+        return r.get("id") if isinstance(r, dict) else None
+
+    @property
+    def parent(self):
+        """The id of the decision this record follows from (run_context(parent=)), or None."""
+        r = self.data.get("run")
+        return r.get("parent") if isinstance(r, dict) else None
 
     @property
     def compact(self):
@@ -1513,6 +1601,7 @@ class JSONLStorage(TraceStorage):
                     self._write_head()
 
     def _append(self, body):
+        body = _stamp(body)
         if self._in_batch():
             b = self._batch
             if self.rotates and self._due() and body.get("kind") != "redaction":
@@ -1824,6 +1913,7 @@ class _SQLStorage(TraceStorage):
             self._x("COMMIT")
 
     def _append(self, body):
+        body = _stamp(body)
         if self._batch == threading.get_ident():
             with self._lock:
                 return self._append_row(body)
@@ -2065,7 +2155,7 @@ def open_storage(where, system=None):
     return JSONLStorage(p, system)
 
 
-__all__ = ["chained", "check_source", "compact_content", "CompactRecord", "DuckDBStorage", "entry", "FORMAT",
+__all__ = ["chained", "check_source", "chronology", "compact_content", "current_run", "CompactRecord", "DuckDBStorage", "entry", "FORMAT",
            "JSONLStorage", "open_storage", "plain", "PostgresStorage", "ProvenanceIndex", "record_body", "record_hash", "record_mode",
-           "RECORD_MODES", "rederive", "SQLiteStorage", "Stored", "TraceStorage", "TRUSTED_SOURCES", "UntrustedLabel",
+           "RECORD_MODES", "rederive", "run_context", "SQLiteStorage", "Stored", "TraceStorage", "TRUSTED_SOURCES", "UntrustedLabel",
            "VERIFIED", "VERIFIED_REFUSED", "view", "AUDIT"]
