@@ -45,7 +45,6 @@ def admit_noisy(ls, cands, ask: Callable[[Any, Any], Any], *, pool: list, safe, 
     veq = None if eq is None else (lambda u, v: len(u) == len(v) and all(eq(x, y) for x, y in zip(u, v)))
     cls = groups_of(vecs, veq)                    # classes: equal predictions on every probe of the pool
     cls.sort(key=lambda g: (min(len(hyps[j].condition) if hyps[j] is not None else -1 for j in g), g[0]))
-    of = {j: ci for ci, g in enumerate(cls) for j in g}
     loglik = [0.0] * len(hyps)                    # per hypothesis; a class's weight: its members' mean likelihood
     asked: list = []
 
