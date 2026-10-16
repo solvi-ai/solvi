@@ -221,6 +221,16 @@ STATUS: dict[str, dict] = {
                "record is tested on a synthetic corridor only, and skills are not admitted by discriminating probes "
                "(laws are: LawSet.admit_by_probes)",
                "script": "benchmarks/skills_toy.py"},
+    "injection": {"since": "1.2", "what": "a calibrated detector of instruction-like text in tool outputs: a "
+                  "per-sentence logistic score over the fixed detector's rule families and hashed word n-grams, "
+                  "fitted on labelled texts, its threshold set on ordinary texts to a chosen false-flag rate",
+                  "missing": "measured once on injected tool outputs of one public benchmark (InjecAgent): on 248 "
+                  "held-out injections (attacker instructions and tools not used in fitting) a detector fitted on 279 "
+                  "other cases and 865 ordinary texts found 76% against the fixed rules' 23%, flagging fewer "
+                  "ordinary texts (1.8% against 4.2%); but a plain TF-IDF classifier did the same, half of the gain "
+                  "was one address repeated across that dataset (without it +0.19, 95% CI +0.06…+0.38), and on "
+                  "140 AgentDojo-style injections the rules found 78%, the detector 53%; still missing: a gain "
+                  "on an injection family it was not fitted on, and wiring into Guard as its detector", "script": None},
 }
 for _s in STATUS.values():
     _s["deadline"] = DEADLINE

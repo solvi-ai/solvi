@@ -160,6 +160,7 @@ nav:
       - Experimental:
           - solvi.experimental: api/experimental.md
           - solvi.experimental.lora: api/lora.md
+          - solvi.experimental.injection: api/injection.md
           - solvi.experimental.compile: api/compile.md
           - solvi.experimental.compile.sandbox: api/sandbox.md
           - solvi.experimental.hooks: api/hooks.md
