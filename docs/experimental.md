@@ -271,6 +271,27 @@ fall, so a monitor that only watches for a drop misses it.
 - API: [solvi.experimental.ood](api/ood.md). The note is a warning, not a guarantee: a regime whose answers look like the
   calibration answers but whose errors differ passes every check; only labels show it.
 
+## `audit`
+
+What a small random audit buys. `Dispatcher(audit=)` marks a random share of decisions for labelling; this module uses
+those labels together with everything else. `ppi_mean` is prediction-powered inference (Angelopoulos, Bates,
+Fannjiang, Jordan and Zrnic, *Prediction-powered inference*, Science 2023; the power-tuned weight of PPI++, Angelopoulos,
+Duchi and Zrnic 2023): a prediction of the quantity on every decision — 1 − confidence for "wrong", or the label a
+person or an outcome gave where there is one — corrected by the audited decisions' gap between truth and prediction.
+Unbiased whatever the prediction's bias; never wider than the audit alone, up to the estimation of the weight.
+`ppi_calibrate` sets a guarantee threshold from it (learn-then-test, fixed sequence from the strictest threshold down;
+install it with `system.guarantee(question, promise=p)`), `ppi_paired_harm` tests at the end of a window whether a
+candidate run beside the current system is worse. `AuditWatch` follows a check's failure rate on the audited share with
+a Bernoulli CUSUM whose threshold is simulated with the audit share and the reference's own error — for a check that is
+otherwise bought only where the system is unsure, where it disagrees anyway and a break goes unseen. Since 1.2.
+
+The intervals are the method's normal (CLT) intervals: valid as the audit grows, not exact for a handful of audited
+decisions. The PPI promise holds for inputs like the audited stream, not for the next, drifted one.
+
+- **Missing:** no measured gain yet: whether the PPI threshold and harm test gate refits on a drifting stream better than the stored corrections alone, and whether the audit watch sees a broken check that the decisions which buy it do not, are both still to be measured (pre-registered stands); the intervals are normal (CLT) intervals, valid as the audit grows
+- **Script:** none yet. **Deadline:** 1.2.
+- API: `solvi.experimental.audit` (`ppi_mean`, `ppi_calibrate`, `ppi_paired_harm`, `AuditWatch`).
+
 ## Graduated and removed
 
 - **Graduated in 1.1:** `counterfactual` — counterfactual explanations are the stable `solvi.core.explain`

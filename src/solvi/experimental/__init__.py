@@ -255,6 +255,14 @@ STATUS: dict[str, dict] = {
             "differ (20 of 27–150 labels); still missing: a benchmark script in benchmarks/ and a decider "
             "that has not seen the data",
             "script": None},
+    "audit": {"since": "1.2",
+              "what": "AuditWatch: a Bernoulli CUSUM on a check run on a random share of decisions "
+              "(Dispatcher(audit=)), its threshold simulated with the share and the reference's sampling error, for a "
+              "check that is otherwise bought only where the system is unsure (a known method: continuous sampling "
+              "inspection with a proportion CUSUM)",
+              "missing": "one task family and one break size measured (docs/experimental.md); a smaller break, a short "
+              "reference and a break confined to the decisions the policy never checks are unmeasured",
+              "script": None},
 }
 for _s in STATUS.values():
     _s["deadline"] = DEADLINE
