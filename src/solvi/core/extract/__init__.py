@@ -3,7 +3,11 @@ field(name, description), save / load, fingerprint()): a field is defined by its
 (windows), and the field may be absent ("no answer"). ModernBERT: input "field description [SEP] document window", two pointer
 heads; "no answer" is position 0 (the special token). Prediction: the best span across all windows; an answer exists if its
 score is above the field's threshold (tuned on held-out examples). Also works for fields unseen in training, from the
-description alone ("new field")."""
+description alone ("new field").
+
+It needs torch and transformers (`solvi[model]`) for training and for prediction alike. The `solvi[onnx]` extra covers
+the decider only (solvi.core.deciders, backend="onnx"): there is no ONNX path for this extractor — running the
+encoder and the two pointer heads exported to ONNX under onnxruntime would be one, and is not built."""
 from __future__ import annotations
 
 import math
@@ -22,8 +26,11 @@ class LongSpanExtractor:
     def __init__(self, model_name="answerdotai/ModernBERT-large", max_len=1024, stride=128, max_span=96, device=None):
         """stride: overlap between adjacent windows in tokens (as in transformers); max_span: maximum answer length in tokens."""
         from ..._loader import optional
-        torch = optional("torch", "model", "LongSpanExtractor")
-        tf = optional("transformers", "model", "LongSpanExtractor")
+        try:
+            torch = optional("torch", "model", "LongSpanExtractor")
+            tf = optional("transformers", "model", "LongSpanExtractor")
+        except ImportError as e:                 # the onnx extra runs the decider without torch, not this extractor
+            raise ImportError(f"{e} (solvi[onnx] covers the decider, not this extractor)") from e
         AutoModel, AutoTokenizer = tf.AutoModel, tf.AutoTokenizer
         self.torch = torch
         self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")

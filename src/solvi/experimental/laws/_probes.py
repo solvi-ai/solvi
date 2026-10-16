@@ -3,6 +3,7 @@ the hypotheses apart, safely and cheaply (see the package docstring)."""
 from __future__ import annotations
 
 import inspect
+import math
 import numbers
 from dataclasses import dataclass
 from typing import Any, Callable, Iterable, Sequence
@@ -11,11 +12,15 @@ from typing import Any, Callable, Iterable, Sequence
 @dataclass(frozen=True)
 class Probe:
     """A chosen probe: the state and action to try, each hypothesis's prediction there, and the split score (how many
-    hypotheses the answer can rule out at least: those outside the largest group of equal predictions)."""
+    hypotheses the answer can rule out at least: those outside the largest group of equal predictions); info: the
+    expected information of its answer in bits (the entropy of the groups of equal predictions, every hypothesis
+    equally likely); cost: its cost when `split` was given one."""
     state: Any
     action: Any
     predictions: tuple
     score: int
+    info: float = 0.0
+    cost: Any = None
 
 
 def _ro(read_only):
@@ -99,7 +104,7 @@ def groups_of(values: Sequence, eq: Callable[[Any, Any], bool] | None) -> list[l
 def split(hypotheses: Sequence, safe: Callable[[Any, Any], bool], probes: Iterable[tuple[Any, Any]], *,
           read_only: Callable[..., bool] | None = None, cost: Callable[[Any, Any], Any] | None = None,
           tol: float | None = None, same: Callable[[Any, Any], bool] | None = None,
-          rtol: float | None = None) -> Probe | None:
+          rtol: float | None = None, per_cost: bool = False) -> Probe | None:
     """The probe that best splits the hypotheses (law sets, or predictors `fn(state, action)`), among `probes` —
     (state, action) pairs — that `safe(state, action)` allows. Order: read-only probes first (`read_only(action)`, or
     `read_only(state, action)` when the kind of call is in the state),
@@ -107,22 +112,35 @@ def split(hypotheses: Sequence, safe: Callable[[Any, Any], bool], probes: Iterab
     any two hypotheses apart. Predictions are told apart by exact equality, or within `tol` (numbers: |a − b| ≤ tol,
     tuples element by element), within a relative `rtol` (|a − b| ≤ tol + rtol·max(|a|, |b|)) or by `same(a, b)` —
     two formulas that differ by float rounding (x·0.1·10 and x) are the same hypothesis under tol=1e-9; over
-    predictions from 0.003 to 3,000, rtol=1e-6 keeps a law 0.1 % off apart where no single tol does both."""
+    predictions from 0.003 to 3,000, rtol=1e-6 keeps a law 0.1 % off apart where no single tol does both.
+
+    per_cost=True (opt-in; needs `cost`): the probe with the most information per unit of cost — `info / cost`, info
+    the expected bits of its answer (Probe.info) — after read-only first; so a cheap probe that halves the hypotheses
+    is taken before one ten times dearer that splits them a little better. A cost ≤ 0 counts as 1e-12 (a free probe
+    first)."""
+    if per_cost and cost is None:
+        raise ValueError("per_cost=True ranks by information per unit of cost: give cost=")
     preds = [_predictor(h) for h in hypotheses]
     eq = sameness(tol, same, rtol=rtol)
     ro = _ro(read_only)
     best = None
     for i, (state, action) in enumerate(probes):
         ps = tuple(p(state, action) for p in preds)
-        score = len(ps) - max((len(g) for g in groups_of(ps, eq)), default=0)
+        gs = groups_of(ps, eq)
+        score = len(ps) - max((len(g) for g in gs), default=0)
         if score <= 0:
             continue
-        key = (0 if ro is None or ro(state, action) else 1, -score, cost(state, action) if cost else 0, i)
+        info = -sum(len(g) / len(ps) * math.log2(len(g) / len(ps)) for g in gs)
+        c = cost(state, action) if cost else None
+        if per_cost:
+            key = (0 if ro is None or ro(state, action) else 1, -info / max(float(c), 1e-12), i)
+        else:
+            key = (0 if ro is None or ro(state, action) else 1, -score, c if cost else 0, i)
         if best is not None and key >= best[0]:
             continue
         if not safe(state, action):
             continue
-        best = (key, Probe(state, action, ps, score))
+        best = (key, Probe(state, action, ps, score, info, c))
     return best[1] if best else None
 
 
