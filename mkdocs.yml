@@ -169,6 +169,7 @@ nav:
           - solvi.experimental.laws: api/laws.md
           - solvi.experimental.skills: api/skills.md
           - solvi.experimental.relations: api/relations.md
+          - solvi.experimental.ood: api/ood.md
   - Changelog: changelog.md
   - Roadmap: roadmap.md
 

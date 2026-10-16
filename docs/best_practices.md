@@ -113,6 +113,9 @@ not tested): the same script's change from 1:1:1 to 1:8:1 was flagged after 67 /
 50 / 100 / 200. Take the reference from the stream itself unless the calibration set has its mix: a reference with another mix
 differs from the stream from the start. Treat a quiet monitor as "no large change", not as
 "no change".
+A regime change can raise the decider's confidence as well as lower it: on half of ten dataset pairs of intent
+classification the mean confidence rose, where a monitor for a drop of confidence sees nothing. Test both directions,
+or the whole spread of the answers' features (`ShiftWatch`, [experimental](experimental.md#ood)).
 
 **`fit` and `teach` move the scores, not the reading.** They shift and scale the logits of one question; they help
 calibration and the mix of answers, and level off within a few dozen examples. When a question needs the model to read

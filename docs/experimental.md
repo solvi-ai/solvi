@@ -234,6 +234,30 @@ perturbations), reaches its goal on the exact copy; the skill records both footp
 - Guide: [Learning in a world described by code](best_practices.md#learning-in-a-world-described-by-code-plan-on-the-code);
   API: [solvi.experimental.skills](api/skills.md).
 
+## `ood`
+
+A watch next to `System.calibrate`'s default Platt scaling (`watch=ShiftWatch()`), packaging a known method: the
+black-box shift test of Rabanser, Günnemann and Lipton (*Failing Loudly*, NeurIPS 2019) — a per-feature two-sample
+Kolmogorov–Smirnov test with Bonferroni on a classifier's outputs — applied to three label-free features of each answer
+(the raw confidence, the margin between the two best options, the options' normalized entropy). `shift(batch)` says
+whether a batch's answer features differ from the calibration answers'; "out of domain" in `why` marks one answer far
+from them, a max-softmax style score (Hendrycks and Gimpel, ICLR 2017) as a Mahalanobis distance above the reference's
+own 1 − alpha quantile. Alpha is nominal (asymptotic KS p-values, three Bonferroni tests). Since 1.2.
+
+What it sees is the decider's confidence profile, not the content: it reports "the answers' features differ from the
+reference", not "the inputs are out of domain". Intents the decider has never seen, phrased like the calibration ones,
+mostly pass — for inputs from outside the calibration set use `OpenSetGate`
+([solvi.core.guarantees.openset](api/openset.md)); for a fall of the share answered alone and a change of the answer
+mix use `DriftMonitor`. A rephrasing of the same domain can be flagged like another domain. The per-answer note catches
+few of another dataset's answers: it is a note on one answer, not a detector — test batches with `shift`, of about 200
+answers (50-answer batches missed about a quarter of the shifts below). Confidence can rise under a shift as well as
+fall, so a monitor that only watches for a drop misses it.
+
+- **Missing:** measured once on intent classification with solvi-base (raw confidences, next to Platt calibration; alpha 0.01; 10 directed pairs of CLINC150, Banking77, HWU64 and Bitext customer support): with 200-answer batches (shift), 0.99–1.0 of the batches from another dataset flagged on every pair and at most 0.05 of in-domain batches (one domain at that bar, 0.03–0.05 over two draws of the windows; 0.01 or less for the others); with 50-answer batches, a mean of 0.76 and 0.30–0.48 on four pairs, +0.18 [0.05, 0.34] over a dev-tuned two-sided mean-confidence test at the watch's own in-domain rate of about 1 % (worse on one pair) and on par with it at 5 %. On half of the pairs the mean confidence rose, which a test for a fall of confidence cannot see. Held-out intents of the same dataset were mostly not flagged (CLINC150, Banking77: under 1 % of batches), while a rephrasing of the same domain (Banking77 and Bitext retail banking) was flagged like another dataset; the per-answer note marked on average 10 % of another dataset's answers. All four datasets are in or near the decider's training mix and their option sets differ (20 of 27–150 labels); still missing: a benchmark script in benchmarks/ and a decider that has not seen the data
+- **Script:** none yet. **Deadline:** 1.2.
+- API: [solvi.experimental.ood](api/ood.md). The note is a warning, not a guarantee: a regime whose answers look like the
+  calibration answers but whose errors differ passes every check; only labels show it.
+
 ## Graduated and removed
 
 - **Graduated in 1.1:** `counterfactual` — counterfactual explanations are the stable `solvi.core.explain`

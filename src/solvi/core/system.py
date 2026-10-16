@@ -106,7 +106,7 @@ def experimental_of(system):
                     n = _experimental_name(obj)
                     if n:
                         names.add(n)
-    for h in (getattr(system, "heads", None) or {}).values():
+    for h in [*(getattr(system, "heads", None) or {}).values(), *(getattr(system, "shift_watch", None) or {}).values()]:
         n = _experimental_name(h)
         if n:
             names.add(n)
@@ -207,6 +207,7 @@ class System:
         self.timeout = timeout                    # aask: default seconds per call of a part
         self.early_exit = bool(early_exit)        # False: the whole flow runs although a hard check failed
         self.calib: dict[str, tuple] = {}         # question → (a, b): confidence' = σ(a·logit(confidence) + b)
+        self.shift_watch = {}                     # question → an out-of-domain watch (System.calibrate(watch=), experimental)
         self.guards = {}                          # question → solvi.core.guarantees.guarantee.QuestionGuard (System.guarantee)
         self.learned_rules = {}                   # question → RuleList (readable rules learned from examples)
         if order not in ("default", "learned"):
@@ -603,8 +604,11 @@ class System:
             r.kind = q.answer.kind
             if c is not None and r.status == "ok":
                 r = _contracted(self, c, q, r, flow, trace)
+            raw = r.confidence
             if q.name in self.calib and r.status == "ok":
                 r.confidence = _platt(r.confidence, *self.calib[q.name])
+            if q.name in self.shift_watch and r.status == "ok":
+                r = _watched(self.shift_watch[q.name], r, raw)
             results[q.name] = r
         if textin is not None:
             _read_results(textin, results)
@@ -673,12 +677,14 @@ class System:
                     q.min_confidence, q.require_evidence)
         key = (tuple((n, content(q)) for n, q in self.questions.items()), tuple(sorted(self.calib.items())),
                tuple(sorted((n, g.fingerprint()) for n, g in self.guards.items())),     # solvi.core.guarantees.guarantee
-               tuple(sorted((n, c.fingerprint()) for n, c in (getattr(self.catalog, "contracts", None) or {}).items())))
+               tuple(sorted((n, c.fingerprint()) for n, c in (getattr(self.catalog, "contracts", None) or {}).items())),
+               tuple(sorted((n, w.fingerprint()) for n, w in self.shift_watch.items())))
         cached = getattr(self, "_qfp", None)
         if cached is None or cached[0] != key:
             cached = self._qfp = (key, digest(sorted((q.name, data(q)) for q in self.questions.values()), list(key[1]),
                                               *([list(key[2])] if key[2] else []),
-                                              *([["contracts", list(key[3])]] if key[3] else [])))
+                                              *([["contracts", list(key[3])]] if key[3] else []),
+                                              *([["shift_watch", list(key[4])]] if key[4] else [])))
         return cached[1]
 
     def _fingerprint(self, flow):
@@ -1141,7 +1147,7 @@ class System:
         self.learned_rules[question] = rl
         return rl
 
-    def calibrate(self, question, examples, *removed):
+    def calibrate(self, question, examples, *removed, watch=None):
         """Calibrate answer confidence (Platt scaling) on held-out examples [(init_state, correct answer)], as `fit` takes
         them (the answer written as for `fit` and `teach`: True / False for a yes/no question, an Enum member, ...); the
         0.7 form `calibrate(question, states, truth)` was removed in 0.9.
@@ -1149,7 +1155,12 @@ class System:
         The held-out examples are run without the question's current calibration (so a second call fits the same thing
         again, not a correction of the first), are not saved to the storage and do not count in `stats`. Fewer than 10
         answered examples, all of them right (or wrong), or confidences that do not vary (a rule's answers: 1.0): only
-        the shift b is fitted (a = 1) — the calibrated confidence is then the share of right answers."""
+        the shift b is fitted (a = 1) — the calibrated confidence is then the share of right answers.
+        watch= (experimental: solvi.experimental.ood.ShiftWatch): fitted on the same answers' raw confidences and options'
+        probabilities, kept in `shift_watch[question]`; every later answer then carries "out of domain: ..." in `why` when
+        it is unlike them (few answers of a new regime get it; test batches with `shift_watch[question].shift`), and the
+        raw confidence in `extra["out_of_domain"]`. The Platt map is the same with or without
+        it. watch=False removes a question's watch; without watch= a watch fitted before is kept."""
         import numpy as np
         q = self.questions[question]
         examples = list(examples)
@@ -1160,7 +1171,7 @@ class System:
             raise ValueError("calibrate: examples are [(init_state, correct answer), ...]")
         examples, truth = [s for s, _ in examples], [q.answer.normalize(y) for _, y in examples]
         was = self.calib.pop(question, None)          # raw confidences: not the previously calibrated ones
-        xs, ys = [], []
+        xs, ys, seen = [], [], []
         try:
             for st, y in zip(examples, truth):
                 p = self._prepare(st, [question], None)
@@ -1171,11 +1182,19 @@ class System:
                     continue
                 xs.append(_logit(r.confidence))
                 ys.append(float(vhash(r.answer) == vhash(y)))
+                if watch:
+                    seen.append({"confidence": r.confidence, "probs": dict(r.probs or {})})
+            if watch:
+                watch.fit(seen)
         except BaseException:
             if was is not None:
                 self.calib[question] = was
             raise
         self.calib[question] = _platt_fit(np.array(xs), np.array(ys))
+        if watch is False:
+            self.shift_watch.pop(question, None)
+        elif watch is not None:
+            self.shift_watch[question] = watch
         return self.calib[question]
 
     def guarantee(self, question, examples=None, **kw):
@@ -1568,6 +1587,15 @@ def _learnable(q, examples):
 def _logit(c):
     c = min(max(c, 1e-4), 1 - 1e-4)
     return math.log(c / (1 - c))
+
+
+def _watched(watch, r, raw):
+    """An answer through an out-of-domain watch: "out of domain: ..." in why, the raw confidence and notes in extra."""
+    notes = watch.note(raw, dict(r.probs or {}))
+    if notes:
+        r.why = f"{r.why}; out of domain: " + "; ".join(notes)
+    r.extra = {**(r.extra or {}), "out_of_domain": {"raw": raw, "notes": list(notes)}}
+    return r
 
 
 def _platt(c, a, b):
