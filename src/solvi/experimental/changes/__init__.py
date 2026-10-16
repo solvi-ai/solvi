@@ -98,8 +98,9 @@ approval levels and rollback — infrastructure, not a claim that its gates admi
 
 What is not done:
 - no rewind over an Environment (Confirmation.on_evidence takes the replay as a callback);
-- narrows / widens is measured only on probe inputs through the answerers (Consistency(probes=), opt-in) or
-  taken from a callback; a classifier over the rule's text (Z3 over lawlang) is planned;
+- narrows / widens is proved over the rule's text only for a subset of Python (comparisons, and / or / not, arithmetic on
+  numbers, membership in literal sets; Consistency(prove=True), the smt extra); outside it, it is measured on probe
+  inputs through the answerers (Consistency(probes=), opt-in) or taken from a callback;
 - no regression-scenario stage (`solvi test` cases.json);
 - the should-abstain set is declared by the caller: none is derived (stored abstentions are not one — a correction
   may rightly make the system answer them), and an empty set holds the change for a person;
@@ -119,6 +120,7 @@ from .. import warn_on_import
 from ._isolated import IsolatedTests, strict_equal
 from ._journal import ChangeJournal, EvalLocked, EvaluatorLock, MemoryStorage
 from ._paired import paired_bootstrap, run_episode
+from ._prove import prove_direction
 from ._stages import (DEFAULT_APPROVAL, LEVELS, REFUSAL_WORDS, Approval, Canaries, CleanCases, catalog_of, Confirmation,
                      Consistency, Context, FreshEnvironments, identity, IDENTITY_KEYS, Impact, KnownFailures, RefusalRegression, SliceGuard, SOURCES,
                      Stage, Static, StageVerdict, allowed, gate_of, gates_of, hazard_body, hazard_gate, is_refusal)
@@ -568,5 +570,5 @@ __all__ = ["allowed", "Approval", "ARTIFACTS", "Canaries", "catalog_of", "Change
            "Confirmation", "Consistency", "Context", "DEFAULT_APPROVAL", "EvalLocked", "EvaluatorLock",
            "FreshEnvironments", "gate_of", "IsolatedTests", "gates_of", "hazard_body", "hazard_gate", "identity", "IDENTITY_KEYS", "Impact", "is_refusal", "KnowledgeTarget",
            "KnownFailures", "REFUSAL_WORDS", "RefusalRegression",
-           "LearningTarget", "LEVELS", "ORDERS", "stage_cost", "STAGE_COSTS", "DEFAULT_COST", "MemoryStorage", "paired_bootstrap", "Pipeline", "Promoted", "Refused", "Result", "run_episode", "ShipWatch", "SliceGuard", "SOURCES",
+           "LearningTarget", "LEVELS", "ORDERS", "stage_cost", "STAGE_COSTS", "DEFAULT_COST", "MemoryStorage", "paired_bootstrap", "Pipeline", "prove_direction", "Promoted", "Refused", "Result", "run_episode", "ShipWatch", "SliceGuard", "SOURCES",
            "Stage", "Static", "STORE_SOURCE", "StageVerdict", "strict_equal", "VersionsTarget"]
