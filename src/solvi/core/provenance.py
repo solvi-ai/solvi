@@ -403,6 +403,73 @@ def part_callees(part):
     return out
 
 
+def own_code_fingerprint(f):
+    """code_fingerprint without what the functions it calls do: a callee (see code_callees) is taken in by its name only,
+    so this changes with the function's own code and the values it reads, not with a callee's code."""
+    import inspect
+    if f is None:
+        return None
+    f = inspect.unwrap(f)
+    if inspect.ismethod(f):
+        f = f.__func__
+    if not inspect.isfunction(f):
+        return code_fingerprint(f)
+    seen = _Seen()
+    co = f.__code__
+    body = _source_ast(f)
+    parts = [f.__qualname__, body if body is not None else _bytecode(co)]
+    cells = []
+    for name, cell in zip(co.co_freevars, f.__closure__ or ()):
+        try:
+            v = cell.cell_contents
+        except ValueError:
+            cells.append([name, "empty"])
+            continue
+        cells.append([name, "fn:" + v.__qualname__ if inspect.isfunction(v) else _value_fp(v, f, seen)])
+    parts.append(cells)
+    glob = []
+    g = getattr(f, "__globals__", {}) or {}
+    for name in sorted(_code_names(co)):
+        if name not in g:
+            continue
+        v = g[name]
+        if inspect.isfunction(v):
+            v = "fn:" + v.__qualname__ if fp_module(v.__module__, v.__qualname__) == \
+                fp_module(f.__module__, f.__qualname__) else None
+        elif isinstance(v, _MUTABLE):
+            v = _global_container(g, name, f, seen)
+        else:
+            v = _value_fp(fp_module(v) if name == "__name__" and isinstance(v, str) else v, f, seen, module_only=True)
+        if v is not None:
+            glob.append([name, v])
+    parts.append(glob)
+    if f.__defaults__:
+        parts.append([_value_fp(v, f, seen) for v in f.__defaults__])
+    return digest("own", *parts)
+
+
+def part_own_fingerprint(part):
+    """part_fingerprint over the part's own code (own_code_fingerprint): what changes with its declarations and its own
+    code, not with the functions it calls. diff reads it to say "its own code changed" next to a changed callee."""
+    return part_fingerprint(part, own_code_fingerprint)
+
+
+def own_fingerprints(catalog):
+    """{part: part_own_fingerprint} for the catalog's parts that call functions of their own module (catalog_fingerprint's
+    "calls"); cached on the catalog like catalog_fingerprint."""
+    c = catalog_fingerprint(catalog)
+    key = (c["fp"], tuple((n, id(p), id(p.func)) for n, p in catalog.parts.items()),
+           tuple((p.name, id(p), id(p.func)) for p in catalog.rules.values()))
+    cached = getattr(catalog, "_own_fp_cache", None)
+    if cached is not None and cached[0] == key:
+        return cached[1]
+    items = dict([(n, p) for n, p in catalog.parts.items()] + [(p.name, p) for p in catalog.rules.values()] +
+                 [("constraint:" + n, p) for n, p in catalog.constraints.items()])
+    out = {n: part_own_fingerprint(items[n]) for n in c.get("calls", ()) if n in items}
+    catalog._own_fp_cache = (key, out)
+    return out
+
+
 _MUTABLE = (dict, list, set, bytearray)
 _FIRST = {}             # (id of a module's globals, name) → (the container, its value as first fingerprinted)
 
@@ -477,25 +544,27 @@ def type_fingerprint(t, depth=0):
     return _r(t)
 
 
-def part_fingerprint(part):
+def part_fingerprint(part, _code=None):
     """The fingerprint of one catalog part: its declarations (kind, inputs, hard / then, options, validate, types, the
     model's type) and its code; a fact with alternative producers — each producer's, in order. The model's weights are not
-    here: they are the model's own fingerprint, recorded with each step it produced."""
+    here: they are the model's own fingerprint, recorded with each step it produced. (_code: the code fingerprint to
+    use — own_code_fingerprint for part_own_fingerprint.)"""
+    code_fingerprint_ = _code or code_fingerprint
     d = {"kind": part.kind, "name": part.name, "inputs": list(part.inputs), "hard": part.hard,
-         "then": sorted([str(k), code_fingerprint(v) if callable(v) else _r(v)] for k, v in (part.then or {}).items()),
+         "then": sorted([str(k), code_fingerprint_(v) if callable(v) else _r(v)] for k, v in (part.then or {}).items()),
          "question": part.question,
          "provides": part.provides, "options": None if part.options is None else [_r(o) for o in part.options],
          "exact": part.exact, "source": part.source, "min_confidence": part.min_confidence, "provenance": part.provenance,
-         "validate": code_fingerprint(part.validate), "model": None if part.model is None else type(part.model).__qualname__,
+         "validate": code_fingerprint_(part.validate), "model": None if part.model is None else type(part.model).__qualname__,
          "types": None if part.types is None else {k: type_fingerprint(t) for k, t in part.types.items()},
          "returns": None if part.returns is None else type_fingerprint(part.returns)}
     if getattr(part, "quotes", "normalized") != "normalized":   # only when set otherwise: 0.9's fingerprints stay as
         d["quotes"] = part.quotes                                # they were
     if part.alternatives is not None:
-        d["alternatives"] = [part_fingerprint(a) for a in part.alternatives]
-        d["features"] = code_fingerprint(part.features)
+        d["alternatives"] = [part_fingerprint(a, _code) for a in part.alternatives]
+        d["features"] = code_fingerprint_(part.features)
     else:
-        d["code"] = code_fingerprint(part.func)
+        d["code"] = code_fingerprint_(part.func)
     return digest(d)
 
 

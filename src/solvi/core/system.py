@@ -752,15 +752,18 @@ class System:
 
     def _fingerprint(self, flow):
         """trace.fingerprint: the catalog's and questions' fingerprints and those of the parts in this flow; "calls" (when
-        any of them calls a function of its own module): {part: {callee: fingerprint}}; "combine" (when the flow holds
+        any of them calls a function of its own module): {part: {callee: fingerprint}}, with "own": {part: its fingerprint
+        without its callees' code}; "combine" (when the flow holds
         two hard checks or more): the catalog's combine mode, which picks among several failed ones."""
-        from .provenance import catalog_fingerprint
+        from .provenance import catalog_fingerprint, own_fingerprints
         c = catalog_fingerprint(self.catalog)
         out = {"catalog": c["fp"], "questions": self._questions_fp(),
                "parts": {s.part.name: c["parts"][s.part.name] for s in flow.steps if s.part.name in c["parts"]}}
         calls = {s.part.name: c["calls"][s.part.name] for s in flow.steps if s.part.name in c.get("calls", ())}
         if calls:                                     # the module functions the flow's parts call (diff says which changed)
             out["calls"] = calls
+            own = own_fingerprints(self.catalog)      # and each such part's own code, to tell both changes apart
+            out["own"] = {n: own[n] for n in calls if n in own}
         if sum(s.part.kind == "check" and bool(s.part.hard) for s in flow.steps) > 1:   # Catalog(combine=) can decide
             out["combine"] = getattr(self.catalog, "combine", "strictest")             # (diff(incremental=True) reads it)
         return out

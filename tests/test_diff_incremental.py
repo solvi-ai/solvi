@@ -169,6 +169,9 @@ def test_diff_says_which_called_function_changed(tmp_path):
     own = diff(store, _module(tmp_path, "m2", CALLER.format(step=1, op="* 2 +")).system())
     whys = {c["questions"]["big"]["first_step"]["why"] for c in own.changed}
     assert whys == {"its own code or declarations changed"}
+    both = diff(store, _module(tmp_path, "m3", CALLER.format(step=2, op="* 2 +")).system())
+    whys = {c["questions"]["big"]["first_step"]["why"] for c in both.changed}
+    assert whys == {"its own code or declarations changed, and a function it calls changed: helper"}
 
 
 def _two_checks(combine):

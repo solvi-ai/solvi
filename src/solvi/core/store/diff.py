@@ -79,7 +79,8 @@ def _model_of(r):
 
 def _code_why(name, ofp, nfp):
     """Why a part's fingerprint differs, when both traces recorded what it calls ("calls"): a function it calls changed
-    (named) or its own code or declarations did; else (a trace stored before solvi recorded it, or a flow with no calls
+    (named), its own code or declarations did, or both (when both traces recorded the part's own fingerprint, "own");
+    else (a trace stored before solvi recorded it, or a flow with no calls
     to record) the plain "its code or declarations changed"."""
     if "calls" not in ofp or "calls" not in nfp:
         return "its code or declarations changed"
@@ -87,6 +88,9 @@ def _code_why(name, ofp, nfp):
     moved = sorted(k for k in set(oc) | set(nc) if oc.get(k) != nc.get(k))
     if not moved:
         return "its own code or declarations changed"
+    oo, no = (ofp.get("own") or {}).get(name), (nfp.get("own") or {}).get(name)
+    if oo and no and oo != no:                        # recorded since 1.2: both changed, both named
+        return "its own code or declarations changed, and a function it calls changed: " + ", ".join(moved)
     return "a function it calls changed: " + ", ".join(moved)
 
 
