@@ -71,3 +71,22 @@ def test_a_new_run_id_when_none_is_given():
             assert b.id == a.id
     with run_context() as c:
         assert c.id != a.id and len(c.id) == 16
+
+
+def test_query_by_run_on_every_store(tmp_path):
+    import contextvars
+    from concurrent.futures import ThreadPoolExecutor
+    s = build()
+    for st in (JSONLStorage(tmp_path / "q.jsonl"), SQLiteStorage(tmp_path / "q.db")):
+        s.storage = st
+        outside = s.ask(STATE).stored_id
+        with run_context("r1"):
+            a = s.ask(STATE).stored_id
+            with ThreadPoolExecutor(1) as pool:                  # a pool keeps the run with copy_context()
+                b = pool.submit(contextvars.copy_context().run, lambda: s.ask({**STATE, "amount": 500}).stored_id).result()
+        with run_context("r2"):
+            c = s.ask(STATE).stored_id
+        assert [x.id for x in st.query(run="r1")] == [a, b]
+        assert [x.id for x in st.query(run="r2")] == [c]
+        assert [x.id for x in st.query(run="r1", status="ok")] == [x.id for x in st.query(status="ok") if x.id in (a, b)]
+        assert len(st.query()) == 4 and outside in [x.id for x in st.query()] and st.query(run="nope") == []

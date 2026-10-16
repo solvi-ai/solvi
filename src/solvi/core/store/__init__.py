@@ -278,7 +278,9 @@ def run_context(run=None, parent=None):
     the other processes of a run. parent: the id of the decision the records inside follow from (a nested
     `with run_context(parent=decision_id):` keeps the run id). → an object with .id and .parent. Opt-in: outside a
     run_context nothing is added, and readers take records without "run" as before. A store of your own sees the field
-    when its _append writes the body it is given."""
+    when its _append writes the body it is given. store.query(run=id) finds the decisions of one run. The run lives in
+    a context variable: a thread started inside does not inherit it — submit work to a pool as
+    `pool.submit(contextvars.copy_context().run, fn, *args)`, or open run_context(run=id) in the thread."""
     outer = _run_var().get()
     if run is None:
         import uuid
@@ -447,6 +449,14 @@ def _matches(d, question, answer, status, safeguard, model, since, until, catalo
         if not any(model in (m.get("fp"), m.get("id"), m.get("type")) for m in d.get("models") or ()):
             return False
     return True
+
+
+def _of_run(d, run):
+    """The record was written inside run_context(run) (any record when run is None)."""
+    if run is None:
+        return True
+    r = d.get("run")
+    return isinstance(r, dict) and r.get("id") == str(run)
 
 
 def _models_of(records):
@@ -978,18 +988,20 @@ class TraceStorage(abc.ABC):
 
     @_deprecate.removed_kwargs(catalog="catalog_fp")
     def query(self, question=None, answer=ANY, status=None, safeguard=None, model=None, since=None, until=None,
-              catalog_fp=None):
+              catalog_fp=None, run=None):
         """Stored responses that match every filter given → [Stored] in stored order.
         question: asked this question; answer: answered this (with question: that question's answer; None matches an
         abstention); status: "ok" / "forced" / "abstain" (with question: of that question); safeguard: a safeguard of this
         kind fired ("grounding", "hard_check", "low_confidence", ...; with question: one that concerns it); model: a model
         with this fingerprint, id or type produced a step; since / until: stored in [since, until) — seconds since the
         epoch, a datetime, a date or an ISO string; catalog_fp: decided by the catalog with this fingerprint
-        (System.fingerprint()["catalog"]). An answer is matched in its stored form: answer=True finds a yes/no "yes"
+        (System.fingerprint()["catalog"]); run: written inside run_context(run) with this run id (records written outside
+        a run_context have none). An answer is matched in its stored form: answer=True finds a yes/no "yes"
         (see _answer_key)."""
         since, until = _when(since), _when(until)
         answer = self._answer_key(question, answer)
-        return [s for s in self.iter() if _matches(s.data, question, answer, status, safeguard, model, since, until, catalog_fp)]
+        return [s for s in self.iter() if _matches(s.data, question, answer, status, safeguard, model, since, until, catalog_fp)
+                and _of_run(s.data, run)]
 
     def report(self, since=None, until=None, question=None, format="md", examples=3, system=None, **filters):
         """A human-readable report of the stored decisions in [since, until) (optionally of one question): counts by
@@ -2008,7 +2020,7 @@ class _SQLStorage(TraceStorage):
 
     @_deprecate.removed_kwargs(catalog="catalog_fp")
     def query(self, question=None, answer=ANY, status=None, safeguard=None, model=None, since=None, until=None,
-              catalog_fp=None):
+              catalog_fp=None, run=None):
         since, until = _when(since), _when(until)
         answer = self._answer_key(question, answer)
         where, args = ["r.kind = 'ask'"], []
@@ -2045,7 +2057,8 @@ class _SQLStorage(TraceStorage):
             where.append("r.\"time\" < ?")
             args.append(until)
         sql = f"SELECT r.seq, r.body FROM {{p}}records r WHERE {' AND '.join(where)} ORDER BY r.seq"  # noqa: S608
-        return [_stored(d, self.catalog) for _, d in self._rows(sql, args) if chained(d) and not d.get("redacted")]
+        return [_stored(d, self.catalog) for _, d in self._rows(sql, args)
+                if chained(d) and not d.get("redacted") and _of_run(d, run)]   # the run is in the body, not a column
 
     def _backend_problems(self, rows, snap=None):
         out = []
