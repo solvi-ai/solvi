@@ -305,11 +305,34 @@ class Consistency:
     them by source rank or asks a person — not a refusal here) and, with `classify(change, ctx) → "narrows" | "widens"`,
     the direction of the behaviour change (Approval upgrades "gate" to "gate+person" for a widening change); classify
     may also return a dict {"direction": ..., other measurements} — all of it is recorded. An artifact other than an
-    item is admitted with only the classification."""
+    item is admitted with only the classification.
+
+    probes (opt-in): the library measures the direction instead of taking the caller's word. Each probe input (a list,
+    or `probes(change, ctx)` → inputs) is asked with the answerer in force and with the candidate's (the pipeline's
+    answer_of= or the target's answerer, as RefusalRegression asks them); `refused(answer)` (default is_refusal)
+    decides. "widens" when the candidate answers a probe the version in force refused, else "narrows" when it refuses
+    one that was answered, else "same"; recorded with the counts ("widened", "narrowed", "probes"). A classify given
+    too is a claim: recorded as "claimed", and the direction is "widens" when either says so. When the answerers
+    cannot be had the direction is "widens" ("unmeasured": a person looks)."""
     name = "consistency"
 
-    def __init__(self, *, classify: Callable | None = None):
-        self.classify = classify
+    def __init__(self, *, classify: Callable | None = None, probes=None, refused: Callable | None = None):
+        self.classify, self.probes = classify, probes
+        self.refused = refused or is_refusal
+
+    def _measure(self, change, ctx):
+        xs = list(self.probes(change, ctx) if callable(self.probes) else self.probes)
+        pipe = getattr(ctx, "pipeline", None)
+        before = pipe.answerer(None, ctx, change) if pipe is not None else None
+        after = pipe.answerer(change, ctx, change) if pipe is not None else None
+        if not xs or before is None or after is None:
+            return {"direction": "widens", "unmeasured": True, "probes": len(xs)}
+        rb = [bool(self.refused(before(x))) for x in xs]
+        ra = [bool(self.refused(after(x))) for x in xs]
+        w = sum(1 for b, a in zip(rb, ra) if b and not a)
+        n = sum(1 for b, a in zip(rb, ra) if a and not b)
+        return {"direction": "widens" if w else "narrows" if n else "same", "widened": w, "narrowed": n,
+                "probes": len(xs)}
 
     def run(self, change, ctx):
         m = {}
@@ -319,6 +342,12 @@ class Consistency:
                 m.update(d)
             else:
                 m["direction"] = d
+        if self.probes is not None:                   # the library's measurement; the caller's direction is a claim
+            claimed = m.pop("direction", None)
+            got = self._measure(change, ctx)
+            if claimed == "widens":
+                got["direction"] = "widens"
+            m.update(got, claimed=claimed)
         if change.artifact != "item" or ctx.store is None:
             return StageVerdict.admit("not a knowledge item", m or None)
         from ...core.knowledge.gates import ConsistencyGate
