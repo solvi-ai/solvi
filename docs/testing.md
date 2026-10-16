@@ -43,6 +43,7 @@ solvi test gallery/ --json                # results as data
 solvi test gallery/ --fuzz 30             # also 30 mutated inputs per case (see below)
 solvi test . --store                      # also save the cases' decisions to the system's own store
 solvi test . --timeout 5 --reruns 2       # stop a case after 5 s; ask a failing case twice more
+solvi test . --isolate --max-mem 2G       # each case in its own process, at most 2 GB of memory
 ```
 
 From Python, use `solvi.testing.run_path(paths)` to get a `FileResult` per file and a `CaseResult` per case (`ok`,
@@ -50,8 +51,20 @@ From Python, use `solvi.testing.run_path(paths)` to get a `FileResult` per file 
 status, safeguard or the replay is not what the case expects), `nondeterministic` (a step of the fresh trace does not
 recompute on replay, or — with `--reruns N` / `run_path(paths, reruns=N)` — asking the case again gave other answers),
 `timeout` (longer than `--timeout S` / `timeout=S` seconds; stopped with SIGALRM, so POSIX and the main thread only),
-`error` (ask raised) or `invalid` (the case cannot fail: an unknown key, nothing expected). `FileResult.counts()` gives
-the numbers per status, and the summary line of `solvi test` lists them. To run the cases inside your own pytest suite, one test is enough:
+`memory` (more than `--max-mem`, see below), `error` (ask raised) or `invalid` (the case cannot fail: an unknown key,
+nothing expected). `FileResult.counts()` gives the numbers per status, and the summary line of `solvi test` lists them.
+
+`--isolate` (`run_path(paths, isolate=True)`) runs each case in a fresh Python process: the task is imported and the
+System built there, never in the runner. No case sees module state another case left behind, and a case that ends the
+interpreter (a crash in an extension, `os._exit`) fails alone with status `error` while the next case runs. With
+`--timeout` the case's process is killed when the time is up, so a case stuck inside a C call stops too, and it works
+where SIGALRM does not. The price is a process start, the imports and the System's build per case (about 90 ms per case
+on a small task). `--max-mem SIZE` (`max_mem="2G"`, or bytes; needs `--isolate`) caps the case's process: an
+allocation past it raises MemoryError and the case has status `memory`. The cap is the address space (RLIMIT_AS) of
+the whole process — Python, solvi, the task and the case — and numpy with a threaded BLAS reserves about 1 GB of it at
+import, so leave room. macOS and Windows do not enforce RLIMIT_AS: there the process's peak resident memory is compared
+with the cap after the case instead (a case over it still fails with `memory`, but it was not stopped), and a warning
+says so. To run the cases inside your own pytest suite, one test is enough:
 
 ```python
 from solvi.testing import run_path
