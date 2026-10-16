@@ -969,7 +969,7 @@ class TraceStorage(abc.ABC):
         from .signature import sign
         return sign(self, alg)
 
-    def verify(self, anchor=None, signature=None, candidates=None):
+    def verify(self, anchor=None, signature=None, candidates=None, *, deep=True):
         """Check the chain across stored records: each record's hash, its link to the record before it, the sequence
         numbers, the stored response against its own summary, and the stored head (a cut-off tail). `anchor`: a head()
         taken earlier and kept elsewhere — the chain must still contain it (catches a rewrite of the whole store).
@@ -980,7 +980,11 @@ class TraceStorage(abc.ABC):
         [(seq, id, reason)] — redacted records of format 1, whose kept fields no hash covers). Records written before the
         chain (0.5 journal lines) are counted in `legacy` and not checked.
         A store that is being written to verifies as it stands at one moment: the stored head is read first and the
-        records are checked against it, so a record appended while verify runs is not reported as damage."""
+        records are checked against it, so a record appended while verify runs is not reported as damage.
+        deep: True (default) — everything above; False — the chain only (hashes, links, sequence numbers, head, anchor,
+        signature), not each stored response against its own summary: faster on big records, and an edit after storing
+        still breaks a hash, but a record written inconsistent (or a store rewritten whole with new hashes and no
+        anchor) passes. The result says which ran ("deep")."""
         problems, rows = [], []
         prev, n = GENESIS, 0
         snap = self._snapshot()
@@ -1025,7 +1029,7 @@ class TraceStorage(abc.ABC):
             if d.get("seq") != n:
                 problems.append((d.get("seq"), rid, f"sequence number {d.get('seq')} where {n} was expected (records "
                                                     "deleted, inserted or reordered)"))
-            if d.get("kind", "ask") == "ask" and not d.get("redacted"):
+            if deep and d.get("kind", "ask") == "ask" and not d.get("redacted"):
                 try:
                     problems += [(d.get("seq"), rid, p) for p in _summary_problems(d)]
                 except (AttributeError, TypeError, KeyError, IndexError, ValueError) as e:    # damaged in its shape:
@@ -1048,7 +1052,8 @@ class TraceStorage(abc.ABC):
             elif k > 0 and rows[k - 1].get("hash") != h:
                 problems.append((k - 1, rows[k - 1].get("id"), "the record at the anchor differs from the anchored one: "
                                                                "the store was rewritten"))
-        out = {"ok": not problems, "count": len(rows), "head": {"count": len(rows), "hash": prev}, "legacy": self._legacy()}
+        out = {"ok": not problems, "count": len(rows), "head": {"count": len(rows), "hash": prev}, "legacy": self._legacy(),
+               "deep": bool(deep)}
         if unverified:
             out["unverified"] = unverified
         if signature is not None:
