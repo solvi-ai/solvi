@@ -1869,7 +1869,7 @@ class Guard:
             raise ValueError(f"tool {t.name} is declared with authorize=True, but the guard has no authorizer "
                              "(guard.make_authorizer(decider)): its calls would go unauthorized")
         self._check_policies()
-        cat = Catalog()
+        cat = Catalog(combine="first")         # several failed checks: the guard's declaration order decides (deny first)
         schema = json.dumps(t.model.model_json_schema(), sort_keys=True, default=str)
         fns, policies = self._parts_of(t)
         read = {x for f in fns + [f for f, _ in policies] for x in inspect.signature(f).parameters}

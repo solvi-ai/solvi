@@ -20,8 +20,8 @@ uv run python gallery/05_agent_trace_audit/run.py        # 10 scenarios + the au
   from the named DB snapshot, push back the SHA the force push overwrote (read from the push output), or revert an UPDATE
   from the transaction log. A step with no way back gets `None`.
 - **Hard checks.** An exposed secret forces escalate and rotate_secrets=yes. Destruction with no way back forces escalate.
-  Destruction that can be undone forces roll_back. When several fail, the first by name decides, and the names are chosen so
-  escalate wins. Then a rule: escalate on an off-allowlist tool or on cost; roll_back if a step failed after state had changed;
+  Destruction that can be undone forces roll_back. When several fail, the strictest verdict decides — the one last in
+  the options approve, roll_back, escalate (`Catalog(combine="strictest")`) — so escalate wins. Then a rule: escalate on an off-allowlist tool or on cost; roll_back if a step failed after state had changed;
   otherwise approve.
 - **The audit is itself auditable.** solvi's hash-chained trace of the audit is the record you store. Replay re-derives every
   finding from the raw log.
