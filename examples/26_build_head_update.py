@@ -2,13 +2,15 @@
 on held-out groups, for honesty and for refusals before it goes live; every version is journaled and can be rolled back.
 
 The system: refund requests from twelve shops (the group), a promise of at most 2% answered alone and wrong, the rest
-handed to a person. Shops s10 and s11 are never given to `build`: their requests are the held-out check every update
-is measured on. Three updates are proposed:
+handed to a person; a refund larger than the order always goes to a person (a hard check). Shops s10 and s11 are never
+given to `build`: their requests are the held-out check every update is measured on. Three updates are proposed:
 
-  1. more labelled requests from the same shops           → promoted (version 1)
-  2. a batch whose labels say "yes" to every late delivery → refused: the re-built system answers 2 of the 4
-     held-out requests that must go to a person (the build's own calibration, on the same bad labels, saw nothing
-     wrong); had it kept them, the per-shop slices and the canaries would measure it next
+  1. more labelled requests from the same shops           → promoted (version 1) when no held-out shop gets worse by
+     more than the 2% tolerance: here on every build seed 0–4 (SEED); on other draws of the data a re-fit sometimes
+     costs one shop more than that, and the slice guard refuses it — the script prints what happened
+  2. a batch whose labels say "yes" to every late delivery → refused by the per-shop slices: the re-built system
+     loses 0.06–0.11 per request on each held-out shop (build seeds 0–4), which its own calibration, on the same bad
+     labels, cannot see
   3. the same batch again                                  → refused by the failure memory, nothing re-built
 
 then version 1 is rolled back with a reason, and proposing it again is refused as a known failure. The stages (solvi.experimental.changes):
@@ -17,7 +19,8 @@ then version 1 is rolled back with a reason, and proposing it again is refused a
     add up;
   - Canaries.drawn: the confident-error rate on 100 held-out requests drawn per change by the stage's secret, against the
     promise;
-  - RefusalRegression (always on): requests a person marked as must-go-to-a-person stay with a person;
+  - RefusalRegression (always on): requests that must go to a person (here: refunds larger than the order) stay with a
+    person in every version;
   - the order is cheap first (Pipeline(order="cheap_first")), so a candidate the failure memory knows is not re-built.
 
 What is missing for this in the library (on the roadmap): a ready target for a `build` system (here a dozen lines,
@@ -46,6 +49,11 @@ def refund_share(amount, order_total) -> float:
     return amount / order_total
 
 
+@cat.check(hard=True)                                         # false: handed to a person, whatever the data say
+def within_order(amount, order_total) -> bool:
+    return amount <= order_total
+
+
 @cat.fn
 def delivered_late(days_late) -> bool:
     return days_late > 2
@@ -71,13 +79,16 @@ DATA["late_yes"] = DATA["v0"] + [({**s, "days_late": 6}, "yes") for s, _ in
                                  (request(rng, rng.choice(SEEN)) for _ in range(600))]
 HELD = {f"s{g}": [request(rng, g) for _ in range(150)] for g in HELD_OUT}
 POOL = [{"id": f"{g}-{i}", "state": s, "label": y} for g, xs in HELD.items() for i, (s, y) in enumerate(xs)]
+MUST_HAND_OVER = [{**c["state"], "amount": round(c["state"]["order_total"] * rng.uniform(1.05, 2.0), 2)}
+                  for c in POOL[::15]]                        # 20 refunds larger than the order
 QUESTION = Question("refund", "Refund without asking a person?", Answer.yes_no())
 
 
+SEED = 0                                                      # build's seed: the outcomes above hold for 0–4
+
+
 def make(name):
-    # split="shuffle" (the split up to 1.1): the "more data" update below is promoted only on this split and seed —
-    # over seeds 0–4 on 1 of 5 with the shuffle and 0 of 5 with the hash split, the others lose a refusal to the refit
-    return build(QUESTION, DATA[name], catalog=cat, max_risk=0.02, groups="shop", seed=0, split="shuffle")
+    return build(QUESTION, DATA[name], catalog=cat, max_risk=0.02, groups="shop", seed=SEED)
 
 
 class BuildHead:
@@ -131,14 +142,11 @@ def update(data, why):
 
 if __name__ == "__main__":
     head = BuildHead("v0")
-    v0 = head.live
-    # requests a person marked as must-go-to-a-person (here, for the demo: held-out ones version 0 hands over)
-    must_hand_over = [c["state"] for c in POOL if v0.ask(c["state"]).answer is None][:20]
     stages = [KnownFailures(), SliceGuard(slices, tol=0.02, min_n=30),
               Canaries.drawn(honesty, POOL, 100, baseline={"confident_error_rate": 0.02}, tolerance=0.0, perfect=None)]
     with tempfile.TemporaryDirectory() as tmp:
         pipe = Pipeline(stages, Path(tmp) / "changes.jsonl", targets=[head], approval={"update": "gate"},
-                        refusals=must_hand_over, order="cheap_first")
+                        refusals=MUST_HAND_OVER, order="cheap_first")
         for data, why in [("more", "600 more labelled requests"), ("late_yes", "a batch from the late-delivery desk"),
                           ("late_yes", "the same batch, proposed again")]:
             res = pipe.propose(update(data, why))
@@ -146,6 +154,7 @@ if __name__ == "__main__":
             for v in res.verdicts:
                 print(f"    {'ok ' if v.ok else 'NO '} {v.stage}: {v.reason[:110]}")
         print("versions:", [(v["version"], v["in_force"]) for v in pipe.versions()], "live data:", head.name)
-        print("rollback undid:", pipe.rollback(0, by="ops", why="complaints from shop s3"), "live data:", head.name)
-        res = pipe.propose(update("more", "600 more labelled requests"))
-        print("again after the rollback →", res.status, "by", res.stage)
+        if head.name == "more":
+            print("rollback undid:", pipe.rollback(0, by="ops", why="complaints from shop s3"), "live data:", head.name)
+            res = pipe.propose(update("more", "600 more labelled requests"))
+            print("again after the rollback →", res.status, "by", res.stage)
