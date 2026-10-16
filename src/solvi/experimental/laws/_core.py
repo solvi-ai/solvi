@@ -1063,7 +1063,8 @@ class LawSet:
                         read_only: Callable[..., bool] | None = None, cost: Callable[[Any, Any], Any] | None = None,
                         order: str = "split", unique: bool = True, seed: int = 0, tol: float | None = None,
                         same: Callable[[Any, Any], bool] | None = None, assume_one_law: bool = False,
-                        rtol: float | None = None, coverage: str = "warn", max_new: int | None = None) -> Admission:
+                        rtol: float | None = None, coverage: str = "warn", max_new: int | None = None,
+                        noise: float | None = None, level: float = 0.95) -> Admission:
         """Admit one of `candidates` by asking the world where they disagree (CEGIS-style), not by a random held-out
         sample. ask(state, action) → the observation (the environment, or an exact model of it); probes: the (state,
         action) pairs you may ask about (a finite pool; also what the equivalence classes are computed on); safe:
@@ -1128,7 +1129,27 @@ class LawSet:
         uniqueness rule alone on 8 random probes: 0.000 wrong but 0.893 undetermined; 20 random probes with the
         shortest survivor: 0.037 wrong (tests/test_laws_w2.py reruns the 8-check comparison on 150 trials). The
         accepted law records admitted="probes", tested = the number of candidates, support = the rows where it
-        applied, born = "probe"."""
+        applied, born = "probe".
+
+        noise=ε (opt-in; 0 < ε < 0.5): an answer may be wrong — with probability ε it is not the true outcome. One
+        answer then refutes nothing: every hypothesis (the set without a new law, and the set with each candidate)
+        keeps a likelihood — 1 − ε for an answer it predicts, ε / (G − 1) otherwise, G the distinct predictions at that
+        probe — and each class of hypotheses that predict alike on the pool a weight (equal prior per class; within a
+        class the mean likelihood of its members). The next probe is the safe one with the largest expected
+        information gain under that noise (`split(score="eig")`); it may be a probe already asked (a repeat
+        measurement). It stops when one class holds at least `level` of the weight (default 0.95) or the budget of
+        answers is spent; the shortest candidate of that class is accepted when the class is not the set without a new
+        law, else "undetermined". It assumes one law is missing (the witness guard is not used), the noise is
+        independent between answers, and ε is known; `coverage` is not checked and `classes` lists every class (no
+        class is dropped). order="split", unique=True and max_new=None only. Logged `buffer` rows count as answers
+        under the same noise."""
+        if noise is not None:
+            if not 0.0 < float(noise) < 0.5:
+                raise ValueError("noise is the chance an answer is wrong: 0 < noise < 0.5 (None: answers are exact)")
+            if not 0.0 < float(level) < 1.0:
+                raise ValueError("level is a probability strictly between 0 and 1")
+            if order != "split" or not unique or max_new is not None:
+                raise ValueError("noise= takes order='split', unique=True and max_new=None")
         if order not in ("split", "random"):
             raise ValueError(f"order is 'split' or 'random', not {order!r}")
         if max_new not in (None, 1, 2):
@@ -1152,6 +1173,10 @@ class LawSet:
                 cands.append(c)
         pool = list(probes)
         rng = random.Random(seed)
+        if noise is not None:
+            from ._noisy import admit_noisy
+            return admit_noisy(self, cands, ask, pool=pool, safe=safe, budget=budget, buffer=buffer, exclude=exclude,
+                               read_only=read_only, cost=cost, eq=eq, noise=float(noise), level=float(level))
         if max_new == 2:
             from ._versions import admit_up_to_two
             return admit_up_to_two(self, cands, ask, pool=pool, safe=safe, budget=budget, buffer=buffer,

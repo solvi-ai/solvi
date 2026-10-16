@@ -184,7 +184,7 @@ from ._coarse import BackoffBase, OutcomeClass, coarse
 from ._compile import CompiledCheck, check_compiled, load_module
 from ._core import (Admission, Atom, Buffer, CallableProposer, Candidate, Delta, Enumerate, Grammar, Law, LawSet, Proposer,
                     RandomProposer, Step, Transition, Undetermined, sized_level, sized_need)
-from ._probes import Probe, discriminate, split
+from ._probes import Probe, discriminate, eig, split
 from ._rank import (FEATURES, BagOfAtomsRanker, FeatureRanker, HandoverRanker, JointRanker, PriorRanker, RankedProposer,
                     SyntheticTask, atom_features, atom_kind, candidate_features, checks_to, synthetic_task)
 
@@ -195,5 +195,5 @@ __all__ = ["Admission", "Atom", "BackoffBase", "BagOfAtomsRanker", "Buffer", "Ca
            "FEATURES", "FeatureRanker", "Grammar", "HandoverRanker", "JointRanker", "Law", "LawSet", "PriorRanker", "Probe",
            "OutcomeClass", "Proposer", "RandomProposer",
            "RankedProposer", "Step", "SyntheticTask", "Transition", "atom_features", "atom_kind", "candidate_features",
-           "check_compiled", "checks_to", "coarse", "discriminate", "load_module", "sized_level", "sized_need", "split",
+           "check_compiled", "checks_to", "coarse", "discriminate", "eig", "load_module", "sized_level", "sized_need", "split",
            "synthetic_task", "Undetermined"]
