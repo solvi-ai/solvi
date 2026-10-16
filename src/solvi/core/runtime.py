@@ -14,7 +14,7 @@ from dataclasses import dataclass, field
 from json.encoder import encode_basestring as _jstr
 from typing import Any
 
-from .catalog import Decision, Quote, Serial, Unknown, accept, evidence_rows, ground, has_evidence, locate, unwrap, validated
+from .catalog import AnyOf, Decision, Quote, Serial, Unknown, accept, evidence_rows, ground, has_evidence, locate, unwrap, validated
 from .catalog import Claim                                # Claim.extra is recorded (solvi.core.slow.refine.Fail, solvi.core.slow.generate)
 from .provenance import TIMED_OUT, fp_module, model_info
 from .provenance import NOT_GROUNDED, OUTSIDE_OPTIONS, QUOTE_OUTSIDE, catalog_fingerprint, fingerprint, matches
@@ -115,6 +115,8 @@ def _canon(v):
         return {"quote": [_canon(v.value), v.start, v.end, v.source]}
     if isinstance(v, Decision):
         return {"decision": [_canon(v.value), _canon(v.probs)]}
+    if isinstance(v, AnyOf):                      # a label with several right answers
+        return {"any_of": [_canon(x) for x in v.options]}
     if isinstance(v, (list, tuple)):
         return [_canon(x) for x in v]
     if isinstance(v, (set, frozenset)):          # in a fixed order: repr(set) depends on PYTHONHASHSEED

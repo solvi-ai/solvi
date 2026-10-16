@@ -428,11 +428,12 @@ def _calibration_rows(system, question, examples, guard, correct, folds=None, se
                 grp.append(None)
                 continue
             ans = r.answer if r.status == "forced" else guard.would_answer(r)
-            if correct is not None:
+            from ..catalog import label_options
+            if correct is not None:               # a label with several right answers (AnyOf): right if any is
                 import dataclasses
-                right = bool(correct(dataclasses.replace(r, answer=ans), y))
+                right = any(bool(correct(dataclasses.replace(r, answer=ans), o)) for o in label_options(y))
             else:
-                right = vhash(ans) == vhash(q.answer.normalize(y))
+                right = any(vhash(ans) == vhash(q.answer.normalize(o)) for o in label_options(y))
             ok.append(right)
             grp.append(guard.group(r, vals, ans))
             if r.status == "forced":              # a hard check decides: answered whatever the signal
