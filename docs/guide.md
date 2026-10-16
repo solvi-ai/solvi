@@ -117,6 +117,7 @@ pip install "solvi[serve]"     # + fastapi, uvicorn: solvi serve over HTTP
 pip install "solvi[mcp]"       # + the official MCP SDK for solvi serve --mcp (without it, a built-in stdio server is used)
 pip install "solvi[duckdb]"    # + duckdb: stored decisions in a DuckDB file; "solvi[postgres]" for PostgreSQL
 pip install "solvi[lora]"      # + torch, transformers, peft>=0.19: solvi.experimental.lora.adapt_lora, a LoRA adapter per question (experimental)
+pip install "solvi[smt]"       # + z3-solver: narrows / widens proved over a rule's text (solvi.experimental.changes, Consistency(prove=True))
 ```
 
 On x86_64 macOS (Intel), whose last torch is 2.2.2, see [the LoRA page](api/lora.md#install-on-x86_64-macos-intel) for a
@@ -5900,6 +5901,32 @@ res = pipe.propose(Change("person", artifact="update", proposer="ann", reason="t
 res.status, res.stage, res.verdicts          # "promoted" | "rejected" | "held", the stage that decided, every verdict
 pipe.versions(); pipe.rollback(0)            # each promotion is a version; a rollback goes through its target
 ```
+
+### Narrows or widens, proved over the rule's text
+
+Approval holds a widening change for a person, so the direction of a change matters. `Consistency(probes=)` measures
+it on the inputs you list; with the `smt` extra (`pip install "solvi[smt]"`, the z3 solver) `Consistency(prove=True)`
+proves it over the two rules' code for every input:
+
+```python
+from solvi.experimental.changes import Consistency, prove_direction
+
+prove_direction("def ok(amount, country): return amount < 1000 and country in {'DE', 'FR'}",
+                "def ok(amount, country): return amount < 1500 and country in {'DE', 'FR'}")
+# {"proved": "widens", "witness_widens": {"amount": 1000, "country": "DE"}, "sorts": {...}, "ms": ...}
+
+Consistency(prove=True, before=rule_in_force, probes=inputs)   # the candidate's rule: change.code (or change.check)
+```
+
+A rule accepts an input when it returns something that is not a refusal (None, False, a refusal word);
+`outcome="high"` asks about the inputs that get "high" instead. The answer is `"widens"`, `"narrows"`, `"both"` (held
+as widening), `"same"`, or `"unknown"`. The subset proved: comparisons, `and` / `or` / `not`, arithmetic on numbers,
+membership in literal sets, `if` / `else`, local assignments and literal constants. A call, a subscript, a loop or a
+name outside the rule's inputs gives `"unknown"` with the reason, and the stage falls back to the probes. Numbers are
+reals unless `types={"age": int}` says otherwise (`x > 3` and `x >= 4` differ over reals, not over integers). On the
+gallery's rules with every threshold shifted or made strict (`benchmarks/changes_prove.py`), 151 of 526 proofs were
+decided (29 %; the rest read a call or a subscript), at a median of 0.6 ms each, and no witness or random input
+contradicted a decided proof.
 
 ### A labelled update is a candidate change
 
