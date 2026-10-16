@@ -192,6 +192,10 @@ def first_difference(old, new, question=None):
         if ro is not None and rn is not None and (ro.repaired or rn.repaired):
             return {"step": None, "name": "answer:" + question, "old": ro.why, "new": rn.why,
                     "why": "a constraint between answers repaired it"}
+        if ofp.get("combine") and nfp.get("combine") and ofp["combine"] != nfp["combine"]:
+            return {"step": None, "name": "question:" + question, "old": ofp["combine"], "new": nfp["combine"],
+                    "why": f"every step agrees; Catalog(combine=) changed ({ofp['combine']} → {nfp['combine']}): another "
+                           "of the failed hard checks decides"}
         if ofp.get("questions") and nfp.get("questions") and ofp["questions"] != nfp["questions"]:
             return {"step": None, "name": "question:" + question, "old": "", "new": "",
                     "why": "every step agrees; the questions changed (answer type, min_confidence, calibration)"}
@@ -364,7 +368,8 @@ def _reusable(old, system, names, now, qfp, models):
     recorded: the questions' fingerprint (answer types, thresholds, calibration, guards, contracts), the flow it would
     plan now (the same steps), every step's part fingerprint (its code and declarations), and, for every model-backed step
     (or alternative producer) that ran, the model it holds now is the one it used. Anything not recorded makes
-    it False (re-run). Not seen: a non-deterministic or external source, Catalog(combine=), a learned producer policy
+    it False (re-run). With two hard checks or more in the flow, the catalog's combine mode must be the one recorded
+    (a record without it is re-run). Not seen: a non-deterministic or external source, a learned producer policy
     (System(producers="learned") is always re-run)."""
     fp = old.trace.fingerprint or {}
     parts = fp.get("parts")
@@ -381,6 +386,9 @@ def _reusable(old, system, names, now, qfp, models):
         return False
     if any(now["parts"].get(n) != h for n, h in parts.items()) or any(n in now["parts"] and n not in parts for n in steps):
         return False
+    if sum(st.part.kind == "check" and bool(st.part.hard) for st in flow.steps) > 1 and \
+            fp.get("combine") != getattr(system.catalog, "combine", "strictest"):
+        return False                                  # several hard checks: the combine mode (unrecorded before 1.2) decides
     used = {}                                         # (step, producer or None) → the model fingerprints recorded
     for r in old.trace.records:
         if r.model is not None:
@@ -413,9 +421,10 @@ def diff(storage, system, confidence=0.01, limit=None, only=None, *, incremental
     incremental=True: a stored decision is re-run only when something it rests on changed — its questions' fingerprint,
     the flow `system` plans for its input, a part of that flow, or a model one of them holds (see _reusable); the
     others are counted in `reused` and are not asked again (they are loaded and checked as before, so `errors`,
-    `total` and `catalog` are the full diff's). On a deterministic catalog the report is the full diff's; a
-    non-deterministic or external source, a change of Catalog(combine=) alone, or learning from the re-run asks is not
-    seen this way — run the full diff for those.
+    `total` and `catalog` are the full diff's). On a deterministic catalog the report is the full diff's (a change of
+    Catalog(combine=) included: a decision with two hard checks or more is re-run when its recorded mode differs or was
+    not recorded); a non-deterministic or external source, or learning from the re-run asks, is not seen this way —
+    run the full diff for those.
     facts=True: each changed decision also gets "facts": {fact: {"old", "new"}} — the computed facts whose value
     differs (see fact_changes) — and a decision whose facts differ while its answers do not is listed too (with
     "questions": {}). A compact record keeps no facts: it is compared on its answers only."""

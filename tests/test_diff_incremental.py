@@ -169,3 +169,42 @@ def test_diff_says_which_called_function_changed(tmp_path):
     own = diff(store, _module(tmp_path, "m2", CALLER.format(step=1, op="* 2 +")).system())
     whys = {c["questions"]["big"]["first_step"]["why"] for c in own.changed}
     assert whys == {"its own code or declarations changed"}
+
+
+def _two_checks(combine):
+    cat = Catalog(combine=combine)
+
+    @cat.check(hard=True, then={"route": "review"})
+    def small_enough(amount):
+        return amount < 300
+
+    @cat.check(hard=True, then={"route": "reject"})
+    def known(customer):
+        return customer != "blocked"
+
+    @cat.rule("route")
+    def route(amount) -> str:
+        return "approve"
+
+    return System(cat, [Question("route", "Route?", Answer.choice(["approve", "review", "reject"]))])
+
+
+def test_incremental_diff_sees_a_change_of_the_combine_mode(tmp_path):
+    import warnings
+    for seed in range(4):
+        for was, now in (("first", "strictest"), ("strictest", "first"), ("first", "first"), ("strictest", "strictest")):
+            store = JSONLStorage(tmp_path / f"c{seed}{was}{now}.jsonl")
+            s = _two_checks(was)
+            s.storage = store
+            store.catalog = s
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                for st in _states(seed):
+                    s.ask(st)
+                full, inc = diff(store, _two_checks(now)), diff(store, _two_checks(now), incremental=True)
+            _same(full, inc)
+            assert bool(full.changed) == (was != now)        # both checks fail on some states: the mode decides
+            if was == now:
+                assert inc.reused == inc.total
+            for c in full.changed:                           # the why names the mode, not a step
+                assert "Catalog(combine=) changed" in c["questions"]["route"]["first_step"]["why"]
