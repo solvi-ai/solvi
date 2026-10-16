@@ -4659,6 +4659,13 @@ had never been written (`ks.rebuild(skip={x})`). `benchmarks/knowledge/retractio
 grows with the connected component it touches (premise edges and shared keys): there, a retraction touched a component of 6,057 of the 10,000 items at the median and took 0.19 s (rebuilding the whole store: 0.79 s); retractions in small components took about 0 s (Spearman ρ between component size and time 0.88). The store has been
 measured up to 10,000 items, not beyond.
 
+What a conclusion looked at besides its premises — the evidence for the alternatives it did not choose — can be named
+with `add(..., consulted=[...])` (`Knowledge.tell(..., consulted=)`; opt-in). Retracting a consulted item does not
+retract the conclusion (its premises stand) but marks it for review: a hypothesis pending re-test, until
+`retest(id, ok=True)`; `ks.item(id)["consulted"]` lists them. A conclusion whose margin over the losing alternative
+rested on a retracted source is then reviewed instead of staying a fact unnoticed. Such a retraction is not exact in
+the sense above until the re-test: the rebuilt store has no review mark.
+
 A decision is given `ks.snapshot(...)` as a fact: the active items that match (`facts`), the hints (hypotheses, expired
 or stale items, with why), the ids they rest on, the store's fingerprint and its journal position — so the trace shows
 what the memory said, and the decision replays. `ks.redecide(store, retracted, decide)` finds the stored decisions whose
