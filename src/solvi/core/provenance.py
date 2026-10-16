@@ -249,13 +249,33 @@ def _dump(node):
     return repr(node)
 
 
+class _Seen(dict):
+    """The functions on the way of one fingerprint: id → the order it was reached in; `low` is the earliest-reached
+    function that a cycle or a second path ran into ("recursive") below the function being hashed."""
+    low = float("inf")
+
+
+_MEMO_ON = True         # memoise nested code fingerprints within one call (off only to compare with the plain recursion)
+_MEMO = None            # contextvars.ContextVar: {function: (fingerprint, ids it reached)} while a call runs
+
+
+def _memo():
+    global _MEMO
+    if _MEMO is None:
+        import contextvars
+        _MEMO = contextvars.ContextVar("solvi_code_fp_memo", default=None)
+    return _MEMO
+
+
 def code_fingerprint(f, _seen=None):
     """A stable hash of a function's code: its definition's AST (without decorators, docstring, comments, formatting; the
     bytecode when there is no source), the simple values it closes over or reads as module globals (THRESHOLD = 30), and
     the code of the module's own functions it calls. A callable object (a model-backed part such as a decision) is
     identified by its type: its weights are the model's fingerprint. Cached per function: a module constant rebound after
     the first fingerprint is not noticed within the process; a mutable module-level container (dict, list, set) is
-    hashed by its content as first seen in the process (see _global_container)."""
+    hashed by its content as first seen in the process (see _global_container). Within one call (and one
+    catalog_fingerprint) a function the code calls is hashed once and reused wherever the result cannot depend on the
+    path that reached it, so a helper shared by many rules costs one hash."""
     import inspect
     import weakref
     global _CODE
@@ -274,10 +294,39 @@ def code_fingerprint(f, _seen=None):
             return _CODE[f]
     except TypeError:
         top = False
-    seen = _seen if _seen is not None else set()
+    var = _memo()
+    memo = var.get()
+    token = var.set({}) if memo is None and _MEMO_ON else None
+    try:
+        fp = _code_fp(f, _seen if _seen is not None else _Seen(), var.get())
+    finally:
+        if token is not None:
+            var.reset(token)
+    if top:
+        try:
+            _CODE[f] = fp
+        except TypeError:
+            pass
+    return fp
+
+
+def _code_fp(f, seen, memo):
+    """code_fingerprint's recursion. A function reached again on the same way gives "recursive", so a fingerprint can
+    depend on the way that reached it (a cycle, a diamond). The memo keeps one only when it did not: no "recursive" below
+    it pointed above it — then, reached again with none of the functions it reached already on the way, it is the same
+    value, and those functions are marked as reached, as the plain recursion would have marked them."""
     if id(f) in seen:
+        seen.low = min(seen.low, seen[id(f)])
         return "recursive"
-    seen.add(id(f))
+    if memo is not None:
+        hit = memo.get(f)
+        if hit is not None and seen.keys().isdisjoint(hit[1]):
+            for i in hit[1]:
+                seen[i] = len(seen)
+            return hit[0]
+    start, outer_low = len(seen), seen.low
+    seen.low = float("inf")
+    seen[id(f)] = start
     co = f.__code__
     body = _source_ast(f)
     parts = [f.__qualname__, body if body is not None else _bytecode(co)]
@@ -307,11 +356,12 @@ def code_fingerprint(f, _seen=None):
     if f.__defaults__:
         parts.append([_value_fp(v, f, seen) for v in f.__defaults__])
     fp = digest(*parts)
-    if top:
+    if memo is not None and seen.low >= start:
         try:
-            _CODE[f] = fp
+            memo[f] = (fp, [i for i, k in seen.items() if k >= start])
         except TypeError:
             pass
+    seen.low = min(outer_low, seen.low)
     return fp
 
 
@@ -414,7 +464,8 @@ def part_fingerprint(part):
 def catalog_fingerprint(catalog):
     """→ {"fp": the catalog's fingerprint, "parts": {name: fingerprint}} over every part, answer rule ("answer:<question>")
     and constraint ("constraint:<name>"). Cached on the catalog while its parts are the same objects (a part edited in place
-    after that is not noticed: register a new one)."""
+    after that is not noticed: register a new one). A helper that many parts call is hashed once per call (see
+    code_fingerprint)."""
     items = [(n, p) for n, p in catalog.parts.items()] + [(p.name, p) for p in catalog.rules.values()] + \
             [("constraint:" + n, p) for n, p in catalog.constraints.items()]
     combine = getattr(catalog, "combine", "first")
@@ -422,7 +473,13 @@ def catalog_fingerprint(catalog):
     cached = getattr(catalog, "_fp_cache", None)
     if cached is not None and cached[0] == key:
         return cached[1]
-    parts = {n: part_fingerprint(p) for n, p in items}
+    var = _memo()
+    token = var.set({}) if var.get() is None and _MEMO_ON else None   # one memo for every part's code
+    try:
+        parts = {n: part_fingerprint(p) for n, p in items}
+    finally:
+        if token is not None:
+            var.reset(token)
     out = {"fp": digest(sorted(parts.items())) if combine == "first" else digest(sorted(parts.items()), ("combine", combine)),
            "parts": parts}
     catalog._fp_cache = (key, out)

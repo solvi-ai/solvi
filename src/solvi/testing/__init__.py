@@ -92,8 +92,8 @@ class Suite:
         return prep(st) if callable(prep) else st
 
 
-def load(path):
-    """A cases file → Suite. The task is {"task": ...} in the file (relative to it), else task.py next to it."""
+def _read(path):
+    """A cases file → (cases, the task module's path, the "system" factory), without importing the task."""
     path = Path(path)
     data = json.loads(path.read_text())
     if isinstance(data, list):
@@ -104,11 +104,17 @@ def load(path):
     if not task_path.exists():
         raise FileNotFoundError(f"{path}: no task module (put a task.py next to it, or name it: "
                                 "{\"task\": ..., \"cases\": ...})")
-    return Suite(path, cases, load_task(task_path.resolve()), task_path, factory)
+    return cases, task_path, factory
+
+
+def load(path):
+    """A cases file → Suite. The task is {"task": ...} in the file (relative to it), else task.py next to it."""
+    cases, task_path, factory = _read(path)
+    return Suite(Path(path), cases, load_task(task_path.resolve()), task_path, factory)
 
 
 # --------------------------------------------------------------------------------------------------- checking
-STATUSES = ("ok", "regression", "nondeterministic", "timeout", "error", "invalid")
+STATUSES = ("ok", "regression", "nondeterministic", "timeout", "memory", "error", "invalid")
 
 
 @dataclass
@@ -117,8 +123,9 @@ class CaseResult:
     {question: [answer, status]}, the time it took in ms and its `status` — one of STATUSES: "ok"; "regression" (an
     answer, status, safeguard or the trace replay is not what the case expects); "nondeterministic" (the decision is not
     the same when computed again: a step of its trace does not recompute on replay, or a re-run of a failing case — see
-    run_file(reruns=) — gave other answers); "timeout" (it ran longer than run_file(timeout=)); "error" (ask raised, or
-    the case's state could not be prepared); "invalid" (the case itself cannot fail: an unknown key, nothing expected)."""
+    run_file(reruns=) — gave other answers); "timeout" (it ran longer than run_file(timeout=)); "memory" (it needed
+    more than run_file(max_mem=)); "error" (ask raised, the case's state could not be prepared, or its isolated process
+    died); "invalid" (the case itself cannot fail: an unknown key, nothing expected)."""
     name: str
     problems: list = field(default_factory=list)     # one line per mismatch (or the crash)
     answers: dict = field(default_factory=dict)      # question → [answer, status]
@@ -301,14 +308,38 @@ def _run_case(system, case, state, store):
     return out
 
 
-def run_file(path, fuzz_n=0, seed=0, store=False, timeout=None, reruns=0):
+def run_file(path, fuzz_n=0, seed=0, store=False, timeout=None, reruns=0, isolate=False, max_mem=None):
     """Run every case of a cases file → FileResult (with fuzz_n > 0, each case is also fuzzed; crashes are problems).
     store=True: the cases (never the fuzz mutations) are saved to the system's storage, when it has one.
     timeout: seconds each case may take (see run_case; None: no limit). reruns: a failing case is asked that many times
     more, to tell a nondeterministic decision from a regression (see run_case). FileResult.counts() splits the cases by
-    status."""
+    status.
+    isolate=True: each case runs in a fresh Python process (the task is imported and the System built there, never in
+    this process), so a case cannot change another's module state, and a crash of the interpreter or a case stuck in a
+    C call is that case's "error" / "timeout" (the process is killed at the timeout, which counts from when the case
+    starts; no SIGALRM needed) while the next case runs. It costs a process start, the imports and the System's build
+    per case. max_mem (needs isolate=True): the most memory a case's process may use — bytes, or "512M" / "2G" —
+    enforced as its address space (RLIMIT_AS: numpy with a threaded BLAS alone reserves about 1 GB of it), and a case
+    that runs out has status "memory". Where RLIMIT_AS is not enforced (macOS, Windows) the process's peak resident
+    memory is compared with max_mem after the case instead, and a UserWarning says so."""
     path = Path(path)
     out = FileResult(path)
+    if max_mem is not None and not isolate:
+        raise ValueError("max_mem= caps the process a case runs in: it needs isolate=True")
+    if isolate:
+        from ._isolate import parse_mem, run_isolated
+        try:
+            cases = _read(path)[0]
+        except Exception as e:  # noqa: BLE001
+            out.error = f"{type(e).__name__}: {e}"
+            return out
+        cap = parse_mem(max_mem)
+        out.cases, out.error, notes = run_isolated(path, cases, timeout, reruns, store, fuzz_n, seed, cap, CaseResult)
+        if cap and notes:
+            import warnings
+            warnings.warn(f"max_mem is not enforced here ({'; '.join(sorted(notes))}): a case's peak resident memory "
+                          "was checked after it ran instead", UserWarning, stacklevel=2)
+        return out
     try:
         suite = load(path)
         system = suite.system()
@@ -332,9 +363,17 @@ def run_file(path, fuzz_n=0, seed=0, store=False, timeout=None, reruns=0):
     return out
 
 
-def run_path(paths, fuzz_n=0, seed=0, store=False, timeout=None, reruns=0):
+def _isolated_child(req):
+    """The entry point of an isolated case's process (see run_file(isolate=True))."""
+    import sys
+
+    from ._isolate import child
+    child(req, sys.modules[__name__])
+
+
+def run_path(paths, fuzz_n=0, seed=0, store=False, timeout=None, reruns=0, isolate=False, max_mem=None):
     """Every cases file under the paths → [FileResult] (see run_file)."""
-    return [run_file(f, fuzz_n, seed, store, timeout, reruns) for f in find(paths)]
+    return [run_file(f, fuzz_n, seed, store, timeout, reruns, isolate, max_mem) for f in find(paths)]
 
 
 # --------------------------------------------------------------------------------------------------- fuzzing
@@ -426,12 +465,16 @@ def main(argv=None):
                     "seconds and report it as a timeout (POSIX)")
     ap.add_argument("--reruns", type=int, default=0, metavar="N", help="ask a failing case N more times: answers that "
                     "differ make it nondeterministic, not a regression")
+    ap.add_argument("--isolate", action="store_true", help="run each case in a fresh Python process: a crash or a "
+                    "stuck case does not stop the run, and no case sees another's module state")
+    ap.add_argument("--max-mem", default=None, metavar="SIZE", help="with --isolate: the most memory a case's process "
+                    "may use (bytes, or 512M / 2G); a case that needs more fails with status memory")
     ap.add_argument("--json", action="store_true", help="print the results as JSON")
     ap.add_argument("-q", "--quiet", action="store_true", help="print failures and the summary only")
     a = ap.parse_args(argv)
     try:
-        files = run_path(a.paths, a.fuzz, a.seed, a.store, a.timeout, a.reruns)
-    except FileNotFoundError as e:
+        files = run_path(a.paths, a.fuzz, a.seed, a.store, a.timeout, a.reruns, a.isolate, a.max_mem)
+    except (FileNotFoundError, ValueError) as e:
         print(f"solvi test: {e}", file=sys.stderr)
         return 2
     if not files:
@@ -471,7 +514,7 @@ def main(argv=None):
     return 0 if passed == n and not bad_files else 1
 
 
-from ._traces import boundary, cases_from_store  # noqa: E402 — after the runner it builds on
+from ._traces import boundary, cases_from_store, metamorphic, Relation  # noqa: E402 — after the runner it builds on
 
-__all__ = ["boundary", "cases_from_store", "CaseResult", "CaseTimeout", "FileResult", "STATUSES", "find", "fuzz", "is_cases_file", "load", "main", "mutations",
+__all__ = ["boundary", "cases_from_store", "metamorphic", "Relation", "CaseResult", "CaseTimeout", "FileResult", "STATUSES", "find", "fuzz", "is_cases_file", "load", "main", "mutations",
            "run_case", "run_file", "run_path", "Suite"]
