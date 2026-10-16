@@ -144,7 +144,7 @@ started from a failing test built on the reproduction; the numbers are before â†
   thresholds, its dispatcher's slices and the stored dispatcher config move with them. `split="shuffle"` rebuilds 1.1's
   split exactly; `split=(fit, guarantee, dispatch)` shares are still cut from the shuffle. Whether that example's
   notes slice opens to the slow path depends on the calibration sample (2 of 5 seeds under either split); at seed 0
-  with the hash split it goes to a person, and the example says so. The nine-task comparison of `build` with hand-written setups was measured with the shuffle.
+  with the hash split it goes to a person, and the example says so. The benchmark-task comparison of `build` with hand-written setups was measured with the shuffle.
 - A failed `System.guarantee` call keeps the guarantee in force before it: the call still raises its error, a
   `GuaranteeWarning` says the old guarantee stays, and `guard_history` logs the attempt with `"kept"`. Before, the
   failed call had already removed the old guarantee (the question answered unguarded), and a call that failed after
