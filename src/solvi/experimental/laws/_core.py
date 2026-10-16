@@ -1421,7 +1421,8 @@ class LawSet:
         for a in list(buffer._rows):
             rows = buffer._rows[a]
             n = len(rows)
-            counts = Counter(_key(t.observed) for t in rows)
+            ok_ = getattr(self.effects, "outcome_key", None)     # a coarse set (laws.coarse): outcomes by class
+            counts = Counter(_key(t.observed if ok_ is None else ok_(t.observed)) for t in rows)
             if isinstance(self.null, str):
                 null = min(max(min(counts.values()) / n, self.NULL_FLOOR), cap) if n else min(self.NULL_FLOOR, cap)
             else:
