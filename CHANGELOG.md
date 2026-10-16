@@ -1,9 +1,108 @@
 # Changelog
 
-## 1.2.0 — unreleased — fixes from a second external review of 1.1.1
+## 1.2.0 — 2026-10-17 — stricter defaults, mutants for your cases, the extractor without torch
 
-A user ran solvi 1.1.1 through some sixty experiments and sent the defects with reproductions. Each fix below
-started from a failing test built on the reproduction; the numbers are before → after on that reproduction.
+What matters most, in one place (details in the sections below; every number is measured once and said where):
+
+- **Breaking — several failed hard checks:** the strictest `then` answer now decides, not the first declared.
+  `Catalog(combine="first")` restores 1.1; every catalog fingerprint built on the default changes once (a decision stored
+  under 1.1 re-decides against the new default as if made by another catalog); Guard keeps "first".
+- **Breaking — `solvi.build` splits examples by a hash** (`split="hash"`): a refit on more examples leaves the old ones in
+  their share, and a system rebuilt on 1.2 is fitted and calibrated on other examples than 1.1's. `split="shuffle"`
+  rebuilds 1.1's split exactly.
+- **Breaking — drift is watched by default** once the guarantee has 500 calibration examples (`build(monitor="auto")`);
+  after a flag System 1's answers are checked by the slow path or go to a person until `reset_drift()`. `monitor=None`
+  turns it off, `Dispatcher(on_drift="accept")` keeps the old routing.
+- **Breaking — three smaller defaults:** `Certificate`'s alarm bets on breaks of 1.5× and 2× the promise at level 50
+  (`alternatives=None` restores the old alarm); a failed `System.guarantee` call keeps the guarantee in force
+  (`system.guarantee(q, False)` first for the old outcome); `LongSpanExtractor.load` is `backend="auto"` (`backend="torch"`
+  pins it).
+- **Testing:** `solvi mutants PATH` says how many small faults in your catalog your cases would catch;
+  `testing.cases_from_store`, `testing.boundary(system=)` (cases on your thresholds) and `testing.metamorphic`;
+  `solvi test --fast | --isolate --max-mem | --timeout | --reruns` and per-case statuses; `solvi.testing.history`.
+- **The document extractor predicts without torch:** `LongSpanExtractor.load(..., backend="onnx")` on `solvi[onnx]`.
+- **Guarantees:** learn-then-test `procedure="fallback"` answers more at the same promise; `AnyOf` labels with several
+  right answers; `because()` / `missing()` put the branch and the numbers into `why`; a remote model that did not answer
+  is counted as `no_answer`, apart from the model's doubt.
+- **Experimental, all opt-in:** laws that follow a changing stream (`Buffer(window=)`, suspension, noisy probes, history
+  atoms, per-law confidence, two missing laws at once), `AuditWatch`, `ShiftWatch`, `InjectionDetector`, narrows / widens
+  proved with z3, `ShipWatch`, `SliceGuard`, labelled `Shadow`, `System(cache=)`, batch saves, `KnowledgeStore.forget`,
+  a `writers=` registry.
+
+The fixes come from a second external review of 1.1.1: a user ran it through some sixty experiments and sent the defects with
+reproductions. Each fix started from a failing test built on the reproduction; its numbers are before → after on that
+reproduction.
+
+### Changed (breaking)
+
+- **`Certificate`: the alarm now bets on breaks of a stated size** (`alternatives=(1.5, 2)`, level 50;
+  `alternatives=None` restores the old alarm, `alarm=` still sets the level). The detector is the mean of two Bernoulli
+  likelihood-ratio CUSUMs against failure rates 1.5× and 2× the promise (`alternatives=(1.5, 2)`, a standard CUSUM
+  against stated alternatives run in parallel, Lorden 1971, averaged: a mixture e-detector), level 50 (= 5/δ at the
+  default δ 0.1; other δ untested; the level does not follow δ). A multiple with r · promise ≥ 1 is left out (at a
+  promise of 2/3 or more the old alarm is used). The old alarm (bet ½/promise, level 1/δ) is a burst detector whose
+  level must grow as the promise shrinks: it fired on 67–100 % of 3000-outcome streams running at a quarter to a half of
+  the promise. Measured on simulated Bernoulli streams, promises 0.05–0.3, two seed sets: ≤ 1 % false alarms on streams
+  at ≤ half the promise, 100 % of 2×/3× breaks caught, faster than the quietest fixed level of the old alarm per promise
+  in 12 of 16 settings (by hundreds of outcomes at promise 0.05, where that level also misses 14–20 % of 2× breaks) and
+  1–2 outcomes slower in one (promise 0.2, break ×3). That loss was accepted under a tolerance bar (a loss of at most
+  max(3 outcomes, 10 %) counts as none) written after a first run showed it; under the original bar the result is
+  inconclusive. A per-promise k-of-W window counter is faster on 2× breaks at promises ≤ 0.2 (by 44–68 outcomes at 0.05)
+  but alarms far more near the promise. The alarm is a change detector, not a δ-level test: P(an alarm within L
+  outcomes) ≤ L/50 is a bound over a horizon, empty past 50 outcomes, and a unit running exactly at its promise is
+  retired within a few thousand outcomes (43–100 % of 3000-outcome streams); the certification's anytime-valid guarantee
+  is unchanged. The alternatives and the level were chosen on development streams at δ 0.1; i.i.d. streams with step
+  breaks only. `to_dict()` always carries `alternatives`.
+- **The drift monitor is on by default when the guarantee has at least 500 calibration examples.**
+  `build(monitor="auto")` is the new default (`MONITOR_MIN_REFERENCE = 500`); `monitor=None` turns it off,
+  `monitor=True` turns it on at any size. A monitor whose reference is short cries wolf — the known effect of estimated
+  parameters on a CUSUM (Jones, Champ and Rigdon 2004). Measured on four English intent-classification sets (Banking77,
+  HWU64, Bitext customer support and retail banking; a TF-IDF + logistic-regression System 1, no slow path, 100 replays
+  per set and size, streams of 1 000 decisions): with 500 calibration examples as the reference the monitor flagged an
+  unchanged stream in 0–1 % of replays per set (95 % upper bound 3.6–5.4 %) and a planted shift — 30 % of requests from
+  unseen intents — in 89–100 %, a median 17–157 decisions after it began (a dev-tuned window test on mean confidence caught as many, 92–99 %, with
+  0–8 % false flags); on Banking77 and HWU64 part of those catches
+  (33 of 89, 26 of 93) came through the answers given alone, live only because the guarantee answered about 78 % alone
+  there. At 200 examples or fewer both bars failed: 6–24 % false flags on the two Bitext sets, where System 1 is
+  near-certain, and only 59–79 % of shifts caught on Banking77 and HWU64 — 500 is set by both. With the default split
+  that is about 2 000 examples when System 1 is fitted here, 4 000 with a slow path. Below 500 the monitor is off and
+  nothing is said at build or decision time: `explain()` reads «Drift: none: monitor="auto" turns a DriftMonitor on with
+  at least 500 guarantee calibration examples …» and `dispatcher.monitor` is None. Not measured: other shifts (slow
+  drifts, a rise of confidence, new vocabulary), streams beyond 1 000 decisions, other System 1s or a slow path.
+  **Behaviour change** for systems built with ≥ 500 calibration examples: after a flag System 1's answers are checked
+  by the slow path or go to a person until `reset_drift()`; `Dispatcher(on_drift="accept")` keeps the old routing.
+- **Several false hard checks with different `then` answers: the strictest answer decides by default.**
+  `Catalog(combine=None)` behaves as `"strictest"`: the answer that comes last in the question's options decides,
+  whatever the declaration order, with a warning naming the checks; `Catalog(combine="first")` keeps the declaration
+  order (the old default), `Catalog(combine="strictest")` chooses the new rule without the warning; where the options
+  give no order the first declared still decides, with the warning. Fingerprints: the default (and an explicit
+  `"strictest"`) is marked, so every catalog fingerprint built on the default changes once and a decision stored under
+  1.1 replays or re-decides against the 1.2 default as made by another catalog; an explicit `"first"` keeps 1.1's
+  fingerprint (the same rule). The learned hard-check order now waits for every
+  governing check before settling, so its answers match the default order. Options not listed mildest → strictest
+  (e.g. `allow, deny, escalate`) need `combine="first"` or reordered options.
+- Guard keeps its own rule for several failed checks: its catalog sets `combine="first"` (a failed deny policy declared
+  first wins over an escalation, as before); its catalog fingerprint is 1.1's.
+- **`solvi.build` splits the examples by a hash by default** (`split="hash"`, was the seeded shuffle):
+  each example's share (fit, guarantee, dispatcher) is set by a hash of its state (of its group with `groups=`)
+  salted by `seed=`, so a refit on more examples leaves the old ones where they were. A system rebuilt on 1.2 is fitted
+  and calibrated on other examples: on 2,000 refund requests (`examples/24_one_entry_point.py`, 5 seeds, measured once) 40.1–42.1%
+  of the examples change share and 84–89% of the shuffle's calibration examples are replaced; the shares are cut by
+  the hash, so they hold their proportions only approximately (1,449 / 266 / 285 instead of 1,500 / 250 / 250). Its
+  thresholds, its dispatcher's slices and the stored dispatcher config move with them. `split="shuffle"` rebuilds 1.1's
+  split exactly; `split=(fit, guarantee, dispatch)` shares are still cut from the shuffle. Whether that example's
+  notes slice opens to the slow path depends on the calibration sample (2 of 5 seeds under either split); at seed 0
+  with the hash split it goes to a person, and the example says so. The benchmark-task comparison of `build` with hand-written setups was measured with the shuffle.
+- **A failed `System.guarantee` call no longer removes the guarantee in force.** The call still raises its error, a
+  `GuaranteeWarning` says the old guarantee stays, and `System.guard_history` logs the attempt with `"kept"`. Before, the
+  failed call had already removed the old guarantee (the question answered unguarded), and a call that failed after the
+  signal's facts were added left them as required parts of the question. To get 1.1's outcome — no guarantee after a failed
+  call — remove it first: `system.guarantee(question, False)`, then call again. **Behaviour change.**
+- **`LongSpanExtractor.load` defaults to `backend="auto"`.** With torch and transformers installed nothing changes; without
+  them it loads the checkpoint's ONNX export (`solvi[onnx]`) instead of raising. The two backends have different fingerprints
+  (the ONNX file and `tokenizer.json`, not the torch weights), so a decision stored on one backend does not replay as the same
+  model on the other. `backend="torch"` pins 1.1's behaviour (it raises without torch); `backend="onnx"` chooses the export.
+  **Behaviour change** for installs without torch.
 
 ### Fixed
 
@@ -28,7 +127,7 @@ started from a failing test built on the reproduction; the numbers are before �
 - **Knowledge: an item added earlier in a `batch()` reads as present** (it read as retracted, and a fact derived
   from it in the same batch was refused).
 - **Knowledge: loading is linear.** A write re-resolves only the touched items, their derivations and same-key
-  competitors: a 2,000-fact chain 15.8 s → 0.12 s. A derived item's rank no longer depends on the order its premises
+  competitors: a 2,000-fact chain 15.8 s → 0.12 s (measured once on one machine). A derived item's rank no longer depends on the order its premises
   were first written in (fingerprints of affected stores change once).
 - **Laws: a candidate's support and precision are counted on the rows where it would be the applied law**, as its
   net already was: a default whose exceptions are already laws scored 45/55 and was refused at 0.9; now 45/45.
@@ -40,7 +139,7 @@ started from a failing test built on the reproduction; the numbers are before �
 - **Laws: `admit_by_probes` no longer trusts a «too narrow» refutation when more than one law may be missing.**
   Candidates never wrong where they applied are kept as `Admission.witnesses`, and a lone survivor is accepted only
   once the witnesses no longer fit or agree with it. Two-law world (x0 ∨ x1): wrong admissions 29 → 6 of 100;
-  single-law benchmark at 8 checks: right 0.987 → 0.897, never wrong (1.000 at 10 checks). `assume_one_law=True`
+  single-law benchmark at 8 checks: right 0.987 → 0.897, no wrong admission in the trials (1.000 right at 10 checks). `assume_one_law=True`
   keeps the old rule. **Behaviour change.**
 - **Fingerprints ignore later changes of a mutable module-level container** read by a rule: the content first seen
   in the process is hashed, a later change warns once (the fingerprint changed three times while a registry filled).
@@ -57,7 +156,7 @@ started from a failing test built on the reproduction; the numbers are before �
   failed (`failed=False` for the old behaviour); the failure memory compares a keyed item by subject, relation, value,
   kind and change type, so an extra body key (a nonce) no longer makes a rejected rule new. **Behaviour changes.**
 - **experimental.changes: a proposal no longer re-reads the whole journal** — 1.0 → 12.3 ms per proposal over 400
-  proposals before, 0.3 ms flat after. New in-memory `MemoryStorage` (`Pipeline(stages, ":memory:")`).
+  proposals before, 0.3 ms flat after (measured once on one machine). New in-memory `MemoryStorage` (`Pipeline(stages, ":memory:")`).
 - **experimental.changes: `EvaluatorLock.create` takes `seeds=[...]`** and refuses a bad `n` with a clear error.
 - **experimental.changes: `Pipeline.revert(version)` undoes one version in force and only it**; `rollback(v)` undid
   every version after v. A snapshot target (not `independent`) can revert only its newest version in force.
@@ -85,70 +184,6 @@ started from a failing test built on the reproduction; the numbers are before �
   fingerprint. Older records keep the old wording.
 - Example 26 (a build update through the change pipeline) holds on build seeds 0–4 with the default split: a hard check
   sends refunds larger than the order to a person, and those requests are the refusal set.
-
-### Changed (breaking)
-
--  **`Certificate`: the alarm now bets on breaks of a stated size.** The detector is the mean of two Bernoulli
-  likelihood-ratio CUSUMs against failure rates 1.5× and 2× the promise (`alternatives=(1.5, 2)`, a standard CUSUM
-  against stated alternatives run in parallel, Lorden 1971, averaged: a mixture e-detector), level 50 (= 5/δ at the
-  default δ 0.1; other δ untested; the level does not follow δ). A multiple with r · promise ≥ 1 is left out (at a
-  promise of 2/3 or more the old alarm is used). The old alarm (bet ½/promise, level 1/δ) is a burst detector whose
-  level must grow as the promise shrinks: it fired on 67–100 % of 3000-outcome streams running at a quarter to a half of
-  the promise. Measured on simulated Bernoulli streams, promises 0.05–0.3, two seed sets: ≤ 1 % false alarms on streams
-  at ≤ half the promise, 100 % of 2×/3× breaks caught, faster than the quietest fixed level of the old alarm per promise
-  in 12 of 16 settings (by hundreds of outcomes at promise 0.05, where that level also misses 14–20 % of 2× breaks) and
-  1–2 outcomes slower in one (promise 0.2, break ×3). That loss was accepted under a tolerance bar (a loss of at most
-  max(3 outcomes, 10 %) counts as none) written after a first run showed it; under the original bar the result is
-  inconclusive. A per-promise k-of-W window counter is faster on 2× breaks at promises ≤ 0.2 (by 44–68 outcomes at 0.05)
-  but alarms far more near the promise. The alarm is a change detector, not a δ-level test: P(an alarm within L
-  outcomes) ≤ L/50 is a bound over a horizon, empty past 50 outcomes, and a unit running exactly at its promise is
-  retired within a few thousand outcomes (43–100 % of 3000-outcome streams); the certification's anytime-valid guarantee
-  is unchanged. The alternatives and the level were chosen on development streams at δ 0.1; i.i.d. streams with step
-  breaks only. `alternatives=None` restores the old alarm; `alarm=` still sets the level; `to_dict()` always carries
-  `alternatives`.
-- **The drift monitor is on by default when the guarantee has at least 500 calibration examples.**
-  `build(monitor="auto")` is the new default (`MONITOR_MIN_REFERENCE = 500`); `monitor=None` turns it off,
-  `monitor=True` turns it on at any size. A monitor whose reference is short cries wolf — the known effect of estimated
-  parameters on a CUSUM (Jones, Champ and Rigdon 2004). Measured on four English intent-classification sets (Banking77,
-  HWU64, Bitext customer support and retail banking; a TF-IDF + logistic-regression System 1, no slow path, 100 replays
-  per set and size, streams of 1 000 decisions): with 500 calibration examples as the reference the monitor flagged an
-  unchanged stream in 0–1 % of replays per set (95 % upper bound 3.6–5.4 %) and a planted shift — 30 % of requests from
-  unseen intents — in 89–100 %, a median 17–157 decisions after it began; on Banking77 and HWU64 part of those catches
-  (33 of 89, 26 of 93) came through the answers given alone, live only because the guarantee answered about 78 % alone
-  there. At 200 examples or fewer both bars failed: 6–24 % false flags on the two Bitext sets, where System 1 is
-  near-certain, and only 59–79 % of shifts caught on Banking77 and HWU64 — 500 is set by both. With the default split
-  that is about 2 000 examples when System 1 is fitted here, 4 000 with a slow path. Below 500 the monitor is off and
-  nothing is said at build or decision time: `explain()` reads «Drift: none: monitor="auto" turns a DriftMonitor on with
-  at least 500 guarantee calibration examples …» and `dispatcher.monitor` is None. Not measured: other shifts (slow
-  drifts, a rise of confidence, new vocabulary), streams beyond 1 000 decisions, other System 1s or a slow path.
-  **Behaviour change** for systems built with ≥ 500 calibration examples: after a flag System 1's answers are checked
-  by the slow path or go to a person until `reset_drift()`; `Dispatcher(on_drift="accept")` keeps the old routing.
-- **Several false hard checks with different `then` answers: the strictest answer decides by default.**
-  `Catalog(combine=None)` behaves as `"strictest"`: the answer that comes last in the question's options decides,
-  whatever the declaration order, with a warning naming the checks; `Catalog(combine="first")` keeps the declaration
-  order (the old default), `Catalog(combine="strictest")` chooses the new rule without the warning; where the options
-  give no order the first declared still decides, with the warning. Fingerprints: the default (and an explicit
-  `"strictest"`) is marked, so every catalog fingerprint built on the default changes once and a decision stored under
-  1.1 replays or re-decides against the 1.2 default as made by another catalog; an explicit `"first"` keeps 1.1's
-  fingerprint (the same rule). The learned hard-check order now waits for every
-  governing check before settling, so its answers match the default order. Options not listed mildest → strictest
-  (e.g. `allow, deny, escalate`) need `combine="first"` or reordered options.
-- Guard keeps its own rule for several failed checks: its catalog sets `combine="first"` (a failed deny policy declared
-  first wins over an escalation, as before); its catalog fingerprint is 1.1's.
-- **`solvi.build` splits the examples by a hash by default** (`split="hash"`, was the seeded shuffle):
-  each example's share (fit, guarantee, dispatcher) is set by a hash of its state (of its group with `groups=`)
-  salted by `seed=`, so a refit on more examples leaves the old ones where they were. A system rebuilt on 1.2 is fitted
-  and calibrated on other examples: on 2,000 refund requests (`examples/24_one_entry_point.py`, 5 seeds) 40.1–42.1%
-  of the examples change share and 84–89% of the shuffle's calibration examples are replaced; the shares are cut by
-  the hash, so they hold their proportions only approximately (1,449 / 266 / 285 instead of 1,500 / 250 / 250). Its
-  thresholds, its dispatcher's slices and the stored dispatcher config move with them. `split="shuffle"` rebuilds 1.1's
-  split exactly; `split=(fit, guarantee, dispatch)` shares are still cut from the shuffle. Whether that example's
-  notes slice opens to the slow path depends on the calibration sample (2 of 5 seeds under either split); at seed 0
-  with the hash split it goes to a person, and the example says so. The benchmark-task comparison of `build` with hand-written setups was measured with the shuffle.
-- A failed `System.guarantee` call keeps the guarantee in force before it: the call still raises its error, a
-  `GuaranteeWarning` says the old guarantee stays, and `guard_history` logs the attempt with `"kept"`. Before, the
-  failed call had already removed the old guarantee (the question answered unguarded), and a call that failed after
-  the signal's facts were added left them as required parts of the question.
 
 ### Added
 
@@ -179,12 +214,11 @@ started from a failing test built on the reproduction; the numbers are before �
 - **`LongSpanExtractor` predicts without torch** (`solvi[onnx]`: onnxruntime + tokenizers).
   `LongSpanExtractor.load(path_or_id, backend="onnx")` reads the checkpoint's `onnx/model_fp16.onnx` (or `model.onnx`,
   `onnx_file=`) and `tokenizer.json`, and downloads only the JSON files and `onnx/` of a Hugging Face id; windows, "no
-  answer" and span decoding are the torch path's code. `backend="auto"`, the new default of `load`, keeps torch whenever
-  torch and transformers are installed and takes ONNX otherwise (it raised before). `fit`, `save` and `embed` stay on
+  answer" and span decoding are the torch path's code (the default `backend="auto"`: see «Changed (breaking)»).
+  `fit`, `save` and `embed` stay on
   torch and say so. On 50 SQuAD v2 questions the published extract-base's fp16 export gave the same span as torch on all
   50 (largest span-score difference 0.0035). `tools/export_onnx.py` now writes a folder this backend loads (`onnx/` and
   the tokenizer files) and compares through it, with the largest logit difference.
-
 - **Laws (experimental): `Buffer(window=N)`, `LawSet(recent=M, readmit="grown")`, `LawSet(memo=True)`,
   `LawSet.proposals`** (opt-in; defaults unchanged). A windowed buffer keeps its last N rows and scores exactly as a
   fresh buffer of them; the sized rule's N never decreases when rows leave, and a candidate counts again once the window
@@ -226,9 +260,11 @@ started from a failing test built on the reproduction; the numbers are before �
   fresh observations where it would apply, and comes back when they bear it out (precision ≥ min_precision and a
   binomial test against its null), its running counts reset; `doubt_probe` names a probe where the suspended law and the
   set disagree. On synthetic streams where a rare law (4 % of rows) stops holding for 1,000 rows and returns, a returning
-  law comes back ~6× sooner than the best retire-and-readmit setting (40 vs 263 rows; ratio 0.15 [0.14, 0.17], 75
-  streams, faster on all 75); the default also re-learns it, slower (275 rows). False admissions 1 against 2 in 200
-  streams (too few to call a difference; 0 by reactivation), no revival of a law whose effect had changed for good, and
+  law comes back ~6× sooner than the best retire-and-readmit setting that kept false admissions at the cap (40 vs 263
+  rows; ratio 0.15 [0.14, 0.17], 75 streams, faster on all 75; at most 0.25 against every simple-baseline setting tried —
+  a faster-forgetting window baseline returned in ~160 rows on the tuning streams but with 4–24 false admissions per 80
+  streams); the default also re-learns it, slower (275 rows). False admissions 1 against 2 in 200 streams (too few to
+  call a difference; 0 by reactivation); no arm, the default included, revived a law whose effect had changed for good;
   prequential accuracy unchanged (+0.0014). m was tuned on this world (m = 5); the default m = 10 is the more
   conservative setting. A law whose states the agent stops visiting (a dead end) is not handled. A known mechanism
   (stored concepts re-examined on recent fit).
@@ -254,7 +290,7 @@ started from a failing test built on the reproduction; the numbers are before �
   law as exact (2,372 of 2,985 were not). The confidence is an estimate, not a bound: there is no risk guarantee, and
   thresholds come from your own data. Exact-safety was measured on laws with at least 191 rows; at the default 60 rows a
   law right on 97 % of its rows is flagged exact about 1 time in 5.
--  **`solvi.experimental.audit.AuditWatch`** (opt-in): a Bernoulli CUSUM on a check run on a random share of decisions
+- **`solvi.experimental.audit.AuditWatch`** (opt-in): a Bernoulli CUSUM on a check run on a random share of decisions
   (`Dispatcher(audit=)`), its threshold simulated with the share and the reference's sampling error — a known method
   (continuous sampling inspection with a proportion CUSUM) packaged for a check that is otherwise bought only where the
   system is unsure. Measured once on an intent-routing stream (100 replays): with the check's failure rate rising from
@@ -269,11 +305,8 @@ started from a failing test built on the reproduction; the numbers are before �
   against shuffled gold — within each question, gold permuted across cases, N seeded permutations averaged, no extra
   system calls — reported as `control` with the same metric names and `discriminates` (real confident_error_rate at
   least 0.05 below the control's and at most half of it; questions with one gold in every case are listed as
-  `uncontrolled`). `solvi.testing.honesty.control(rows)`. On the core set: 4.9% real against 54% control.
-- `Catalog(combine="strictest")` (opt-in): when several hard checks governing a question fail, the strictest
-  `then` answers; a warning names conflicting failed checks under the default «first declared decides»
-  (`combine="first"` explicitly: no warning). The default flips for ordered answers in this release (see «Changed
-  (breaking)»).
+  `uncontrolled`). `solvi.testing.honesty.control(rows)`. On the core set (one run of `solvi honesty --control`): 4.9% real against 54% control.
+- `Catalog(combine=)`: `"strictest"` (the default) or `"first"` (1.1's rule); see «Changed (breaking)».
 - `Catalog.check(family=, shares_call_with=)` and `solvi check` warnings `check_shares_call` / `checks_one_family`:
   a check that re-reads another part's model call agrees with it whatever it says.
 - `NumericDrift` monitor over any numeric stream (residuals, latencies) and `Cusum.calibrate(ref_n=)`.
@@ -282,7 +315,7 @@ started from a failing test built on the reproduction; the numbers are before �
 - `solvi test` case statuses (ok, regression, nondeterministic, timeout, error, invalid), `run_file(timeout=,
   reruns=)`, `--timeout` / `--reruns`.
 - Stored full records keep the skipped catalog parts grouped (`flow.skipped_rest`, `flow.skipped_by`): a 302-part
-  catalog record 13.5 kB → 2.9 kB; loading with the catalog restores `flow.skipped`; an older solvi reading a new
+  catalog record 13.5 kB → 2.9 kB (measured once); loading with the catalog restores `flow.skipped`; an older solvi reading a new
   record sees an empty `flow.skipped`.
 - Knowledge: `retract(id, only_from=writer)`, `retract_source(writer)`; `redecide(..., upto="now")`.
 - Laws: `acceptance="sized"|"fixed"|"exact"` (few-shot: 0/20 → 20/20 learned with `"exact", min_support=2`),
@@ -299,12 +332,13 @@ started from a failing test built on the reproduction; the numbers are before �
   splitting, no automatic switch). New `Shadow(slice_of=, alpha=0.05, max_slices=20, correct=, max_pending=10_000)`,
   `shadow.labels`, `shadow.harm`. A candidate wrong on every discordant pair is halted after 10 of them; harm confined to
   one of two slices (overall e-value 0.03) is halted in that slice; under the null 3.1 % of 2,000 runs × 1,000 pairs
-  halt (bound 5 %).
+  halt (bound 5 %; a one-off simulation, not in the repo).
 - `experimental.changes.ShipWatch` / `pipe.watch(version, promise)` (opt-in): a post-ship watch keeps, per declared
   slice, a test martingale against that slice's promised failure rate on the change's own outcomes and reverts only the
   watched version when one slice's evidence reaches slices/α; a change that keeps every promise is reverted with
   probability at most α, at any time. Synthetic test (four slices, a 5 % slice raised from 5 % to 30 % failure, promise
-  10 %, α 0.05): 60 of 60 harmful rollouts reverted, 0 of 60 clean ones, 14 of 600 at exactly the promise; no
+  10 %, α 0.05): 60 of 60 harmful rollouts reverted, 0 of 60 clean ones, 14 of 600 at exactly the promise; a milder harm (that slice at 20 %, twice the promise) was
+  reverted in 44 of 60 within the horizon; no
   detection-delay edge over a mean-with-tolerance rule checked after every outcome (which reverted 22 of 60 clean
   rollouts). `outcome="loss"` for a numeric loss in [0, 1].
 - `experimental.changes.SliceGuard(measure, original=None, tol=0.02, cumulative_tol=None, alpha=0.05, min_n=30,
@@ -331,7 +365,7 @@ started from a failing test built on the reproduction; the numbers are before �
   store's mode for one response.
 - Stores: `with store.batch():` and `store.save_many(responses, metas=None)` — `JSONLStorage` takes its locks and
   writes the head (and, with `fsync=True`, syncs) once per batch; the SQL stores commit once per batch and roll it back
-  on an exception. 1,000 small asks: JSONL 2,496 → 3,048 asks/s, SQLite 1,853 → 2,687. Single saves unchanged; the
+  on an exception. 1,000 small asks: JSONL 2,496 → 3,048 asks/s, SQLite 1,853 → 2,687 (measured once on one machine). Single saves unchanged; the
   stores' thread locks are reentrant.
 - `Dispatcher(audit=rate)` (opt-in) marks a random share of decisions for labelling (`Dispatched.audit`, `"audit":
   true` in the record); `teach` / `save_correction(label_source="audit", of=)` stores a label of a marked decision only;
@@ -369,7 +403,7 @@ started from a failing test built on the reproduction; the numbers are before �
   roles user / assistant / system only. Off by default; the channel trusts the client.
 - `experimental.compile.sandbox.run_many(sources, driver, payload)` runs many modules in one subprocess, each with its
   own CPU and wall-time limit and result; a module that ends the process is reported as a crash and the rest run in a
-  fresh subprocess. 20 trivial modules: 5.1 ms a module vs 106 ms for one `run` each.
+  fresh subprocess. 20 trivial modules: 5.1 ms a module vs 106 ms for one `run` each (measured once on one machine).
 - `benchmarks/baseline.json` and `tests/test_benchmark_bars.py` (`-m slow`): bars for `drift_simulation.py`,
   `journal_size.py` and `ask_overhead.py` (speed as ratios within one run).
 - Docs: best practices gain the remaining notes of the review (weighted checks of another family, re-derivation as a
@@ -397,14 +431,16 @@ started from a failing test built on the reproduction; the numbers are before �
   on AgentDojo: a right list (reference solution plus read tools) cut attack success 0.33 → 0.07 at equal utility; a
   keyword-rule list 0.33 → 0.11 at −3.4 points of utility.
 - ROADMAP: measured verdicts for the 1.2 checks — correlation-aware combination, a hierarchical calibrator, numeric
-  formula laws, Guard taint per message and `effect=`, an escalation queue ranked by value and a promise-free
-  Certificate alarm level were measured and not merged (reasons in the ROADMAP).
+  formula laws, Guard taint per message and `effect=`, an escalation queue ranked by value and a single promise-free
+  level for the old Certificate alarm (none exists: the quietest admissible level is 300 at a promise of 0.2–0.3, 1,000 at
+  0.1 and 3,000 at 0.05, where it misses breaks — the bet was redesigned instead, see «Changed (breaking)») were measured
+  and not merged (reasons in the ROADMAP).
 - Best practices: votes of one model family are not independent (naive product ECE 0.118 against 0.026 with one tuned
   temperature); order questions to a person by how many items an answer unblocks, not first-in-first-out (about 4×
   more resolved per answer); raise `Certificate`'s `alarm=` for long streams, by the promise; a fitted injection
   detector holds on the family it was fitted on; a regime change can raise confidence as well as lower it.
 - **Knowledge store: `tick` re-resolves only the items whose expiry can flip** (an index of each item's deadlines),
-  not every item with `reconfirm_after`: 100 ticks over 10,000 such items took 16.4 s, now 0.001 s. A property test
+  not every item with `reconfirm_after`: 100 ticks over 10,000 such items took 16.4 s, now 0.001 s (measured once on one machine). A property test
   compares the store with a full re-resolution after every write on 60 random histories.
 - **`Knowledge.value(snapshot, s, r, valid_at=t)`** reads only a fact whose validity covers `t` (a fact told without
   `valid` holds at any time); without it, unchanged (the first matching row, which on a key with several validity
@@ -412,7 +448,7 @@ started from a failing test built on the reproduction; the numbers are before �
   before this change has no `"valid"` in its rows; `redecide` may list such a decision as changed once (its answer is
   re-run and compared, so a same answer lands in "justification only").
 - **`TraceStorage.verify(deep=False)`** (and `verify_segments(deep=False)`) skips re-checking each stored response
-  against its own summary and keeps every chain check; default unchanged. Measured 1.15–1.41× faster on 5,000 small
+  against its own summary and keeps every chain check; default unchanged. Measured once on one machine: 1.15–1.41× faster on 5,000 small
   records (JSONL / SQLite, full / compact), about 1.15× on 41 KB records — reading and re-hashing each record is the
   larger cost, and no mode skips it.
 - **`SliceGuard(pin_file=..., pinned=...)` (experimental, opt-in):** the original version's per-slice losses kept in a
@@ -421,7 +457,7 @@ started from a failing test built on the reproduction; the numbers are before �
   steps of +0.012 on a 40-case slice went 7 of 8 through (+0.084) without the file, and stop at +0.036 with it.
 - Code fingerprints: a function that many rules call is hashed once per `catalog_fingerprint` call instead of once per
   rule that reaches it (the values are unchanged, golden fingerprints included); a catalog of 200 rules over a
-  30-helper chain fingerprints 26.6× faster cold (0.80 s → 0.030 s).
+  30-helper chain fingerprints 26.6× faster cold (0.80 s → 0.030 s, measured once on one machine).
 - `testing.boundary(system=)` cuts numbers at the constants the rules compare them with (`amount >= 100` → 99, 100,
   101; the nearest floats around a float constant; module and closure constants read too); `thresholds=` gives them by
   hand or turns them off. New edge values: a huge negative number, a long list and a long set of distinct values, a
@@ -442,7 +478,6 @@ started from a failing test built on the reproduction; the numbers are before �
   argument, gets the injection checks). `sign_message(text, sender, key)` / `signed_messages(keys, max_age=None)` give
   HMAC signatures in the message's `"signature"` field; `Session.add(..., signature=)` and the MCP proxy's context
   channel carry them. Opt-in; without it nothing changes.
-
 - System report: forced answers are split (`forced_split`) into changed by the check, the same without it, and not
   known (`early_exit=True`, the default, skips the question's own answer, so the record has nothing to compare;
   `System(early_exit=False)` records it).
@@ -507,13 +542,11 @@ started from a failing test built on the reproduction; the numbers are before �
   and at 8 probes undetermined in 97.5 % — give it 12 or more. At most two missing laws; `coverage` is not checked;
   the pair space is quadratic in the candidates. `Admission.laws` lists every accepted law. Default `max_new=None`
   unchanged.
-
 - `TraceStorage.query(run=...)` (JSONL and SQL stores) finds the decisions written inside `run_context(run)`; the
   `run_context` docstring shows how to carry the run into a thread pool (`contextvars.copy_context()`).
 - `run_file(fast=True)` / `run_path(fast=True)` / `solvi test --fast`: cases decided without the record keeping and the
-  replay check (1,000 cases of a small catalog: 0.09 s against 0.33 s); safeguard cases are still asked in full; not with
+  replay check (1,000 cases of a small catalog: 0.09 s against 0.34 s); safeguard cases are still asked in full; not with
   `store=True`.
-
 - **Learn-then-test: two sequential procedures for the threshold grid, `calibrate(..., procedure="fallback")` and
   `procedure="fixed"`** (also `System.guarantee(..., procedure=)`, `ltt_threshold(procedure=)`,
   `solvi.core.calibration.ltt_certified`; opt-in, the default Bonferroni unchanged). The same promise — error among the
