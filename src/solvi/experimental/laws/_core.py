@@ -371,6 +371,7 @@ class Law:
     null: float | None = None
     admitted: str = "test"
     recent: Any = field(default=None, repr=False)      # the last observations (1 right, 0 wrong) with LawSet(recent=)
+    doubt: Any = field(default=None, repr=False)       # suspended: the last observations where it would apply
 
     def holds(self, true: Iterable[str]) -> bool:
         t = set(true)
@@ -470,6 +471,11 @@ class CallableProposer:
 
 
 # ───────────────────────────────────────────── the sized acceptance
+def _binom_tail(n: int, k: int, p: float) -> float:
+    """P[Binomial(n, p) ≥ k]."""
+    return sum(math.comb(n, j) * p ** j * (1 - p) ** (n - j) for j in range(max(0, k), n + 1))
+
+
 def sized_level(tested: int, delta: float, space: int | None = None) -> float:
     """The error level one candidate is tested at when `tested` candidates have been scored on the buffer: δ / space
     when you declared the number of candidates you will test (`space`, Bonferroni; valid while tested ≤ space), else
@@ -643,7 +649,17 @@ class LawSet:
     held-out rows), so a law right on 1,000 rows needs about 250 wrong ones before it falls below 0.8 after the world
     changes; a number M — once a law has M observations since its acceptance, only the last M count (pair it with
     `Buffer(window=)` on a stream whose laws change). memo: keep scores until the buffer or the active laws change
-    (`memo_hits`)."""
+    (`memo_hits`).
+
+    on_fall: what happens to a law whose running precision falls — "retire" (the default) or "suspend" (opt-in): it
+    leaves the active laws but stays a candidate in `suspended`, status "suspended". Each later observation where its
+    condition holds (no more specific active law applying, not from its birth group) goes into its own window of the
+    last `reactivate_min` (default 10) such observations; when the window is full, its precision is at least
+    min_precision and P[Binomial(m, null) ≥ hits] ≤ delta (null: the law's own null from its test, else 0.5), it is
+    reactivated (`reactivated` counts) with its running counts reset — judged on fresh observations only, not on the
+    buffer that retired it. `doubt_probe(probes)` names a probe where a suspended law and the set disagree (to ask
+    the world, then `step` it). At most `suspended_cap` (default 50) are kept; the oldest is then retired. The test may
+    also accept the same law again (it leaves `suspended` then). `suspend(law)` / `reactivate(law)` by hand."""
 
     def __init__(self, grammar: Grammar, *, base: Callable | None = None, apply: Callable | None = None,
                  effects: Callable | None = None, proposer: Proposer | None = None, min_support: int = 5,
@@ -652,7 +668,8 @@ class LawSet:
                  null: str | float = "base", disagree: str = "first", support_on: str = "applied",
                  readmit: str = "any", acceptance: str | None = None, confirm: Callable | None = None,
                  ties: str = "earlier", tol: float | None = None, rtol: float | None = None,
-                 same: Callable[[Any, Any], bool] | None = None, recent: int | None = None, memo: bool = False):
+                 same: Callable[[Any, Any], bool] | None = None, recent: int | None = None, memo: bool = False,
+                 on_fall: str = "retire", reactivate_min: int = 10, suspended_cap: int = 50):
         if disagree not in ("first", "abstain"):
             raise ValueError(f"disagree is 'first' or 'abstain', not {disagree!r}")
         if not 0.0 < float(delta) < 1.0:
@@ -696,6 +713,13 @@ class LawSet:
             raise ValueError(f"recent is None or a number of observations ≥ retire_min ({self.retire_min})")
         self.recent = int(recent) if recent is not None else None
         self.memo = bool(memo)
+        if on_fall not in ("retire", "suspend"):
+            raise ValueError(f"on_fall is 'retire' or 'suspend', not {on_fall!r}")
+        if int(reactivate_min) < 1 or int(suspended_cap) < 1:
+            raise ValueError("reactivate_min and suspended_cap are numbers ≥ 1")
+        self.on_fall, self.reactivate_min, self.suspended_cap = on_fall, int(reactivate_min), int(suspended_cap)
+        self.suspended: list[Law] = []     # on_fall="suspend": fallen laws kept as candidates (most recent last)
+        self.reactivated = 0
         self.memo_hits = 0
         self._memo: dict = {}
         self._memo_at = None
@@ -1416,6 +1440,13 @@ class LawSet:
                          laws=[law])
 
     def _accept(self, c, *, born, support=0, hits=0, net=0, sources=()):
+        if self.suspended:
+            k = (_key(c.action), tuple(c.condition), _key(c.effect))
+            for x in [x for x in self.suspended if (_key(x.action), x.condition, _key(x.effect)) == k]:
+                self.suspended.remove(x)
+                x.status = "retired"
+                x.why = "accepted again by the test"
+                self.retired.append(x)
         self._seq += 1
         law = Law(id=f"law-{self._seq}", action=c.action, condition=tuple(c.condition), effect=c.effect,
                   support=support, hits=hits, precision=(hits / support) if support else None, net=net, born=born,
@@ -1449,7 +1480,7 @@ class LawSet:
                 if gone is None:
                     break
                 h, n = self.running(gone)
-                self.retire(gone, why=f"held-out precision {h}/{n} below {self.retire_below}")
+                self._fall(gone, why=f"held-out precision {h}/{n} below {self.retire_below}")
                 retired.append(gone)
         self._stamp(retired, self._clock(buffer))
         return retired
@@ -1468,7 +1499,16 @@ class LawSet:
 
     def observe(self, t: Transition) -> list[Law]:
         """Count a transition against the law applied to it (unless it comes from the law's birth group) and retire
-        the law if its running precision fell → the retired laws."""
+        the law if its running precision fell → the retired laws (on_fall="suspend": suspended). Suspended laws whose
+        condition holds count it in their window and may be reactivated (after the active laws have counted it; a law
+        this transition suspends does not count it)."""
+        before = list(self.suspended) if self.suspended else None
+        out = self._observe_active(t)
+        if before:
+            self._doubt(t, before)
+        return out
+
+    def _observe_active(self, t: Transition) -> list[Law]:
         law = self.applied(t.state, t.action)
         if law is None or (law.born is not None and _key(t.group) == _key(law.born)):
             return []
@@ -1481,12 +1521,90 @@ class LawSet:
             law.recent.append(hit)
         if self._falls(law):
             h, n = self.running(law)
-            self.retire(law, why=f"held-out precision {h}/{n} below {self.retire_below}")
+            self._fall(law, why=f"held-out precision {h}/{n} below {self.retire_below}")
             return [law]
         return []
 
+    def _fall(self, law: Law, *, why: str | None = None):
+        if self.on_fall == "suspend":
+            self.suspend(law, why=why)
+        else:
+            self.retire(law, why=why)
+
+    def suspend(self, law: Law, *, why: str | None = None):
+        """Take a law out of use but keep it as a candidate (`suspended`), re-checked on later observations."""
+        if law in self.laws:
+            self.laws.remove(law)
+            self._laws_version += 1
+        if law in self.suspended:
+            return
+        law.status, law.why = "suspended", why
+        law.doubt = deque(maxlen=self.reactivate_min)
+        self.suspended.append(law)
+        self._stamp([law], None)
+        while len(self.suspended) > self.suspended_cap:
+            old = self.suspended.pop(0)
+            old.status = "retired"
+            self.retired.append(old)
+
+    def reactivate(self, law: Law):
+        """Put a suspended law back in use, its running counts reset (judged from here on)."""
+        if law not in self.suspended:
+            return
+        self.suspended.remove(law)
+        law.status, law.why = "active", None
+        law.n, law.hits_after, law.held, law.recent, law.doubt = 0, 0, (0, 0), None, None
+        self.laws.append(law)
+        self.laws.sort(key=self._order)
+        self._laws_version += 1
+        self.reactivated += 1
+
+    def _doubt(self, t: Transition, laws: list):
+        true = None
+        k = _key(t.action)
+        for law in laws:
+            if law not in self.suspended:
+                continue
+            if _key(law.action) != k or (law.born is not None and _key(t.group) == _key(law.born)):
+                continue
+            if true is None:
+                true = set(self.grammar.true(t.state, t.action))
+            if not law.holds(true):
+                continue
+            if any(_key(x.action) == k and len(x.condition) > len(law.condition) and x.holds(true)
+                   for x in self.laws):
+                continue
+            law.doubt.append(int(self.agrees(self.apply(law.effect, t.state), t.observed)))
+            m = len(law.doubt)
+            if m < self.reactivate_min:
+                continue
+            h = sum(law.doubt)
+            null = law.null if law.null is not None else 0.5
+            if h >= self.min_precision * m and _binom_tail(m, h, null) <= self.delta:
+                self.reactivate(law)
+
+    def doubt_probe(self, probes: Iterable[tuple[Any, Any]], safe: Callable[[Any, Any], bool] | None = None, *,
+                    read_only: Callable[..., bool] | None = None, cost: Callable[[Any, Any], Any] | None = None):
+        """(law, Probe) for the most recently suspended law that some safe probe tells apart from the set (`split`
+        over the set and the set with that law back), or None. Ask the world there and `step` the answer: it goes into
+        the law's window."""
+        from ._probes import split
+        pts = list(probes)
+        for law in reversed(self.suspended):
+            h = self.hypothesis(Candidate(law.action, law.condition, law.effect))
+            p = split([lambda s, a: self.predict(s, a, disagree="first"), h], safe or (lambda s, a: True), pts,
+                      read_only=read_only, cost=cost)
+            if p is not None:
+                return law, p
+        return None
+
     def retire(self, law: Law, *, why: str | None = None):
         """Take a law out of use (kept in `retired` with the reason)."""
+        if law in self.suspended:
+            self.suspended.remove(law)
+            law.status, law.why = "retired", why
+            self.retired.append(law)
+            return
         if law in self.laws:
             self.laws.remove(law)
             self._laws_version += 1
