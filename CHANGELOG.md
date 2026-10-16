@@ -144,7 +144,7 @@ started from a failing test built on the reproduction; the numbers are before �
   thresholds, its dispatcher's slices and the stored dispatcher config move with them. `split="shuffle"` rebuilds 1.1's
   split exactly; `split=(fit, guarantee, dispatch)` shares are still cut from the shuffle. Whether that example's
   notes slice opens to the slow path depends on the calibration sample (2 of 5 seeds under either split); at seed 0
-  with the hash split it goes to a person, and the example says so. The task-stand comparison of `build` with hand-written setups was measured with the shuffle.
+  with the hash split it goes to a person, and the example says so. The nine-task comparison of `build` with hand-written setups was measured with the shuffle.
 - A failed `System.guarantee` call keeps the guarantee in force before it: the call still raises its error, a
   `GuaranteeWarning` says the old guarantee stays, and `guard_history` logs the attempt with `"kept"`. Before, the
   failed call had already removed the old guarantee (the question answered unguarded), and a call that failed after
@@ -294,7 +294,7 @@ started from a failing test built on the reproduction; the numbers are before �
 - `experimental.changes.ShipWatch` / `pipe.watch(version, promise)` (opt-in): a post-ship watch keeps, per declared
   slice, a test martingale against that slice's promised failure rate on the change's own outcomes and reverts only the
   watched version when one slice's evidence reaches slices/α; a change that keeps every promise is reverted with
-  probability at most α, at any time. Synthetic stand (four slices, a 5 % slice raised from 5 % to 30 % failure, promise
+  probability at most α, at any time. Synthetic test (four slices, a 5 % slice raised from 5 % to 30 % failure, promise
   10 %, α 0.05): 60 of 60 harmful rollouts reverted, 0 of 60 clean ones, 14 of 600 at exactly the promise; no
   detection-delay edge over a mean-with-tolerance rule checked after every outcome (which reverted 22 of 60 clean
   rollouts). `outcome="loss"` for a numeric loss in [0, 1].
