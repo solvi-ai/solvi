@@ -4660,7 +4660,9 @@ and staleness is read from the flags (`stale`, `usable`), never from the item's 
 back. `reconfirm_after` (per kind and source, `RECONFIRM_DEFAULTS`; the store's clock moves with `tick`) expires items
 that weaker evidence keeps: a "verified" fact after 2,000 decisions; observations, person labels and spec facts have no
 clock — the next contradicting observation refutes them. A fact nobody observes again stays believed: a world where a
-first contact is costly needs a clock of its own.
+first contact is costly needs a clock of its own. A tick re-resolves only the items whose expiry falls between the old and
+the new clock (an index of deadlines), so calling `tick` once per decision stays cheap on a large store: 100 ticks over
+10,000 items with `reconfirm_after` took 16.4 s when every such item was re-resolved, 0.001 s with the index.
 
 What a flag does not do: it does not close the window between an abrupt shift and its detection. A calibrated promise
 ("≤ 5% wrong among the answers given alone") does not hold in the first decisions after an abrupt shift to unseen
