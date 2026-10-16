@@ -3405,6 +3405,11 @@ Which promise each method makes, for inputs like the calibration examples (the s
 | `"ltt"` (learn-then-test) | `max_error=e` | the error **among the answers given alone** ≤ e, with probability ≥ 1 − delta over the calibration set |
 | `"empirical"` | `max_error=e, method="empirical"` | none: the error among the answered was ≤ e on the calibration examples only |
 
+`procedure=` chooses how learn-then-test spends delta over its ≤ 64 thresholds: `"bonferroni"` (default, delta / 64
+each), `"fixed"` (from the top down at the full delta, stop at the first failure) or `"fallback"` (from the top down,
+half of delta on the first threshold and half over the rest, a certified threshold passing its level on). The promise
+is the same; the sequential ones usually answer more — the numbers are in the best-practices page.
+
 Which one to use: "≤ 5% of the answers we give are wrong" is `max_error=` (learn-then-test). `max_risk=` is the cheaper
 promise and the weaker one when most inputs are easy: when most pairs are non-matches, "1% of all pairs" can be met
 while a predicted match given alone is wrong far more often — `groups="answer"` puts the promise inside each answer. groups also takes a fact name, a hierarchy or a function of facts, as `act_guard` does.

@@ -95,6 +95,18 @@ while the confidence answered 14% of dev ([cuad/solution.py](../benchmarks/tasks
 we answer is wrong" and `max_risk=` for "≤ r of all inputs": on a stream of mostly easy non-matches the risk held overall
 while the matches an LLM gave alone were wrong far more often — `groups="answer"` puts the promise inside each answer.
 
+**Take `procedure="fallback"` for a learn-then-test promise; keep the default when you want the realised error far
+below delta.** The default tests every one of up to 64 thresholds at delta / 64; the fallback tests them from the top
+down and lets a certified threshold pass its level on, at the same promise. On five intent classifiers (CLINC150,
+Banking77; max-probability scores; delta = 0.1; error targets 1–10 %; 300 or 1,000 calibration examples) it answered
++0.10 more of the inputs on average than the default (+0.03 to +0.18 per classifier), never less in any cell, and
+broke the promise in at most 5 % of calibration draws (the default: 0.2 % — it is far more conservative than its
+delta). `procedure="fixed"` answers a little more — the fallback's price against it is −0.028 of the inputs pooled,
+−0.055 at 300 examples and ≈ 0 at 1,000 — but can answer less than the default when a wrong case sits among the first
+ones answered (3 of 40 cells, down to −0.08); take it only where e × n is about 3 or less (1 % at 300 examples), where
+the fallback certifies nothing. Both need the error to fall with the score: on a signal where it does not, the descent
+spends delta at the top and the default is the better choice. Measured on max-probability scores and delta = 0.1 only.
+
 **Size thresholds for inputs the decider has no answer for — when new kinds can come.** New kinds of input break every
 promise calibrated without them: on a Banking77 stream where 40% of the requests come from 20 unseen intents after
 request 1,000, a "≤ 5% wrong" threshold calibrated without them gave 16.4% wrong after the shift; an `OpenSetGate`

@@ -215,14 +215,17 @@ def ltt_certified(k, m, error, delta, procedure="bonferroni", min_support=1, *, 
     with at least max(min_support, k0) answered, k0 the fewest cases that can pass with no wrong one
     ((1 − error)^k0 ≤ delta): a choice from the counts alone, not the labels, so the order is still fixed before the
     test. Thresholds with fewer answered than min_support are never certified.
-    procedure="fallback": the fallback procedure (Wiens 2003; the chain graph of Bretz et al. 2009) — the same descent
-    from the same count-only start, the first threshold tested at (1 − fallback)·delta and each of the others below it
+    procedure="fallback": the fallback procedure (Wiens 2003; Wiens & Dmitrienko 2005; the chain graph of Bretz et al.
+    2009; the same procedure in Learn then Test, Angelopoulos et al. 2021, App. E) — the same descent from the same
+    count-only start, the first threshold tested at (1 − fallback)·delta and each of the others below it
     at fallback·delta / their number; a certified threshold passes its whole level on to the next one down, a failed one
     keeps its level and the descent goes on at the next one's own level. The start uses (1 − fallback)·delta in k0.
     Every certificate holds together with probability ≥ 1 − delta (a closed test with weighted Bonferroni local tests).
-    It never certifies less than Bonferroni at fallback·delta over the thresholds below the start, and until its first
-    failure it is a fixed sequence at (1 − fallback)·delta or more; the price is the later start, which can leave
-    nothing certified where e·n is small. fallback=0 is the fixed sequence."""
+    It never certifies less than Bonferroni at fallback·delta over the thresholds below the start (a weaker procedure
+    than the default's Bonferroni at delta — against the default nothing is guaranteed by construction; on intent
+    classifiers it answered at least as much in every cell, see the changelog), and until its first failure it is a
+    fixed sequence at (1 − fallback)·delta or more; the price is the later start, which can leave nothing certified
+    where error·n is small. fallback=0 is the fixed sequence."""
     if procedure not in LTT_PROCEDURES:
         raise ValueError(f"procedure must be one of {LTT_PROCEDURES}, not {procedure!r}")
     if procedure == "fallback":
