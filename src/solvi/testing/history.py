@@ -21,7 +21,7 @@ from __future__ import annotations
 import re
 import time as _time
 
-PASS = "ok"
+PASS = "ok"                                      # noqa: S105 (a case status, not a password)
 BLOCKED = ("error", "timeout")                   # statuses that say the case could not run, not that it decided wrong
 CLASSES = ("new", "stable", "flaky", "regression", "fixed")
 
