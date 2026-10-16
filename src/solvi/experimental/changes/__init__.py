@@ -104,7 +104,8 @@ What is not done:
   may rightly make the system answer them), and an empty set holds the change for a person;
 - no scope flag on a world change for rules from experience;
 - no validity periods in compile Versions (nor the change-type classifier in the compiler);
-- the research harness's untrusted-code process sandbox is not ported (Static uses the compiler's sandbox check);
+- Static only checks code; IsolatedTests (opt-in, _isolated.py) runs it on test cases in the compiler's process
+  sandbox (solvi.experimental.compile.sandbox.run), the expected answers kept in the parent;
 - a held change lives only in this process's memory until it is ruled on (its journal records survive, the Change
   object does not); Pipeline.expire_held(max_age) rules on the ones that waited too long."""
 from __future__ import annotations
@@ -114,6 +115,7 @@ from typing import Any, Callable
 
 from ...core.runtime import vhash
 from .. import warn_on_import
+from ._isolated import IsolatedTests, strict_equal
 from ._journal import ChangeJournal, EvalLocked, EvaluatorLock, MemoryStorage
 from ._paired import paired_bootstrap, run_episode
 from ._stages import (DEFAULT_APPROVAL, LEVELS, REFUSAL_WORDS, Approval, Canaries, CleanCases, catalog_of, Confirmation,
@@ -534,7 +536,7 @@ class Pipeline:
 
 __all__ = ["allowed", "Approval", "ARTIFACTS", "Canaries", "catalog_of", "Change", "CHANGE_TYPES", "ChangeJournal", "CleanCases",
            "Confirmation", "Consistency", "Context", "DEFAULT_APPROVAL", "EvalLocked", "EvaluatorLock",
-           "FreshEnvironments", "gate_of", "gates_of", "hazard_body", "hazard_gate", "identity", "IDENTITY_KEYS", "Impact", "is_refusal", "KnowledgeTarget",
+           "FreshEnvironments", "gate_of", "IsolatedTests", "gates_of", "hazard_body", "hazard_gate", "identity", "IDENTITY_KEYS", "Impact", "is_refusal", "KnowledgeTarget",
            "KnownFailures", "REFUSAL_WORDS", "RefusalRegression",
            "LearningTarget", "LEVELS", "MemoryStorage", "paired_bootstrap", "Pipeline", "Promoted", "Refused", "Result", "run_episode", "ShipWatch", "SliceGuard", "SOURCES",
-           "Stage", "Static", "STORE_SOURCE", "StageVerdict", "VersionsTarget"]
+           "Stage", "Static", "STORE_SOURCE", "StageVerdict", "strict_equal", "VersionsTarget"]
