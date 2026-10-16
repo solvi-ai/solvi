@@ -369,6 +369,10 @@ class Confirmation:
                                       solvi.experimental.compile);
     Confirmation.on_evidence(replay)  every evidence id must be confirmed by `replay(eid, change) → bool` (an outcome rule
                                       must fire on what it was learned from, e.g. rewound k steps before the failure).
+                                      The ids are the proposer's: with `exists(eid, ctx)` → bool (opt-in; e.g. a lookup
+                                      in the decisions store) every id must be in the record — an id that is not
+                                      refuses the change — and each counts once (a repeated id does not raise the share);
+                                      min_evidence (with exists=): the fewest distinct ids.
 
     refusals: should-abstain inputs kept with the confirmation's examples; RefusalRegression reads them."""
     name = "confirmation"
@@ -390,11 +394,22 @@ class Confirmation:
         return cls(check, **kw)
 
     @classmethod
-    def on_evidence(cls, replay: Callable, *, min_share: float = 1.0, **kw):
+    def on_evidence(cls, replay: Callable, *, min_share: float = 1.0, exists: Callable | None = None,
+                    min_evidence: int = 1, **kw):
         def check(change, ctx):
-            if not change.evidence:
+            ev = change.evidence
+            if exists is not None:
+                ev = list(dict.fromkeys(change.evidence))            # each id once
+                unknown = [e for e in ev if not exists(e, ctx)]
+                if unknown:
+                    return StageVerdict.refuse(f"evidence not in the record: {unknown[:5]}",
+                                               {"unknown": len(unknown), "evidence": len(ev), "on_evidence": True})
+                if len(ev) < min_evidence:
+                    return StageVerdict.refuse(f"{len(ev)} distinct evidence id(s), fewer than {min_evidence}",
+                                               {"evidence": len(ev), "on_evidence": True})
+            if not ev:
                 return StageVerdict.refuse("no evidence to confirm the change on")
-            hits = [bool(replay(e, change)) for e in change.evidence]
+            hits = [bool(replay(e, change)) for e in ev]
             share = sum(hits) / len(hits)
             ok = share >= min_share
             return StageVerdict("admit" if ok else "refuse",
