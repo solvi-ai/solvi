@@ -199,7 +199,7 @@ def compact_content(d):
     recs = tr.get("records") or []
     trace = {k: v for k, v in tr.items() if k not in ("records", "timings", "schedule", "fingerprint")}
     fp = tr.get("fingerprint") or {}
-    trace["fingerprint"] = {k: v for k, v in fp.items() if k not in ("parts", "calls")}
+    trace["fingerprint"] = {k: v for k, v in fp.items() if k not in ("parts", "calls", "own")}
     trace["records"] = [r for r in recs if _kept_step(r)]
     results = {}
     for q, r in (d.get("results") or {}).items():
