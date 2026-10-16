@@ -242,7 +242,8 @@ class KnowledgeStore:
     def _write(self, op, **data):
         body = {"kind": _KNOWLEDGE, "n": len(self.journal), "op": op, "clock": self.clock, **data}
         if self._mem is not None:
-            rec = self._mem.append(body)
+            from ..store import _stamp
+            rec = self._mem.append(_stamp(body))     # run_context: the in-memory journal carries the run too
         else:
             from ..store import FORMAT
             rec = self.storage._append({"v": FORMAT, **body})

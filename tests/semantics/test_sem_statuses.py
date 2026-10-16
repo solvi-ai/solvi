@@ -91,8 +91,8 @@ def test_no_data_survives_storage_and_json(tmp_path, record):
     assert {q for q, g in st.record(res.stored_id)["guards"].items() if g == "no_data"} == {"pay", "big"}
     if record == "full":
         assert st.get(res.stored_id, s).checks == res.checks
-    schema = load_schema()                                     # record schema 2.1.0 describes it
-    assert schema["x-schema-version"] == "2.1.0"
+    schema = load_schema()                                     # record schema 2.1.0 describes it (2.2.0 adds "run")
+    assert schema["x-schema-version"] in ("2.1.0", "2.2.0")
     for rec in read_lines(st.path):
         assert validate(rec, schema) == []
 
