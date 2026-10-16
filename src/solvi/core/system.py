@@ -165,7 +165,9 @@ class System:
         that first decision}; stored, it is a compact record with meta {"cache_of": that id} — replay / rederive re-run
         it from its input and compare every step's hash, as for any compact record. A model-backed part raises here;
         the cache is bypassed for an ask with another order, a system that learns (learn=True, order or producers
-        "learned"), answer heads, a stateful guarantee or a strategist of your own. aask and ask_text do not use it."""
+        "learned"), answer heads, a stateful guarantee or a strategist of your own. aask shares the cache with ask (a
+        decision where a part timed out is not kept); ask_text / aask_text read the text each time and serve the flow when
+        the read (entry point, fields with their quotes, dialogue changes) and the text are the same."""
         from . import _i18n as i18n
         from .costs import CostBook
         self.lang = i18n.check(lang)
@@ -332,10 +334,28 @@ class System:
         trace, vals = execute(self.catalog, p.flow, p.state, workers=workers or self.workers, order=p.order,
                               costs=self.cost_book, policy=p.policy, known=p.known, early_exit=self._early(early_exit),
                               memo=memo)
-        resp = self._respond(p, trace, vals, t0, store)
-        if key is not None:
+        return self._keep(key, self._respond(p, trace, vals, t0, store))
+
+    def _keep(self, key, resp):
+        """A decision made on a cache miss, kept for the next ask of the same key (System(cache=)). A decision where a
+        part timed out (aask) is not kept: a timeout says how long a call took, not what the part computes."""
+        if key is not None and not any(e.get("kind") == "timeout" for e in resp.safeguards or ()):
             self._cache.put(key, _served(resp, resp.ms), resp.stored_id)
         return resp
+
+    def _text_key(self, read, order, early_exit):
+        """ask_text's cache key and memo (System(cache=)): the key of the ask on the read's state, and the read itself —
+        the entry point and each field as recorded (quote, parser, the model that read it) and its dialogue changes."""
+        if self._cache is None:
+            return None, None
+        key, memo = self._cache_key(read.init_state(), [read.question] if read.question is not None else [], order,
+                                    early_exit)
+        if key is None:
+            return None, None
+        try:
+            return key + (digest([(r.body(), r.confidence) for r in read.records()], srepr(read.changes)),), memo
+        except Exception:  # noqa: BLE001 — a read that does not hash: run it
+            return None, None
 
     def _cache_key(self, init_state, questions, order, early_exit):
         """(the cache key of an ask (System(cache=)), the HashMemo that hashed its input) — (None, None) when this ask
@@ -417,9 +437,13 @@ class System:
             raise ValueError("pass a decider or a TextIn, not both")
         return textin.read(text, question=question)
 
-    def _prepare_text(self, read, order):
+    def _read(self, text, decider, textin, question):
+        """ask_text's read: the text read by its TextIn, each value re-derived from its quote (a built TextRead is not
+        trusted)."""
         from .textin import rederive
-        read = rederive(self, read)                   # each value re-derived from its quote: a built TextRead is not trusted
+        return rederive(self, self._textin(text, decider, textin, question))
+
+    def _prepare_text(self, read, order):
         if read.question is not None:
             p = self._prepare(read.init_state(), [read.question], order)
         else:                                         # the entry point escalated: nothing is asked
@@ -440,24 +464,33 @@ class System:
         When the entry point escalates, nothing runs: the likely questions abstain (guard "escalated"). A required field the
         text does not state is not guessed: the question abstains for lack of it. `res.read` is the TextRead
         (`res.read.missing`, `res.read.clarify()`; `res.read` in 0.7). early_exit: as for `ask`."""
-        read = self._textin(text, decider, textin, question)
+        read = self._read(text, decider, textin, question)
         t0 = now_ms()
+        key, memo = self._text_key(read, order, early_exit)
+        hit = None if key is None else self._cache.get(key)
+        if hit is not None:
+            return self._serve(hit, t0, store)
         p = self._prepare_text(read, order)
         trace, vals = execute(self.catalog, p.flow, p.state, workers=workers or self.workers, order=p.order,
-                              costs=self.cost_book, policy=p.policy, known=p.known, early_exit=self._early(early_exit))
-        return self._respond(p, trace, vals, t0, store)
+                              costs=self.cost_book, policy=p.policy, known=p.known, early_exit=self._early(early_exit),
+                              memo=memo)
+        return self._keep(key, self._respond(p, trace, vals, t0, store))
 
     async def aask_text(self, text, decider=None, *, textin=None, question=None, store=True, timeout=None,
                         speculate=False, order=None, early_exit=None):
         """ask_text with aask (async parts awaited)."""
-        read = self._textin(text, decider, textin, question)
+        read = self._read(text, decider, textin, question)
         t0 = now_ms()
+        key, _ = self._text_key(read, order, early_exit)
+        hit = None if key is None else self._cache.get(key)
+        if hit is not None:
+            return self._serve(hit, t0, store)
         p = self._prepare_text(read, order)
         _speculate_note(speculate, p)
         trace, vals = await aexecute(self.catalog, p.flow, p.state, order=p.order, costs=self.cost_book, policy=p.policy,
                                      known=p.known, timeout=self.timeout if timeout is None else timeout,
                                      speculate=speculate, early_exit=self._early(early_exit))
-        return self._respond(p, trace, vals, t0, store)
+        return self._keep(key, self._respond(p, trace, vals, t0, store))
 
     @_deprecate.removed_kwargs(names="questions")
     async def aask(self, init_state, questions=None, *, order=None, store=True, timeout=None, speculate=False,
@@ -478,12 +511,18 @@ class System:
         whatever `blocking` says. early_exit: as for `ask` (False: every step runs, whatever the hard checks say)."""
         from .runtime import aexecute
         t0 = now_ms()
+        key = None
+        if self._cache is not None:
+            key, _ = self._cache_key(init_state, questions, order, early_exit)
+            hit = None if key is None else self._cache.get(key)
+            if hit is not None:
+                return self._serve(hit, t0, store)
         p = self._prepare(init_state, questions, order)
         _speculate_note(speculate, p)
         trace, vals = await aexecute(self.catalog, p.flow, p.state, order=p.order, costs=self.cost_book, policy=p.policy,
                                      known=p.known, timeout=self.timeout if timeout is None else timeout,
                                      speculate=speculate, early_exit=self._early(early_exit))
-        return self._respond(p, trace, vals, t0, store)
+        return self._keep(key, self._respond(p, trace, vals, t0, store))
 
     @property
     def is_async(self):
