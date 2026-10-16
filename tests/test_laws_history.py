@@ -6,8 +6,7 @@ import warnings
 
 with warnings.catch_warnings():
     warnings.simplefilter("ignore")
-    from solvi.experimental.laws import (Atom, Buffer, Context, Grammar, History, LawSet, Past, Same, Tracker,
-                                         Transition)
+    from solvi.experimental.laws import Atom, Buffer, Context, Grammar, History, LawSet, Past, Same, Tracker
 
 NA = 4
 ACTIONS = ("push", "wait")
