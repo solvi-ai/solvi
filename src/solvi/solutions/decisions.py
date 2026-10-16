@@ -81,6 +81,8 @@ from ..core.catalog import Answer, AnyOf, Catalog, Question, first_label, label_
 
 SPLIT_FIT = 0.75            # the share fitted on when System 1 is fitted here
 SPLIT_SELECT = 1 / 3        # the share a signal is chosen on when a rule answers and its confidence does not vary
+MONITOR_MIN_REFERENCE = 100  # build(monitor="auto"): the fewest guarantee calibration examples that turn the monitor on
+                             # (provisional: to be set from the measured false-alarm rate on short references)
 
 
 class DecisionSystem:
@@ -412,7 +414,9 @@ def build(question, examples, *, catalog=None, learner=None, slow=None, reads=No
     calibration measures System 1's own answers breaking the promise on its examples (every slice then goes to a
     person, but System 1 still answers alone above its threshold), raise a ValueError instead of the default
     GuaranteeWarning. monitor: None (default: no drift monitor), True (a DriftMonitor whose reference is System 1's
-    responses on the guarantee's calibration examples) or a monitor of your own (an object with observe(response,
+    responses on the guarantee's calibration examples), "auto" (as True when the guarantee has at least
+    MONITOR_MIN_REFERENCE calibration examples, else none — a short reference raises false flags; the explanation says
+    which) or a monitor of your own (an object with observe(response,
     question=) → {"drift", "why"}, e.g. a DriftMonitor or a NumericDrift) — the dispatcher feeds it every System 1 response, and after
     its flag System 1's answers are checked by the slow path or go to a person (Dispatcher(on_drift=))."""
     from ..core.dispatch import SIGNALS, THINK, Dispatcher
@@ -753,6 +757,12 @@ def _monitor(monitor, system, qname, g_ex, gate):
     """build(monitor=) → (the monitor or None, its description or None)."""
     if monitor is None or monitor is False:
         return None, None
+    if isinstance(monitor, str) and monitor == "auto":
+        if len(g_ex) < MONITOR_MIN_REFERENCE:
+            return None, (f"none: monitor=\"auto\" turns a DriftMonitor on with at least {MONITOR_MIN_REFERENCE} "
+                          f"guarantee calibration examples as its reference, and there are {len(g_ex)} (a short "
+                          "reference raises false flags on a stream that has not changed)")
+        monitor = True
     if monitor is True:
         from ..core.guarantees.drift import DriftMonitor
         mon = DriftMonitor()
@@ -767,7 +777,7 @@ def _monitor(monitor, system, qname, g_ex, gate):
         return mon, (f"a DriftMonitor (window {mon.window}) whose reference is the first {mon.window} decisions; after "
                      "its flag System 1's answers are checked by the slow path, or go to a person when there is none")
     if not callable(getattr(monitor, "observe", None)):
-        raise TypeError("monitor= takes True, None or a monitor with observe(response, question=)")
+        raise TypeError('monitor= takes True, "auto", None or a monitor with observe(response, question=)')
     return monitor, (f"{type(monitor).__name__} given to build; after its flag System 1's answers are checked by the slow "
                      "path, or go to a person when there is none")
 

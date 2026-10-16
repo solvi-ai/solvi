@@ -103,3 +103,17 @@ def test_build_can_attach_a_drift_monitor():
     own = DriftMonitor(window=50)
     ds = solvi.build(Q, ex, catalog=_cat(), max_risk=0.05, monitor=own)
     assert ds.dispatcher.monitor is own
+
+
+def test_build_monitor_auto_turns_on_only_with_enough_calibration_examples():
+    from solvi.solutions import decisions
+    big = _examples(4 * decisions.MONITOR_MIN_REFERENCE + 40, 1, near=0.1, far=0.01)
+    ds = solvi.build(Q, big, catalog=_cat(), max_risk=0.05, monitor="auto")
+    mon = ds.dispatcher.monitor
+    assert isinstance(mon, DriftMonitor) and len(mon.reference) >= decisions.MONITOR_MIN_REFERENCE
+    small = _examples(decisions.MONITOR_MIN_REFERENCE // 2, 1, near=0.1, far=0.01)
+    ds = solvi.build(Q, small, catalog=_cat(), max_risk=0.1, monitor="auto")
+    assert ds.dispatcher.monitor is None
+    assert "monitor=\"auto\"" in ds.choices["monitor"] and str(decisions.MONITOR_MIN_REFERENCE) in ds.choices["monitor"]
+    with pytest.raises(TypeError, match="auto"):
+        solvi.build(Q, small, catalog=_cat(), max_risk=0.1, monitor="always")
