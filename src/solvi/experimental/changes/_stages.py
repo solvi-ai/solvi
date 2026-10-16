@@ -29,7 +29,9 @@ Built in, in the order the pipeline usually runs them (what each one wraps, port
 from __future__ import annotations
 
 import fnmatch
+import os
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Callable, Protocol, runtime_checkable
 
 DECISIONS = ("admit", "refuse", "hold")
@@ -833,8 +835,13 @@ class SliceGuard:
     version in force and of the candidate on the SAME cases, in the same order (paired).
     original: the original version's losses on those cases, {slice: losses} — a dict, or `original(change, ctx)` → one;
     None (default): pinned from the in-force losses the first time this guard runs (so "original" is the version in
-    force then; the pin lives in this object — pass the dict to keep it across processes); False: no comparison with
-    the original.
+    force then; the pin lives in this object — pass the dict, or a `pin_file`, to keep it across processes); False: no
+    comparison with the original.
+    pin_file: a path (opt-in, with original=None) — the pin kept in a file instead of this object: written once, read-only,
+    at the first run in any process ({"slices": {slice: losses}}, slice names as strings), read by every later run, so a
+    new process (a new guard) compares with the same original. Its SHA-256 is in the verdict's numbers
+    ("original_file"); pinned: that SHA-256 fixed elsewhere (next to EvaluatorLock's pins) — a file that differs, or is
+    missing, refuses the change.
 
     A slice is refused against a reference when the mean excess d = mean(candidate − reference) is above the tolerance
     (`tol` against the version in force, `cumulative_tol` (default tol) against the original), or when d > 0 is
@@ -847,7 +854,10 @@ class SliceGuard:
     name = "slices"
 
     def __init__(self, measure: Callable, *, original=None, tol: float = 0.02, cumulative_tol: float | None = None,
-                 alpha: float = 0.05, min_n: int = 30, on_small: str = "hold"):
+                 alpha: float = 0.05, min_n: int = 30, on_small: str = "hold", pin_file=None, pinned: str | None = None):
+        if (pin_file is not None or pinned is not None) and (original is not None or pin_file is None):
+            raise ValueError("pin_file= keeps the original pinned from the version in force (original=None); pinned= "
+                             "is the SHA-256 of a pin_file")
         if on_small not in SMALL:
             raise ValueError(f"on_small is one of {SMALL}, not {on_small!r}")
         if not 0.0 < alpha < 1.0:
@@ -860,15 +870,47 @@ class SliceGuard:
         self.cumulative_tol = self.tol if cumulative_tol is None else float(cumulative_tol)
         self.alpha, self.min_n, self.on_small = float(alpha), int(min_n), on_small
         self._pinned = None
+        self.pin_file, self.pinned = (None if pin_file is None else Path(pin_file)), pinned
+        self._file = None
 
     def z(self, m):
         """The one-sided critical z for m comparisons (Bonferroni)."""
         from statistics import NormalDist
         return NormalDist().inv_cdf(1.0 - self.alpha / max(1, m))
 
+    def _from_file(self, m):
+        """The original from the pin file (written here when it does not exist yet) → (original, pinned now, sha256)."""
+        import hashlib
+        import json
+        p, now = self.pin_file, False
+        if not p.exists() and self.pinned is None:
+            bad = [s for s in m if not isinstance(s, str)]
+            if bad:
+                raise TypeError(f"a pin_file keeps slice names as strings, not {bad[:3]!r}")
+            body = json.dumps({"purpose": "the original version's per-slice losses (SliceGuard)",
+                               "slices": {s: list(a) for s, (a, _) in sorted(m.items())}}, indent=0) + "\n"
+            try:
+                with open(p, "x") as fh:                 # written once: another process may have written it first
+                    fh.write(body)
+                os.chmod(p, 0o444)
+                now = True
+            except FileExistsError:
+                pass
+        if not p.exists():
+            return None, False, None
+        raw = p.read_bytes()
+        sha = hashlib.sha256(raw).hexdigest()
+        if self.pinned is not None and sha != self.pinned:
+            return None, False, sha                     # refused by run(): not read
+        return {s: list(v) for s, v in json.loads(raw)["slices"].items()}, now, sha
+
     def _original(self, change, ctx, m):
         if self.original is False:
             return None, False
+        if self.original is None and self.pin_file is not None:
+            orig, now, sha = self._from_file(m)
+            self._file = {"path": str(self.pin_file), "sha256": sha}
+            return orig, now
         if self.original is None:
             if self._pinned is None:
                 self._pinned = {s: list(now) for s, (now, _) in m.items()}
@@ -879,7 +921,15 @@ class SliceGuard:
 
     def run(self, change, ctx):
         m = {s: (list(a), list(b)) for s, (a, b) in self.measure(change, ctx).items()}
+        self._file = None
         orig, pinned_now = self._original(change, ctx, m)
+        if self._file is not None:
+            if self._file["sha256"] is None:
+                return StageVerdict.refuse(f"the pinned original file {self.pin_file} is missing",
+                                           {"original_file": self._file})
+            if self.pinned is not None and self._file["sha256"] != self.pinned:
+                return StageVerdict.refuse(f"the pinned original file changed: {self._file['sha256']} != pinned "
+                                           f"{self.pinned}", {"original_file": self._file})
         for s, (now, cand) in m.items():
             if len(now) != len(cand):
                 raise ValueError(f"slice {s!r}: the version in force and the candidate must come from the same cases")
@@ -902,6 +952,8 @@ class SliceGuard:
                 why = "above the tolerance" if d > tol else "significant"
                 bad.append(f"{s}: {d:+.4f} vs {ref.replace('_', ' ')} ({why}, tol {tol})")
         rep.update({"z": round(z, 4), "small": small, "new": new, "original_pinned_now": pinned_now})
+        if self._file is not None:
+            rep["original_file"] = self._file
         if bad:
             return StageVerdict.refuse("slice regression: " + "; ".join(bad), rep)
         if small and self.on_small != "admit":

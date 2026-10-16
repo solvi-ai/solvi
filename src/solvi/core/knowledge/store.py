@@ -48,7 +48,8 @@ item learned before the flag is a hint, not a fact, until a newer observation or
 (supervision undoing an update) restores the previous version as a hint, never as a fact, while a flag covering the
 rolled-back version or its scope is pending (a rollback during a pending drift flag once restored a stale threshold as
 a fact on a shifted stream, and a stale check that read the item status missed it). `reconfirm_after` per
-(kind, source) (RECONFIRM_DEFAULTS, the store's clock advanced by `tick`) expires items that weaker evidence keeps.
+(kind, source) (RECONFIRM_DEFAULTS, the store's clock advanced by `tick`) expires items that weaker evidence keeps. A tick
+re-resolves only the items whose expiry can flip between the old and the new clock (an index of their deadlines).
 
 Every write — add, promote, refuse, retract, flag, resolve, tick, use — is a journal entry: in a TraceStorage (records of
 kind "knowledge", in the same hash chain as the decisions when it is the decisions' store) or in memory with its own hash
@@ -65,6 +66,7 @@ from __future__ import annotations
 
 import json
 import threading
+from bisect import bisect_left, insort
 from collections import defaultdict
 from contextlib import contextmanager
 
@@ -229,6 +231,8 @@ class KnowledgeStore:
         self.questions = []                          # person questions (disputes), one per dispute event
         self._open_disputes = set()
         self._batch, self._touched, self._tick_dirty = 0, set(), False
+        self._expiry = []                            # sorted (clock an item's expiry can flip at, id): the tick index
+        self._resolved_clock = 0                     # the clock the state was last resolved at
         self._fp = None
         self._taints = {}                            # id → the journal position its support was last cut at (memo)
         if self.storage is not None and _replay:
@@ -368,6 +372,8 @@ class KnowledgeStore:
                            "of": r.get("of"), "inferred": bool(r.get("inferred"))})
         for p in it.asserts[-1]["just"]:
             self.dependents[p].add(iid)
+        if it.reconfirm_after:                          # this assertion's clock is a possible last support: past
+            insort(self._expiry, (it.asserts[-1]["clock"] + it.reconfirm_after, iid))   # it, the item expires
         self._touch(iid)
 
     def proposal(self, kind, body, scope=None, *, source, by=None, evidence=None, derived_from=(), supersedes=None,
@@ -711,10 +717,19 @@ class KnowledgeStore:
         if not self._batch:
             self._flush()
 
+    def _expiring(self, c0, c1):
+        """Items whose expiry can differ between clocks c0 and c1: an item expires once the clock is past the clock of
+        its last live support plus its reconfirm_after, and every assertion's such deadline is in the index (a superset
+        of the deadlines resolution can use), so only items with a deadline between the two clocks can flip (a margin of
+        one clock unit on each side keeps it exact under float rounding)."""
+        lo, hi = (c0, c1) if c0 <= c1 else (c1, c0)
+        a, b = bisect_left(self._expiry, (lo - 1,)), bisect_left(self._expiry, (hi + 1,))
+        return {i for _, i in self._expiry[a:b]}
+
     def _flush(self):
-        if self._tick_dirty:                              # expiry depends on the clock
-            self._touched |= {i for i, it in self.items.items() if it.reconfirm_after}
-            self._tick_dirty = False
+        if self._tick_dirty or self.clock != self._resolved_clock:    # expiry depends on the clock: the index names
+            self._touched |= self._expiring(self._resolved_clock, self.clock)   # the items whose expiry can flip
+            self._resolved_clock, self._tick_dirty = self.clock, False
         if not self._touched:
             return
         comp = self.downstream(self._touched)           # upstream items keep their state: nothing here changes it
@@ -846,7 +861,8 @@ class KnowledgeStore:
         `relation`; `scope`; `kinds`, default every kind) — "facts" (active and not stale) and "hints" (hypotheses,
         expired or stale items, with why) — the ids they rest on, the store's fingerprint and journal position, and the
         query (so redecide can rebuild it). Disputed, refuted and retracted items are not given. valid_at: a world time —
-        an item whose `valid` does not cover it is a hint ("not valid at ..."), not a fact."""
+        an item whose `valid` does not cover it is a hint ("not valid at ..."), not a fact. A row of an item with a `valid`
+        carries it ("valid": [since, until])."""
         self._settle()
         q = {"about": about, "relation": relation, "scope": scope, "kinds": None if kinds is None else list(kinds)}
         if valid_at is not None:
@@ -866,6 +882,9 @@ class KnowledgeStore:
                 continue
             st = self.status(iid)
             row = {"id": iid, "kind": it.kind, "body": it.body, "source": it.asserts[-1]["source"]}
+            v = self.valid(iid)
+            if v is not None:                            # the validity a reader filters on (Knowledge.value(valid_at=))
+                row["valid"] = v
             if st == "active" and valid_at is not None and not covers(self.valid(iid), valid_at):
                 hints.append({**row, "why": f"not valid at {valid_at}"})
             elif st == "active" and not self.stale(iid):

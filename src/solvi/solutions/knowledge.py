@@ -258,11 +258,19 @@ class Knowledge:
         return self.store.snapshot(**query)
 
     @staticmethod
-    def value(snapshot, s, r, default=None):
-        """The value of the active fact (s, r) in a snapshot (the fact "knowledge" a rule reads), or `default`."""
+    def value(snapshot, s, r, default=None, *, valid_at=None):
+        """The value of the active fact (s, r) in a snapshot (the fact "knowledge" a rule reads), or `default`.
+
+        valid_at: a world time — only a fact whose validity (`valid=` when it was told; the row's "valid") covers it is
+        read; a fact told without `valid` holds at any time. Without it the first matching fact is read, which on a key
+        with several validity intervals is the first interval's value: pass the decision's world time (or take the
+        snapshot with `valid_at=`)."""
+        from ..core.knowledge.store import covers
         for row in (snapshot or {}).get("facts") or ():
             b = row.get("body") or {}
             if isinstance(b, dict) and b.get("s") == s and b.get("r") == r:
+                if valid_at is not None and not covers(row.get("valid"), valid_at):
+                    continue
                 return b.get("o")
         return default
 
