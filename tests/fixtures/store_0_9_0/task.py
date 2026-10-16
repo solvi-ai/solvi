@@ -54,6 +54,8 @@ class WordCount:
 # None (the catalog default) when make.py wrote the files; the tests set "first", the rule those versions decided by
 # (solvi 1.2 defaults to "strictest" and marks it in the catalog fingerprint)
 COMBINE = None
+# likewise the split of build(): the tests set "shuffle", the split up to 1.1 (1.2 defaults to "hash")
+SPLIT = None
 
 
 def category_part(calibration=None):
@@ -158,4 +160,4 @@ def dispatch(storage=None):
         return small or days_late > 4                   # wrong when three days late: the slow path knows better
 
     return build(Question("refund", "Refund without asking a person?", Answer.yes_no()), EXAMPLES, catalog=cat,
-                 max_risk=0.06, slow=slow, storage=storage)
+                 max_risk=0.06, slow=slow, storage=storage, **({} if SPLIT is None else {"split": SPLIT}))

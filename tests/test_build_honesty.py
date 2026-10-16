@@ -58,6 +58,8 @@ def test_build_strict_refuses_a_measured_broken_promise():
 def test_a_kept_dispatcher_promise_does_not_warn():
     with warnings.catch_warnings(record=True) as w:
         warnings.simplefilter("always")
-        ds = solvi.build(Q, _examples(600, 1), catalog=_cat(), max_risk=0.02, slow=_teacher, min_slice=1, seed=1)
+        # the scenario as measured on the seeded shuffle (on the hash split's examples seed 1 measures a broken promise)
+        ds = solvi.build(Q, _examples(600, 1), catalog=_cat(), max_risk=0.02, slow=_teacher, min_slice=1, seed=1,
+                         split="shuffle")
     assert not ds.calibration["dispatch"].get("why")
     assert not [x for x in w if "break the promise" in str(x.message)]

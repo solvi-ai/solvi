@@ -18,6 +18,7 @@ def task():
     try:
         import task
         task.COMBINE = "first"           # the rule this version decided by (1.2 defaults to "strictest")
+        task.SPLIT = "shuffle"           # the split this version made (1.2 defaults to "hash")
         yield task
     finally:
         sys.path.remove(str(DATA))

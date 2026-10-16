@@ -894,9 +894,12 @@ decisions gives an unbiased reading (within 5 points on 1,200 decisions at audit
 check that broke silently: in a drift stand the current monitor missed a broken check in 98 of 100 runs, while a 10 %
 random audit found it in 59 of 100.
 
-**Refit on a hash split when examples keep arriving.** `build(split="hash")` keeps every old example in its share when
-examples are added (600 + 60 examples, 5 seeds: 0 old examples moved in or out of the fit share, against 101–120 with the
-shuffle). Routes still move with the thresholds; `solvi diff` shows them.
+**Refit on the hash split when examples keep arriving.** `build(split="hash")` (the default since 1.2; 1.1 shuffled)
+keeps every old example in its share when examples are added (600 + 60 examples, 5 seeds: 0 old examples moved in or out of the fit share, against 101–120 with the
+shuffle). Routes still move with the thresholds; `solvi diff` shows them. Moving from the shuffle to the hash puts
+about 41% of the examples in another share (2,000 refund requests, 5 seeds: 40.1–42.1%; 84–89% of the shuffle's
+calibration examples), so a system rebuilt on 1.2 is calibrated on other examples: pass `split="shuffle"` to rebuild
+1.1's exactly.
 
 **Check a change pipeline's gates once with `testing.conformance.check_pipeline`** on your own change schema. An
 aggregate gate passes harm in a small slice and salami (eight steps of +0.012 on a 40-case slice each pass against the
