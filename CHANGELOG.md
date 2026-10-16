@@ -201,6 +201,10 @@ started from a failing test built on the reproduction; the numbers are before �
   flagged 0.99–1.0 of the time, in-domain at most 0.05; 50-answer batches mean 0.76 (0.30–0.48 on four pairs); +0.18
   [0.05, 0.34] over a two-sided mean-confidence test at about 1 % false flags, on par at 5 %. Held-out intents of the
   same dataset mostly pass (use `OpenSetGate`); a rephrasing of the same domain is flagged like another dataset.
+- Guard: `allowed_tools=` on `session`, `check`, `call`, `acheck` and `acall`, opt-in — a catalog tool outside the
+  task's list is denied before its own checks, as its own replayable decision; `None` keeps today's behaviour. Measured
+  on AgentDojo: a right list (reference solution plus read tools) cut attack success 0.33 → 0.07 at equal utility; a
+  keyword-rule list 0.33 → 0.11 at −3.4 points of utility.
 - ROADMAP: measured verdicts for the 1.2 checks — correlation-aware combination, a hierarchical calibrator, numeric
   formula laws, Guard taint per message and `effect=`, an escalation queue ranked by value and a promise-free
   Certificate alarm level were measured and not merged (reasons in the ROADMAP).
