@@ -99,6 +99,25 @@ every quote checked (CUAD). On every task each decision is stored and replays. C
 a simulated customer, the seed of Banking77's simulated new intents, the supervision on Abt-Buy) and the cost of a run
 from an empty cache are in [benchmarks/tasks/README.md](../benchmarks/tasks/README.md).
 
+## The extractor on ONNX
+
+`LongSpanExtractor.load("solvi-ai/extract-base", backend="onnx")` (fp16 export, onnxruntime, no torch) against the same
+model on torch (fp32), on a CPU, 50 questions of the SQuAD v2 validation set as field descriptions (30 over their own
+paragraph, one window; 20 over twelve paragraphs joined, 2–3 windows of 1,024 tokens; one seed of the sample, 82
+windows in all):
+
+| | |
+|---|---|
+| windows, token ids and character offsets (tokenizers vs transformers) | identical |
+| same span | 50 / 50 |
+| same found / not-found at the default threshold 0.3 | 50 / 50 |
+| span score, largest difference | 0.0035 |
+| start/end logits, largest / mean difference | 0.85 / 0.004 |
+
+The largest logit differences are fp16 rounding; they did not move a span here. Time per document (batch 1, 4 threads,
+a shared machine, medians, rough): one window 1.25 s on torch against 0.30 s on ONNX; 2–3 windows 8.2 s against 7.6 s.
+Check a fine-tuned model's own export with `tools/export_onnx.py ... texts.jsonl` (it prints the same comparison).
+
 ## Known negative results
 
 - **New field from its description only.** An extractor trained on a few fields does not find a field it never saw
