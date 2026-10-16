@@ -137,6 +137,23 @@ survives, `predict(..., disagree="abstain")` abstains where laws that are not ex
   candidates](best_practices.md#rules-over-relations-enumerate-with-a-library-rank-only-where-a-check-is-expensive); API:
   [solvi.experimental.laws](api/laws.md).
 
+## `injection`
+
+A calibrated detector of instruction-like text in tool outputs: a per-sentence logistic score over the fixed
+detector's rule families and hashed word n-grams, fitted on labelled texts, its threshold set on ordinary texts to a
+chosen false-flag rate. Since 1.2. Opt-in and shipped without weights: the fixed rules (`injection_spans`) stay Guard's
+detector. Fit it on labelled outputs your own tools return and set its threshold on your ordinary ones
+(`calibrate(max_flag_rate=)`); its gain held only on the injection family it was fitted on.
+
+- **Missing:** measured once on injected tool outputs of one public benchmark (InjecAgent): on 248 held-out injections
+  (attacker instructions and tools not used in fitting) a detector fitted on 279 other cases and 865 ordinary texts
+  found 76% against the fixed rules' 23%, flagging fewer ordinary texts (1.8% against 4.2%); but a plain TF-IDF classifier
+  did the same, half of the gain was one address repeated across that dataset (without it +0.19, 95% CI +0.06…+0.38),
+  and on 140 AgentDojo-style injections the rules found 78%, the detector 53%; still missing: a gain on an injection
+  family it was not fitted on, and wiring into Guard as its detector.
+- **Script:** none yet. **Deadline:** 1.2.
+- API: [solvi.experimental.injection](api/injection.md).
+
 ## `relations`
 
 Relations over a state and rules found over them (`solvi.experimental.relations`): a state becomes named relations over

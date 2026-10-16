@@ -237,6 +237,15 @@ caught the same way. On clean text the cost is small: the rules rarely fire on o
 counts how often they do on e-mails). The rules know English and Russian wordings; a paraphrase no rule knows passes
 ("kindly file this under X": 12.5% either way, same script), so it is a safeguard, not a proof.
 
+**A fitted injection detector holds on the family it was fitted on, not beyond.** The fixed injection rules find about
+a quarter of polite injections in tool outputs (23% of 248 held-out InjecAgent cases) and flag about 4% of ordinary
+texts. A small classifier fitted on labelled outputs and calibrated on ordinary ones
+(`solvi.experimental.injection.InjectionDetector`) found three times as many on that family at a lower flag rate
+(1.8%) — but half of that gain was one address repeated across the dataset (+0.19 over the rules without it, 95% CI
++0.06…+0.38), a plain TF-IDF classifier did as well, and on AgentDojo-style injections the rules lead (78% against
+53%). A detector is a per-deployment signal: fit and calibrate it on the outputs your own tools return. The grounding
+and the policies are what hold.
+
 **Ask in the language of the checkpoint's training; let the text be in any.** Questions and options in Russian lost
 much accuracy against English ones over the same Russian text. Corrections do not carry across languages.
 
