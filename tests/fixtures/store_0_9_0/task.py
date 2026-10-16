@@ -51,6 +51,11 @@ class WordCount:
         return len(note.split())
 
 
+# None (the catalog default) when make.py wrote the files; the tests set "first", the rule those versions decided by
+# (solvi 1.2 defaults to "strictest" and marks it in the catalog fingerprint)
+COMBINE = None
+
+
 def category_part(calibration=None):
     """The decision part (a fresh model: teach changes the model it is given), with a calibration file applied."""
     model = DecideModel(Words(), {"format": "solvi_decide v2", "act": False})
@@ -62,7 +67,7 @@ def category_part(calibration=None):
 
 def system(storage=None, calibration=None):
     """A fresh System."""
-    cat = Catalog()
+    cat = Catalog() if COMBINE is None else Catalog(combine=COMBINE)
     cat.fn(WordCount())
 
     @cat.check(hard=True, then={"approve": "no"})
@@ -138,7 +143,7 @@ def slow(state):
 def dispatch(storage=None):
     """A fresh AutoSystem (solvi.build) over the refund rule."""
     from solvi.solutions.decisions import build
-    cat = Catalog()
+    cat = Catalog() if COMBINE is None else Catalog(combine=COMBINE)
 
     @cat.fn
     def small(amount: float) -> bool:
