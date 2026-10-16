@@ -79,6 +79,13 @@ started from a failing test built on the reproduction; the numbers are before â†
   round-robin by kind, dedupe and pinning unchanged. **Behaviour change:** the same cases give a different list;
   case files generated earlier stay valid, regenerating them gives new ones.
 
+- `diff(incremental=True)` sees a change of `Catalog(combine=)`: a trace whose flow holds two hard checks or more records
+  the combine mode, and such a decision is re-run when the mode differs or was not recorded.
+- `diff` names both causes when a part's own code and a function it calls changed; traces record each calling part's own
+  fingerprint. Older records keep the old wording.
+- Example 26 (a build update through the change pipeline) holds on build seeds 0â€“4 with the default split: a hard check
+  sends refunds larger than the order to a person, and those requests are the refusal set.
+
 ### Changed (breaking)
 
 - **The drift monitor is on by default when the guarantee has at least 500 calibration examples.**
@@ -369,6 +376,12 @@ started from a failing test built on the reproduction; the numbers are before â†
   and at 8 probes undetermined in 97.5 % â€” give it 12 or more. At most two missing laws; `coverage` is not checked;
   the pair space is quadratic in the candidates. `Admission.laws` lists every accepted law. Default `max_new=None`
   unchanged.
+
+- `TraceStorage.query(run=...)` (JSONL and SQL stores) finds the decisions written inside `run_context(run)`; the
+  `run_context` docstring shows how to carry the run into a thread pool (`contextvars.copy_context()`).
+- `run_file(fast=True)` / `run_path(fast=True)` / `solvi test --fast`: cases decided without the record keeping and the
+  replay check (1,000 cases of a small catalog: 0.09 s against 0.33 s); safeguard cases are still asked in full; not with
+  `store=True`.
 
 ### Docs
 
