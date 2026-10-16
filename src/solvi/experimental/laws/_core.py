@@ -458,15 +458,17 @@ class Undetermined:
 class Admission:
     """What `admit_by_probes` decided. status: "accepted" (one equivalence class of candidates survived and it is
     not the set without a law) or "undetermined"; law: the accepted law (the shortest candidate of the surviving
-    class) or None; classes: the surviving candidates grouped by what they predict on every probe offered (shortest
+    class; under max_new=2 with two laws accepted, the first of `laws`) or None; classes: the surviving candidates grouped by what they predict on every probe offered (shortest
     first in each, classes by their shortest); asked: the probes asked, as Transitions (group "probe"); refuted: the
     candidates the logged rows and the probes refuted (a count — the candidates themselves are `refuted_list`); null:
     the set without any new law still survives; why: the reason; witnesses: the candidates refuted only as too narrow
     that are right wherever they were applied and predict otherwise than the surviving class where they apply — while
-    any is left nothing is accepted (several laws may be missing); refuted_list: the refuted candidates, in the order
-    they fell; untested: the atoms of a longer candidate in the surviving class that the shortest one drops and that
-    never varied on the pool and the rows seen where the shortest one holds — the evidence cannot tell the shorter law
-    from the longer, so the accepted law may be too general there (see `coverage` of `admit_by_probes`)."""
+    any is left nothing is accepted (several laws may be missing; empty under max_new=2, which does not use this
+    guard); refuted_list: the refuted candidates, in the order they fell; laws: every law accepted (one, or two with
+    max_new=2; empty when undetermined); untested: the atoms of a longer candidate in the surviving class that the
+    shortest one drops and that never varied on the pool and the rows seen where the shortest one holds — the
+    evidence cannot tell the shorter law from the longer, so the accepted law may be too general there (see
+    `coverage` of `admit_by_probes`; empty under max_new=2, where coverage is not checked)."""
     status: str
     law: Law | None
     classes: list
@@ -477,6 +479,7 @@ class Admission:
     witnesses: list = field(default_factory=list)
     refuted_list: list = field(default_factory=list)
     untested: list = field(default_factory=list)
+    laws: list = field(default_factory=list)
 
 
 # ───────────────────────────────────────────── the law set
@@ -950,7 +953,7 @@ class LawSet:
                         read_only: Callable[..., bool] | None = None, cost: Callable[[Any, Any], Any] | None = None,
                         order: str = "split", unique: bool = True, seed: int = 0, tol: float | None = None,
                         same: Callable[[Any, Any], bool] | None = None, assume_one_law: bool = False,
-                        rtol: float | None = None, coverage: str = "warn") -> Admission:
+                        rtol: float | None = None, coverage: str = "warn", max_new: int | None = None) -> Admission:
         """Admit one of `candidates` by asking the world where they disagree (CEGIS-style), not by a random held-out
         sample. ask(state, action) → the observation (the environment, or an exact model of it); probes: the (state,
         action) pairs you may ask about (a finite pool; also what the equivalence classes are computed on); safe:
@@ -986,6 +989,18 @@ class LawSet:
         wherever it applies on the pool, so no probe tells them apart). assume_one_law=True: the narrow refutation is
         final (before 1.2).
 
+        max_new=2: a version space over law sets instead — the set with no new law, with one candidate, or with two
+        (`_versions.admit_up_to_two`): a hypothesis is refuted where it predicts wrong and one of its new laws spoke,
+        or none of them holds and one of their effects is what was observed; the probes split the classes of
+        hypotheses that predict alike on the pool, and the smallest hypothesis of the one surviving class is accepted —
+        one law, or two (`Admission.laws`; with two accepted, `law` is the first of them). It assumes at most two laws
+        are missing (the witness guard is not used; three or more missing laws are not measured); the classes grow
+        with the square of the candidates. Where one law is missing it needs more probes than the default (at a
+        budget of 8 it is mostly undetermined there; see docs/experimental.md, `laws`) — give it a budget of 12 or
+        more. `witnesses` and `untested` are empty in this mode and `coverage` is
+        not checked, so an over-general law can be accepted without the `coverage` warning. max_new=1 is
+        assume_one_law=True; None (the default) the witness guard above. order="split" and unique=True only.
+
         coverage: what to do when the pool cannot tell the accepted (shortest) candidate from a longer one of its
         class — an atom the longer one adds never varied on the pool or the rows seen where the shorter one holds
         (a pool where every state is next to the table admits "make & wood ≥ 1 → pickaxe" without "near table";
@@ -1006,6 +1021,12 @@ class LawSet:
         applied, born = "probe"."""
         if order not in ("split", "random"):
             raise ValueError(f"order is 'split' or 'random', not {order!r}")
+        if max_new not in (None, 1, 2):
+            raise ValueError(f"max_new is None, 1 or 2, not {max_new!r}")
+        if max_new == 2 and (order != "split" or not unique):
+            raise ValueError("max_new=2 takes order='split' and unique=True")
+        if max_new == 1:
+            assume_one_law = True
         if coverage not in ("warn", "undetermined", "ignore"):
             raise ValueError(f"coverage is 'warn', 'undetermined' or 'ignore', not {coverage!r}")
         from ._probes import groups_of, sameness, split
@@ -1021,6 +1042,10 @@ class LawSet:
                 cands.append(c)
         pool = list(probes)
         rng = random.Random(seed)
+        if max_new == 2:
+            from ._versions import admit_up_to_two
+            return admit_up_to_two(self, cands, ask, pool=pool, safe=safe, budget=budget, buffer=buffer,
+                                   exclude=exclude, read_only=read_only, cost=cost, eq=eq)
 
         def info(x, a):
             ms = self.matching(x, a)
@@ -1252,7 +1277,8 @@ class LawSet:
                            sources=tuple(r.id for r in sup))
         law.admitted, law.tested = "probes", len(cands)
         self.cost["accepted"] += 1
-        return Admission("accepted", law, classes, asked, refuted, null, why or "one class left", [], out, gap)
+        return Admission("accepted", law, classes, asked, refuted, null, why or "one class left", [], out, gap,
+                         laws=[law])
 
     def _accept(self, c, *, born, support=0, hits=0, net=0, sources=()):
         self._seq += 1

@@ -403,6 +403,14 @@ left; otherwise it returns "undetermined" with the classes. On a synthetic world
 with the shortest survivor accepted a wrong law in 0.593 of 300 trials, the probes in none (0.987 right, 0.013
 undetermined). Ask only where the rest of your law set and base are right, or a right candidate is refuted with them.
 
+**When two laws may be missing at once, use `admit_by_probes(..., max_new=2)` and give it at least 12 probes.** It is
+a known method — a version space (Mitchell 1982) over law sets with up to two new laws, split by discriminating
+probes as in generalized binary search (Golovin et al. 2010). On two synthetic boolean two-law worlds (10 atoms, a
+pool of 200 states, 1,000 trials each, budget 16) every accepted law was correct in 1,000 of 1,000 trials against
+5–6.5 % wrong for the default, and both laws were found in about 42 %. Where only one law is missing it needs about
+1.5× the probes (11.7 against 7.6 on a single-law benchmark; at a budget of 8 it is undetermined in 97.5 % of trials).
+Three or more missing laws are not measured, and the `coverage` warning is off in this mode.
+
 **Abstain when consistent laws disagree.** Two laws that both passed their test, neither an exception of the other,
 predicting different things for one state are a reason to abstain, not a tie to break by length or age:
 `predict(state, action, disagree="abstain")` returns `Undetermined` there and counts it (`lawset.abstained`). Skills

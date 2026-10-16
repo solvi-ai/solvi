@@ -322,6 +322,14 @@ started from a failing test built on the reproduction; the numbers are before �
   `coarse(key)` (outcomes grouped coarser than the observation: a law predicts the class) and `BackoffBase` (a base
   predictor backing off from specific to general levels, with `explain`); `split(..., per_cost=True)` picks the probe
   with the most information per unit of cost (`Probe.info`, `Probe.cost`).
+- **Laws (experimental): `admit_by_probes(max_new=2)`** — a version space over law sets with up to two new laws (a
+  known active-discrimination method applied to pairs), opt-in. Two synthetic two-law worlds (x0 ∨ x1 and two random
+  laws; 10 binary atoms, pool of 200 states, 1,000 trials each, budget 16): wrong admissions 51 and 65 of 1,000 → 0
+  (upper bound 0.3 %), a right law accepted in every trial (both laws in about 42 %) against 58 %; 7.3–7.7 probes
+  against 5.2–5.4. Single-law benchmark: as right as the default at a budget of 12–16 but 11.7 probes against 7.6,
+  and at 8 probes undetermined in 97.5 % — give it 12 or more. At most two missing laws; `coverage` is not checked;
+  the pair space is quadratic in the candidates. `Admission.laws` lists every accepted law. Default `max_new=None`
+  unchanged.
 
 ### Docs
 
