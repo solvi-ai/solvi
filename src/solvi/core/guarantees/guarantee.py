@@ -20,7 +20,8 @@ examples (exchangeable with them: the same stream, not a new domain):
                             over calibration sets (conformal risk control: (wrong answered + 1) / (n + 1) ≤ r)
     "ltt"        max_error=e    the error AMONG the answers given alone ≤ e, with probability ≥ 1 − delta over the
                             calibration set (learn-then-test: a binomial test per threshold, Bonferroni over ≤ 64;
-                            procedure="fixed": fixed-sequence, from the highest threshold down)
+                            procedure="fixed": fixed-sequence, from the highest threshold down;
+                            procedure="fallback": the fallback chain over the same descent)
     "empirical"  max_error=e    none: the error among the answered was ≤ e on the calibration examples only
 
 max_risk= selects "crc", max_error= selects "ltt" (method="empirical" to ask for the plain one). groups= gives a threshold per
@@ -75,7 +76,7 @@ def promise_text(method, level, delta=None, groups=False, n_groups=1, procedure=
         return (f"P(answered alone and wrong) ≤ {level:g} within every group at once ({n_groups} groups), with probability "
                 f"≥ {1 - delta:g}, for inputs like the calibration examples")
     where = f" within every group at once ({n_groups} groups)" if groups else ""
-    how = " (fixed-sequence learn-then-test)" if procedure == "fixed" else ""
+    how = {"fixed": " (fixed-sequence learn-then-test)", "fallback": " (fallback-chain learn-then-test)"}.get(procedure, "")
     return (f"error among the answers given alone ≤ {level:g}{where} with probability ≥ {1 - delta:g}, for inputs like "
             f"the calibration examples{how}")
 
@@ -94,7 +95,7 @@ def _curve(s, w):
 def _search(s, w, method, level, delta, min_support, bound_delta=None, procedure="bonferroni"):
     """The lowest threshold that keeps the method's promise on these examples → (threshold, why or None). bound_delta:
     conformal risk control as a binomial bound at that level (groups with delta). procedure: learn-then-test's multiple
-    testing over its grid ("bonferroni" or "fixed": calibration.ltt_certified)."""
+    testing over its grid ("bonferroni", "fixed" or "fallback": calibration.ltt_certified)."""
     from ..calibration import loss_budget, ltt_certified, ltt_grid
     n = len(s)
     if n == 0:
@@ -235,7 +236,9 @@ def calibrate(scores, correct, *, max_error=None, max_risk=None, method=None, de
     threshold must have this many examples at or above it. weak: "raise" (default) or "warn" when the signal does not
     separate right from wrong. procedure: learn-then-test's multiple testing over its grid — "bonferroni" (default: each
     of ≤ 64 thresholds at delta / their number) or "fixed" (fixed-sequence: from the highest threshold down at the full
-    delta, stopping at the first that fails; calibration.ltt_certified) — the same promise, usually more answered.
+    delta, stopping at the first that fails) or "fallback" (the same descent, half of delta on the first threshold
+    and half spread over the rest, a certified threshold passing its level on; a failure does not end it) — all
+    calibration.ltt_certified, the same promise; the sequential ones usually answer more.
     → Promise (its threshold is inf — everything escalates — when none keeps the promise; report["why"] says why)."""
     from ..calibration import check_rate, group_nodes
     error, risk = max_error, max_risk
