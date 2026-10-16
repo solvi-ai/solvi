@@ -1151,7 +1151,7 @@ class LawSet:
         10 checks: 1.000 right in 7.66 asks; with assume_one_law=True at 8: 0.987 right, 0.013 undetermined, 7.45
         asks — the check against the several-laws alternative costs about one probe). The
         uniqueness rule alone on 8 random probes: 0.000 wrong but 0.893 undetermined; 20 random probes with the
-        shortest survivor: 0.037 wrong (tests/test_laws_w2.py reruns the 8-check comparison on 150 trials). The
+        shortest survivor: 0.037 wrong (tests/test_laws_sized_probes.py reruns the 8-check comparison on 150 trials). The
         accepted law records admitted="probes", tested = the number of candidates, support = the rows where it
         applied, born = "probe".
 

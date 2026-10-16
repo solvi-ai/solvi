@@ -461,7 +461,7 @@ predicting different things for one state are a reason to abstain, not a tie to 
 do not abstain: two certified skills of one goal are both verified plans, and a different sequence is not a
 disagreement about the world. **Report the search cost next to accuracy**:
 `lawset.cost` and each skill episode's `cost` (candidates, tests, probes, simulated steps). Measured on synthetic worlds
-only: [tests/test_laws_w2.py](../tests/test_laws_w2.py).
+only: [tests/test_laws_sized_probes.py](../tests/test_laws_sized_probes.py).
 
 ## Relational rules: enumerate, let the test judge, then compile
 
