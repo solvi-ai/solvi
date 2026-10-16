@@ -26,6 +26,10 @@ searched, start, end, simulation)`: a breadth-first search on forks (uniform cos
 with a visited set on the state key; refused steps are not plan steps; deterministic; None when nothing within the
 horizon reaches the goal or the budget of simulated steps is used up. `verify(model, state, plan)` re-simulates the plan
 on a fresh fork: every step accepted, the goal at the end, and — from the plan's own start — every predicted state.
+The version space (opt-in): `plan(..., collect=k, distinct=fn)` → a list of up to k plans whose ends differ by
+`fn(end state)` (is there ANOTHER program that fits the demonstrations but answers differently?), `model.last
+["complete_depth"]` the last depth searched in full; a goal may read the path (`goal(state, path)`); `verify` takes a
+plain action list too.
 
 Skills. `Skill(condition, actions, goal, source, support, outcomes, certificate)`: "when these atoms hold, for this goal,
 do this sequence". `SkillSet(grammar, certificate)`: `compile(goal, plan, state)` (the condition rule: the atoms true

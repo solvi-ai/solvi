@@ -370,20 +370,25 @@ class KnowledgeStore:
         it.asserts.append({"t": t, "clock": r.get("clock", 0), "source": r["source"], "by": r.get("by"),
                            "just": tuple(r.get("just") or ()), "supersedes": r.get("supersedes"),
                            "evidence": r.get("evidence"), "valid": r.get("valid"), "level": r.get("level"),
-                           "of": r.get("of"), "inferred": bool(r.get("inferred"))})
-        for p in it.asserts[-1]["just"]:
+                           "of": r.get("of"), "inferred": bool(r.get("inferred")),
+                           "consulted": tuple(r.get("consulted") or ())})
+        for p in it.asserts[-1]["just"] + it.asserts[-1]["consulted"]:     # a consulted item's change re-resolves it
             self.dependents[p].add(iid)
         if it.reconfirm_after:                          # this assertion's clock is a possible last support: past
             insort(self._expiry, (it.asserts[-1]["clock"] + it.reconfirm_after, iid))   # it, the item expires
         self._touch(iid)
 
     def proposal(self, kind, body, scope=None, *, source, by=None, evidence=None, derived_from=(), supersedes=None,
-                 reconfirm_after=None, valid=None, level=None, of=None, inferred=False):
+                 reconfirm_after=None, valid=None, level=None, of=None, inferred=False, consulted=()):
         """A proposed item as the write gates see it (a dict with the record's fields; nothing is written)."""
         if kind not in KINDS:
             raise ValueError(f"kind is one of {KINDS}, not {kind!r}")
         if inferred and not derived_from:
             raise ValueError("an inferred assertion names the premises it is computed from (derived_from=)")
+        consulted = sorted(set(consulted) - set(derived_from))
+        unknown = [c for c in consulted if c not in self.items]
+        if unknown:
+            raise ValueError(f"consulted items not in the store: {unknown}")
         body, scope = plain_json(body), plain_json(scope or {})
         if reconfirm_after is None:
             reconfirm_after = self.defaults.get((kind, source))
@@ -391,10 +396,11 @@ class KnowledgeStore:
                 "by": None if by is None else str(by), "evidence": plain_json(evidence) if evidence is not None else None,
                 "derived_from": sorted(set(derived_from)), "supersedes": supersedes, "reconfirm_after": reconfirm_after,
                 "valid": plain_json(list(valid)) if valid is not None else None, "level": level,
-                "of": None if of is None else str(of), "key": key_of(body, scope), "inferred": bool(inferred)}
+                "of": None if of is None else str(of), "key": key_of(body, scope), "inferred": bool(inferred),
+                "consulted": consulted}
 
     def add(self, kind, body, scope=None, *, source, by=None, evidence=None, derived_from=(), supersedes=None,
-            reconfirm_after=None, valid=None, level=None, of=None, shadow=None, inferred=False):
+            reconfirm_after=None, valid=None, level=None, of=None, shadow=None, inferred=False, consulted=()):
         """Propose an item → its id, or None when a gate refused it (a "refused" entry in the journal says why).
 
         kind: one of KINDS; body: plain JSON (a fact: {"s", "r", "o"}); scope: a dict (a question, an environment);
@@ -406,12 +412,16 @@ class KnowledgeStore:
         passed to the write gates (a shadow measurement for a behaviour-changing item); inferred: the assertion is a
         consequence computed from `derived_from` (a rule applied to facts), not an observation — an inferred outcome
         does not refute the current value as an observation does: it competes by rank, and equal ranks are a dispute.
+        consulted: item ids the conclusion looked at besides its premises — the evidence for the alternatives it did not
+        choose (opt-in). Retracting one does not retract this item (its premises stand) but marks it for review: a
+        hypothesis pending re-test (`retest(id, ok=True)`), as an item resting on a retracted premise; `item(id)
+        ["consulted"]` lists them. Such a store differs from its rebuild without the retracted item until the re-test.
 
         A fact or an episode the gates admit is present at once; a rule, skill or action the gates admit is promoted (its
         verdicts recorded); one a later gate holds stays a hypothesis (a "held" entry says why)."""
         prop = self.proposal(kind, body, scope, source=source, by=by, evidence=evidence, derived_from=derived_from,
                              supersedes=supersedes, reconfirm_after=reconfirm_after, valid=valid, level=level, of=of,
-                             inferred=inferred)
+                             inferred=inferred, consulted=consulted)
         with self._lock:
             verdicts = []
             for g in self.gates:
@@ -425,7 +435,8 @@ class KnowledgeStore:
             rec = self._write("assert", item=prop["id"], item_kind=kind, body=prop["body"], scope=prop["scope"],
                               source=source, by=prop["by"], evidence=prop["evidence"], just=prop["derived_from"],
                               supersedes=supersedes, reconfirm_after=prop["reconfirm_after"], valid=prop["valid"],
-                              level=level, of=prop["of"], **({"inferred": True} if inferred else {}))
+                              level=level, of=prop["of"], **({"inferred": True} if inferred else {}),
+                              **({"consulted": prop["consulted"]} if prop["consulted"] else {}))
             with self.batch():
                 self._raw_assert(rec, rec["n"])
                 if kind in NEEDS_PROMOTION:
@@ -815,6 +826,7 @@ class KnowledgeStore:
         return {"id": iid, "kind": it.kind, "body": it.body, "scope": it.scope, "source": last.get("source"),
                 "by": last.get("by"), "evidence": [a.get("evidence") for a in it.asserts if a.get("evidence") is not None],
                 "derived_from": sorted({p for a in it.asserts for p in a["just"]}),
+                **({"consulted": cs} if (cs := sorted({p for a in it.asserts for p in a.get("consulted", ())})) else {}),
                 "confidence": {"n_confirm": st.get("n_confirm", 0), "n_refute": len(st.get("refuted_by") or ()),
                                "n_used": it.uses[0], "n_used_wrong": it.uses[1], "level": last.get("level")},
                 "status": self.status(iid), "stale": self.stale(iid), "version": version,
@@ -993,16 +1005,18 @@ def _taint(items, iid, memo):
     cut = _cut(it)
     cut = None if cut < 0 else cut
     live = _live(it)
-    via, whole = [], bool(live)
+    via, whole, seen = [], bool(live), []
     for a in live:
         ta = max((tp for p in a["just"] if (tp := _taint(items, p, memo)) is not None and tp > a["t"]), default=None)
         if ta is None:
             whole = False
         else:
             via.append(ta)
+        seen += [tp for p in a.get("consulted", ()) if (tp := _taint(items, p, memo)) is not None and tp > a["t"]]
     if cut is not None and live and all(a.get("inferred") for a in live):
         cut = None                                      # recomputed from premises: their own cuts decide (above)
-    memo[iid] = max(([cut] if cut is not None else []) + (via if whole else []), default=None)
+    # a consulted item (an alternative's evidence) cut after the assertion: any one marks it for review
+    memo[iid] = max(([cut] if cut is not None else []) + (via if whole else []) + seen, default=None)
     return memo[iid]
 
 

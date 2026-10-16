@@ -108,6 +108,7 @@ status.
 pip install solvi              # core: numpy, scipy, pydantic (imported only for typed parts and serialization)
 pip install "solvi[model]"     # + torch, transformers, for the ModernBERT extractors (solvi.extract_*) and the decider
 pip install "solvi[onnx]"      # + onnxruntime, tokenizers: the decider (solvi.core.deciders) on CPU without torch
+                               #   (the decider only: LongSpanExtractor and solvi.extract_* still need [model])
 pip install "solvi[serve]"     # + fastapi, uvicorn: solvi serve over HTTP
 pip install "solvi[mcp]"       # + the official MCP SDK for solvi serve --mcp (without it, a built-in stdio server is used)
 pip install "solvi[duckdb]"    # + duckdb: stored decisions in a DuckDB file; "solvi[postgres]" for PostgreSQL
@@ -613,6 +614,13 @@ def repair_days(doc: str) -> Estimate[0, 3, 7, 14]:
   the support (`quoted` for plain code, `quoted_by_model` for a model). `Question(require_evidence=True)`: an answer without
   a supporting quote abstains — safeguard **evidence missing** (`guard="evidence_missing"`, `system.stats`); a span is its
   own evidence, and "not stated" needs none.
+- **The branch and the numbers in `why`** (opt-in). A rule's `why` lists its inputs and their values; to say which branch
+  it took, return `because(value, "B = P ≠ D", p=0.38)` (`from solvi.core import because, missing`): `why` then reads
+  `because B = P ≠ D (p=0.38); direct = 176.0; ...`. A fact function may return `because(...)` too — its reason follows the
+  fact's value in each reading rule's `why` (`p_abstain = 0.38 (two of three checks agree; agree=2, of=3)`) — and
+  `missing("the program did not run")` for a fact with no value: the rule reads None and `why` says
+  `proposed = missing (the program did not run)` instead of a NaN stand-in. Both are recorded in the trace
+  (`record.extra["because"]`, `["numbers"]`, `["missing"]`) and checked on replay.
 - **Span** (`Span[T]`, `Answer.span(source="doc", type=None)`): the rule returns a `Quote` (its text must be literally at its
   offsets, whatever the part) or the text (located in `source`). The answer is the text read as `T`: by pydantic
   (`"149.90"` → 149.9, `"2026-07-21"`), and for a date or a number (`date`, `int`, `float`, `Decimal`) otherwise by the
@@ -3378,6 +3386,12 @@ system.guarantee("correct", examples, max_error=0.3, answer="yes", folds=5)
 system.guarantee("refund", False)                                  # remove it
 ```
 
+A label with several right answers — the dialog closes by the button or by Escape — is `AnyOf("button", "escape")`
+(`from solvi.core import AnyOf`): `system.guarantee`, `solvi.build` and a decision part's `act_guard`,
+`calibrate_for` and `conformal` count an answer right when it is any of them (with `correct=`, your judge is asked per
+option), so another right answer is not counted as an error and does not lower the share answered alone. What is
+fitted on such a label (`solvi.build`'s head or learner) learns the first option. A plain label is the one right answer.
+
 Which promise each method makes, for inputs like the calibration examples (the same stream, not a new domain):
 
 | method | given as | promise |
@@ -4664,6 +4678,13 @@ had never been written (`ks.rebuild(skip={x})`). `benchmarks/knowledge/retractio
 grows with the connected component it touches (premise edges and shared keys): there, a retraction touched a component of 6,057 of the 10,000 items at the median and took 0.19 s (rebuilding the whole store: 0.79 s); retractions in small components took about 0 s (Spearman ρ between component size and time 0.88). The store has been
 measured up to 10,000 items, not beyond.
 
+What a conclusion looked at besides its premises — the evidence for the alternatives it did not choose — can be named
+with `add(..., consulted=[...])` (`Knowledge.tell(..., consulted=)`; opt-in). Retracting a consulted item does not
+retract the conclusion (its premises stand) but marks it for review: a hypothesis pending re-test, until
+`retest(id, ok=True)`; `ks.item(id)["consulted"]` lists them. A conclusion whose margin over the losing alternative
+rested on a retracted source is then reviewed instead of staying a fact unnoticed. Such a retraction is not exact in
+the sense above until the re-test: the rebuilt store has no review mark.
+
 A decision is given `ks.snapshot(...)` as a fact: the active items that match (`facts`), the hints (hypotheses, expired
 or stale items, with why), the ids they rest on, the store's fingerprint and its journal position — so the trace shows
 what the memory said, and the decision replays. `ks.redecide(store, retracted, decide)` finds the stored decisions whose
@@ -4955,7 +4976,8 @@ reachable from the stage at which the recorded player first reached it. The repl
 
 With `pip install "solvi[model]"`, solvi provides a ModernBERT extractor, `LongSpanExtractor`. It predicts a start and an end
 position in the text, so the extracted value is always a substring of the document with exact offsets. It gives you
-plain functions `doc -> Quote` to register with `cat.extract`.
+plain functions `doc -> Quote` to register with `cat.extract`. It runs on torch for prediction too: `solvi[onnx]` covers
+the decider only, and there is no ONNX path for this extractor.
 
 Labels are character spans: for each training document and field, `(start, end)` of the value in the text, or `None` if
 the field is absent. extract-base's model card suggests labelling about 25–100 documents per task and fine-tuning. A
