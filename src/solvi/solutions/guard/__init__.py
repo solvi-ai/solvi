@@ -154,13 +154,16 @@ def messages(context) -> list:
 
 
 class Message(tuple):
-    """A (role, text) message of a Session's context, with a flag: `tainted` — the message, before the session cut it
-    to its size cap, carried instruction-like text (the guard treats it as tainted even if the cut kept none)."""
+    """A (role, text) message of a Session's context, with flags: `tainted` — the message, before the session cut it
+    to its size cap, carried instruction-like text (the guard treats it as tainted even if the cut kept none);
+    `verified` — a user message whose signature Guard(message_verifier=) accepted (the guard does not ask again)."""
     tainted = False
+    verified = False
 
-    def __new__(cls, role, text, tainted=False):
+    def __new__(cls, role, text, tainted=False, verified=False):
         m = super().__new__(cls, (role, text))
         m.tainted = bool(tainted)
+        m.verified = bool(verified)
         return m
 
 
@@ -1476,15 +1479,24 @@ class Guard:
     decision)` → the verified identity (raise PermissionError, or return a falsy value, to refuse); `resolve(...,
     approve=True)` then needs `approval=` (a token) that verifies, and the store records the verified identity. None
     (default): any truthy approve with any reviewer name is taken, as before. `approval_verifier(keys)` is a verifier
-    over HMAC tokens from `sign_approval(decision, reviewer, key)`, bound to the decision's approval_key."""
+    over HMAC tokens from `sign_approval(decision, reviewer, key)`, bound to the decision's approval_key.
+    message_verifier: the other half — who wrote a «user» message. `message_verifier(message)` → the verified sender
+    (raise, or return a falsy value, to refuse), called with each user message as given (a dict, a message object, a
+    (role, text) pair, or the plain string context); a user message it does not accept is read as a tool output: it
+    grounds no user-only argument (`ground_from=("user",)`) and gets the injection checks. None (default): roles are
+    taken as given, as before. `signed_messages(keys)` is a verifier over HMAC tokens from `sign_message(text, sender,
+    key)` carried in the message's "signature" field."""
 
     @_deprecate.removed_kwargs(facts="fact_names")
     def __init__(self, storage=None, authorizer=None, fact_names=None, lang="en", scan_user=False, tool_values="deny",
-                 knowledge=None, user_verifier=None):
+                 knowledge=None, user_verifier=None, message_verifier=None):
         from ...core.store import open_storage
         if user_verifier is not None and not callable(user_verifier):
             raise TypeError("user_verifier is a function (approval, decision) → the verified identity, or None")
+        if message_verifier is not None and not callable(message_verifier):
+            raise TypeError("message_verifier is a function (message) → the verified sender, or None")
         self.user_verifier = user_verifier
+        self.message_verifier = message_verifier
         self.storage = open_storage(storage)
         self.tools: dict[str, Tool] = {}
         facts = fact_names                   # the names (and types) of the facts the app gives (`facts=` in 0.7); their
@@ -1825,7 +1837,7 @@ class Guard:
         """The input the authorizer reads for a call (decide.Facts) — for fit / act_guard / conformal examples."""
         from ...core.deciders import Facts
         c = ToolCall.parse(call)
-        text, _, request = conversation(context)
+        text, _, request = conversation(self._read(context))
         t = self.tools.get(c.name)
         args = c.arguments
         if t is not None and t.model is not None and isinstance(args, dict):
@@ -2046,9 +2058,30 @@ class Guard:
         return {"tool_name": c.name, "tool_arguments": c.arguments, "session_tools": list(allowed)}
 
     # --- checking and calling
+    def _signed(self, m):
+        """Does message_verifier accept this user message? (a refusal by raising counts as no)"""
+        try:
+            return bool(self.message_verifier(m))
+        except Exception:  # noqa: BLE001 — a verifier's refusal: the message is not the user's
+            return False
+
+    def _read(self, context):
+        """The context as the guard reads it: with Guard(message_verifier=), every user message the verifier does not
+        accept becomes a tool output → [Message] (the context itself when no verifier is set)."""
+        if self.message_verifier is None or context is None:
+            return context
+        out = []
+        for m in [context] if isinstance(context, str) else context:
+            parts = _messages(m if isinstance(m, str) and m is context else [m])
+            ok = isinstance(m, Message) and m.verified or any(r == "user" for r, _, _ in parts) and self._signed(m)
+            for r, t, tainted in parts:
+                user = r == "user" and ok
+                out.append(Message("tool" if r == "user" and not ok else r, t, tainted, verified=user))
+        return out
+
     def _state(self, c, context, facts):
         facts = dict(facts or {})
-        text, roles, request = conversation(context)
+        text, roles, request = conversation(self._read(context))
         state = {"tool_name": c.name, "tool_arguments": c.arguments, "conversation": text, "conversation_roles": roles,
                  "user_request": request}
         if c.name in self.tools and self.tools[c.name].once:
@@ -2404,8 +2437,9 @@ class Session:
         self.allowed_tools = guard._allowed(allowed_tools)
         self.max_messages, self.max_chars = max_messages, max_chars
         self.context = []
-        for r, t, tainted in _messages(context):
-            self._append(r, t, tainted)
+        for m in (guard._read(context) or []) if guard.message_verifier is not None else _messages(context):
+            self._append(m[0], m[1], getattr(m, "tainted", False) if isinstance(m, Message) else m[2],
+                         getattr(m, "verified", False))
         self.facts = dict(facts or {})
         self.decisions = []
         self.made = []                                # the calls that were made and did not fail (for once=True tools)
@@ -2438,21 +2472,29 @@ class Session:
         self.add("tool", f"{decision.tool}: {error if error else _text(result)}")
         return decision
 
-    def _append(self, role, text, tainted=False):
+    def _append(self, role, text, tainted=False, verified=False):
         if self.max_chars is not None and len(text) > self.max_chars:
             if role == "tool" and not tainted:
                 from ...core.deciders.perturb import injection_spans
                 tainted = bool(injection_spans(text))      # on the whole message, before the cut
             text = _clip(text, self.max_chars)
-        self.context.append(Message(role, text, tainted and role == "tool"))
+        self.context.append(Message(role, text, tainted and role == "tool", verified and role == "user"))
         if self.max_messages is not None and len(self.context) > self.max_messages:
             del self.context[:len(self.context) - self.max_messages]
         if self.max_chars is not None:
             while len(self.context) > 1 and sum(len(m[1]) for m in self.context) > self.max_chars:
                 del self.context[0]
 
-    def add(self, role, text):
-        self._append(ROLES.get(role, role), _text(text))
+    def add(self, role, text, signature=None):
+        """Append a message. With Guard(message_verifier=) a user message is checked as {"role": "user", "content":
+        text, "signature": signature}: unsigned or refused, it is appended as a tool output."""
+        role = ROLES.get(role, role)
+        if role == "user" and self.guard.message_verifier is not None:
+            m = {"role": "user", "content": text, **({"signature": signature} if signature is not None else {})}
+            for r, t, _ in _messages(self.guard._read([m])):
+                self._append(r, t, verified=r == "user")
+            return self
+        self._append(role, _text(text))
         return self
 
     def check(self, call):
@@ -2538,12 +2580,77 @@ def approval_verifier(keys, *, max_age=300, clock=None):
     return verify
 
 
+# ------------------------------------------------------------------------------------------------ signed user messages
+def _user_words(message):
+    """The words of a user message the guard reads as the user's (its user text blocks, joined) — what is signed."""
+    if isinstance(message, str):
+        return message
+    return "\n".join(t for r, t, _ in _messages([message]) if r == "user")
+
+
+def _signature_of(m):
+    """A message's "signature": a dict key, an attribute, or in additional_kwargs / metadata (message objects)."""
+    sig = _get(m, "signature")
+    for attr in ("additional_kwargs", "metadata"):
+        d = _get(m, attr)
+        if sig is None and isinstance(d, dict):
+            sig = d.get("signature")
+    return sig
+
+
+def sign_message(content, sender, key, *, now=None) -> str:
+    """A user message's signature for Guard(message_verifier=signed_messages(...)): "<sender>.<unix time>.<HMAC-SHA256
+    hex>" over the message's words as the guard reads them (`content`: a string, or a message's content blocks — only
+    its text blocks are the user's), the sender and the time, with the sender's secret `key` (bytes or str). Put it in
+    the message's "signature" field. Sign where the person types (your app's server), not in the agent's process: a
+    signed message proves who wrote those words, not that they are fresh — the same message signed once stays valid in
+    any conversation unless the verifier has a max_age."""
+    import hashlib
+    import hmac
+    import time
+    words = content if isinstance(content, str) else _user_words({"role": "user", "content": content})
+    t = int(time.time() if now is None else now)
+    k = key.encode() if isinstance(key, str) else bytes(key)
+    return f"{sender}.{t}.{hmac.new(k, f'{words}|{sender}|{t}'.encode(), hashlib.sha256).hexdigest()}"
+
+
+def signed_messages(keys, *, max_age=None, clock=None):
+    """A message_verifier over sign_message signatures: keys {sender: secret}; a user message verifies when its
+    "signature" names a sender with a key, its HMAC matches the message's words, and (with max_age, in seconds; None:
+    no limit, a conversation keeps its old turns) it is not older than that (clock(): default time.time) → the sender;
+    else PermissionError saying why (the guard reads the message as a tool output)."""
+    import hashlib
+    import hmac
+    import time
+    clock = clock or time.time
+    keys = {str(r): (k.encode() if isinstance(k, str) else bytes(k)) for r, k in dict(keys).items()}
+
+    def verify(message):
+        sig = None if isinstance(message, (str, tuple, list)) else _signature_of(message)
+        parts = sig.rsplit(".", 2) if isinstance(sig, str) else []
+        if len(parts) != 3 or not parts[1].isdigit():
+            raise PermissionError("the message is not signed (sender.time.signature)")
+        who, t, got = parts[0], int(parts[1]), parts[2]
+        if who not in keys:
+            raise PermissionError(f"the message names an unknown sender {who!r}")
+        want = hmac.new(keys[who], f"{_user_words(message)}|{who}|{t}".encode(), hashlib.sha256).hexdigest()
+        if not hmac.compare_digest(want, got):
+            raise PermissionError(f"the signature does not match the message's words (or {who!r}'s key)")
+        age = clock() - t
+        if max_age is not None and age > max_age:
+            raise PermissionError(f"the message is {age:.0f}s old (max_age {max_age}s)")
+        if age < -30:
+            raise PermissionError("the message is dated in the future")
+        return who
+    return verify
+
+
 # the rest of the guard: the confirmation step and the intents of a user's words (they import this module's names, so
 # they come after them)
 from .confirm import accepted_proposals, accepts  # noqa: E402
 from .intents import INTENTS, register_intent  # noqa: E402
 
-__all__ = ["action_model_allows", "slots_grounded", "agenda_allows", "accepted_proposals", "accepts", "INTENTS", "register_intent", "approval_verifier", "sign_approval", "model_from_json_schema", "arguments_from_user", "arguments_grounded", "arguments_model", "arguments_valid", "AUTHORIZE_TASK",
+__all__ = ["action_model_allows", "slots_grounded", "agenda_allows", "accepted_proposals", "accepts", "INTENTS", "register_intent", "approval_verifier", "sign_approval", "sign_message", "signed_messages", "model_from_json_schema", "arguments_from_user", "arguments_grounded", "arguments_model", "arguments_valid", "AUTHORIZE_TASK",
            "conversation", "Guard", "GuardDecision", "MATCHERS", "Message", "messages", "no_injected_arguments",
            "no_instructions_in_tool_outputs", "proposal", "request_authorizes", "same_url", "Session", "Tool",
            "ToolCall", "url_parts", "VERDICTS"]
