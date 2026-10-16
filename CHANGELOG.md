@@ -81,6 +81,23 @@ started from a failing test built on the reproduction; the numbers are before �
 
 ### Changed (breaking)
 
+- **The drift monitor is on by default when the guarantee has at least 500 calibration examples.**
+  `build(monitor="auto")` is the new default (`MONITOR_MIN_REFERENCE = 500`); `monitor=None` turns it off,
+  `monitor=True` turns it on at any size. A monitor whose reference is short cries wolf — the known effect of estimated
+  parameters on a CUSUM (Jones, Champ and Rigdon 2004). Measured on four English intent-classification sets (Banking77,
+  HWU64, Bitext customer support and retail banking; a TF-IDF + logistic-regression System 1, no slow path, 100 replays
+  per set and size, streams of 1 000 decisions): with 500 calibration examples as the reference the monitor flagged an
+  unchanged stream in 0–1 % of replays per set (95 % upper bound 3.6–5.4 %) and a planted shift — 30 % of requests from
+  unseen intents — in 89–100 %, a median 17–157 decisions after it began; on Banking77 and HWU64 part of those catches
+  (33 of 89, 26 of 93) came through the answers given alone, live only because the guarantee answered about 78 % alone
+  there. At 200 examples or fewer both bars failed: 6–24 % false flags on the two Bitext sets, where System 1 is
+  near-certain, and only 59–79 % of shifts caught on Banking77 and HWU64 — 500 is set by both. With the default split
+  that is about 2 000 examples when System 1 is fitted here, 4 000 with a slow path. Below 500 the monitor is off and
+  nothing is said at build or decision time: `explain()` reads «Drift: none: monitor="auto" turns a DriftMonitor on with
+  at least 500 guarantee calibration examples …» and `dispatcher.monitor` is None. Not measured: other shifts (slow
+  drifts, a rise of confidence, new vocabulary), streams beyond 1 000 decisions, other System 1s or a slow path.
+  **Behaviour change** for systems built with ≥ 500 calibration examples: after a flag System 1's answers are checked
+  by the slow path or go to a person until `reset_drift()`; `Dispatcher(on_drift="accept")` keeps the old routing.
 - **Several false hard checks with different `then` answers: the strictest answer decides by default.**
   `Catalog(combine=None)` behaves as `"strictest"`: the answer that comes last in the question's options decides,
   whatever the declaration order, with a warning naming the checks; `Catalog(combine="first")` keeps the declaration

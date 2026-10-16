@@ -81,8 +81,8 @@ from ..core.catalog import Answer, AnyOf, Catalog, Question, first_label, label_
 
 SPLIT_FIT = 0.75            # the share fitted on when System 1 is fitted here
 SPLIT_SELECT = 1 / 3        # the share a signal is chosen on when a rule answers and its confidence does not vary
-MONITOR_MIN_REFERENCE = 100  # build(monitor="auto"): the fewest guarantee calibration examples that turn the monitor on
-                             # (provisional: to be set from the measured false-alarm rate on short references)
+MONITOR_MIN_REFERENCE = 500  # build(monitor="auto"): the fewest guarantee calibration examples that turn the monitor on
+                             # (measured: below it two of four intent sets gave false flags on unchanged streams; docs/guide.md)
 
 
 class DecisionSystem:
@@ -383,7 +383,7 @@ def _slow_path(slow, q, reads, novel_on, writer, inputs):
 def build(question, examples, *, catalog=None, learner=None, slow=None, reads=None, max_risk=None, max_error=None,
           signal=None, correct=None, novel="auto", budget=None, total=None, price=None, storage=None, split=None,
           seed=0, delta=0.10, min_slice=20, writer=None, inputs=None, knowledge=None, groups=None, strict=False,
-          monitor=None):
+          monitor="auto"):
     """Fit System 1, calibrate its guarantee and the dispatcher, wire the store → a DecisionSystem (see the module docs).
 
     question: a Question, or the name of one a rule of `catalog` (or learner=) answers. examples: [(state, correct
@@ -413,12 +413,13 @@ def build(question, examples, *, catalog=None, learner=None, slow=None, reads=No
     share then holds whole groups (at least two groups); None: example by example. strict: when the dispatcher's
     calibration measures System 1's own answers breaking the promise on its examples (every slice then goes to a
     person, but System 1 still answers alone above its threshold), raise a ValueError instead of the default
-    GuaranteeWarning. monitor: None (default: no drift monitor), True (a DriftMonitor whose reference is System 1's
-    responses on the guarantee's calibration examples), "auto" (as True when the guarantee has at least
-    MONITOR_MIN_REFERENCE calibration examples, else none — a short reference raises false flags; the explanation says
-    which) or a monitor of your own (an object with observe(response,
-    question=) → {"drift", "why"}, e.g. a DriftMonitor or a NumericDrift) — the dispatcher feeds it every System 1 response, and after
-    its flag System 1's answers are checked by the slow path or go to a person (Dispatcher(on_drift=))."""
+    GuaranteeWarning. monitor: "auto" (default since 1.2): a DriftMonitor whose reference is System 1's responses on the
+    guarantee's calibration examples, when there are at least MONITOR_MIN_REFERENCE of them (a shorter reference raises
+    false flags on a stream that has not changed; the measurement is in docs/guide.md); below that no monitor — nothing
+    is watched or flagged, and only explain() says so ("Drift: none: ..."). True: the same monitor at any size (take the
+    false flags). None: no monitor. Or a monitor of your own (an object with observe(response, question=) → {"drift",
+    "why"}, e.g. a DriftMonitor or a NumericDrift). The dispatcher feeds it every System 1 response; after its flag System
+    1's answers are checked by the slow path or go to a person (Dispatcher(on_drift=)) until reset_drift()."""
     from ..core.dispatch import SIGNALS, THINK, Dispatcher
     from ..core.guarantees.guarantee import promise_text
     from ..core.store import open_storage
@@ -761,7 +762,8 @@ def _monitor(monitor, system, qname, g_ex, gate):
         if len(g_ex) < MONITOR_MIN_REFERENCE:
             return None, (f"none: monitor=\"auto\" turns a DriftMonitor on with at least {MONITOR_MIN_REFERENCE} "
                           f"guarantee calibration examples as its reference, and there are {len(g_ex)} (a short "
-                          "reference raises false flags on a stream that has not changed)")
+                          "reference raises false flags on a stream that has not changed); below it the stream is not "
+                          "watched — pass monitor=True to watch it anyway")
         monitor = True
     if monitor is True:
         from ..core.guarantees.drift import DriftMonitor
