@@ -1125,7 +1125,13 @@ class TraceStorage(abc.ABC):
         return bad
 
     # --- provenance over the store
-    def quarantine(self, fact, value=ANY):
+    def provenance_index(self):
+        """An index of which stored records read or hold which fact → ProvenanceIndex. Its quarantine(fact, value) and
+        where_is(fact, value) answer as this store's do, looking only at the records that can match instead of every
+        record; it follows records saved after it was built (it reads the new ones on the next query)."""
+        return ProvenanceIndex(self)
+
+    def quarantine(self, fact, value=ANY, *, _rows=None):
         """A fact (or a given input) found to be wrong: the stored decisions whose answers rest on it — through the trace's
         provenance graph (each step's recorded inputs, from the answer back to the fact; a hard check that ran for the
         question counts, passed or failed: the answer stood because it passed). `value`: only where the fact had this value (compared by its hash as the consumers recorded it).
@@ -1137,7 +1143,7 @@ class TraceStorage(abc.ABC):
         from ..runtime import vhash
         vh = None if value is ANY else vhash(value)
         out, unchecked = [], []
-        for s in self.iter():
+        for s in self.iter() if _rows is None else _rows:
             d = s.data.get("response")
             if s.compact:
                 r, _ = rederive(s.data, self.catalog) if self.catalog is not None else (None, None)
@@ -1158,7 +1164,7 @@ class TraceStorage(abc.ABC):
 
     forget = _deprecate.removed_attr("forget()", "where_is(fact, value) (forget never deleted anything)", "TraceStorage")
 
-    def where_is(self, fact, value=ANY):
+    def where_is(self, fact, value=ANY, *, _rows=None):
         """Where a given fact (e.g. a person's data) is held, and what removing it would touch (`forget` in 0.7) — a
         report only: nothing is deleted (deleting a
         stored record breaks the chain by design; keep the report as the record of the request, and erase the records it
@@ -1171,7 +1177,7 @@ class TraceStorage(abc.ABC):
         from ..schema import untag_floats
         vh = None if value is ANY else {vhash(value), vhash(plain(value))}
         dependent, stored = [], []
-        for s in self.iter(None):
+        for s in self.iter(None) if _rows is None else _rows:
             if s.kind == "ask":
                 v = view(s.data) or {}
                 init = (v.get("trace") or {}).get("init") or {}
@@ -1185,6 +1191,83 @@ class TraceStorage(abc.ABC):
                 stored.append(s.id)
         return {"fact": fact, "value": None if value is ANY else plain(value), "dependent": dependent, "stored": stored,
                 "deleted": 0}
+
+
+class ProvenanceIndex:
+    """Which stored records read which fact (as a step's recorded input) and which hold it as a given input — built from
+    a store in one pass (TraceStorage.provenance_index()), so that quarantine(fact, value) and where_is(fact, value)
+    visit only the records that can match. The answers are the store's own (the same lists, in stored order): the
+    candidates are then checked by the store's quarantine / where_is. A compact record keeps no step inputs: it is
+    always a candidate of quarantine (re-derived there, as the store does). Records saved after the index was built are
+    read on the next query; a record redacted since is passed over, as the store passes it over. In memory only:
+    {fact: {record id: value hashes}}, nothing is written to the store."""
+
+    def __init__(self, storage):
+        self.storage = storage
+        self.reads = {}                               # fact → {id: {value hash as the consumers recorded it}}
+        self.holds = {}                               # fact → {id: {hashes of the given value}}
+        self.compact = []                             # ids of the compact decisions
+        self.seq = {}                                 # id → seq (stored order)
+        self._count = -1
+        self.refresh()
+
+    def refresh(self):
+        """Read the records saved since the last refresh (cheap when there are none: one head() read)."""
+        from ..runtime import vhash
+        from ..schema import untag_floats
+        count = self.storage.head()["count"]
+        if count == self._count:
+            return self
+        last = max(self.seq.values(), default=-1)
+        for s in self.storage.iter(None):
+            if s.seq <= last:
+                continue
+            self.seq[s.id] = s.seq
+            if s.kind == "ask":
+                v = view(s.data) or {}
+                if s.compact:
+                    self.compact.append(s.id)
+                for r in (v.get("trace") or {}).get("records") or ():
+                    for x, h in (r.get("inputs") or {}).items():
+                        self.reads.setdefault(x, {}).setdefault(s.id, set()).add(h)
+                init = (v.get("trace") or {}).get("init") or {}
+            else:
+                init = s.data.get("init") or {}
+            for k, val in (init.items() if isinstance(init, dict) else ()):
+                try:
+                    hs = {vhash(val), vhash(untag_floats(val))}
+                except Exception:  # noqa: BLE001 — a value that cannot be hashed: a candidate for any value
+                    hs = {None}
+                self.holds.setdefault(k, {}).setdefault(s.id, set()).update(hs)
+        self._count = count
+        return self
+
+    def _rows(self, ids, kind):
+        for i in sorted(ids, key=lambda i: self.seq[i]):
+            d = self.storage._find(i)
+            if d is None or not chained(d) or d.get("redacted") or (kind is not None and d.get("kind", "ask") != kind):
+                continue
+            yield _stored(d, self.storage.catalog)
+
+    def quarantine(self, fact, value=ANY):
+        """As TraceStorage.quarantine, over the records that read `fact` (with this value, when given)."""
+        from ..runtime import vhash
+        self.refresh()
+        vh = None if value is ANY else vhash(value)
+        ids = {i for i, hs in self.reads.get(fact, {}).items() if vh is None or vh in hs} | set(self.compact)
+        return self.storage.quarantine(fact, value, _rows=self._rows(ids, "ask"))
+
+    def where_is(self, fact, value=ANY):
+        """As TraceStorage.where_is, over the records that read or hold `fact`."""
+        from ..runtime import vhash
+        self.refresh()
+        if value is ANY:
+            ids = set(self.reads.get(fact, {})) | set(self.holds.get(fact, {}))
+        else:
+            vh = {vhash(value), vhash(plain(value))}
+            ids = {i for i, hs in self.reads.get(fact, {}).items() if vhash(value) in hs} | \
+                  {i for i, hs in self.holds.get(fact, {}).items() if hs & vh or None in hs}
+        return self.storage.where_is(fact, value, _rows=self._rows(ids, None))
 
 
 def _dependents(resp, fact, value_hash=None):
@@ -1983,6 +2066,6 @@ def open_storage(where, system=None):
 
 
 __all__ = ["chained", "check_source", "compact_content", "CompactRecord", "DuckDBStorage", "entry", "FORMAT",
-           "JSONLStorage", "open_storage", "plain", "PostgresStorage", "record_body", "record_hash", "record_mode",
+           "JSONLStorage", "open_storage", "plain", "PostgresStorage", "ProvenanceIndex", "record_body", "record_hash", "record_mode",
            "RECORD_MODES", "rederive", "SQLiteStorage", "Stored", "TraceStorage", "TRUSTED_SOURCES", "UntrustedLabel",
            "VERIFIED", "VERIFIED_REFUSED", "view", "AUDIT"]
