@@ -202,10 +202,10 @@ def ltt_grid(score, size=LTT_GRID):
     return u
 
 
-LTT_PROCEDURES = ("bonferroni", "fixed")
+LTT_PROCEDURES = ("bonferroni", "fixed", "fallback")
 
 
-def ltt_certified(k, m, error, delta, procedure="bonferroni", min_support=1):
+def ltt_certified(k, m, error, delta, procedure="bonferroni", min_support=1, *, fallback=0.5):
     """Which thresholds of a learn-then-test grid are certified: k[i] answered alone and m[i] of them wrong at the i-th
     threshold (thresholds ascending, so k does not increase along the grid) → booleans, one per threshold. Each threshold
     is the null "the error among the answered > error", rejected by a binomial test. procedure="bonferroni": every
@@ -214,12 +214,40 @@ def ltt_certified(k, m, error, delta, procedure="bonferroni", min_support=1):
     certifying any threshold whose error is above `error` stays ≤ delta). The descent starts at the highest threshold
     with at least max(min_support, k0) answered, k0 the fewest cases that can pass with no wrong one
     ((1 − error)^k0 ≤ delta): a choice from the counts alone, not the labels, so the order is still fixed before the
-    test. Thresholds with fewer answered than min_support are never certified."""
+    test. Thresholds with fewer answered than min_support are never certified.
+    procedure="fallback": the fallback procedure (Wiens 2003; the chain graph of Bretz et al. 2009) — the same descent
+    from the same count-only start, the first threshold tested at (1 − fallback)·delta and each of the others below it
+    at fallback·delta / their number; a certified threshold passes its whole level on to the next one down, a failed one
+    keeps its level and the descent goes on at the next one's own level. The start uses (1 − fallback)·delta in k0.
+    Every certificate holds together with probability ≥ 1 − delta (a closed test with weighted Bonferroni local tests).
+    It never certifies less than Bonferroni at fallback·delta over the thresholds below the start, and until its first
+    failure it is a fixed sequence at (1 − fallback)·delta or more; the price is the later start, which can leave
+    nothing certified where e·n is small. fallback=0 is the fixed sequence."""
     if procedure not in LTT_PROCEDURES:
         raise ValueError(f"procedure must be one of {LTT_PROCEDURES}, not {procedure!r}")
+    if procedure == "fallback":
+        if not 0 <= fallback < 1:
+            raise ValueError(f"fallback must be in [0, 1), not {fallback!r}")
     k, m = np.asarray(k, int), np.asarray(m, float)
     good = np.zeros(len(k), bool)
     if not len(k):
+        return good
+    if procedure == "fallback":
+        first = (1 - fallback) * delta
+        k0 = max(1, int(min_support), int(math.ceil(math.log(first) / math.log1p(-error) - 1e-9)))
+        chain = [i for i in range(len(k) - 1, -1, -1) if k[i] >= k0]        # descending from the start
+        if not chain:
+            return good
+        rest = fallback * delta / (len(chain) - 1) if len(chain) > 1 else 0.0
+        carry = 0.0
+        for j, i in enumerate(chain):
+            level = (first if j == 0 else rest) + carry
+            if len(chain) == 1:
+                level = delta
+            if level > 0 and _binom_cdf(float(m[i]), int(k[i]), error) <= level:
+                good[i], carry = True, level
+            else:
+                carry = 0.0
         return good
     if procedure == "bonferroni":
         for i in range(len(k)):
@@ -242,8 +270,9 @@ def ltt_certified(k, m, error, delta, procedure="bonferroni", min_support=1):
 def ltt_threshold(score, wrong, error=0.10, delta=0.10, grid=None, procedure="bonferroni"):
     """Learn-then-test: the lowest threshold t on a fixed grid such that the error AMONG the cases answered alone
     (score ≥ t) is ≤ error with probability ≥ 1 − delta over the calibration examples (binomial test, Bonferroni over the
-    grid; procedure="fixed": fixed-sequence testing from the highest threshold down, each at the full delta — see
-    ltt_certified). A stronger promise than crc_threshold, so it often allows no automatic answers at all (inf).
+    grid; procedure="fixed": fixed-sequence testing from the highest threshold down, each at the full delta;
+    "fallback": the fallback chain over the same descent — see ltt_certified). A stronger promise than crc_threshold,
+    so it often allows no automatic answers at all (inf).
     grid=None: at most 64 quantiles of the distinct calibration scores (ltt_grid; before 0.7 a fixed linspace(0.2,
     0.995, 32), which let nothing through for a decider whose scores sit above 0.995)."""
     check_rate("error", error)
