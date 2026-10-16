@@ -427,3 +427,17 @@ def test_impact_refuses_an_exception_that_moves_other_decisions_and_admits_the_e
     assert exact.promoted and t.state == "exact"
     m = {v.stage: v for v in exact.verdicts}["impact"].measured           # (the approval stage ran after it)
     assert m["extraneous"] == [] and m["changed"] == 1 and m["ids"] == [sid["a1"]]
+
+
+def test_fresh_environments_calls_on_episode_start_before_every_episode():
+    seen = []
+
+    def start(policy, seed):
+        seen.append((callable(policy), seed))
+    fresh = FreshEnvironments(Corridor, agent, select=[1, 2], confirm=[3, 4], boot=50, on_episode_start=start)
+    from types import SimpleNamespace
+    fresh.run(lava_rule(), SimpleNamespace(store=KnowledgeStore()))
+    seeds = [s for _, s in seen]
+    assert all(c for c, _ in seen) and seeds[:4] == [1, 2, 1, 2]        # the current agent, then the candidate
+    with pytest.raises(TypeError):
+        FreshEnvironments(Corridor, agent, select=[1], confirm=[2], on_episode_start="reset")
