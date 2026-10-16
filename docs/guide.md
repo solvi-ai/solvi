@@ -3615,7 +3615,7 @@ yet — erase before the file rotates, or keep personal data out of the input). 
 | `rederive(id, system=None, trust_models=False)` | the stored `Response`; a compact one re-run from its input and checked step by step against its hashes |
 | `iter()`, `query(question=, answer=, status=, safeguard=, model=, since=, until=)` | `Stored` records (`.id`, `.time`, `.answers`, `.response()`) in stored order; `since <= time < until` |
 | `head()` | `{"count", "hash"}` of the chain |
-| `verify(anchor=None, signature=None, candidates=None)` | `{"ok", "count", "head", "legacy", "problems": [(seq, id, reason)]}` (+ `"signature"`) |
+| `verify(anchor=None, signature=None, candidates=None, *, deep=True)` | `{"ok", "count", "head", "legacy", "problems": [(seq, id, reason)]}` (+ `"signature"`); `deep=False` skips re-checking each stored response against its summary (every chain check stays) |
 | `signature(alg="syndrome")` | 64 bytes that later name the one changed record (see below) |
 | `replay_all(system)` | the stored decisions whose trace no longer replays, with the mismatches (`"record": "compact"` for a compact one) |
 | `segments()`, `verify_segments(anchor=None)` (`JSONLStorage`) | the closed segments of a rotated store; every file and every link verified: `{"ok", "files", "count", "problems": [(path, seq, id, reason)]}` |
