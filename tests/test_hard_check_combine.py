@@ -1,6 +1,8 @@
-"""Several false hard checks with different `then` answers: the first declared decides (as before) with a warning that
-names them; Catalog(combine="strictest") gives the answer that comes last in the question's options (or an abstention,
-when a governing check sets no answer); replay re-derives either."""
+"""Several false hard checks with different `then` answers: by default (since 1.2) the answer that comes last in the
+question's options decides (or an abstention, when a governing check sets no answer), with a warning that names them;
+Catalog(combine="strictest") does the same without the warning; Catalog(combine="first") keeps the declaration order
+(before 1.2 the default); where the options give no order the first declared decides, with the warning. Replay
+re-derives each."""
 import warnings
 
 import pytest
@@ -35,11 +37,33 @@ def _system(combine=None, order=("b", "a")):
 BOTH = {"x": False, "y": False, "z": True}
 
 
-def test_first_declared_decides_and_warns_on_conflicting_then():
-    s = _system()
-    with pytest.warns(UserWarning, match="several hard checks are false"):
+def test_default_takes_the_strictest_and_warns_on_conflicting_then():
+    for order in (("b", "a"), ("a", "b")):
+        s = _system(order=order)
+        with pytest.warns(UserWarning, match="several hard checks are false.*strictest.*a_ok.*default since 1.2"):
+            res = s.ask(BOTH)
+        assert (res["size"].answer, res["size"].status) == ("zero", "forced")
+        assert res.trace.replay(s, res.flow)["ok"]
+
+
+def test_default_without_an_order_of_answers_keeps_the_first_declared_with_the_warning():
+    cat = Catalog()
+
+    @cat.check(hard=True, then={"size": lambda: "half"})
+    def b_ok(y: bool) -> bool:
+        return y
+
+    @cat.check(hard=True, then={"size": "zero"})
+    def a_ok(x: bool) -> bool:
+        return x
+
+    @cat.rule("size")
+    def size(z: bool) -> str:
+        return "zero" if z else "full"
+    s = System(cat, [Question("size", "s", Answer.choice(["full", "half", "zero"]), requires=["a_ok", "b_ok"])])
+    with pytest.warns(UserWarning, match="the first declared, b_ok, decides"):
         r = s.ask(BOTH, store=False)["size"]
-    assert (r.answer, r.status) == ("half", "forced")
+    assert r.answer == "half"
 
 
 def test_one_failed_check_does_not_warn():
@@ -63,13 +87,26 @@ def test_strictest_takes_the_last_option_whatever_the_declaration_order():
 def test_combine_is_validated_and_enters_the_fingerprint():
     with pytest.raises(ValueError):
         Catalog(combine="loudest")
-    assert _system().fingerprint()["catalog"] != _system("strictest").fingerprint()["catalog"]
-    assert _system().fingerprint()["catalog"] == _system("first").fingerprint()["catalog"]
+    assert _system().fingerprint()["catalog"] == _system("strictest").fingerprint()["catalog"]
+    assert _system().fingerprint()["catalog"] != _system("first").fingerprint()["catalog"]
 
 
 def test_combine_first_chosen_explicitly_keeps_the_order_without_a_warning():
     s = _system("first")
     with warnings.catch_warnings():
         warnings.simplefilter("error")
-        r = s.ask(BOTH, store=False)["size"]
-    assert r.answer == "half"
+        res = s.ask(BOTH)
+    assert (res["size"].answer, res["size"].status) == ("half", "forced")
+    assert res.trace.replay(s, res.flow)["ok"]
+
+
+def test_learned_order_gives_the_same_answer_as_the_default_order():
+    # the learned order stops at the failed checks that settle a question: with the strictest deciding, every check
+    # governing it must have been evaluated first
+    for combine, want in ((None, "zero"), ("strictest", "zero"), ("first", "half")):
+        s = _system(combine)
+        s.learn_order([{"x": True, "y": False, "z": True}] * 30)     # b_ok tends to fail, a_ok to pass: b_ok goes first
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            res = s.ask(BOTH, store=False)
+        assert res["size"].answer == want, (combine, res["size"].answer)

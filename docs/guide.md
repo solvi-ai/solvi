@@ -211,8 +211,13 @@ def guarantor_points(other_debtors):
   into that question's flow by the strategist (since 1.0; the step's reason says `hard check for <question> (then)`), so
   `then=` alone wires it — no `requires=` needed, and the other questions' flows stay as they were. A strategist of your
   own that leaves such a check out is refused when the `System` is built. To make sure a hard check without `then` is
-  always in a question's flow, list it in the question's `requires`. When several hard checks fail, the first one declared in the catalog decides:
-  declare the most important first. A question's flow does not depend on which other questions are asked in the same
+  always in a question's flow, list it in the question's `requires`. When several hard checks governing a question
+  fail with different `then` answers, the strictest decides — the answer that comes last in the question's options, so
+  list them from mildest to strictest (a governing check with no `then` answer for it abstains, strictest of all) — and
+  a warning names them; `Catalog(combine="strictest")` chooses this without the warning. **Changed in 1.2**: before,
+  the first one declared in the catalog decided; `Catalog(combine="first")` keeps that (declare the most important
+  first). Where the options give no order (a `then` function among them, or a question without options) the first
+  declared decides, with the warning. A question's flow does not depend on which other questions are asked in the same
   request, and neither does its answer — except through a constraint between answers, which applies only when all its
   questions are asked.
 
@@ -3271,9 +3276,10 @@ check (`system.order_model`: Laplace counts, then a FastHead refitted every 50 r
 values of `init_state` (and one level of dicts, e.g. `invoice.currency`). `learn_order(features=[...])` adds cheap computed
 facts; they are computed before the hard checks.
 
-Answers are identical to the default order. When several hard checks fail, the first one declared in the catalog decides;
-so a question is settled by a failed check only after every hard check that governs it and is declared earlier has been
-evaluated. Those earlier checks are scheduled next, since evaluating them settles the question whatever they return. Records
+Answers are identical to the default order. When several hard checks fail, the strictest decides (since 1.2), so a
+question is settled by a failed check only after every hard check that governs it has been evaluated; under
+`Catalog(combine="first")` the first one declared in the catalog decides, so only those declared earlier must have been
+evaluated. Those checks are scheduled next, since evaluating them settles the question whatever they return. Records
 stay in flow order. What changes is only which steps run: `res.trace.skipped` lists the rest, and
 `res.trace.explain_order()` (also printed by `show`) says why each hard check ran when it did:
 
