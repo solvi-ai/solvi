@@ -734,7 +734,9 @@ not yet been measured on the refusals of a real split.
 `JSONLStorage` does on POSIX (a file lock per append), and on Windows one writing process.
 
 **Verify against something kept elsewhere.** `verify()` catches edits; a rewrite of the whole store with its head is
-caught only by a head or a signature you published (`verify(anchor=...)`, `verify(signature=...)`).
+caught only by a head or a signature you published (`verify(anchor=...)`, `verify(signature=...)`). A frequent
+check of a large store can run `verify(deep=False)` (every chain check, no re-check of the stored responses; 1.15–1.41×
+faster measured) with a full `verify()` now and then.
 
 **Read the kind of a replay mismatch before raising an alarm.** `integrity` means the data changed after the run;
 `missing_part`, `recompute` and `model_changed` mean the catalog or the model moved on. `summary` says which.

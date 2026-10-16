@@ -969,7 +969,7 @@ class TraceStorage(abc.ABC):
         from .signature import sign
         return sign(self, alg)
 
-    def verify(self, anchor=None, signature=None, candidates=None):
+    def verify(self, anchor=None, signature=None, candidates=None, *, deep=True):
         """Check the chain across stored records: each record's hash, its link to the record before it, the sequence
         numbers, the stored response against its own summary, and the stored head (a cut-off tail). `anchor`: a head()
         taken earlier and kept elsewhere — the chain must still contain it (catches a rewrite of the whole store).
@@ -980,7 +980,12 @@ class TraceStorage(abc.ABC):
         [(seq, id, reason)] — redacted records of format 1, whose kept fields no hash covers). Records written before the
         chain (0.5 journal lines) are counted in `legacy` and not checked.
         A store that is being written to verifies as it stands at one moment: the stored head is read first and the
-        records are checked against it, so a record appended while verify runs is not reported as damage."""
+        records are checked against it, so a record appended while verify runs is not reported as damage.
+        `deep`: True (default) also re-checks each stored response against its own summary (the answers, their
+        confidence, the trace's hashes and links, guards, safeguards, models, flow); False skips that re-check and
+        keeps every chain check (each record's hash, links, sequence, ids, redactions, the head, anchor, signature) —
+        an edit is still caught unless the editor recomputed the record's hash and every hash after it, which only an
+        anchor or a signature kept elsewhere catches."""
         problems, rows = [], []
         prev, n = GENESIS, 0
         snap = self._snapshot()
@@ -1025,7 +1030,7 @@ class TraceStorage(abc.ABC):
             if d.get("seq") != n:
                 problems.append((d.get("seq"), rid, f"sequence number {d.get('seq')} where {n} was expected (records "
                                                     "deleted, inserted or reordered)"))
-            if d.get("kind", "ask") == "ask" and not d.get("redacted"):
+            if deep and d.get("kind", "ask") == "ask" and not d.get("redacted"):
                 try:
                     problems += [(d.get("seq"), rid, p) for p in _summary_problems(d)]
                 except (AttributeError, TypeError, KeyError, IndexError, ValueError) as e:    # damaged in its shape:
@@ -1364,17 +1369,17 @@ class JSONLStorage(TraceStorage):
                  if (m := pat.search(os.path.basename(f)))]
         return [f for _, f in sorted(found)]
 
-    def verify_segments(self, anchor=None):
+    def verify_segments(self, anchor=None, *, deep=True):
         """Verify a rotated store whole: every closed segment and the current file (each as verify() checks it) and
         every link — the first record of each file after the first is a "segment" record naming the file before it, its
         record count and its last hash, which must be that file's. `anchor`: a head() of the current file kept
-        elsewhere. → {"ok", "files": [{"path", "ok", "count", "head"}], "count": records in all files, "problems":
+        elsewhere; `deep`: as verify(). → {"ok", "files": [{"path", "ok", "count", "head"}], "count": records in all files, "problems":
         [(path, seq, id, reason)]}."""
         files = self.segments() + [self.path]
         out, problems, before = [], [], None
         for i, f in enumerate(files):
             st = self if f == self.path else JSONLStorage(f, self.catalog)
-            v = st.verify(anchor=anchor if f == self.path else None)
+            v = st.verify(anchor=anchor if f == self.path else None, deep=deep)
             problems += [(f, *p) for p in v["problems"]]
             first = next((d for _, d in st._raw() if chained(d)), None)
             link = (first or {}).get("segment") if (first or {}).get("kind") == "segment" else None

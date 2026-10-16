@@ -91,3 +91,34 @@ def test_save_many_checks_the_metas_and_a_plain_backend_falls_back_to_single_sav
         st.save_many([system().ask({"amount": 1}, store=False)], metas=[None, None])
     from solvi.core.store import TraceStorage
     assert "batch" not in TraceStorage.__abstractmethods__
+
+
+def test_verify_deep_false_skips_the_answer_re_check_and_keeps_the_chain_checks(tmp_path, monkeypatch):
+    import solvi.core.store as store_mod
+    from solvi.core.store import record_hash
+    p = tmp_path / "d.jsonl"
+    st = JSONLStorage(p)
+    s = system(st)
+    for i in range(5):
+        s.ask({"amount": i * 50})
+    assert st.verify() == st.verify(deep=True)
+    lines = [json.loads(x) for x in p.read_text().splitlines()]
+    d = lines[2]                                       # the response edited, its record re-hashed and re-linked
+    d["response"]["results"]["approve"]["answer"] = not d["response"]["results"]["approve"]["answer"]
+    prev = lines[1]["hash"]
+    for r in lines[2:]:
+        r["prev"] = prev
+        r["hash"] = record_hash(r)
+        r["id"] = r["hash"][:16]
+        prev = r["hash"]
+    p.write_text("".join(json.dumps(r, sort_keys=True) + "\n" for r in lines))
+    deep = JSONLStorage(p).verify()
+    assert not deep["ok"] and any("stored answers differ" in pr[2] for pr in deep["problems"])
+    calls = []
+    real = store_mod._summary_problems
+    monkeypatch.setattr(store_mod, "_summary_problems", lambda r: calls.append(1) or real(r))
+    shallow = JSONLStorage(p).verify(deep=False)
+    assert calls == [] and not any("stored answers differ" in pr[2] for pr in shallow["problems"])
+    lines[3]["meta"] = {"edited": True}                # an edit without re-hashing is still caught
+    p.write_text("".join(json.dumps(r, sort_keys=True) + "\n" for r in lines))
+    assert any("hash does not match" in pr[2] for pr in JSONLStorage(p).verify(deep=False)["problems"])
