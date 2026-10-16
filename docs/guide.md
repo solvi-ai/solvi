@@ -3980,7 +3980,10 @@ What it shows, per question:
 
 - **Who answered.** The answers given alone and what gave them — a rule (its name), a model decision (the model's id),
   a learned head, or a hard check that forced the answer — and the inputs handed over, by the safeguard that held them
-  back. With a dispatcher (`solvi.core.dispatch`, `storage=`), who gave the final answer: System 1, the slow path or a
+  back. A forced answer is credited to its check whether or not the check changed it, so the forced ones are split
+  (`forced_split`): the check changed the answer (the question's own answer in the trace differs), the answer would
+  have been the same, or not known — under `early_exit=True` (the default) a failed hard check skips the question's own
+  answer and the record holds no value to compare; build the System with `early_exit=False` to count them. With a dispatcher (`solvi.core.dispatch`, `storage=`), who gave the final answer: System 1, the slow path or a
   person, by action (accept, think, check) and by the slice System 1 handed over.
 - **What it cost.** The time of every decision, the model calls and tokens the traces record, and dollars where they
   are known (the dispatcher records them, and so does a generator built with `price=`; for other model calls pass

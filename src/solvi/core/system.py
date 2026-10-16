@@ -152,7 +152,8 @@ class System:
         one since 1.0 ("measured" was removed: it showed no measured benefit).
         early_exit: True (default) — when a hard check fails, the steps only the questions it settles needed are skipped
         (the expensive rest is not paid for); the decision's record then holds no values for them, and a part listed in
-        `requires` may not have run. False — every step of the flow runs anyway: the answers are the same (the failed
+        `requires` may not have run — statistics over such records (the system report's "forced_split") cannot say
+        whether the check changed the answer. False — every step of the flow runs anyway: the answers are the same (the failed
         hard check still decides), `res.values` and the trace hold every fact and rule value, and the trace says so
         (`trace.early_exit` is False). `ask(..., early_exit=...)` overrides it for one ask.
         lang: the language of what solvi renders for people — res.audit(), solvi.show, safeguard_summary() — "en" (default)
