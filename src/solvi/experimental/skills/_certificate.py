@@ -6,6 +6,8 @@ import math
 from .._evalue import MeanBound
 
 SCOPES = ("skill", "goal", "set")
+DEFAULT_ALTERNATIVES = (1.5, 2.0)
+DEFAULT_ALARM = 50.0
 
 
 class Certificate:
@@ -21,25 +23,30 @@ class Certificate:
     outcomes that take a fresh process there, ceil(log(1/delta) / log(1 + bet·promise/(1−promise))) — 50 at 5% and
     0.1, 25 at 10%, 12 at 20%.
 
-    The alarm: an e-detector on the outcomes of decisions taken alone (CUSUM wealth D = max(D, 1)·(1 + μ·(failed −
-    promise)), μ = ½ / promise: an ok halves it, a failure multiplies it by 1 + (1 − promise) / (2·promise)); at
-    D ≥ `alarm` (default 1/delta) the process restarts — uncertified, wealth 1 — and must reach the need again. At 5%
-    one failure alone is an alarm; at 30% it takes three in a row.
+    The alarm (default): a change detector that bets on breaks of a stated size — `alternatives`, a tuple of
+    failure-rate multiples r of the promise, default (1.5, 2) (a multiple with r·promise ≥ 1 is left out; at a promise
+    of 2/3 or more none is left and the old alarm below is used). The detector is the mean over r of the Bernoulli
+    likelihood-ratio CUSUMs against the rate r·promise (a failure multiplies one by r, an ok by
+    (1 − r·promise)/(1 − promise); each restarts from 1 when it falls below 1) — a standard CUSUM against stated
+    alternatives run in parallel (Lorden 1971), averaged (a mixture e-detector). At D ≥ `alarm` (default 50) the
+    process restarts — uncertified, wealth 1 — and must reach the need again. At a failure rate at or below the
+    promise each product has mean at most 1, so P(an alarm within L outcomes) ≤ L/alarm: a bound over a horizon, empty
+    once L passes `alarm`. The alarm is a change detector, not a level-delta test: a unit running at its promise is
+    retired within a few thousand outcomes and must re-certify; a unit well inside its promise rarely alarms. The
+    level 50 (= 5/delta at the default delta 0.1; it does not follow delta) and the alternatives were chosen on
+    simulated streams at promises 0.05–0.3 (docs/best_practices.md).
 
-    alternatives: an opt-in alarm that bets on breaks of a stated size instead — a tuple of failure-rate multiples r of
-    the promise (e.g. (1.5, 2, 3)). The detector is then the mean over r of the Bernoulli likelihood-ratio CUSUMs
-    against the rate r·promise (a failure multiplies one by r, an ok by (1 − r·promise)/(1 − promise); each restarts
-    from 1 when it falls below 1). At a failure rate equal to the promise each product is a test martingale, so the
-    mean is an e-detector: P(an alarm within L outcomes) ≤ L/alarm. A burst of failures far rarer than r·promise is
-    not what it bets on, so a unit well inside its promise rarely alarms. Its default level is 5/delta (50 at the
-    default delta), chosen on simulated streams at promises 0.05–0.3 with alternatives (1.5, 2).
+    alternatives=None: the old alarm — an e-detector with CUSUM wealth D = max(D, 1)·(1 + μ·(failed − promise)),
+    μ = ½ / promise (an ok halves it, a failure multiplies it by 1 + (1 − promise) / (2·promise)), default level
+    1/delta. It bets on a failure rate near one half, so it is a burst detector whose level must grow as the promise
+    shrinks: at 5% one failure alone is an alarm; at 30% it takes three in a row.
 
     scope: whose outcomes one process pools — "skill" (each skill its own, the default), "goal" (the skills of one
     goal) or "set" (every skill): a pooled process certifies the pool's failure rate, not each skill's; each skill keeps
     its own process too, whose alarm retires that skill alone."""
 
     def __init__(self, promise: float = 0.05, delta: float = 0.1, *, bet: float = 0.9, scope: str = "skill",
-                 alarm: float | None = None, alternatives: tuple | None = None):
+                 alarm: float | None = None, alternatives: tuple | None | str = "default"):
         if not 0.0 < float(promise) < 1.0:
             raise ValueError("promise is a failure rate strictly between 0 and 1")
         if not 0.0 < float(delta) < 1.0:
@@ -49,8 +56,13 @@ class Certificate:
         if scope not in SCOPES:
             raise ValueError(f"scope is one of {SCOPES}, not {scope!r}")
         self.promise, self.delta, self.bet, self.scope = float(promise), float(delta), float(bet), scope
+        if isinstance(alternatives, str):
+            if alternatives != "default":
+                raise ValueError('alternatives: a tuple of multiples, None (the old alarm) or "default"')
+            # (1.5, 2) where r · promise stays a failure rate; none left (promise ≥ 2/3): the old alarm
+            alternatives = tuple(r for r in DEFAULT_ALTERNATIVES if r * self.promise < 1.0) or None
         if alarm is None:
-            alarm = (5.0 if alternatives is not None else 1.0) / self.delta
+            alarm = DEFAULT_ALARM if alternatives is not None else 1.0 / self.delta
         self.alarm = float(alarm)
         if self.alarm <= 1.0:
             raise ValueError("alarm is a level above 1")
@@ -77,8 +89,7 @@ class Certificate:
     def to_dict(self) -> dict:
         d = {"promise": self.promise, "delta": self.delta, "bet": self.bet, "scope": self.scope,
              "alarm": self.alarm, "need": self.need}
-        if self.alternatives is not None:
-            d["alternatives"] = list(self.alternatives)
+        d["alternatives"] = None if self.alternatives is None else list(self.alternatives)
         return d
 
     def __repr__(self):

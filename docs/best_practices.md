@@ -418,6 +418,23 @@ pool of 200 states, 1,000 trials each, budget 16) every accepted law was correct
 1.5× the probes (11.7 against 7.6 on a single-law benchmark; at a budget of 8 it is undetermined in 97.5 % of trials).
 Three or more missing laws are not measured, and the `coverage` warning is off in this mode.
 
+**When the laws of a stream change, give the law set a window: `Buffer(window=N)` with `LawSet(recent=M,
+readmit="grown")`; size N to a fraction of how long a regime lasts.** On synthetic streams whose laws change abruptly
+(two conjunctive laws over 12 atoms, one flipped and one replaced at each of five switches, phases of 1,500–2,500 rows),
+`Buffer(window=150)` with `LawSet(recent=50, readmit="grown")` re-learned the new laws in 605 rows on average (30 of 500
+switches censored), where a periodic reset tuned under the same rule took 1,080 (83 censored) and the library default
+did not re-learn within any phase (an oracle with known switch points: 238); prequential accuracy 0.796 against 0.755
+(reset) and 0.692 (default), oracle 0.813, with 0 wrong laws among 1,221 accepted (reset 3 of 1,258); no arm accepted a
+law on streams without laws (a property of the sized rule, shared by all arms). The window length was tuned to this
+phase length: another drift rate needs another window, and an adaptive window is not built. Synthetic abrupt drift only
+— no gradual, incremental or recurring drift, no real stream. The first measurement of this feature was mis-scored (a
+cache bug: 31 wrong laws that were in fact 1) and the bar was then relaxed to at most 3 wrong laws; this run meets it at
+0, as it meets the original bar of 0. The score memo (`memo=True`) and the proposals count are built and unit-tested,
+not measured. A sliding window with forgetting and a retirement on recent performance is a standard answer to concept
+drift (FLORA, Widmer and Kubat 1996; ADWIN, Bifet and Gavaldà 2007; Gama et al. 2014); what is the library's is only how
+the sized rule's N behaves under a window (it never decreases; a candidate counts again after a full turnover) and
+`readmit="grown"`.
+
 **Abstain when consistent laws disagree.** Two laws that both passed their test, neither an exception of the other,
 predicting different things for one state are a reason to abstain, not a tie to break by length or age:
 `predict(state, action, disagree="abstain")` returns `Undetermined` there and counts it (`lawset.abstained`). Skills
@@ -502,7 +519,7 @@ seeds). Achievements are unique achievements unlocked per episode (of 22). The s
 episodes System 1 acted alone 1,350 times with an observed outcome and failed twice (0.15%, Wilson upper bound 0.54%; 4
 of 2,882 over the whole run); 57 further alone runs were paused by a reflex and not resumed, so they carry no outcome
 (counted as failures they would make 4.2%, Wilson 5.4%). The promise is the set's, not a single skill's; a skill's own
-alarm retires it (4 retirements, each later re-certified). Goals that are stochastic by the written rules stayed with
+alarm retires it (4 retirements, each later re-certified; measured with the alarm before 1.2, `alternatives=None`). Goals that are stochastic by the written rules stayed with
 System 2 and are outside the promise. With skills the planner was called 32 times per episode against 42 when it plans
 every goal (−23%), and an episode took 84 s against 107 s on the same machine (−21%), with achievements kept: 15.2
 against 15.7 unique achievements unlocked per episode of 22 (ratio 0.966, bootstrap lower bound 0.934). System 1's share
@@ -536,7 +553,7 @@ against 0 with the condition rule alone; in the same grid with «do» refused in
 refuted on the copy every time and no alone run failed. Measured once in an open world (the simulator benchmark of 1.1, 10
 streams × 30 episodes): System 1's share of non-reflex steps 0.343 / 0.486 / 0.385 by thirds against 0.071 / 0.175 / 0.233
 with constant footprints, failures 0.51 % under the certificate, achievements 0.918 of planning always; the share fell in
-the last third while the pooled certificate's alarms retired skills — if shares fall late, check the certificate's
+the last third while the pooled certificate's alarms (the alarm before 1.2) retired skills — if shares fall late, check the certificate's
 restart policy first (a hypothesis; not tested by a separate arm). Generalizing a verified plan's conditions is old
 (explanation-based macro-operators, lifted action models learned from traces); what is this library's is the judge — the
 plan re-run on an exact copy of the world for the states the wider footprint admits.
@@ -886,11 +903,19 @@ escalations with dependencies, ranking by the decisions an answer unblocks resol
 FIFO; a simple count of each question's downstream items got most of that (the full ranking was only 1.18× better),
 and re-ranking after every answer added nothing over ranking once.
 
-**Raise `Certificate`'s alarm level for long streams; the right level depends on the promise.** The default alarm
-(1/δ) fires on most stable streams far inside the promise: 67 % of 300 streams with a failure rate of 5 % under a
-promise of 20 % alarmed. The smallest level that kept stable streams quiet was about 300 for a promise of 0.2–0.3,
-1000 for 0.1 and 3000 for 0.05 — and at 0.05 that level then missed real breaks. Pick `alarm=` for your promise and
-stream length, and check its false alarms on a replay of a stable stream.
+**`Certificate`'s default alarm (1.2) bets on breaks of a stated size; keep it unless the true rate sits well below the
+promise.** The default alarm (two CUSUMs against 1.5× and 2× the promise, level 50) is quiet well inside the promise and
+catches a doubling within about 150 outcomes at a promise of 0.05 (about 30 at 0.2). It is not a δ-guarantee: a skill
+living at its promise will be retired within a few thousand uses and must re-certify; if your promise is loose relative
+to the true rate, that is intended. A per-promise k-of-W window detects a doubling faster at small promises (by about 50
+outcomes at 0.05) but alarms far more near the promise; pick it only when the true rate is known to sit well below the
+promise. The old alarm (`alternatives=None`, level 1/δ) is a burst detector whose level must grow as the promise
+shrinks: it fired on 67 % of 300 stable streams at a failure rate of 5 % under a promise of 20 %, and the smallest level
+that kept stable streams quiet was about 300 for a promise of 0.2–0.3, 1000 for 0.1 and 3000 for 0.05, where it then
+missed real breaks. The level 50 (= 5/δ at δ 0.1; other δ untested) and the alternatives were chosen on simulated
+Bernoulli streams; the default is one setting for all promises and was 1–2 outcomes slower than a per-promise tuned
+level of the old alarm in one setting (promise 0.2, break ×3), a loss accepted after a first run showed it and
+re-tested on fresh seeds.
 
 **Laws cover little where outcomes are stochastic** (about 2 % coverage in Crafter; in Freeciv 0.576 / 0.860 against
 0.963 for a lookup table), and short matches (30 steps or fewer) give no laws at all. The gain of "measure until
