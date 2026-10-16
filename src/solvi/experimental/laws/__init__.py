@@ -187,7 +187,11 @@ it the law set implicitly treats every law as exact.
 Noisy probes (opt-in). `admit_by_probes(..., noise=ε, level=L)`: where an answer of the world may be wrong with a known
 probability ε, one answer refutes nothing — every hypothesis keeps a likelihood, the next probe is the one with the
 largest expected information gain under that noise (`split(score="eig", noise=ε)`, a repeat when that is best), and a
-law is accepted only when one class of hypotheses holds at least L of the weight.
+law is accepted only when one class of hypotheses holds at least L of the weight. On a synthetic single-law benchmark,
+given the same number of answers as the best repetition scheme (a majority vote per probe or a per-probe sequential
+test, each tuned under the same wrong-accept cap), it accepted the right law more often when answers were scarce and as
+often with fewer answers when they were not; the default admission is often wrong under such noise. A known method:
+noisy generalized binary search over classes of hypotheses, stopped at a posterior threshold.
 
 Suspended laws (opt-in). `LawSet(..., on_fall="suspend", reactivate_min=m)`: a law whose running precision falls leaves
 the active set but stays a candidate (`suspended`); it is re-checked on the next m fresh observations where it would
@@ -203,8 +207,10 @@ What is not done:
 - retirement is by precision only; a weak law no observation contradicts stays;
 - the store item's id is its content: a law retired and accepted again is the same item, asserted again;
 - no wiring into a System's decisions or an Agenda gate (a law set predicts; using the prediction is yours);
-- noisy probes (`noise=`) assume symmetric flip noise with ε known and one missing law; a misspecified ε,
-  state-dependent noise and several missing laws are not measured;
+- noisy probes (`noise=`) assume symmetric flip noise with ε known — to the method and, through their tuning, to the
+  repetition schemes it was compared with — and one missing law, on a synthetic single-law benchmark at three noise
+  levels and two answer budgets; at the highest noise level with the small budget it did not hold the wrong-accept
+  cap; a misspecified ε, state-dependent noise, numeric noise and several missing laws are not measured;
 - suspension does not handle the "dead end": a law whose states the agent stops visiting is never re-checked and
   stays suspended;
 - history atoms are measured at depth=1 only;

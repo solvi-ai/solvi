@@ -448,10 +448,19 @@ the sized rule's N behaves under a window (it never decreases; a candidate count
 `readmit="grown"`.
 
 **When the world's answers can be wrong, give the probes the noise level: `admit_by_probes(..., noise=ε, level=L)`.**
-With the default one wrong answer refutes the right law (at 10 % noise the default admission was wrong in 46 % of
-synthetic trials); with `noise=` it accepted the right law in 93 % / 100 % at 24 / 48 answers with at most 0.8 % wrong,
-where asking each probe several times and taking the majority could not stay safe and admit anything at those budgets.
-Give ε as you know it; a wrong ε, noise that depends on the state and several missing laws are not measured.
+With the default one wrong answer refutes the right law: at 10 % noise the default admission was wrong in about 41 % of
+synthetic trials. With `noise=` the hypotheses keep likelihoods and the probes are chosen by expected information gain,
+so a small answer budget is spent where it decides most. On a synthetic single-law benchmark at 10 % noise and 24
+answers it accepted the right law in 92 % of trials (0.4 % wrong), where the best repetition scheme under a 5 %
+wrong-accept cap — a majority vote per probe — finished in 40 % and ran out of answers in 58 %; at 48 answers a
+per-probe sequential test was as right (99 % against 100 %) and the noisy admission used 23 % fewer answers; at 5 %
+noise the two were equally right and it used 24–40 % fewer answers. Prefer it to repeating probes when answers are
+scarce; when they are plentiful and the noise is low, a per-probe sequential test is as right and simpler. Give ε as
+you know it (both the method and the repetition schemes it was compared with knew the true ε) and pick `level` for
+your wrong-accept cap: 0.99–0.999 held a 5 % cap at 5–10 % noise, and at 20 % noise with 24 answers no level did —
+give it more answers there (at 48 it was right in 91 % with 0.4 % wrong). A wrong ε, noise that depends on the state
+and several missing laws are not measured; the mechanism is covered by
+[tests/test_laws_noise.py](../tests/test_laws_noise.py), the numbers come from synthetic worlds only.
 
 **When a law may stop holding for a while and come back, suspend it instead of retiring it: `LawSet(on_fall="suspend")`;
 keep the default `reactivate_min=10` unless your observations are clean.** On synthetic streams a returning law came
