@@ -79,6 +79,19 @@ started from a failing test built on the reproduction; the numbers are before �
   round-robin by kind, dedupe and pinning unchanged. **Behaviour change:** the same cases give a different list;
   case files generated earlier stay valid, regenerating them gives new ones.
 
+### Changed (breaking)
+
+- **Several false hard checks with different `then` answers: the strictest answer decides by default.**
+  `Catalog(combine=None)` behaves as `"strictest"`: the answer that comes last in the question's options decides,
+  whatever the declaration order, with a warning naming the checks; `Catalog(combine="first")` keeps the declaration
+  order (the old default), `Catalog(combine="strictest")` chooses the new rule without the warning; where the options
+  give no order the first declared still decides, with the warning. Fingerprints: the default stays unmarked,
+  `"first"` is now marked and an explicit `"strictest"` no longer is. The learned hard-check order now waits for every
+  governing check before settling, so its answers match the default order. Options not listed mildest → strictest
+  (e.g. `allow, deny, escalate`) need `combine="first"` or reordered options.
+- Guard keeps its own rule for several failed checks: its catalog sets `combine="first"` (a failed deny policy declared
+  first wins over an escalation, as before); its catalog fingerprint changes once.
+
 ### Added
 
 - `solvi honesty --control [N]` (opt-in; default off, outputs and baselines unchanged): the same answers scored
@@ -88,7 +101,8 @@ started from a failing test built on the reproduction; the numbers are before �
   `uncontrolled`). `solvi.testing.honesty.control(rows)`. On the core set: 4.9% real against 54% control.
 - `Catalog(combine="strictest")` (opt-in): when several hard checks governing a question fail, the strictest
   `then` answers; a warning names conflicting failed checks under the default «first declared decides»
-  (`combine="first"` explicitly: no warning). The default flips for ordered answers in 1.2.
+  (`combine="first"` explicitly: no warning). The default flips for ordered answers in this release (see «Changed
+  (breaking)»).
 - `Catalog.check(family=, shares_call_with=)` and `solvi check` warnings `check_shares_call` / `checks_one_family`:
   a check that re-reads another part's model call agrees with it whatever it says.
 - `NumericDrift` monitor over any numeric stream (residuals, latencies) and `Cusum.calibrate(ref_n=)`.
@@ -251,6 +265,68 @@ started from a failing test built on the reproduction; the numbers are before �
   argument, gets the injection checks). `sign_message(text, sender, key)` / `signed_messages(keys, max_age=None)` give
   HMAC signatures in the message's `"signature"` field; `Session.add(..., signature=)` and the MCP proxy's context
   channel carry them. Opt-in; without it nothing changes.
+
+- System report: forced answers are split (`forced_split`) into changed by the check, the same without it, and not
+  known (`early_exit=True`, the default, skips the question's own answer, so the record has nothing to compare;
+  `System(early_exit=False)` records it).
+- `build(novel=[state, ...])`: real out-of-scope inputs calibrate the open-set gate in place of the leave-options-out
+  simulation, for any answer kind; fewer than 30 are refused, fewer than 100 or labelled examples among them are
+  warned about.
+- `System.guard_history`: every `System.guarantee` attempt logged — installed (and whether it replaced one), failed
+  (with the error; a failed attempt removes the guarantee in force), removed.
+- `solvi.core.AnyOf(a, b)`: a label with several right answers; `solvi.build`, `System.guarantee`, `act_guard`,
+  `calibrate_for` and conformal sets count any of them as right (opt-in).
+- `solvi.core.because(value, text, **numbers)` and `solvi.core.missing(reason)` (opt-in): a rule's `why` names the
+  branch it took and its numbers; a fact function's reason follows its value in each reading rule's `why`; a fact with
+  no value says why instead of a NaN stand-in. Recorded in the trace and checked on replay.
+- Knowledge items can name what they consulted besides their premises (`add(..., consulted=)`,
+  `Knowledge.tell(..., consulted=)`; opt-in): retracting a consulted item (a losing alternative's evidence) marks the
+  conclusion for review (pending re-test) instead of leaving it a fact unnoticed.
+- `diff(storage, system, incremental=True)` re-runs only the stored decisions whose questions, planned flow, flow parts
+  or used models changed; the others are counted in `reused` and the report is otherwise the full diff's.
+  `diff(..., facts=True)` adds the computed facts whose value changed per decision (and lists decisions whose facts
+  changed while their answers did not); `solvi.core.store.diff.fact_changes(old, new)` is public.
+- A trace's fingerprint records the module functions its parts call (`"calls"`, only when there are some; not in
+  compact records); `diff` says «a function it calls changed: helper» or «its own code or declarations changed»
+  instead of one «code changed». New `solvi.core.provenance.code_callees`.
+- `TraceStorage.provenance_index()` → `ProvenanceIndex`: `quarantine` / `where_is` over only the records that read or
+  hold the fact, with the store's own answers; it follows later saves and passes over redacted records.
+- `solvi.core.store.run_context(run, parent=)`: every record written inside it (any JSONL / SQL store, the in-memory
+  knowledge journal) carries `"run": {"id", "parent"}`; `chronology(*stores, run=)` orders the records of several
+  stores; `Stored.run` / `Stored.parent`; `current_run()`. Opt-in; record schema 2.2.0 (an optional field: old files
+  read and verify unchanged).
+- `solvi.testing.history`: `VerdictHistory` (stable / flaky / regression / fixed per case over a window of runs,
+  quarantine of flaky cases in `gate()`, passes on a later attempt, `stable_share()`), `KnownBugs` (failure text →
+  known bug id, open / fixed, a fixed bug seen again, open bugs not seen for N runs) and `run_status` («degraded» when
+  many cases of one run are blocked at once). Records kept in any store or in memory.
+- `solvi.core.explain.search(..., exhaustive=n)`: on small enumerated domains every combination is re-run in one
+  batch and every counterfactual returned (`complete`); 1.5–1.6× faster than the probing search in one run.
+- experimental.changes (all opt-in): `IsolatedTests`, a stage that runs a change's code on test cases in a fresh
+  `python -I` process with limits (only the inputs go to the child; the expected answers are compared in the parent,
+  strictly; a sandbox failure is a stage error, not a rejection); `Pipeline(order="cheap_first", costs=)` runs stages
+  by cost (a `cost` attribute, `costs=`, or the built-in `STAGE_COSTS`), Approval last, the order journaled;
+  `RefusalRegression(cumulative=True, original=)` also counts refusals lost against the original version;
+  `Consistency(probes=, refused=)` measures widens / narrows through the answerers on probe inputs (a caller's
+  `classify` can only raise the direction to «widens»; unmeasurable counts as widening); `Canaries.drawn(run_cases,
+  pool, k, secret=)` draws canary cases per change from a pool with the stage's secret, a hash of the drawn ids
+  journaled; `Confirmation.on_evidence(exists=, min_evidence=)` requires evidence ids to be in the record and counts
+  each once; `FreshEnvironments(handed_over=)` gives a world the candidate hands over the version in force's progress
+  (a refusal is not lower progress) and `FreshEnvironments(on_episode_start=)` calls `(policy, seed)` before every
+  episode.
+- Example `examples/26_build_head_update.py`: a `solvi.build` system updated through the change pipeline (held-out
+  groups as slices, drawn canaries, refusal regression, cheap-first order, versions and rollback).
+- experimental.skills: `plan(..., collect=k, distinct=)` returns the version space (up to k plans with different
+  ends) and `model.last["complete_depth"]`; a goal may read `(state, path)`; `verify` takes a plain action list.
+- Laws (experimental): `LawSet.intervention(state_before, state_after, actions)` → one `Delta` per action (the
+  prediction before and after with the law behind each, the change, and `covered`: False where no law speaks);
+  `coarse(key)` (outcomes grouped coarser than the observation: a law predicts the class) and `BackoffBase` (a base
+  predictor backing off from specific to general levels, with `explain`); `split(..., per_cost=True)` picks the probe
+  with the most information per unit of cost (`Probe.info`, `Probe.cost`).
+
+### Docs
+
+- The `solvi[onnx]` extra covers the decider only; `LongSpanExtractor` needs torch (`solvi[model]`) for prediction
+  too, and its ImportError says so.
 
 ## 1.1.1 — 2026-10-11 — fixes from use, and four learning items with their measurements
 
