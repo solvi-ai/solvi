@@ -76,11 +76,17 @@ Cases do not have to be written by hand. `testing.cases_from_store(storage, n=No
 status, the questions asked. The same input twice is one case; with `n`, every distinct outcome comes first. Running them
 after a change is a regression test against what the System actually decided.
 
-`testing.boundary(cases, n=50, system=None)` makes inputs at the edges of what the cases show: per field, a number just
-past the largest and smallest seen, 0, -1, a huge one; empty, one-character, long, non-ASCII or padded text, the same
-accents decomposed (NFD) and a compatibility ligature ("ﬁß"); None where the field has shown None and a value of another
-type the field has shown (7 → "7": the str / int confusion of states loaded from JSON); an empty, one-element or long
-list; the same one level into dicts and lists. The changes are taken in turn from each kind and, within a kind, from the
+`testing.boundary(cases, n=50, system=None, thresholds=None)` makes inputs at the edges of what the cases show: per
+field, a number just past the largest and smallest seen, 0, -1, a huge positive and a huge negative one; empty,
+one-character, long, non-ASCII or padded text, the same accents decomposed (NFD) and a compatibility ligature ("ﬁß");
+None where the field has shown None and a value of another type the field has shown (7 → "7": the str / int confusion
+of states loaded from JSON); an empty, one-element or long list, a long list or set of distinct values (a repeated
+element does not reach code that dedupes or indexes), a dict with many keys; the same one level into dicts and lists.
+With `system=`, a number is also cut at each constant a rule compares the field with: `amount >= 100` gives 99, 100 and
+101, `score > 0.5` the nearest floats on either side of 0.5 and 0.5 itself. The constants are read from the parts'
+source where an argument is compared with a number or a numeric constant of the module or closure (`amount > LIMIT`);
+an expression (`x * 2 > 100`), an item (`row["x"] > 1`) and the helpers a part calls are not read. `thresholds=` gives
+them by hand (`{"amount": [100]}`) or turns them off (`False`). The changes are taken in turn from each kind and, within a kind, from the
 first case of each input shape (field → type) first, so many cases of one shape do not crowd out the others. With `system=`, each input is asked (never stored)
 and its current answers are pinned as `expected`, so a later change that moves an answer at an edge — a threshold
 `amount < 100` becoming `<= 100` — fails a case even when the hand-written cases all pass. Inputs whose ask raises are
