@@ -198,6 +198,53 @@ started from a failing test built on the reproduction; the numbers are before �
   were in fact 1) and the bar was then relaxed to ≤ 3; this run's 0 also meets the original bar of 0. The memo and the
   proposals count are unit-tested, not measured. A known mechanism (FLORA, Widmer and Kubat 1996; ADWIN, Bifet and
   Gavaldà 2007).
+- **Laws (experimental): probes under answer noise — `admit_by_probes(..., noise=ε, level=L)` and
+  `split(score="eig", noise=, weights=)`** (opt-in; defaults unchanged). When an answer of the world may be wrong with a
+  known probability ε, every hypothesis keeps a likelihood instead of being refuted by one answer, the next probe is the
+  one with the largest expected information gain under that noise (a repeat when that is best), and a law is accepted
+  when one class of hypotheses holds at least L of the weight. On a synthetic single-law benchmark (10 atoms, 176
+  candidates, 500 trials per budget) at ε = 0.1 it accepted the right law in 93 % (24 answers) and 100 % (48 answers) of
+  the trials with at most 0.8 % wrong. At these budgets a majority vote (each probe asked k times, k picked on separate
+  worlds) could not be both safe and useful: under a 5 % wrong cap it admitted a law in 0 of 500 and 7 of 500 trials, and
+  the default admission (one answer refutes) was wrong in 46 %. A post-hoc comparison, not pre-registered: a majority
+  vote given the same number of answers, k picked on separate worlds, was right less often by 0.31 [0.285, 0.334] (24
+  answers: 0.60; 48 answers: 0.02, with 36 % fewer answers for the noisy admission). At ε = 0.05 and 48 answers it was as
+  right as the majority vote with 37 % fewer answers; at ε = 0.2 and 24 answers its safety was not settled. It assumes
+  symmetric flip noise with ε known, independent answers and one missing law; synthetic worlds only. A known method
+  (noisy generalized binary search over classes of hypotheses).
+- **Laws (experimental): `LawSet(on_fall="suspend", reactivate_min=m)` and `doubt_probe(probes)`** (opt-in; the default
+  still retires). A law whose held-out precision falls leaves the active set but stays a candidate, counts the next m
+  fresh observations where it would apply, and comes back when they bear it out (precision ≥ min_precision and a
+  binomial test against its null), its running counts reset; `doubt_probe` names a probe where the suspended law and the
+  set disagree. On synthetic streams where a rare law (4 % of rows) stops holding for 1,000 rows and returns, a returning
+  law comes back ~6× sooner than the best retire-and-readmit setting (40 vs 263 rows; ratio 0.15 [0.14, 0.17], 75
+  streams, faster on all 75); the default also re-learns it, slower (275 rows). False admissions 1 against 2 in 200
+  streams (too few to call a difference; 0 by reactivation), no revival of a law whose effect had changed for good, and
+  prequential accuracy unchanged (+0.0014). m was tuned on this world (m = 5); the default m = 10 is the more
+  conservative setting. A law whose states the agent stops visiting (a dead end) is not handled. A known mechanism
+  (stored concepts re-examined on recent fit).
+- **Laws (experimental): history atoms — `History(grammar, depth=1, actions=, observed=, same=True)`, `Tracker`,
+  `Context`, `Same`** (opt-in). The grammar lifted to contexts with atoms over the previous step (its state, action and
+  observation, and the episode start) and the effect `Same(1)` («what was observed one step back»). On synthetic
+  episodes (8 atoms, 3 actions, two laws per world, 200 worlds per kind) where one law depends on the previous action,
+  the previous state or the previous observation, the closed share of the error gap (area under the learning curve) rose
+  by 0.48 / 0.46 / 0.35 over the present-state grammar, which cannot write such a law; a hand-built previous-step
+  augmentation tuned on separate worlds matched it on the first two kinds and trailed by 0.11 on persisting values (one
+  `Same` law instead of one per value). 0 of 1,639 accepted history laws were false. On worlds that need no history the
+  larger grammar starts slower (−0.017 closed area; the same final level from 1,250 rows). Depth 1 only.
+- **Laws (experimental): `LawConfidence(lawset, buffer)`, per-law confidence and tail abstention** (opt-in; the law
+  set's learning is untouched). For each active law, the posterior mean of its precision on the held-out rows where it
+  is the applied law; `exact` only with no miss on at least 60 rows; at most one split on an atom outside the law's
+  condition where its misses concentrate (Fisher's exact test, Bonferroni over the atoms tried, each side shrunk towards
+  the law's confidence with m-estimate shrinkage); `predict(state, action, below=t)` returns `Abstained` where the
+  applied law's confidence is below t. On synthetic worlds with three laws of precision 0.92–1.0 (500 worlds per kind),
+  at thresholds tuned on separate worlds for ≈ 2 % risk, it answered 78 % of the law-covered states against 47 % for a
+  per-law precision threshold when one atom tracked the hidden cause (risk 0.018 vs 0.020), and 56 % against 48 % when
+  none did (that gain comes from overlapping laws; expect about none where laws do not overlap); ECE (20 bins) 0.003 /
+  0.005. Of 511 laws flagged exact, 2 had precision below 0.99; without the option the law set implicitly treats every
+  law as exact (2,372 of 2,985 were not). The confidence is an estimate, not a bound: there is no risk guarantee, and
+  thresholds come from your own data. Exact-safety was measured on laws with at least 191 rows; at the default 60 rows a
+  law right on 97 % of its rows is flagged exact about 1 time in 5.
 -  **`solvi.experimental.audit.AuditWatch`** (opt-in): a Bernoulli CUSUM on a check run on a random share of decisions
   (`Dispatcher(audit=)`), its threshold simulated with the share and the reference's sampling error — a known method
   (continuous sampling inspection with a proportion CUSUM) packaged for a check that is otherwise bought only where the

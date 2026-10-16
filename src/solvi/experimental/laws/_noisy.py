@@ -138,3 +138,6 @@ def admit_noisy(ls, cands, ask: Callable[[Any, Any], Any], *, pool: list, safe, 
     law.admitted, law.tested = "probes", len(cands)
     ls.cost["accepted"] += 1
     return Admission("accepted", law, classes, asked, refuted, False, why, [], [], [], laws=[law])
+
+
+__all__ = ["admit_noisy"]

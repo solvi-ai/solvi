@@ -190,8 +190,9 @@ INTRA_TIER_CYCLES = [
      "solvi.core.textin", "solvi.core.types"},
     {"solvi.core.store", "solvi.core.response", "solvi.core.store.report", "solvi.core.store.signature"},
     {"solvi.solutions.guard", "solvi.solutions.guard.confirm"},
-    # admit_by_probes(max_new=2) imports the pair version space inside the call; _versions builds _core's Admission
-    {"solvi.experimental.laws._core", "solvi.experimental.laws._versions"},
+    # admit_by_probes(max_new=2) and (noise=) import the pair version space and the noisy admission inside the call;
+    # _versions and _noisy build _core's Admission
+    {"solvi.experimental.laws._core", "solvi.experimental.laws._noisy", "solvi.experimental.laws._versions"},
 ]
 
 

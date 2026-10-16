@@ -1,4 +1,4 @@
-"""Per-law calibrated confidence and abstention on a law's tail.
+"""Per-law confidence (posterior mean of held-out precision) and abstention on a law's tail.
 
 A law right on 95 % of its rows passes min_precision 0.9 and stays above retire_below 0.8: the law set predicts with it
 as if it were exact, and where a hidden cause flips the outcome (a state the grammar cannot see) it is wrong without
@@ -18,7 +18,12 @@ out), and splits it once where the misses concentrate:
 speaks with confidence below t (where no law speaks: the base predictor's value, confidence None, never abstained).
 The tail is one atom deep and needs an atom that tracks the hidden cause; with none, the confidence is the law's own
 and abstention is per law, not per state. Refit (`fit()`) after the buffer or the laws change; `of` refits when it sees
-either change."""
+either change.
+
+The confidence is an estimate, not a calibrated probability or a lower bound: a Laplace posterior mean, one
+Fisher-exact split on an atom outside the law's condition with m-estimate shrinkage, and `exact` = no miss on at least
+`exact_rows` rows. There is no risk guarantee; pick the threshold t on your own data. Without this class the law set
+implicitly treats every law as exact."""
 from __future__ import annotations
 
 import math
@@ -73,7 +78,7 @@ def fisher_p(a: int, b: int, c: int, d: int) -> float:
 
 
 class LawConfidence:
-    """Calibrated per-law confidence and tail abstention over a law set and its held-out buffer (see the module
+    """Per-law confidence (an estimate, not a bound) and tail abstention over a law set and its held-out buffer (see the module
     docstring). prior: (a, b) of the Beta prior; shrink: m, the pull of a tail side towards the law's confidence;
     alpha: the family-wise level of the tail test; min_rows: least rows on each side of a split; exact_rows: least
     rows for `exact`; atoms: the atom names a split may use (default: every atom of the grammar)."""
@@ -157,3 +162,6 @@ class LawConfidence:
         if law is not None and conf is not None and conf < below:
             return Abstained(law, value, conf)
         return value
+
+
+__all__ = ["Abstained", "LawConfidence", "LawStats", "fisher_p"]
