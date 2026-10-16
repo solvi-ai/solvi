@@ -688,11 +688,16 @@ class System:
         return cached[1]
 
     def _fingerprint(self, flow):
-        """trace.fingerprint: the catalog's and questions' fingerprints and those of the parts in this flow."""
+        """trace.fingerprint: the catalog's and questions' fingerprints and those of the parts in this flow; "calls" (when
+        any of them calls a function of its own module): {part: {callee: fingerprint}}."""
         from .provenance import catalog_fingerprint
         c = catalog_fingerprint(self.catalog)
-        return {"catalog": c["fp"], "questions": self._questions_fp(),
-                "parts": {s.part.name: c["parts"][s.part.name] for s in flow.steps if s.part.name in c["parts"]}}
+        out = {"catalog": c["fp"], "questions": self._questions_fp(),
+               "parts": {s.part.name: c["parts"][s.part.name] for s in flow.steps if s.part.name in c["parts"]}}
+        calls = {s.part.name: c["calls"][s.part.name] for s in flow.steps if s.part.name in c.get("calls", ())}
+        if calls:                                     # the module functions the flow's parts call (diff says which changed)
+            out["calls"] = calls
+        return out
 
     def _count(self, resp):
         from .store.audit import collect

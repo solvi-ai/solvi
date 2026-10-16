@@ -77,13 +77,26 @@ def _model_of(r):
     return dict(next(iter(tm.values()))) if len(tm) == 1 else {}
 
 
+def _code_why(name, ofp, nfp):
+    """Why a part's fingerprint differs, when both traces recorded what it calls ("calls"): a function it calls changed
+    (named) or its own code or declarations did; else (a trace stored before solvi recorded it, or a flow with no calls
+    to record) the plain "its code or declarations changed"."""
+    if "calls" not in ofp or "calls" not in nfp:
+        return "its code or declarations changed"
+    oc, nc = ofp["calls"].get(name) or {}, nfp["calls"].get(name) or {}
+    moved = sorted(k for k in set(oc) | set(nc) if oc.get(k) != nc.get(k))
+    if not moved:
+        return "its own code or declarations changed"
+    return "a function it calls changed: " + ", ".join(moved)
+
+
 def _why(name, a, b, old, new):
     """One differing step as data: {"step", "name", "old", "new", "why"} — why its output differs between two responses."""
     ofp, nfp = old.trace.fingerprint or {}, new.trace.fingerprint or {}
     why = []
     op, np_ = (ofp.get("parts") or {}).get(name), (nfp.get("parts") or {}).get(name)
     if op and np_ and op != np_:
-        why.append("its code or declarations changed")
+        why.append(_code_why(name, ofp, nfp))
     am, bm = _model_of(a), _model_of(b)
     if am.get("fp") != bm.get("fp") and (am or bm):
         why.append(f"its model changed (#{am.get('fp', '—')} → #{bm.get('fp', '—')})")

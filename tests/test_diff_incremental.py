@@ -122,3 +122,50 @@ def test_diff_facts_lists_the_changed_facts(tmp_path):
     # a fact that changed without changing any answer is listed only with facts=True
     plain_ids = {c["id"] for c in diff(store, build(cutoff=6)).changed}
     assert plain_ids <= {c["id"] for c in rep.changed}
+
+
+def _module(tmp_path, name, src):
+    import importlib.util
+    p = tmp_path / f"{name}.py"
+    p.write_text(src)
+    spec = importlib.util.spec_from_file_location(name, p)
+    m = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(m)
+    return m
+
+
+CALLER = """
+from solvi import Answer, Catalog, Question, System
+
+def helper(x):
+    return x + {step}
+
+def system():
+    cat = Catalog()
+
+    @cat.fn
+    def bumped(amount):
+        return helper(amount) {op} 0
+
+    @cat.rule("big")
+    def big(bumped) -> bool:
+        return bumped > 100
+
+    return System(cat, [Question("big", "Big?", Answer.yes_no())])
+"""
+
+
+def test_diff_says_which_called_function_changed(tmp_path):
+    store = JSONLStorage(tmp_path / "c.jsonl")
+    s = _module(tmp_path, "m0", CALLER.format(step=1, op="+")).system()
+    s.storage = store
+    store.catalog = s
+    for a in (50, 99, 150):
+        s.ask({"amount": a})
+    assert s.fingerprint() and store.get(next(iter(store.iter())).id).trace.fingerprint["calls"]["bumped"]
+    callee = diff(store, _module(tmp_path, "m1", CALLER.format(step=2, op="+")).system())
+    whys = {c["questions"]["big"]["first_step"]["why"] for c in callee.changed}
+    assert whys == {"a function it calls changed: helper"}
+    own = diff(store, _module(tmp_path, "m2", CALLER.format(step=1, op="* 2 +")).system())
+    whys = {c["questions"]["big"]["first_step"]["why"] for c in own.changed}
+    assert whys == {"its own code or declarations changed"}
