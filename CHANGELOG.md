@@ -212,6 +212,45 @@ started from a failing test built on the reproduction; the numbers are before �
   temperature); order questions to a person by how many items an answer unblocks, not first-in-first-out (about 4×
   more resolved per answer); raise `Certificate`'s `alarm=` for long streams, by the promise; a fitted injection
   detector holds on the family it was fitted on; a regime change can raise confidence as well as lower it.
+- **Knowledge store: `tick` re-resolves only the items whose expiry can flip** (an index of each item's deadlines),
+  not every item with `reconfirm_after`: 100 ticks over 10,000 such items took 16.4 s, now 0.001 s. A property test
+  compares the store with a full re-resolution after every write on 60 random histories.
+- **`Knowledge.value(snapshot, s, r, valid_at=t)`** reads only a fact whose validity covers `t` (a fact told without
+  `valid` holds at any time); without it, unchanged (the first matching row, which on a key with several validity
+  intervals is any one of them). Snapshot rows of items told with `valid=` now carry `"valid"`. A snapshot stored
+  before this change has no `"valid"` in its rows; `redecide` may list such a decision as changed once (its answer is
+  re-run and compared, so a same answer lands in "justification only").
+- **`TraceStorage.verify(deep=False)`** (and `verify_segments(deep=False)`) skips re-checking each stored response
+  against its own summary and keeps every chain check; default unchanged. Measured 1.15–1.41× faster on 5,000 small
+  records (JSONL / SQLite, full / compact), about 1.15× on 41 KB records — reading and re-hashing each record is the
+  larger cost, and no mode skips it.
+- **`SliceGuard(pin_file=..., pinned=...)` (experimental, opt-in):** the original version's per-slice losses kept in a
+  file written once (read-only) at the first run in any process, with its SHA-256 in the verdict; `pinned=` (kept next
+  to `EvaluatorLock`'s pins) refuses a change when the file differs or is missing. With a new guard per change, eight
+  steps of +0.012 on a 40-case slice went 7 of 8 through (+0.084) without the file, and stop at +0.036 with it.
+- Code fingerprints: a function that many rules call is hashed once per `catalog_fingerprint` call instead of once per
+  rule that reaches it (the values are unchanged, golden fingerprints included); a catalog of 200 rules over a
+  30-helper chain fingerprints 26.6× faster cold (0.80 s → 0.030 s).
+- `testing.boundary(system=)` cuts numbers at the constants the rules compare them with (`amount >= 100` → 99, 100,
+  101; the nearest floats around a float constant; module and closure constants read too); `thresholds=` gives them by
+  hand or turns them off. New edge values: a huge negative number, a long list and a long set of distinct values, a
+  dict with many keys, an empty set.
+- `testing.metamorphic(cases, relations, system=None)` and `testing.Relation(name, transform, expect=None)`: cases
+  whose state is transformed (a unit conversion) and whose expected answers follow from the source case's answers by
+  the relation (by default the same answers).
+- `run_file(isolate=True, max_mem=)` / `solvi test --isolate --max-mem 2G`: each case in its own Python process (a
+  crash of the interpreter or a case stuck in a C call fails only that case; no module state shared between cases);
+  `max_mem` caps the process's address space and a case that runs out has the new status `memory`. On macOS and
+  Windows the cap is checked after the case by peak memory, with a warning. Defaults unchanged.
+- `System(cache=)`: `aask` uses the pure-decision cache and shares it with `ask` (one decision serves both); a
+  decision in which a part timed out is not kept. `ask_text` / `aask_text` use it too: the text is still read each
+  time, and the flow is served when the text and the read (entry point, fields with their quotes and parsers, dialogue
+  changes) are the same. Abstentions are cached as `ask` caches them.
+- Guard: `Guard(message_verifier=)` — with a verifier set, a «user» message counts as the user's words only when the
+  verifier accepts it; an unsigned or refused one is read as a tool output (grounds no `ground_from=("user",)`
+  argument, gets the injection checks). `sign_message(text, sender, key)` / `signed_messages(keys, max_age=None)` give
+  HMAC signatures in the message's `"signature"` field; `Session.add(..., signature=)` and the MCP proxy's context
+  channel carry them. Opt-in; without it nothing changes.
 
 ## 1.1.1 — 2026-10-11 — fixes from use, and four learning items with their measurements
 

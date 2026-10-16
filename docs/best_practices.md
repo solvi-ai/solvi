@@ -790,6 +790,10 @@ the corrected answers; the default answers «what would the decision have been w
 **Keep regression cases from your records:** `testing.cases_from_store(storage, n=...)` plus
 `testing.boundary(cases, system=...)` before changing a catalog; hand-written cases rarely sit on a threshold's edge.
 
+**Isolate cases that can crash or hog memory:** `solvi test --isolate --max-mem 2G` costs about 90 ms per case on a
+small task (process start, imports, System build); leave room above the imports — numpy with a threaded BLAS reserves
+about 1 GB of address space at import.
+
 **Laws on few rows:** on 3 groups × 6 rows a deterministic one-atom law was learned 0/20 with the sized default and
 20/20 with `acceptance="exact", min_support=2`; the exact rule has no false-accept bound over many candidates, so
 pair it with `confirm=` (an independent check). Measured values need `tol=`: with exact equality, 1e-6 noise refuted
