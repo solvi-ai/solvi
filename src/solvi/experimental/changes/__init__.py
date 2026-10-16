@@ -98,7 +98,8 @@ approval levels and rollback — infrastructure, not a claim that its gates admi
 
 What is not done:
 - no rewind over an Environment (Confirmation.on_evidence takes the replay as a callback);
-- no narrows / widens classifier (Consistency takes it as a callback; Z3 over lawlang is planned);
+- narrows / widens is measured only on probe inputs through the answerers (Consistency(probes=), opt-in) or
+  taken from a callback; a classifier over the rule's text (Z3 over lawlang) is planned;
 - no regression-scenario stage (`solvi test` cases.json);
 - the should-abstain set is declared by the caller: none is derived (stored abstentions are not one — a correction
   may rightly make the system answer them), and an empty set holds the change for a person;
