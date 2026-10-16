@@ -156,6 +156,14 @@ an action with fewer rows than that cannot get a law on this buffer — «too fe
 `lawset.why_not(candidate, buffer)` names the first test it fails, in `test`'s order (active, readmit, cap, net,
 min_support, min_precision, exact, sized_need, sized_bound), and by how many rows — without touching the buffer's N.
 
+Coarse outcomes and a backing-off base (opt-in). `LawSet(grammar, **coarse(lambda seen: seen["kind"]))`: a law predicts
+the observation's class (an `OutcomeClass`), right when the observation falls in it — details no law can know (a random
+amount) no longer make every row a mismatch; `report` counts outcomes by class. `BackoffBase(levels, min_rows=,
+outcome=)` is a base predictor fitted on transitions: the most frequent outcome for the state's key at the most specific
+level (`[("front", "wood"), ("front",), ()]`, the action always part of the key) with at least `min_rows` rows, backing
+off to more general levels; `explain` names the level used. Fit it before the set uses it, on rows the laws are not
+tested on.
+
 What is not done:
 - no grammar that cannot be enumerated (where the mismatch should matter most) has been measured;
 - the sized rule, admission by probes and abstention are measured on synthetic worlds only: not yet on the game
@@ -168,6 +176,7 @@ What is not done:
 from __future__ import annotations
 
 from .. import warn_on_import
+from ._coarse import BackoffBase, OutcomeClass, coarse
 from ._compile import CompiledCheck, check_compiled, load_module
 from ._core import (Admission, Atom, Buffer, CallableProposer, Candidate, Enumerate, Grammar, Law, LawSet, Proposer,
                     RandomProposer, Step, Transition, Undetermined, sized_level, sized_need)
@@ -177,9 +186,9 @@ from ._rank import (FEATURES, BagOfAtomsRanker, FeatureRanker, HandoverRanker, J
 
 warn_on_import(__name__)
 
-__all__ = ["Admission", "Atom", "BagOfAtomsRanker", "Buffer", "CallableProposer", "Candidate", "CompiledCheck", "Enumerate",
+__all__ = ["Admission", "Atom", "BackoffBase", "BagOfAtomsRanker", "Buffer", "CallableProposer", "Candidate", "CompiledCheck", "Enumerate",
            "FEATURES", "FeatureRanker", "Grammar", "HandoverRanker", "JointRanker", "Law", "LawSet", "PriorRanker", "Probe",
-           "Proposer", "RandomProposer",
+           "OutcomeClass", "Proposer", "RandomProposer",
            "RankedProposer", "Step", "SyntheticTask", "Transition", "atom_features", "atom_kind", "candidate_features",
-           "check_compiled", "checks_to", "discriminate", "load_module", "sized_level", "sized_need", "split",
+           "check_compiled", "checks_to", "coarse", "discriminate", "load_module", "sized_level", "sized_need", "split",
            "synthetic_task", "Undetermined"]
