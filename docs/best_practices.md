@@ -435,6 +435,26 @@ drift (FLORA, Widmer and Kubat 1996; ADWIN, Bifet and Gavaldà 2007; Gama et al.
 the sized rule's N behaves under a window (it never decreases; a candidate counts again after a full turnover) and
 `readmit="grown"`.
 
+**When the world's answers can be wrong, give the probes the noise level: `admit_by_probes(..., noise=ε, level=L)`.**
+With the default one wrong answer refutes the right law (at 10 % noise the default admission was wrong in 46 % of
+synthetic trials); with `noise=` it accepted the right law in 93 % / 100 % at 24 / 48 answers with at most 0.8 % wrong,
+where asking each probe several times and taking the majority could not stay safe and admit anything at those budgets.
+Give ε as you know it; a wrong ε, noise that depends on the state and several missing laws are not measured.
+
+**When a law may stop holding for a while and come back, suspend it instead of retiring it: `LawSet(on_fall="suspend")`;
+keep the default `reactivate_min=10` unless your observations are clean.** On synthetic streams a returning law came
+back in about 40 rows against 263 for the best retire-and-readmit setting; m = 5 was faster but sat at the false-admission
+cap of its tuning, m = 10 is the safer default. A law whose states the agent stops visiting is never re-checked.
+
+**Add history atoms (`History(grammar, depth=1)`) only when a law may depend on the previous step.** Where one did, they
+learned it and the present-state grammar could not; on worlds that need no history the larger grammar costs a slower
+start (−0.017 closed learning-curve area; the same final level from about 1,250 rows). Depth 1 only is measured.
+
+**Treat `LawConfidence` as an estimate and pick its threshold on your own data.** It answered 78 % of law-covered states
+against 47 % for a per-law precision threshold at the same ≈ 2 % risk when an atom tracks the hidden cause, but it gives
+no risk guarantee. Its `exact` flag needs rows: at the default `exact_rows=60` a law right on 97 % of its rows is flagged
+exact about 1 time in 5; raise `exact_rows` where an exact law matters.
+
 **Abstain when consistent laws disagree.** Two laws that both passed their test, neither an exception of the other,
 predicting different things for one state are a reason to abstain, not a tie to break by length or age:
 `predict(state, action, disagree="abstain")` returns `Undetermined` there and counts it (`lawset.abstained`). Skills

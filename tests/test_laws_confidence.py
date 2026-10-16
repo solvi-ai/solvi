@@ -1,4 +1,4 @@
-"""solvi.experimental.laws: per-law calibrated confidence and tail abstention (LawConfidence). Synthetic data only."""
+"""solvi.experimental.laws: per-law estimated confidence (posterior mean) and tail abstention (LawConfidence). Synthetic data only."""
 from __future__ import annotations
 
 import random
