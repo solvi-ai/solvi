@@ -123,7 +123,7 @@ The modules `solvi.core` is made of. Their public names are re-exported by `solv
 |---|---|
 | [`solvi.experimental`](experimental.md) | `STATUS`: what each experimental piece is, what it is missing, its deadline |
 | [`solvi.experimental.lora`](lora.md) | a LoRA adapter per question, fitted on a few hundred labelled examples |
-| [`solvi.experimental.injection`](injection.md) | a calibrated detector of instruction-like text in tool outputs |
+| [`solvi.experimental.injection`](injection.md) | a detector of instruction-like text in tool outputs, fitted and thresholded on your own tool outputs |
 | [`solvi.experimental.compile`](compile.md) | a specification compiled by an LLM into catalog parts citing its clauses, accepted when two drafts agree and the spec's tests pass; a person for what the drafts dispute; recompile, an agent guard (versions and the decisions a change moves: `solvi.core.versions`) |
 | [`solvi.experimental.compile.sandbox`](sandbox.md) | code a model wrote, held to pure functions: ast allowlist, a subprocess with limits, a restricted load |
 | [`solvi.experimental.hooks`](hooks.md) | a coding agent's hooks: edits checked against rules, a skill picked for a prompt, install / uninstall (Claude Code; Codex, preview) |

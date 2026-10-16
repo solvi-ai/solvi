@@ -1,4 +1,4 @@
-"""A calibrated detector of instruction-like text in tool outputs (experimental, opt-in, no shipped weights).
+"""A detector of instruction-like text in tool outputs, fitted on your labelled tool outputs and thresholded on your ordinary ones (experimental, opt-in, no shipped weights).
 
 `solvi.core.deciders.perturb.injection_spans` is a fixed rule set: it flags ordinary text (an address, a payment line,
 "please reply") and misses polite attacks without its words. This detector scores each sentence of a text with a

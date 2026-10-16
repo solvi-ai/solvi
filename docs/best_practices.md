@@ -199,10 +199,10 @@ labels (log-wealth 0.35 of the 2.30 needed). What labels do buy: more answers on
 the price of fewer before it (−5). If you want coverage on new kinds of input, plan for hundreds of labels per new option
 and a new answerer, and keep the person on the rest.
 
-**Every score has a control that must fail.** In an external lab we audited, a knowledge-graph ranker reported
+**Every score has a control that must fail.** In an external codebase we reviewed, a knowledge-graph ranker reported
 100% Hits@10 that an untrained model also reached: the score measured the shape of the scoring, not the model. Run
 `solvi honesty <set> --control`: the same answers against gold shuffled within each question. The set discriminates only
-when the real confident-error rate is at least 0.05 below the control's and at most half of it (core set: 4.9% against
+when the real confident-error rate is at least 0.05 below the control's and at most half of it (core set, one run: 4.9% against
 54%). A system that always gives the majority answer scores the same against shuffled gold (`discriminates: false`), and a
 question with one gold in every case cannot be controlled this way at all (`uncontrolled`): add cases where the answer differs.
 
@@ -420,7 +420,8 @@ the largest case to 0.030. `LawSet.admit_by_probes(candidates, ask, probes=, saf
 asks the safe probe that splits the surviving classes most and accepts the shortest candidate only when one class is
 left; otherwise it returns "undetermined" with the classes. On a synthetic world at 8 checks: a random held-out sample
 with the shortest survivor accepted a wrong law in 0.593 of 300 trials, the probes in none (0.987 right, 0.013
-undetermined). Ask only where the rest of your law set and base are right, or a right candidate is refuted with them.
+undetermined with `assume_one_law=True`; under the 1.2 default, which keeps witnesses against a second missing law,
+0.897 right at 8 checks and 1.000 at 10, no wrong admission in the trials). Ask only where the rest of your law set and base are right, or a right candidate is refuted with them.
 
 **When two laws may be missing at once, use `admit_by_probes(..., max_new=2)` and give it at least 12 probes.** It is
 a known method — a version space (Mitchell 1982) over law sets with up to two new laws, split by discriminating
@@ -464,7 +465,9 @@ and several missing laws are not measured; the mechanism is covered by
 
 **When a law may stop holding for a while and come back, suspend it instead of retiring it: `LawSet(on_fall="suspend")`;
 keep the default `reactivate_min=10` unless your observations are clean.** On synthetic streams a returning law came
-back in about 40 rows against 263 for the best retire-and-readmit setting; m = 5 was faster but sat at the false-admission
+back in about 40 rows against 263 for the best retire-and-readmit setting that kept false admissions at the cap (at most
+0.25 of the baseline's rows against every setting tried; faster-forgetting windows came back in ~160 rows but admitted
+4–24 false laws per 80 streams); m = 5 was faster but sat at the false-admission
 cap of its tuning, m = 10 is the safer default. A law whose states the agent stops visiting is never re-checked.
 
 **Add history atoms (`History(grammar, depth=1)`) only when a law may depend on the previous step.** Where one did, they
@@ -813,7 +816,7 @@ not yet been measured on the refusals of a real split.
 **Verify against something kept elsewhere.** `verify()` catches edits; a rewrite of the whole store with its head is
 caught only by a head or a signature you published (`verify(anchor=...)`, `verify(signature=...)`). A frequent
 check of a large store can run `verify(deep=False)` (every chain check, no re-check of the stored responses; 1.15–1.41×
-faster measured) with a full `verify()` now and then.
+faster, measured once) with a full `verify()` now and then.
 
 **Read the kind of a replay mismatch before raising an alarm.** `integrity` means the data changed after the run;
 `missing_part`, `recompute` and `model_changed` mean the catalog or the model moved on. `summary` says which.
@@ -899,7 +902,7 @@ already leaves out inputs whose answers differ when asked twice.
 
 **Paid checks pay only when a wrong accept is dear, the check is cheap and independent, and wrong answers occur.**
 Where a check costs more than the error, or every check is the same model, deciding without checks did as well or
-better in the review's stands. Where the error was cheap, an agent without checks beat the full layer by +0.032 [+0.024, +0.041];
+better in the review's test setups. Where the error was cheap, an agent without checks beat the full layer by +0.032 [+0.024, +0.041];
 "don't know" paid only when a miss cost more than 1.5–1.7× an escalation; a cost of error given as a point estimate
 inside the noise failed, and a cost prior without exploration never tried anything.
 
@@ -919,7 +922,7 @@ and `build(novel=[state, ...])` feeds System 1's signal on them to the gate in p
 detector with an ARL bound.
 
 **Wrap a strong agent only at the decision points where it is unsure; without evidence the agent's action stands.**
-The full layer over a tuned classic policy passed 0 of 22 primary checks; the parts chosen on a pilot, 7 of 22.
+The full layer over a tuned classic policy passed 0 of 22 primary checks; the parts chosen on a small preliminary run, 7 of 22.
 
 **Taint on the whole context costs honest tasks.** On AgentDojo utility fell from 0.97 to 0.70 (−0.27 [−0.43,
 −0.14]), 62 of 92 interventions coming from context-wide taint, at an attack rate the agent itself held at 0 of 190.
@@ -975,13 +978,14 @@ accident is what `check_environment` is for.
 **Labels from corrections are not a random sample** — people correct what looks wrong. On a toy dispatcher the stored
 corrections showed 7.2 % error against 1.8 % on the truth. `Dispatcher(audit=0.05–0.25)` and labelling the marked
 decisions gives an unbiased reading (within 5 points on 1,200 decisions at audit=0.25). A random audit also catches a
-check that broke silently: in a drift stand the current monitor missed a broken check in 98 of 100 runs, while a 10 %
-random audit found it in 59 of 100.
+check that broke silently: in a drift simulation the current monitor missed a broken check in 98 of 100 runs, while a 10 %
+random audit with `AuditWatch` found it in 96 of 100 (4 of 100 false flags on unchanged streams; the audit's merit is
+that it held its false-alarm level — see experimental.md).
 
 **Refit on the hash split when examples keep arriving.** `build(split="hash")` (the default since 1.2; 1.1 shuffled)
 keeps every old example in its share when examples are added (600 + 60 examples, 5 seeds: 0 old examples moved in or out of the fit share, against 101–120 with the
 shuffle). Routes still move with the thresholds; `solvi diff` shows them. Moving from the shuffle to the hash puts
-about 41% of the examples in another share (2,000 refund requests, 5 seeds: 40.1–42.1%; 84–89% of the shuffle's
+about 41% of the examples in another share (2,000 refund requests in `examples/24_one_entry_point.py`, 5 seeds, measured once: 40.1–42.1%; 84–89% of the shuffle's
 calibration examples), so a system rebuilt on 1.2 is calibrated on other examples: pass `split="shuffle"` to rebuild
 1.1's exactly.
 
@@ -996,7 +1000,7 @@ cheap stages, or use `Pipeline(order="cheap_first")`, so expensive evidence is n
 refuses.
 
 **Watch a shipped change per slice, against its promise.** `pipe.watch(version, promise)` reverts only that version
-when one slice's evidence is enough; in a synthetic stand it reverted 60 of 60 harmful rollouts and 0 of 60 clean ones,
+when one slice's evidence is enough; on synthetic rollouts it reverted 60 of 60 harmful ones and 0 of 60 clean ones,
 where a mean-with-tolerance rule checked after every outcome reverted 22 of 60 clean ones.
 
 **A Shadow halt needs evidence:** about 10 discordant pairs when the candidate is always the wrong one, hundreds when it

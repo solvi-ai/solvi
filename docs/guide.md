@@ -3391,6 +3391,11 @@ system.guarantee("correct", examples, max_error=0.3, answer="yes", folds=5)
 system.guarantee("refund", False)                                  # remove it
 ```
 
+A call that fails — too few examples, no threshold that can be certified — raises as before, but since 1.2 it leaves the
+guarantee in force untouched and says so in a `GuaranteeWarning`; `system.guard_history` lists every attempt (installed,
+failed — and whether the old one was kept — and removed). To replace a guarantee only when the new one certifies, call
+`guarantee` and keep going; to drop it on failure, remove it first (`system.guarantee(q, False)`).
+
 A label with several right answers — the dialog closes by the button or by Escape — is `AnyOf("button", "escape")`
 (`from solvi.core import AnyOf`): `system.guarantee`, `solvi.build` and a decision part's `act_guard`,
 `calibrate_for` and `conformal` count an answer right when it is any of them (with `correct=`, your judge is asked per
@@ -3563,7 +3568,7 @@ server. Measure on your machine before storing every decision of a high-volume s
 `store.save_many(responses, metas=None)`) shares the cost: `JSONLStorage` takes its locks once and writes the head
 (and, with `fsync=True`, syncs) once at the end; the SQL stores run the batch as one transaction — one commit, and an
 exception inside rolls it back. Other threads and processes wait for the batch; inside it only saves and reads, not
-`verify` or `redact`. On a laptop SSD with small records (1,000 asks of a one-rule system): JSONL 2,496 → 3,048 asks
+`verify` or `redact`. Measured once on a laptop SSD with small records (1,000 asks of a one-rule system): JSONL 2,496 → 3,048 asks
 per second, SQLite 1,853 → 2,687.
 
 #### Compact records and rotation
@@ -4739,7 +4744,7 @@ that weaker evidence keeps: a "verified" fact after 2,000 decisions; observation
 clock — the next contradicting observation refutes them. A fact nobody observes again stays believed: a world where a
 first contact is costly needs a clock of its own. A tick re-resolves only the items whose expiry falls between the old and
 the new clock (an index of deadlines), so calling `tick` once per decision stays cheap on a large store: 100 ticks over
-10,000 items with `reconfirm_after` took 16.4 s when every such item was re-resolved, 0.001 s with the index.
+10,000 items with `reconfirm_after` took 16.4 s when every such item was re-resolved, 0.001 s with the index (measured once on one machine).
 
 What a flag does not do: it does not close the window between an abrupt shift and its detection. A calibrated promise
 ("≤ 5% wrong among the answers given alone") does not hold in the first decisions after an abrupt shift to unseen
@@ -5555,7 +5560,7 @@ lets an LLM write those parts from the text and accepts them only after checks t
 2. the module is **pure functions** checked by `solvi.experimental.compile.sandbox` (an `ast` allowlist of standard-library imports, no
    files, reflection or dunders) and run there — in a subprocess with memory and time limits — before anything of it
    enters your process (`sandbox.run_many(sources, driver, payload)` runs many modules in one subprocess, each with
-   its own CPU and wall-time limit and its own result — about 5 ms a module instead of about 110 ms for one `run` each;
+   its own CPU and wall-time limit and its own result — about 5 ms a module instead of about 110 ms for one `run` each, measured once;
    a module that ends the process is reported and the rest go on in a fresh one);
 3. **two drafts are written independently** and must give the same answer to every question on every input of a pool:
    inputs drawn from the values you declare (`Inputs`), boundary values around every number of the text and of both

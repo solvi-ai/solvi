@@ -101,7 +101,7 @@ kind, name, inputs, the value's hash, quote, error, prev, and the optional field
 
 `store.verify(anchor=None, signature=None, deep=True)` → `{"ok", "count", "head", "legacy", "problems"}`.
 `deep=False` skips guarantee 3 (the re-check of each stored response against its summary) and keeps the others; on
-5,000 small records it verified 1.15–1.41 times faster (JSONL and SQLite, full and compact records), on 41 KB records
+5,000 small records it verified once 1.15–1.41 times faster (JSONL and SQLite, full and compact records), on 41 KB records
 about 1.15 times — the rest is reading and re-hashing every record, which no mode skips.
 
 Guaranteed (each is a test):

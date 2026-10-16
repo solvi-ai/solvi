@@ -103,13 +103,14 @@ and rollback (`solvi.experimental.changes.Pipeline(stages, storage, store=...)`)
   the watch keeps a test martingale against that slice's promised failure rate on the promoted change's own (alone)
   outcomes; when one slice's evidence reaches slices/α it reverts the watched version, and only it
   (`pipe.revert(v)`; `rollback(v)` undoes every version after v). By construction a change that keeps every slice's
-  promise is reverted with probability at most α, at any time (Bonferroni over slices). Measured on a synthetic stand
+  promise is reverted with probability at most α, at any time (Bonferroni over slices). Measured on a synthetic simulation
   only (not in the repo; four slices at 60/25/10/5 % of traffic, pre-ship failure 5 %, promise 10 %, α 0.05, 4,000
   outcomes): a 5 % slice raised to 30 % failure was reverted in 60 of 60 rollouts; 0 of 60 clean rollouts were
-  reverted, and 14 of 600 at exactly the promise (within α). It is not faster than a mean-with-tolerance rule checked
+  reverted, and 14 of 600 at exactly the promise (within α); a milder harm (that slice at 20 %, twice the promise)
+  was reverted in 44 of 60 within the horizon. It is not faster than a mean-with-tolerance rule checked
   after every outcome — its gain is the bounded false-revert rate, not detection delay. `outcome="loss"` takes a
   numeric loss in [0, 1] per outcome instead of a failure (also `EProcess.update(..., loss=)` / `loss_refuted` in
-  `experimental.skills`); not measured on a stand.
+  `experimental.skills`); not measured.
 - **Script:** `benchmarks/changes_credit.py` (the credit policy; needs the German Credit applications:
   `benchmarks/tasks/fetch.sh credit` and `prepare.py`). **Deadline:** 1.2.
 - Guide: [The change pipeline](guide.md#the-change-pipeline-solviexperimentalchanges); design and API: the module
@@ -170,7 +171,7 @@ decreases; a candidate counts again after a full turnover) and `readmit="grown"`
 
 ## `injection`
 
-A calibrated detector of instruction-like text in tool outputs: a per-sentence logistic score over the fixed
+A detector of instruction-like text in tool outputs, fitted and thresholded on your own texts: a per-sentence logistic score over the fixed
 detector's rule families and hashed word n-grams, fitted on labelled texts, its threshold set on ordinary texts to a
 chosen false-flag rate. Since 1.2. Opt-in and shipped without weights: the fixed rules (`injection_spans`) stay Guard's
 detector. Fit it on labelled outputs your own tools return and set its threshold on your ordinary ones
@@ -309,7 +310,7 @@ point, alpha 0.05 per 600 decisions): a 10 % audit flagged the break in 96 of 10
 the policy bought the check for: 57 of 100 (median 176), 9 false flags. The drift monitor on the system's own answers
 cannot see it by design, since the system did not change. The library's `NumericDrift` on the same audited values
 flags sooner (24 decisions on average) but with 14 of 100 false flags: a Gaussian detector on 0/1 values, not
-level-matched, and a level-matched comparison was not run. AuditWatch's merit is that it holds its false-alarm level.
+level-matched, and a level-matched comparison was not run. AuditWatch's merit here is that it held its false-alarm level (4 of 100 at alpha 0.05).
 Condition: the reference was the check run on 800 random decisions, all checked; with only the audited share of a
 reference (about 80 items) the threshold widens and detection is slower than measured here.
 One task family (intent routing, a TF-IDF + logistic-regression router, a nearest-neighbour second opinion) and one
