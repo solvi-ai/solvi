@@ -226,3 +226,88 @@ def test_the_learning_target_and_the_versions_target_answer(tmp_path):
     rec = rr_records(pipe)
     assert len(rec) == 1 and rec[0]["measured"]["n"] == 5, str(res)
     assert callable(getattr(VersionsTarget, "answerer", None))
+
+
+# ------------------------------------------------------------------ opt-in: an item without an answerer; a sampled set
+def test_missing_answer_refuse_fails_a_change_whose_target_cannot_answer(tmp_path):
+    from solvi.experimental.changes import hazard_body
+    item = Change("outcome", payload={"kind": "rule", "body": hazard_body("lava", {"next": "lava"}, ["step"])},
+                  evidence=["e1"], change_type="rule")
+    appr = {("rule", "outcome"): "gate"}
+    # default: a change with no answering target passes the stage unmeasured (unchanged)
+    p0 = Pipeline([RefusalRegression()], str(tmp_path / "a.jsonl"), store=KnowledgeStore(), approval=appr,
+                  refusals=OUTSIDE)
+    assert p0.propose(item).promoted
+    # opt-in: it is refused, with the reason
+    p1 = Pipeline([RefusalRegression(missing_answer="refuse")], str(tmp_path / "b.jsonl"), store=KnowledgeStore(),
+                  approval=appr, refusals=OUTSIDE)
+    res = p1.propose(item)
+    assert res.status == "rejected" and res.stage == "refusal_regression" and "cannot answer" in res.reason
+    m = rr_records(p1)[0]["measured"]
+    assert m["measured"] is False and m["missing_answer"] == "refuse"
+    # an answering change is measured as before
+    p2 = pipe_of(tmp_path, Threshold(0.5), stages=[RefusalRegression(missing_answer="refuse")], name="c.jsonl",
+                 refusals=OUTSIDE)
+    assert p2.propose(move(0.6)).promoted
+    with pytest.raises(ValueError):
+        RefusalRegression(missing_answer="ignore")
+
+
+NEAR = [{"score": s} for s in (0.46, 0.47, 0.48, 0.49, 0.9, 0.95)]   # past inputs: four refused at 0.5, two answered
+
+
+def test_sampled_coverage_draws_unseen_refusals_from_a_pool(tmp_path):
+    # the declared set alone: a move to 0.45 keeps refusing all four declared inputs, so it passes
+    assert pipe_of(tmp_path, Threshold(0.5), refusals=OUTSIDE).propose(move(0.45)).promoted
+    # sampled: inputs drawn from the pool that the version in force refuses join the set
+    own = RefusalRegression(coverage="sampled", sample=6, pool=NEAR, seed=1)
+    pipe = pipe_of(tmp_path, Threshold(0.5), stages=[own], name="s.jsonl", refusals=OUTSIDE)
+    res = pipe.propose(move(0.45))
+    assert res.status == "rejected" and res.stage == "refusal_regression"
+    m = rr_records(pipe)[0]["measured"]
+    assert m["coverage"] == "sampled" and m["sampled_drawn"] == 6 and m["sampled_refused"] == 4
+    assert m["sources"] == {"pipeline": 4, "sampled": 4} and m["n"] == 8 and m["lost"] == 4
+    assert m["seed"] == 1 and len(m["sampled_ids"]) == 4
+    # a draw of k from a callable pool, or from a store's recorded inputs; the seed makes it repeatable
+    calls = []
+
+    def pool(change, ctx):
+        calls.append(change.id if hasattr(change, "id") else 1)
+        return NEAR
+
+    p2 = pipe_of(tmp_path, Threshold(0.5), name="s2.jsonl", refusals=OUTSIDE,
+                 stages=[RefusalRegression(coverage="sampled", sample=2, pool=pool, seed=3)])
+    a = p2.propose(move(0.9))
+    m2 = rr_records(p2)[0]["measured"]
+    assert calls and m2["sampled_drawn"] == 2 and a.promoted
+
+    class Rec:
+        def __init__(self, x):
+            self.input = x
+
+    class Store:
+        def iter(self):
+            return iter([Rec(x) for x in NEAR])
+
+    p3 = pipe_of(tmp_path, Threshold(0.5), name="s3.jsonl", refusals=OUTSIDE,
+                 stages=[RefusalRegression(coverage="sampled", sample=6, pool=Store(), seed=1)])
+    assert p3.propose(move(0.45)).stage == "refusal_regression"
+    # without a seed each change gets a fresh draw; the seed used is recorded
+    p4 = pipe_of(tmp_path, Threshold(0.5), name="s4.jsonl", refusals=OUTSIDE,
+                 stages=[RefusalRegression(coverage="sampled", sample=3, pool=NEAR)])
+    p4.propose(move(0.9))
+    assert isinstance(rr_records(p4)[0]["measured"]["seed"], int)
+    # declared (default) ignores a pool; bad arguments are refused early
+    with pytest.raises(ValueError):
+        RefusalRegression(coverage="all")
+    with pytest.raises(ValueError):
+        RefusalRegression(coverage="sampled", sample=4)                 # no pool
+    with pytest.raises(ValueError):
+        RefusalRegression(coverage="sampled", pool=NEAR, sample=0)
+
+
+def test_a_sampled_pool_alone_measures_when_nothing_is_declared(tmp_path):
+    pipe = pipe_of(tmp_path, Threshold(0.5), stages=[RefusalRegression(coverage="sampled", sample=6, pool=NEAR,
+                                                                         seed=0)])
+    res = pipe.propose(move(0.45))
+    assert res.status == "rejected" and rr_records(pipe)[0]["measured"]["sources"] == {"sampled": 4}
