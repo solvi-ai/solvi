@@ -50,10 +50,13 @@ def test_split_with_no_dispatcher_share_calibrates_system_1_on_every_example():
     assert "no examples" in ds.explain()
 
 
-def test_the_default_split_with_a_slow_path_is_unchanged():
+def test_the_default_split_with_a_slow_path_calibrates_the_dispatcher():
     ds = solvi.build(Q, _examples(600, 0), catalog=_cat(), max_risk=0.05, slow=_teacher, min_slice=1)
     sp = ds.choices["split"]
-    assert sp["to calibrate the dispatcher"] == 200 and ds.dispatcher.policy is not None
+    assert 170 <= sp["to calibrate the dispatcher"] <= 230 and ds.dispatcher.policy is not None     # ~1/3, by hash
+    shuffled = solvi.build(Q, _examples(600, 0), catalog=_cat(), max_risk=0.05, slow=_teacher, min_slice=1,
+                           split="shuffle")
+    assert shuffled.choices["split"]["to calibrate the dispatcher"] == 200       # the split up to 1.1, as it was
 
 
 def test_explain_says_the_uncalibrated_slow_path_answers():

@@ -5,7 +5,7 @@
 The pieces (each its own module; the names below are re-exported here):
 - store (KnowledgeStore): a hash-chained journal of items — facts, rules, skills, actions, episodes — with provenance,
   versions, the source check, disputes to a person, the retraction cascade, staleness flags, snapshots for decisions;
-- gates (WriteGate, SourceGate, ConsistencyGate): what lets an item in;
+- gates (WriteGate, SourceGate, ConsistencyGate, WriterGate): what lets an item in;
 - actions (ActionModel, ConservativeActionModel, Vocabulary, Prediction): what an environment accepts and refuses,
   learned from outcomes over an explicit vocabulary;
 - risk (RiskPolicy, Protect, RiskBudget, LearnedGate): protection by default, justified risk as an option;
@@ -20,11 +20,12 @@ What the evidence behind each piece is, and its limits, is in each module's docs
 from .actions import MISSING, ActionModel, ConservativeActionModel, Prediction, Vocabulary
 from .agenda import Agenda
 from .failures import FailureMemory
-from .gates import ConsistencyGate, SourceGate, WriteGate
+from .gates import ConsistencyGate, SourceGate, WriteGate, WriterGate
 from .risk import LearnedGate, Protect, RiskBudget, RiskDecision, RiskPolicy
 from .store import KINDS, RECONFIRM_DEFAULTS, SOURCES, KnowledgeStore, Verdict
 from .worldmap import WorldMap
 
 __all__ = ["ActionModel", "Agenda", "ConservativeActionModel", "ConsistencyGate", "FailureMemory", "KINDS",
            "KnowledgeStore", "LearnedGate", "MISSING", "Prediction", "Protect", "RECONFIRM_DEFAULTS", "RiskBudget",
-           "RiskDecision", "RiskPolicy", "SourceGate", "SOURCES", "Verdict", "Vocabulary", "WorldMap", "WriteGate"]
+           "RiskDecision", "RiskPolicy", "SourceGate", "SOURCES", "Verdict", "Vocabulary", "WorldMap", "WriteGate",
+           "WriterGate"]

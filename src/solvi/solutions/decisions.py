@@ -21,18 +21,21 @@ System 1, from what is given:
 The examples are shuffled (seed=) and split: a fit share when something is fitted or a signal is chosen (3/4 to fit a
 head or a learner; 1/3 to choose a signal for a rule), the rest for calibration — all of it for System 1's guarantee,
 or half for it and half for the dispatcher when there is a slow path, since the dispatcher must be calibrated on
-examples System 1's guarantee did not see. `split=(fit, guarantee, dispatch)` sets the shares. `split="hash"` keeps
-the default shares but puts each example in its share by a hash of its state (salted by seed=): a refit on the same
-examples plus new ones leaves every old example where it was (600 examples + 60 new, 5 seeds: 0 old examples moved in
-or out of the fit share, against 101–120 with the shuffle) and the order of the examples does not matter; the
-thresholds still move with the new examples. Routes that move while answers stay are what `solvi diff` shows.
+examples System 1's guarantee did not see. `split=(fit, guarantee, dispatch)` sets the shares (cut from the shuffle).
+By default (`split="hash"`, since 1.2) each example goes to its share by a hash of its state (salted by seed=), not by
+its place in a shuffled list: a refit on the same examples plus new ones leaves every old example where it was (600
+examples + 60 new, 5 seeds: 0 old examples moved in or out of the fit share, against 101–120 with the shuffle) and the
+order of the examples does not matter; the thresholds still move with the new examples. `split="shuffle"` is the
+split up to 1.1 (the default shares cut from the shuffle). Routes that move while answers stay are what `solvi diff`
+shows.
 
 Examples that share a source — several from one screen, one customer, one document — are not independent: a random
 split puts some of each source on both sides, System 1 is calibrated on sources it was fitted on, and the promise is
 optimistic on new sources (a user's promise of ≤ 10% confident errors gave up to 14% on unseen screens).
 `groups=` (a key of the state, a function state → group, or one group per example) splits by group instead: the groups
 are shuffled and every example of a group goes to one share, so the guarantee (and the dispatcher) is calibrated on
-groups System 1 never saw and the promise is read on unseen groups. The default (`groups=None`) is the random split.
+groups System 1 never saw and the promise is read on unseen groups (by a hash of the group by default, by the
+shuffled order of the groups with split="shuffle" or shares). The default (`groups=None`) splits example by example.
 
 The signal System 1's guarantee reads: signal= when given; else the act probability of a decision part that has one;
 else the answer's confidence; and when that does not vary (a rule's answer is always sure), the number the catalog
@@ -123,9 +126,13 @@ class DecisionSystem:
         store, and what is not covered."""
         c = self.choices
         grp = c.get("groups")
+        hashed = "hash" in c.get("split_by", "")
         how = (f"split by group ({grp['by']}: {grp['n']} groups, each whole on one side — {grp['fit']} to fit, "
                f"{grp['calibrate']} to calibrate on, so the promise is read on groups System 1 did not see), groups "
-               f"shuffled with seed {c['seed']}" if grp else f"shuffled with seed {c['seed']}")
+               + (f"put in their shares by a hash of the group (seed {c['seed']})" if hashed else
+                  f"shuffled with seed {c['seed']}") if grp else
+               f"each put in its share by a hash of its state (seed {c['seed']})" if hashed else
+               f"shuffled with seed {c['seed']}")
         lines = [f"Question {self.question!r}: {c['examples']} labelled examples, {how}: "
                  + ", ".join(f"{v} {k}" for k, v in c["split"].items() if v) + "."]
         lines.append(f"System 1: {c['system1']}.")
@@ -390,17 +397,18 @@ def build(question, examples, *, catalog=None, learner=None, slow=None, reads=No
     total: solvi.core.dispatch.Budget per decision / for the dispatcher's life; price: dollars per million input and output
     tokens (needed for dollars). storage: a path or a TraceStorage — every decision and the policy, hash-chained.
     split: (fit, guarantee, dispatch) shares (with slow=, a dispatch share of 0 calibrates System 1 on all the rest and
-    leaves the slow path uncalibrated), or "hash": the default shares, each example's share set by a hash of its state
-    (of its group with groups=) salted by seed — not by its place in a shuffled list, so examples added later leave
-    every old example in its share and the order of the examples does not matter (thresholds still move with the
-    new examples; opt-in in 1.2: it calibrates on other examples than the default split). seed: the shuffle (the
-    hash's salt with split="hash") and the open-set simulation. delta: learn-then-test's
+    leaves the slow path uncalibrated; cut from the shuffle), "hash" (None, the default since 1.2): the default shares,
+    each example's share set by a hash of its state (of its group with groups=) salted by seed — not by its place in a
+    shuffled list, so examples added later leave every old example in its share and the order of the examples does not
+    matter (thresholds still move with the new examples), or "shuffle": the default shares cut from a shuffled list
+    (the default up to 1.1; it calibrates on other examples than the hash). seed: the hash's salt (the shuffle with
+    "shuffle" or shares) and the open-set simulation. delta: learn-then-test's
     confidence. min_slice: a slice of the slow path with fewer calibration examples goes to a person. writer, inputs:
     gone in 1.0 (they compiled a Spec here): a TypeError says to compile it first. knowledge: a solvi.Knowledge (or a
     function state → snapshot) — every decision, and every example at build time, is given its snapshot as the fact
     "knowledge", which System 1's rules read like any fact (`Knowledge.value(knowledge, s, r)`). groups: split by
     group (module docs) — a key of the state, a function state → group, or a list with one group per example; every
-    share then holds whole groups (at least two groups); None: the random split. strict: when the dispatcher's
+    share then holds whole groups (at least two groups); None: example by example. strict: when the dispatcher's
     calibration measures System 1's own answers breaking the promise on its examples (every slice then goes to a
     person, but System 1 still answers alone above its threshold), raise a ValueError instead of the default
     GuaranteeWarning. monitor: None (default: no drift monitor), True (a DriftMonitor whose reference is System 1's
@@ -464,11 +472,14 @@ def build(question, examples, *, catalog=None, learner=None, slow=None, reads=No
             raise ValueError(f"no rule answers {qname!r} in the catalog: give the Question (its answer type) so a head "
                              "can be fitted, or learner=")
     gids = _group_ids(groups, examples)
+    if split is None:
+        split = "hash"                         # the default since 1.2 (before: "shuffle")
     hashed = isinstance(split, str)
     if hashed:
-        if split != "hash":
-            raise ValueError(f'split is (fit, guarantee, dispatch) shares or "hash", not {split!r}')
-        split = None                           # the default shares, cut by hash
+        if split not in ("hash", "shuffle"):
+            raise ValueError(f'split is (fit, guarantee, dispatch) shares, "hash" or "shuffle", not {split!r}')
+        hashed = split == "hash"
+        split = None                           # the default shares, cut by hash or by the shuffle
     su = None                                  # with split="hash": each shuffled example's hash in [0, 1), ascending
     if hashed:
         keys = [_hash_unit(seed, gids[i] if gids is not None else raw_states[i]) for i in range(len(examples))]

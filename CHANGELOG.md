@@ -85,12 +85,28 @@ started from a failing test built on the reproduction; the numbers are before �
   `Catalog(combine=None)` behaves as `"strictest"`: the answer that comes last in the question's options decides,
   whatever the declaration order, with a warning naming the checks; `Catalog(combine="first")` keeps the declaration
   order (the old default), `Catalog(combine="strictest")` chooses the new rule without the warning; where the options
-  give no order the first declared still decides, with the warning. Fingerprints: the default stays unmarked,
-  `"first"` is now marked and an explicit `"strictest"` no longer is. The learned hard-check order now waits for every
+  give no order the first declared still decides, with the warning. Fingerprints: the default (and an explicit
+  `"strictest"`) is marked, so every catalog fingerprint built on the default changes once and a decision stored under
+  1.1 replays or re-decides against the 1.2 default as made by another catalog; an explicit `"first"` keeps 1.1's
+  fingerprint (the same rule). The learned hard-check order now waits for every
   governing check before settling, so its answers match the default order. Options not listed mildest → strictest
   (e.g. `allow, deny, escalate`) need `combine="first"` or reordered options.
 - Guard keeps its own rule for several failed checks: its catalog sets `combine="first"` (a failed deny policy declared
-  first wins over an escalation, as before); its catalog fingerprint changes once.
+  first wins over an escalation, as before); its catalog fingerprint is 1.1's.
+- **`solvi.build` splits the examples by a hash by default** (`split="hash"`, was the seeded shuffle):
+  each example's share (fit, guarantee, dispatcher) is set by a hash of its state (of its group with `groups=`)
+  salted by `seed=`, so a refit on more examples leaves the old ones where they were. A system rebuilt on 1.2 is fitted
+  and calibrated on other examples: on 2,000 refund requests (`examples/24_one_entry_point.py`, 5 seeds) 40.1–42.1%
+  of the examples change share and 84–89% of the shuffle's calibration examples are replaced; the shares are cut by
+  the hash, so they hold their proportions only approximately (1,449 / 266 / 285 instead of 1,500 / 250 / 250). Its
+  thresholds, its dispatcher's slices and the stored dispatcher config move with them. `split="shuffle"` rebuilds 1.1's
+  split exactly; `split=(fit, guarantee, dispatch)` shares are still cut from the shuffle. Whether that example's
+  notes slice opens to the slow path depends on the calibration sample (2 of 5 seeds under either split); at seed 0
+  with the hash split it goes to a person, and the example says so. The task-stand comparison of `build` with hand-written setups was measured with the shuffle.
+- A failed `System.guarantee` call keeps the guarantee in force before it: the call still raises its error, a
+  `GuaranteeWarning` says the old guarantee stays, and `guard_history` logs the attempt with `"kept"`. Before, the
+  failed call had already removed the old guarantee (the question answered unguarded), and a call that failed after
+  the signal's facts were added left them as required parts of the question.
 
 ### Added
 
@@ -166,9 +182,15 @@ started from a failing test built on the reproduction; the numbers are before �
   true` in the record); `teach` / `save_correction(label_source="audit", of=)` stores a label of a marked decision only;
   `corrections(label_source=)` filters by source; the system report shows the audited sample and each promise's verdict
   on it. Default 0: records and the dispatcher's config are unchanged.
-- `build(split="hash")` (opt-in): each example's share is set by a hash of its state (or group), salted by `seed=`, so
+- `Knowledge(writers={writer: source, ...})` / `KnowledgeStore(writers=)` (opt-in): a source is a rank that decides
+  contradictions, and without a registry any writer may declare any source (a writer saying `source="outcome"`
+  refuted a written spec with no dispute). With a registry the new `WriterGate` (right after the source check) refuses
+  an item whose `by=` is not registered or declares a source it is not registered with — refused, not held, for rules,
+  skills and actions too — with the reason in the journal; a writer may have several sources. `Knowledge.observe`
+  writes as "environment": register it when an agent writes there. Without `writers=` nothing changes.
+- `build(split="hash")`: each example's share is set by a hash of its state (or group), salted by `seed=`, so
   examples added later leave every old example in its share and the order of examples does not matter;
-  `choices["split_by"]` says which split was used.
+  `choices["split_by"]` says which split was used. The default (see «Changed (breaking)»).
 - `KnowledgeStore.forget(source, storage, decide)`: takes back what a source told, re-decides the stored decisions
   that rested on it on the current journal, and writes one «forget» journal entry; new docs page «Forgetting a source»
   (with `where_is` + `redact` for erasing personal data in decision records). A release before this one cannot read a
@@ -273,7 +295,7 @@ started from a failing test built on the reproduction; the numbers are before �
   simulation, for any answer kind; fewer than 30 are refused, fewer than 100 or labelled examples among them are
   warned about.
 - `System.guard_history`: every `System.guarantee` attempt logged — installed (and whether it replaced one), failed
-  (with the error; a failed attempt removes the guarantee in force), removed.
+  (with the error, and whether the guarantee in force was kept), removed.
 - `solvi.core.AnyOf(a, b)`: a label with several right answers; `solvi.build`, `System.guarantee`, `act_guard`,
   `calibrate_for` and conformal sets count any of them as right (opt-in).
 - `solvi.core.because(value, text, **numbers)` and `solvi.core.missing(reason)` (opt-in): a rule's `why` names the

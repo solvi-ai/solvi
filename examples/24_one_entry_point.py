@@ -48,6 +48,10 @@ examples = [request(rng, n) for n in range(2000)]
 question = Question("refund", "Refund without asking a person?", Answer.yes_no())
 
 with tempfile.TemporaryDirectory() as tmp:
+    # Whether the slice System 1 hands over opens to the slow path depends on which ~250 examples calibrate each
+    # promise (a 0.02 promise read on few examples): over seeds 0–4 it opens on 2 of 5, under either split. Where the
+    # dispatcher's examples show System 1 already breaking the promise, the slice goes to a person and explain() says
+    # why (at seed 0 with the hash split); try seed=1 to see the slow path take it.
     s = build(question, examples, catalog=cat, max_risk=0.02, slow=notes_reader, storage=Path(tmp) / "decisions.jsonl")
     print(s.explain())
     print()

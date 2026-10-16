@@ -16,6 +16,7 @@ def task():
     sys.path.insert(0, str(DATA))
     try:
         import task
+        task.COMBINE = "first"           # the rule this version decided by (1.2 defaults to "strictest")
         yield task
     finally:
         sys.path.remove(str(DATA))

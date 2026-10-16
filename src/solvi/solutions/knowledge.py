@@ -66,9 +66,14 @@ class Knowledge:
     run after the built-in source and consistency gates. actions: an ActionModel of your own (instead of vocabulary=).
     failures: True or FailureMemory settings ({"window", "unit", "max_blocked", "min_open"}) — a failure memory whose
     blocks are hard checks of the agent (None: off). severity: the action model's harm of a refused action (a number or
-    {action: number})."""
+    {action: number}). writers: {writer: source (or sources), ...} — opt-in: a source is a rank (outcome > person >
+    spec > verified wins a contradiction), and with a registry it is taken only from a writer (`by=`) registered with
+    it; an unregistered writer, or one declaring another source, is refused with the reason in the journal
+    (KnowledgeStore(writers=)). What `observe` writes comes from the writer "environment" with source "outcome":
+    register it when an agent writes here. None (default): any writer may declare any source, as before."""
 
-    def __init__(self, path=None, *, vocabulary=None, write_gate=None, actions=None, failures=None, severity=1.0):
+    def __init__(self, path=None, *, vocabulary=None, write_gate=None, actions=None, failures=None, severity=1.0,
+                 writers=None):
         from ..core.knowledge import Agenda, ConservativeActionModel, FailureMemory, KnowledgeStore, Vocabulary
         from ..core.knowledge.gates import default_gates
         if vocabulary is not None and actions is not None:
@@ -78,7 +83,7 @@ class Knowledge:
         if write_gate is not None:
             extra = list(write_gate) if isinstance(write_gate, (list, tuple)) else [write_gate]
             gates = default_gates() + extra
-        self.store = KnowledgeStore(path, gates=gates)
+        self.store = KnowledgeStore(path, gates=gates, writers=writers)
         self.agenda = Agenda(self.store)
         if vocabulary is not None:
             if isinstance(vocabulary, dict):

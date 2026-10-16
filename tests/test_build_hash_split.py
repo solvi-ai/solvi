@@ -1,6 +1,6 @@
-"""build(split="hash"): each example's share is set by a hash of its state (salted by seed=), not by its place in a
-shuffled list — adding examples keeps every old example in its share, and the order of the examples does not matter.
-The default (the seeded shuffle) is unchanged."""
+"""build(split="hash"), the default since 1.2: each example's share is set by a hash of its state (salted by seed=), not
+by its place in a shuffled list — adding examples keeps every old example in its share, and the order of the examples
+does not matter. split="shuffle" is the seeded shuffle, the default up to 1.1."""
 
 import pytest
 
@@ -31,8 +31,8 @@ def test_added_examples_leave_every_old_example_in_its_share():
     assert fit_new & set(range(600)) == fit_old                 # no old example moved into or out of the fit share
     assert "hash" in ds_new.choices["split_by"]
     # the seeded shuffle moves old examples between shares when examples are added
-    rnd_old, _ = _fit_ids(old)
-    rnd_new, _ = _fit_ids(new)
+    rnd_old, _ = _fit_ids(old, split="shuffle")
+    rnd_new, _ = _fit_ids(new, split="shuffle")
     assert rnd_new & set(range(600)) != rnd_old
 
 
@@ -54,6 +54,16 @@ def test_the_shares_hold_about_their_proportions_and_seed_salts_the_hash():
     assert fit0 != fit1
 
 
-def test_split_takes_shares_or_hash_only():
+def test_the_hash_split_is_the_default():
+    ex = _with_ids(_texts(600, WORDS))
+    default, ds = _fit_ids(ex)
+    hashed, _ = _fit_ids(ex, split="hash")
+    shuffled, ds_shuffled = _fit_ids(ex, split="shuffle")
+    assert default == hashed != shuffled
+    assert "hash" in ds.choices["split_by"] and "hash of its state" in ds.explain()
+    assert ds_shuffled.choices["split_by"] == "a shuffle (seed 0)" and "shuffled with seed 0" in ds_shuffled.explain()
+
+
+def test_split_takes_shares_hash_or_shuffle_only():
     with pytest.raises(ValueError, match="hash"):
         build("topic", _texts(100, WORDS), learner=_learner, max_error=0.1, split="random")
