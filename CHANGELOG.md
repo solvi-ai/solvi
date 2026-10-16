@@ -182,6 +182,12 @@ started from a failing test built on the reproduction; the numbers are before �
   true` in the record); `teach` / `save_correction(label_source="audit", of=)` stores a label of a marked decision only;
   `corrections(label_source=)` filters by source; the system report shows the audited sample and each promise's verdict
   on it. Default 0: records and the dispatcher's config are unchanged.
+- `Knowledge(writers={writer: source, ...})` / `KnowledgeStore(writers=)` (opt-in): a source is a rank that decides
+  contradictions, and without a registry any writer may declare any source (a writer saying `source="outcome"`
+  refuted a written spec with no dispute). With a registry the new `WriterGate` (right after the source check) refuses
+  an item whose `by=` is not registered or declares a source it is not registered with — refused, not held, for rules,
+  skills and actions too — with the reason in the journal; a writer may have several sources. `Knowledge.observe`
+  writes as "environment": register it when an agent writes there. Without `writers=` nothing changes.
 - `build(split="hash")`: each example's share is set by a hash of its state (or group), salted by `seed=`, so
   examples added later leave every old example in its share and the order of examples does not matter;
   `choices["split_by"]` says which split was used. The default (see «Changed (breaking)»).

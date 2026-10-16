@@ -4732,6 +4732,15 @@ later gate holds stays a hypothesis. A shadow measurement of a behaviour-changin
 the share of past decisions it would change — reaches every gate as `add(..., shadow=...)`; a gate that admits on it
 is yours to write (the experimental change pipeline measures candidates in its stages and passes the numbers that way).
 
+A source is a rank — outcome > person > spec > verified decides a contradiction — and by default it is what the writer
+declares: any caller that says `source="outcome"` refutes a written spec without a dispute. To bind ranks to writers,
+give a registry (opt-in since 1.2): `Knowledge(writers={"crm": "person", "billing": "outcome", "environment":
+"outcome"})` (or `KnowledgeStore(writers=...)`; a writer may have several sources). `WriterGate` then runs right after
+the source check and refuses — never holds — an item whose `by=` is not registered or declares a source it is not
+registered with, with the reason in the journal. `by=` is still your code's word: register the writers your code
+itself names (an authenticated user, a service), not names read from the input. `Knowledge.observe` writes as
+"environment" with source "outcome", so register it when an agent writes to the same knowledge.
+
 ### The action model: what the environment accepts
 
 ```python
