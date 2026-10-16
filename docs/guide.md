@@ -108,6 +108,7 @@ status.
 pip install solvi              # core: numpy, scipy, pydantic (imported only for typed parts and serialization)
 pip install "solvi[model]"     # + torch, transformers, for the ModernBERT extractors (solvi.extract_*) and the decider
 pip install "solvi[onnx]"      # + onnxruntime, tokenizers: the decider (solvi.core.deciders) on CPU without torch
+                               #   (the decider only: LongSpanExtractor and solvi.extract_* still need [model])
 pip install "solvi[serve]"     # + fastapi, uvicorn: solvi serve over HTTP
 pip install "solvi[mcp]"       # + the official MCP SDK for solvi serve --mcp (without it, a built-in stdio server is used)
 pip install "solvi[duckdb]"    # + duckdb: stored decisions in a DuckDB file; "solvi[postgres]" for PostgreSQL
@@ -4963,7 +4964,8 @@ reachable from the stage at which the recorded player first reached it. The repl
 
 With `pip install "solvi[model]"`, solvi provides a ModernBERT extractor, `LongSpanExtractor`. It predicts a start and an end
 position in the text, so the extracted value is always a substring of the document with exact offsets. It gives you
-plain functions `doc -> Quote` to register with `cat.extract`.
+plain functions `doc -> Quote` to register with `cat.extract`. It runs on torch for prediction too: `solvi[onnx]` covers
+the decider only, and there is no ONNX path for this extractor.
 
 Labels are character spans: for each training document and field, `(start, end)` of the value in the text, or `None` if
 the field is absent. extract-base's model card suggests labelling about 25–100 documents per task and fine-tuning. A

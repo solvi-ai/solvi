@@ -22,6 +22,7 @@ off — is described, with what is measured and what is research, in [the missio
 pip install solvi              # core: rules, checks, learned answer heads, build / Agent / Guard (numpy, scipy, pydantic)
 pip install "solvi[model]"     # + torch, transformers: ModernBERT field extractors for documents and the decider
 pip install "solvi[onnx]"      # + onnxruntime, tokenizers: the decider (solvi.models.decider) on CPU without torch
+                               #   (the decider only: the document extractors still need [model])
 pip install "solvi[serve]"     # + fastapi, uvicorn: `solvi serve app.py:system` — the questions over HTTP (also --mcp)
 pip install "solvi[mcp]"       # + the official MCP SDK for solvi serve --mcp (without it, a built-in stdio server)
 pip install "solvi[duckdb]"    # + duckdb: stored decisions in a DuckDB file (solvi.core.store.DuckDBStorage); [postgres] for PostgreSQL
