@@ -384,3 +384,39 @@ def test_as_s2_plugs_planning_on_the_exact_model_into_the_agent():
     assert d.by == "s2" and d.s2.mode == "exact-plan" and d.s2.record["plan"] == ["right", "right", "right"]
     assert not d.s2.record["cached"] and agent.decisions[1].s2.record["cached"]         # one search, then its steps
     assert L.skills.skills and L.skills.skills[0].goal == "door"                       # compiled for the learner too
+
+
+# ------------------------------------------------------------------------------------------------ the version space
+def test_collect_enumerates_plans_with_different_ends_and_says_how_deep_the_search_was_complete():
+    env = Corridor()
+    m = ExactModel(env)
+    s = env.reset(0)
+    odd = lambda st: st["pos"] % 2 == 1                                       # noqa: E731
+    ps = plan(m, s, odd, horizon=6, budget=1000, collect=3, distinct=lambda st: st["pos"])
+    assert [p.actions for p in ps] == [("right",), ("right", "right", "right")]   # pos 5 is behind the episode's end
+    assert m.last["why"] == "exhausted" and m.last["plans"] == 2 and m.last["complete_depth"] >= 3
+    one = plan(m, s, odd, horizon=6, budget=1000, collect=1)
+    assert [p.actions for p in one] == [("right",)] and m.last["why"] == "found"
+    assert plan(m, s, odd, horizon=6, budget=1000) == one[0]                  # without collect: the first plan, as before
+    few = plan(m, s, odd, horizon=6, budget=3, collect=3)
+    assert len(few) == 1 and m.last["why"] == "budget" and m.last["complete_depth"] == 1
+    for p in ps:
+        assert verify(m, s, p)
+
+
+def test_a_goal_may_read_the_path_and_verify_takes_a_plain_action_list():
+    env = Corridor()
+    m = ExactModel(env)
+    s = env.reset(0)
+    back = lambda st, path: st["pos"] == 1 and "left" in path                 # noqa: E731
+    p = plan(m, s, back, horizon=4, budget=1000, actions=["right", "left"])
+    assert p is None                                    # breadth-first visits pos 1 once, on the way out (visited set)
+    p = plan(m, s, lambda st, path: st["pos"] == 2 and path[:1] == ("right",), horizon=4, budget=1000)
+    assert p.actions == ("right", "right") and verify(m, s, p)               # the plan keeps its path-reading goal
+    assert verify(m, s, ["right", "right", "left"], back)
+    assert not verify(m, s, ["right"], back)
+    c = verify(m, s, ("right", "right", "right"), at_goal)
+    assert c and c.steps == 3 and c.simulation
+    assert not verify(m, s, ["left"], at_goal)
+    with pytest.raises(TypeError):
+        verify(m, s, "right", at_goal)
