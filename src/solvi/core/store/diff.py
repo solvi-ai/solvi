@@ -77,13 +77,26 @@ def _model_of(r):
     return dict(next(iter(tm.values()))) if len(tm) == 1 else {}
 
 
+def _code_why(name, ofp, nfp):
+    """Why a part's fingerprint differs, when both traces recorded what it calls ("calls"): a function it calls changed
+    (named) or its own code or declarations did; else (a trace stored before solvi recorded it, or a flow with no calls
+    to record) the plain "its code or declarations changed"."""
+    if "calls" not in ofp or "calls" not in nfp:
+        return "its code or declarations changed"
+    oc, nc = ofp["calls"].get(name) or {}, nfp["calls"].get(name) or {}
+    moved = sorted(k for k in set(oc) | set(nc) if oc.get(k) != nc.get(k))
+    if not moved:
+        return "its own code or declarations changed"
+    return "a function it calls changed: " + ", ".join(moved)
+
+
 def _why(name, a, b, old, new):
     """One differing step as data: {"step", "name", "old", "new", "why"} — why its output differs between two responses."""
     ofp, nfp = old.trace.fingerprint or {}, new.trace.fingerprint or {}
     why = []
     op, np_ = (ofp.get("parts") or {}).get(name), (nfp.get("parts") or {}).get(name)
     if op and np_ and op != np_:
-        why.append("its code or declarations changed")
+        why.append(_code_why(name, ofp, nfp))
     am, bm = _model_of(a), _model_of(b)
     if am.get("fp") != bm.get("fp") and (am or bm):
         why.append(f"its model changed (#{am.get('fp', '—')} → #{bm.get('fp', '—')})")
@@ -225,6 +238,7 @@ class DiffReport:
     only: list | None = None                      # diff(only=): the decisions the change is allowed to change
     extraneous: list = field(default_factory=list)   # ids of the changed decisions not in `only` (in `changed` order)
     exact: bool = False                           # `only` given, nothing outside it changed, every decision re-ran
+    reused: int | None = None                     # diff(incremental=True): decisions not re-run (nothing they rest on changed)
 
     @property
     def ok(self):
@@ -247,11 +261,13 @@ class DiffReport:
 
     def to_dict(self):
         return {"total": self.total, "changed": self.changed, "errors": self.errors, "catalog": self.catalog,
-                "by_question": self.by_question(), "only": self.only, "extraneous": self.extraneous, "exact": self.exact}
+                "by_question": self.by_question(), "only": self.only, "extraneous": self.extraneous, "exact": self.exact,
+                **({"reused": self.reused} if self.reused is not None else {})}
 
     def __str__(self):
         n = len(self.changed)
-        lines = [f"diff: {self.total} stored decision(s) re-run, {n} changed, {len(self.errors)} could not be re-run"]
+        lines = [f"diff: {self.total} stored decision(s) re-run, {n} changed, {len(self.errors)} could not be re-run"
+                 + (f" ({self.reused} not re-run: nothing they rest on changed)" if self.reused is not None else "")]
         cp = self.catalog.get("changed_parts")
         if cp:
             lines.append("  parts changed since they were stored: " + ", ".join(cp))
@@ -268,6 +284,7 @@ class DiffReport:
                 lines.append(f"      {t}: {k}")
         for c in self.changed:
             lines.append(f"- {c['id']} (#{c['seq']})")
+            changed_facts = c.get("facts") or {}
             for q, ch in c["questions"].items():
                 lines.append(f"    {q}: {_ans(ch['old'])} → {_ans(ch['new'])}  [{', '.join(ch['changed'])}]")
                 fs = ch.get("first_step")
@@ -275,6 +292,8 @@ class DiffReport:
                     lines.append(f"      first difference: {fs['name']}: {fs['old']} → {fs['new']} — {fs['why']}")
                 for c in (ch.get("causes") or [])[1:]:
                     lines.append(f"      and: {c['name']}: {c['old']} → {c['new']} — {c['why']}")
+            for f, d in changed_facts.items():
+                lines.append(f"    fact {f}: {d['old']} → {d['new']}")
         for e in self.errors:
             lines.append(f"! {e['id']} (#{e['seq']}): {e['error']}")
         return "\n".join(lines)
@@ -322,7 +341,64 @@ def _compact_change(s, system, confidence):
     return out
 
 
-def diff(storage, system, confidence=0.01, limit=None, only=None, **filters):
+_INTERNAL = ("head", "plan", "textin", "guard", "then")     # trace records that are not catalog parts
+
+
+def fact_changes(old, new):
+    """The facts (steps that are not answers) whose output differs between two responses to the same input → {name: {"old",
+    "new"}} in flow order; a fact computed in one response only shows "not run" on the other side."""
+    olds, news = _records(old), _records(new)
+    order = [r.name for r in new.trace.records] + [r.name for r in old.trace.records if r.name not in news]
+    out = {}
+    for n in dict.fromkeys(order):
+        a, b = olds.get(n), news.get(n)
+        if n.startswith("answer:") or (b or a).kind in _INTERNAL:
+            continue
+        if (a is None) != (b is None) or _out(a) != _out(b):
+            out[n] = {"old": _show(a), "new": _show(b)}
+    return out
+
+
+def _reusable(old, system, names, now, qfp, models):
+    """Would `system` decide this stored response as it was decided? True only when everything a re-run reads is as
+    recorded: the questions' fingerprint (answer types, thresholds, calibration, guards, contracts), the flow it would
+    plan now (the same steps), every step's part fingerprint (its code and declarations), and, for every model-backed step
+    (or alternative producer) that ran, the model it holds now is the one it used. Anything not recorded makes
+    it False (re-run). Not seen: a non-deterministic or external source, Catalog(combine=), a learned producer policy
+    (System(producers="learned") is always re-run)."""
+    fp = old.trace.fingerprint or {}
+    parts = fp.get("parts")
+    if not parts or not fp.get("questions") or fp["questions"] != qfp or old.flow is None:
+        return False
+    if getattr(system, "producers", "declared") == "learned":
+        return False
+    steps = [st.part.name for st in old.flow.steps]
+    try:
+        flow = system._prepare(dict(old.trace.init), names, None).flow
+    except Exception:  # noqa: BLE001 — a flow that cannot be planned now: the re-run says why
+        return False
+    if [st.part.name for st in flow.steps] != steps:
+        return False
+    if any(now["parts"].get(n) != h for n, h in parts.items()) or any(n in now["parts"] and n not in parts for n in steps):
+        return False
+    used = {}                                         # (step, producer or None) → the model fingerprints recorded
+    for r in old.trace.records:
+        if r.model is not None:
+            used.setdefault((r.name, None), set()).add(str(r.model.get("fp")))
+            used.setdefault((r.name, r.producer), set()).add(str(r.model.get("fp")))
+        for alt, m in (r.tried_models or {}).items():
+            used.setdefault((r.name, alt), set()).add(str(m.get("fp")))
+    ran = {(r.name, None) for r in old.trace.records} | {(r.name, r.producer) for r in old.trace.records} | \
+        {(r.name, a) for r in old.trace.records for a in r.tried_models or ()}
+    for key, mfp in models.items():                   # a model that ran then must be the model held now; one that did
+        part, _, alt = key.partition(" (")            # not run is not reached now either (the steps before it are the same)
+        k = (part, alt[:-1] if alt else None)
+        if k in ran and str(mfp) not in used.get(k, ()):
+            return False
+    return True
+
+
+def diff(storage, system, confidence=0.01, limit=None, only=None, *, incremental=False, facts=False, **filters):
     """Re-run stored decisions with `system` (e.g. a new catalog or model) and report what changes → DiffReport.
     Each stored decision is loaded (typed values restored with `system`), its recorded input is asked again for the same
     questions (store=False: nothing is written to the system's own storage), and the two responses are compared (see
@@ -333,10 +409,23 @@ def diff(storage, system, confidence=0.01, limit=None, only=None, **filters):
     decision re-ran (a decision that could not be re-run, listed in `errors`, may have changed: then `exact` is False).
     A cause whose part (in `system`) cites what it implements (`clause=` / `cite=` on its decorator) carries "cites":
     [{"clause", "quote"}] — the chain clause → part → decision.
-    The system's learned parts may learn from these asks as from any other (System(learn=...))."""
+    The system's learned parts may learn from these asks as from any other (System(learn=...)).
+    incremental=True: a stored decision is re-run only when something it rests on changed — its questions' fingerprint,
+    the flow `system` plans for its input, a part of that flow, or a model one of them holds (see _reusable); the
+    others are counted in `reused` and are not asked again (they are loaded and checked as before, so `errors`,
+    `total` and `catalog` are the full diff's). On a deterministic catalog the report is the full diff's; a
+    non-deterministic or external source, a change of Catalog(combine=) alone, or learning from the re-run asks is not
+    seen this way — run the full diff for those.
+    facts=True: each changed decision also gets "facts": {fact: {"old", "new"}} — the computed facts whose value
+    differs (see fact_changes) — and a decision whose facts differ while its answers do not is listed too (with
+    "questions": {}). A compact record keeps no facts: it is compared on its answers only."""
     from ..provenance import catalog_fingerprint
     rep = DiffReport()
     now = catalog_fingerprint(system.catalog)
+    if incremental:
+        rep.reused = 0
+        qfp = system._questions_fp()
+        models = system.fingerprint()["models"]
     rep.catalog = {"new": now["fp"], "stored": {}, "changed_parts": [], "added_parts": []}
     changed_parts, added_parts = set(), set()
     rows = storage.query(**filters) if filters else storage.iter()
@@ -365,16 +454,20 @@ def diff(storage, system, confidence=0.01, limit=None, only=None, **filters):
                 raise ValueError("the stored input was not restored (" + ", ".join(lost) + ": stored without a type "
                                  "the dump restores, and none is declared) — declare the types (System(input_model=...) or "
                                  "annotations) to re-run it")
+            if incremental and _reusable(old, system, names, now, qfp, models):
+                rep.reused += 1
+                continue
             new = system.ask(dict(old.trace.init), names, store=False)
         except Exception as e:  # noqa: BLE001
             rep.errors.append({"id": s.id, "seq": s.seq, "error": f"{type(e).__name__}: {e}"})
             continue
         was = {r.name for r in old.trace.records} | {n for n, _ in old.trace.skipped}
-        added_parts |= {r.name for r in new.trace.records if r.name not in was and r.kind not in ("head", "plan", "textin", "guard", "then")}
+        added_parts |= {r.name for r in new.trace.records if r.name not in was and r.kind not in _INTERNAL}
         ch = compare(old, new, confidence)
-        if ch:
+        fc = fact_changes(old, new) if facts else None
+        if ch or fc:
             _add_cites(ch, system.catalog, new)
-            rep.changed.append({"id": s.id, "seq": s.seq, "time": s.time, "questions": ch})
+            rep.changed.append({"id": s.id, "seq": s.seq, "time": s.time, "questions": ch, **({"facts": fc} if facts else {})})
     rep.catalog["changed_parts"] = sorted(changed_parts)
     rep.catalog["added_parts"] = sorted(added_parts)
     if only is not None:
@@ -620,4 +713,4 @@ class Shadow:
         return "\n".join(lines)
 
 
-__all__ = ["causes", "compare", "diff", "DiffReport", "part_cites", "Shadow"]
+__all__ = ["causes", "compare", "diff", "DiffReport", "fact_changes", "part_cites", "Shadow"]

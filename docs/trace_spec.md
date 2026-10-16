@@ -54,6 +54,7 @@ machine-readable schema of a record is `src/solvi/core/store/record.schema.json`
 | `safeguards` | `[[kind, fact, [questions]]]` |
 | `models` | `[{"type", "id", "fp"}]` of every model that ran, sorted |
 | `catalog` | the fingerprint of the catalog that decided |
+| `run` | only inside `solvi.core.store.run_context`: `{"id": the run, "parent": the decision it follows from or null}` (schema 2.2.0; also on corrections and every other record kind) |
 | `response` | `Response.to_dict()`: results, flow, the whole trace (`init`, step records), values, checks, timings |
 
 The fields before `response` are the record's **summary**: what queries, reports and the SQL index tables read.

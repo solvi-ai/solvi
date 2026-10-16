@@ -136,6 +136,31 @@ cases += testing.metamorphic(cases, [to_grams, heavier], system=system)
 Numbers are compared up to rounding (1e-9), so a relation that scales a numeric answer gives it scaled in `expect`; a
 rounded answer is rounded there too.
 
+## Verdicts across runs, known bugs, a degraded environment
+
+On a live environment one pass or fail says little. `solvi.testing.history` keeps the outcomes of the same cases over
+runs (in memory, or in any store: one chained record per run):
+
+```python
+from solvi.testing import run_path
+from solvi.testing.history import KnownBugs, VerdictHistory, run_status
+
+results = run_path("cases")
+run_status(results)          # {"status": "degraded", ...} when many cases are blocked at once (errors, timeouts)
+history = VerdictHistory("verdicts.jsonl", window=10)
+history.gate(results)        # the failures that count; flaky cases are quarantined
+history.add(results, skip_degraded=True)
+history.report()             # per case: stable / flaky / regression / fixed, passes on a later attempt
+history.stable_share()       # the share of cases with the same outcome in each of their last runs
+bugs = KnownBugs("verdicts.jsonl", quiet=5)
+bugs.register("BUG-12", r"expected 'high', got 'low'")
+bugs.triage(results)         # known bug per failing case, new failures, a fixed bug seen again, open bugs not seen lately
+```
+
+A case is "flaky" when its outcome changed more than once in the window, it was "nondeterministic", or it passed on a
+later attempt (`add({key: {"status": "ok", "attempt": 2}})`); "regression" / "fixed" when it changed once. Nothing is
+re-run by these: the runs, and any retries, are yours.
+
 ## Fuzzing
 
 `--fuzz N` asks N mutated copies of each case's input (after `prepare`). A mutation removes a field, sets it to `None`,
