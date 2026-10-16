@@ -202,16 +202,25 @@ started from a failing test built on the reproduction; the numbers are before �
   `split(score="eig", noise=, weights=)`** (opt-in; defaults unchanged). When an answer of the world may be wrong with a
   known probability ε, every hypothesis keeps a likelihood instead of being refuted by one answer, the next probe is the
   one with the largest expected information gain under that noise (a repeat when that is best), and a law is accepted
-  when one class of hypotheses holds at least L of the weight. On a synthetic single-law benchmark (10 atoms, 176
-  candidates, 500 trials per budget) at ε = 0.1 it accepted the right law in 93 % (24 answers) and 100 % (48 answers) of
-  the trials with at most 0.8 % wrong. At these budgets a majority vote (each probe asked k times, k picked on separate
-  worlds) could not be both safe and useful: under a 5 % wrong cap it admitted a law in 0 of 500 and 7 of 500 trials, and
-  the default admission (one answer refutes) was wrong in 46 %. A post-hoc comparison, not pre-registered: a majority
-  vote given the same number of answers, k picked on separate worlds, was right less often by 0.31 [0.285, 0.334] (24
-  answers: 0.60; 48 answers: 0.02, with 36 % fewer answers for the noisy admission). At ε = 0.05 and 48 answers it was as
-  right as the majority vote with 37 % fewer answers; at ε = 0.2 and 24 answers its safety was not settled. It assumes
-  symmetric flip noise with ε known, independent answers and one missing law; synthetic worlds only. A known method
-  (noisy generalized binary search over classes of hypotheses).
+  when one class of hypotheses holds at least L of the weight. On a synthetic single-law benchmark (10 boolean atoms, a
+  conjunction of two signed atoms, 176 enumerated candidates, a pool of 200 states; 500 worlds per cell) it was
+  compared with the best simple repetition scheme given the same number of answers — a majority vote per probe or a per-probe
+  sequential test (Wald's), the scheme and its size picked on separate worlds under a 5 % wrong-accept cap, L picked the
+  same way; both sides know ε. At ε = 0.1 with 24 answers it accepted the right law in 92.4 % of worlds (0.4 % wrong,
+  17.5 answers used), where majority-of-5, the best scheme under the cap, finished in 40.4 % (1.2 % wrong) and ran out
+  of answers in 58 %; a sequential test with a smaller margin was nearly as right on the tuning worlds but over the
+  cap. With 48 answers it was right in every world (21.9 answers) against 99.2 % (0.8 % wrong, 28.3 answers) for the
+  sequential test — the same accuracy with 23 % fewer answers. Pooled over the two budgets the gain in right accepts is
+  +0.26 [0.24, 0.29] (paired bootstrap over worlds), nearly all of it from the 24-answer budget; wrong accepts were not
+  higher (difference [−0.015, −0.002]). The default admission (one answer refutes) was wrong in 41–42 % at this noise.
+  At ε = 0.05 the sequential test was as right (within two worlds in 500) and the noisy admission used 24 % / 40 %
+  fewer answers at 24 / 48. At ε = 0.2 with 48 answers it was right in 90.8 % against 55.0 % (0.4 % against 5.4 %
+  wrong, 25 % fewer answers); with 24 answers it was right in 43.0 %, undetermined in 51.6 % and wrong in 5.4 %, over
+  the cap — give it more answers at that noise. It assumes symmetric flip noise with ε known, independent answers and
+  one missing law (the witness guard is off); synthetic worlds only, no misspecified ε, no state-dependent noise. A
+  known method: noisy generalized binary search over classes of hypotheses (Nowak 2009; Golovin, Krause and Ray 2010),
+  stopped at a posterior threshold as in the multi-hypothesis sequential probability ratio test (Baum and Veeravalli
+  1994); `tests/test_laws_noise.py` covers the mechanism.
 - **Laws (experimental): `LawSet(on_fall="suspend", reactivate_min=m)` and `doubt_probe(probes)`** (opt-in; the default
   still retires). A law whose held-out precision falls leaves the active set but stays a candidate, counts the next m
   fresh observations where it would apply, and comes back when they bear it out (precision ≥ min_precision and a
