@@ -734,7 +734,9 @@ not yet been measured on the refusals of a real split.
 `JSONLStorage` does on POSIX (a file lock per append), and on Windows one writing process.
 
 **Verify against something kept elsewhere.** `verify()` catches edits; a rewrite of the whole store with its head is
-caught only by a head or a signature you published (`verify(anchor=...)`, `verify(signature=...)`).
+caught only by a head or a signature you published (`verify(anchor=...)`, `verify(signature=...)`). A frequent
+check of a large store can run `verify(deep=False)` (every chain check, no re-check of the stored responses; 1.15–1.41×
+faster measured) with a full `verify()` now and then.
 
 **Read the kind of a replay mismatch before raising an alarm.** `integrity` means the data changed after the run;
 `missing_part`, `recompute` and `model_changed` mean the catalog or the model moved on. `summary` says which.
@@ -778,7 +780,8 @@ Recalibrate on a few of your own labelled cases; watch the agreement rate when l
 start; under 20 values the false-alarm bound does not hold (it warns). Whiten autocorrelated residuals first.
 
 **Facts with `valid=`:** ask with `snapshot(valid_at=<the decision's world time>)`; without it every interval's
-value is a fact at once. After retracting a wrong item and telling the correction, `redecide(..., upto="now")` gives
+value is a fact at once, and `Knowledge.value(snapshot, s, r)` reads whichever comes first — in a rule, read
+`Knowledge.value(snapshot, s, r, valid_at=<the same time>)`. After retracting a wrong item and telling the correction, `redecide(..., upto="now")` gives
 the corrected answers; the default answers «what would the decision have been without the bad item at the time».
 
 **Mutable registries read by rules are state, not code:** pass them as inputs, or freeze them before the first
@@ -882,7 +885,8 @@ shuffle). Routes still move with the thresholds; `solvi diff` shows them.
 
 **Check a change pipeline's gates once with `testing.conformance.check_pipeline`** on your own change schema. An
 aggregate gate passes harm in a small slice and salami (eight steps of +0.012 on a 40-case slice each pass against the
-version in force); add `SliceGuard` with the original pinned, and give `KnownFailures(key=...)` what the change *does*,
+version in force); add `SliceGuard` with the original pinned (`pin_file=` when proposals run in separate processes, with its hash
+`pinned=` next to the evaluator's pins), and give `KnownFailures(key=...)` what the change *does*,
 not a seed or salt it carries, so a replay under new identities is refused after its first rejection.
 
 **Watch a shipped change per slice, against its promise.** `pipe.watch(version, promise)` reverts only that version

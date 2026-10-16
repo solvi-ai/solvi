@@ -94,7 +94,11 @@ and rollback (`solvi.experimental.changes.Pipeline(stages, storage, store=...)`)
   and reference — valid however the slices depend on each other; cases within a slice are taken as independent). A
   slice under `min_n` cases, or one the original has and the measurement lost, holds for a person by default. On a toy
   target eight steps of +0.012 on a 40-case slice (tolerance 0.03) all pass a guard that compares with the version in
-  force only (+0.084 in all); with the original the chain stops at +0.036 (`tests/test_changes_slices.py`).
+  force only (+0.084 in all); with the original the chain stops at +0.036 (`tests/test_changes_slices.py`). The pin lives
+  in the guard object, so a new process re-pins its own "original": `pin_file="slices_original.json"` keeps it in a
+  file written once (read-only) at the first run in any process, with its SHA-256 in the verdict; `pinned=<sha256>`
+  (kept next to `EvaluatorLock`'s pins) refuses a change when the file differs or is missing. With a new guard per change
+  the same eight steps go 7 of 8 through without the file (+0.084) and stop at +0.036 with it.
 - **Post-ship watch (`ShipWatch`, `pipe.watch(version, promise)`) and `Pipeline.revert(version)`.** Per declared slice
   the watch keeps a test martingale against that slice's promised failure rate on the promoted change's own (alone)
   outcomes; when one slice's evidence reaches slices/α it reverts the watched version, and only it

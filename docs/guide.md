@@ -3615,7 +3615,7 @@ yet — erase before the file rotates, or keep personal data out of the input). 
 | `rederive(id, system=None, trust_models=False)` | the stored `Response`; a compact one re-run from its input and checked step by step against its hashes |
 | `iter()`, `query(question=, answer=, status=, safeguard=, model=, since=, until=)` | `Stored` records (`.id`, `.time`, `.answers`, `.response()`) in stored order; `since <= time < until` |
 | `head()` | `{"count", "hash"}` of the chain |
-| `verify(anchor=None, signature=None, candidates=None)` | `{"ok", "count", "head", "legacy", "problems": [(seq, id, reason)]}` (+ `"signature"`) |
+| `verify(anchor=None, signature=None, candidates=None, *, deep=True)` | `{"ok", "count", "head", "legacy", "problems": [(seq, id, reason)]}` (+ `"signature"`); `deep=False` skips re-checking each stored response against its summary (every chain check stays) |
 | `signature(alg="syndrome")` | 64 bytes that later name the one changed record (see below) |
 | `replay_all(system)` | the stored decisions whose trace no longer replays, with the mismatches (`"record": "compact"` for a compact one) |
 | `segments()`, `verify_segments(anchor=None)` (`JSONLStorage`) | the closed segments of a rotated store; every file and every link verified: `{"ok", "files", "count", "problems": [(path, seq, id, reason)]}` |
@@ -4618,7 +4618,10 @@ under its guarantee, named by `of=<stored decision>` and checked in the store. A
 is journaled: the system's own answers never become knowledge, by construction. `ks.item(id)` is the full record:
 kind, body, scope, source, who, evidence, `derived_from`, confidence counts (confirmations, refutations, uses, uses
 that were wrong, a guarantee level), status, version and `supersedes`, and two time ranges — when it held in the world
-(`valid=(since, until)`, as you give it) and when the store learned and invalidated it (journal positions).
+(`valid=(since, until)`, as you give it) and when the store learned and invalidated it (journal positions). Values on
+validity intervals that do not overlap are facts together; `snapshot(valid_at=t)` keeps as facts only those valid at
+`t`, a snapshot row carries its item's `valid`, and a rule reads the value at a world time with
+`solvi.Knowledge.value(snapshot, s, r, valid_at=t)` (without `valid_at` it reads the first matching row).
 
 Contradictions resolve by rank: an observation refutes whatever it contradicts (the world changed), a higher-ranked
 source (outcome > person > spec > verified) refutes a lower one, a producer's new version (`supersedes=`) refutes the
@@ -4660,7 +4663,9 @@ and staleness is read from the flags (`stale`, `usable`), never from the item's 
 back. `reconfirm_after` (per kind and source, `RECONFIRM_DEFAULTS`; the store's clock moves with `tick`) expires items
 that weaker evidence keeps: a "verified" fact after 2,000 decisions; observations, person labels and spec facts have no
 clock — the next contradicting observation refutes them. A fact nobody observes again stays believed: a world where a
-first contact is costly needs a clock of its own.
+first contact is costly needs a clock of its own. A tick re-resolves only the items whose expiry falls between the old and
+the new clock (an index of deadlines), so calling `tick` once per decision stays cheap on a large store: 100 ticks over
+10,000 items with `reconfirm_after` took 16.4 s when every such item was re-resolved, 0.001 s with the index.
 
 What a flag does not do: it does not close the window between an abrupt shift and its detection. A calibrated promise
 ("≤ 5% wrong among the answers given alone") does not hold in the first decisions after an abrupt shift to unseen
