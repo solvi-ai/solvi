@@ -471,7 +471,7 @@ def main(argv=None):
     return 0 if passed == n and not bad_files else 1
 
 
-from ._traces import boundary, cases_from_store  # noqa: E402 — after the runner it builds on
+from ._traces import boundary, cases_from_store, metamorphic, Relation  # noqa: E402 — after the runner it builds on
 
-__all__ = ["boundary", "cases_from_store", "CaseResult", "CaseTimeout", "FileResult", "STATUSES", "find", "fuzz", "is_cases_file", "load", "main", "mutations",
+__all__ = ["boundary", "cases_from_store", "metamorphic", "Relation", "CaseResult", "CaseTimeout", "FileResult", "STATUSES", "find", "fuzz", "is_cases_file", "load", "main", "mutations",
            "run_case", "run_file", "run_path", "Suite"]

@@ -3,7 +3,8 @@ inputs and the answers given), `boundary` makes inputs at the edges of what the 
 then empty / single / long text and its Unicode forms, 0, -1, one past the smallest and largest number, a huge
 positive and negative one, either side of a rule's threshold, None and another type where the field has shown them, an
 empty, one-element or long list (of distinct values too), many dict keys, one level into dicts and lists — and, given
-the System, pins its current answers on them as the expected ones. Both give case dicts in the cases.json format (see
+the System, pins its current answers on them as the expected ones; `metamorphic` transforms the cases' states (a
+unit conversion) and expects the answers a `Relation` says they must keep. All give case dicts in the cases.json format (see
 solvi.testing), so `solvi test` and `run_case` run them."""
 from __future__ import annotations
 
@@ -376,4 +377,78 @@ def boundary(cases, n=50, system=None, thresholds=None):
     return kept
 
 
-__all__ = ["boundary", "cases_from_store"]
+# --- metamorphic cases
+class Relation:
+    """A metamorphic relation: a transform of a case's state and what the answers must be after it.
+
+    name: what it is ("kg to g"), used in the cases' names and notes.
+    transform: state → the transformed state (a new dict; the state given is a copy), or None when the relation does not
+    apply to that state (a weight already in grams).
+    expect: the source state's answers {question: answer, as in cases.json; None for an abstention} → the answers the
+    transformed state must give, for the questions it names (a question left out is not checked). Default: the same
+    answers for every question — a unit conversion, a reordering, a renaming that must not change the decision. The
+    answers are compared as in a case: numbers up to rounding (1e-9), so a relation that scales a number gives it scaled."""
+
+    def __init__(self, name, transform, expect=None):
+        if not callable(transform) or (expect is not None and not callable(expect)):
+            raise TypeError("Relation(name, transform, expect=None): transform and expect are functions")
+        self.name, self.transform, self.expect = str(name), transform, expect
+
+    def __repr__(self):
+        return f"Relation({self.name!r})"
+
+
+def metamorphic(cases, relations, system=None):
+    """Metamorphic cases: per case and relation, the case's state transformed and the answers the relation says it must
+    give → [case dict] in the cases.json format (name "<relation> <i>", note "metamorphic: <relation> of <case name>",
+    "expected" and "ask" for the questions the relation checks), so `solvi test` and run_case run them. A System that
+    breaks the relation — reads grams as kilograms — fails them as regressions, though no hand-written case pins the
+    transformed input.
+
+    The source answers: with system=, the answers it gives now for the case's state (asked, never stored); else the
+    case's own "expected". A relation that does not apply (transform → None) makes no case; a transform that raises, and
+    a case with no answers to start from, make none either, and a UserWarning says how many. Deterministic: cases in
+    order, relations in order within a case."""
+    rels = [relations] if isinstance(relations, Relation) else list(relations)
+    out, made, raised, empty = [], {}, 0, 0
+    for i, case in enumerate(cases):
+        state = case.get("state")
+        if not isinstance(state, dict):
+            continue
+        name = case.get("name", f"#{i + 1}")
+        source = None
+        for rel in rels:
+            try:
+                new = rel.transform(copy.deepcopy(state))
+            except Exception:  # noqa: BLE001 — a relation that does not fit this state's shape
+                raised += 1
+                continue
+            if new is None:
+                continue
+            if source is None:
+                source = _source_answers(case, system)
+            if not source:
+                empty += 1
+                break
+            want = (rel.expect or dict)(copy.deepcopy(source))
+            if not want:
+                continue
+            made[rel.name] = made.get(rel.name, 0) + 1
+            out.append({"name": f"{rel.name} {made[rel.name]}", "state": new, "expected": dict(want), "ask": sorted(want),
+                        "note": f"metamorphic: {rel.name} of {name}"})
+    if raised or empty:
+        warnings.warn(f"metamorphic: {raised} transform(s) raised, {empty} case(s) had no answers to compare with "
+                      "(no system= and no \"expected\")", UserWarning, stacklevel=2)
+    return out
+
+
+def _source_answers(case, system):
+    if system is None:
+        return dict(case.get("expected") or {})
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        res = system.ask(copy.deepcopy(case["state"]), case.get("ask"), **_store_kw(system))
+    return _answers(res)[0]
+
+
+__all__ = ["boundary", "cases_from_store", "metamorphic", "Relation"]

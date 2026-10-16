@@ -101,6 +101,28 @@ cases += testing.boundary(cases, n=100, system=system)
 open("recorded.cases.json", "w").write(json.dumps({"task": "task.py", "cases": cases}, indent=1))
 ```
 
+### Metamorphic cases
+
+Some answers have no fixed expected value at a new input, but must keep a relation to the answer at a known one: the
+same dose whether the weight is given in kilograms or grams, the same route whatever the order of the items. A
+`testing.Relation(name, transform, expect=None)` says this: `transform(state)` gives the changed state (or None when it
+does not apply), `expect(answers)` the answers the changed state must give, from the source state's answers (by
+default the same answers). `testing.metamorphic(cases, relations, system=None)` makes the cases: each case's state
+transformed, with `expected` from the System's current answers on the source state (with `system=`, never stored) or
+from the case's own `expected`. A System that breaks the relation fails them as regressions, though no hand-written case
+pins the converted input.
+
+```python
+to_grams = testing.Relation("kg to g",
+                            lambda s: {**s, "weight": s["weight"] * 1000, "unit": "g"} if s["unit"] == "kg" else None)
+heavier = testing.Relation("much heavier", lambda s: {**s, "weight": s["weight"] + 500},
+                           expect=lambda a: {"heavy": "yes"})          # only "heavy" is checked
+cases += testing.metamorphic(cases, [to_grams, heavier], system=system)
+```
+
+Numbers are compared up to rounding (1e-9), so a relation that scales a numeric answer gives it scaled in `expect`; a
+rounded answer is rounded there too.
+
 ## Fuzzing
 
 `--fuzz N` asks N mutated copies of each case's input (after `prepare`). A mutation removes a field, sets it to `None`,
