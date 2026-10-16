@@ -16,3 +16,10 @@ Verdicts across runs: stable / flaky / regression / fixed per case, quarantine, 
 "degraded" status.
 
 ::: solvi.testing.history
+
+## `solvi.testing.mutants`
+
+Catalog mutants: small faults made in a task file and run against its cases — the share the cases catch, and the
+survivors with their lines.
+
+::: solvi.testing.mutants

@@ -144,6 +144,47 @@ cases += testing.metamorphic(cases, [to_grams, heavier], system=system)
 Numbers are compared up to rounding (1e-9), so a relation that scales a numeric answer gives it scaled in `expect`; a
 rounded answer is rounded there too.
 
+## Catalog mutants: would the cases catch a wrong catalog?
+
+Passing cases say the catalog answers them as expected; they do not say a wrong catalog would fail them. `solvi
+mutants PATH...` (`solvi.testing.mutants.run(cases_file)`) makes small faults in the task file, one per mutant, runs the
+cases against each with `run_file(fast=True)` and reports the share the cases catch:
+
+| kind | the fault |
+|---|---|
+| `flip` | a comparison negated: `<` ↔ `>=`, `==` ↔ `!=`, `in` ↔ `not in`, `is` ↔ `is not` |
+| `boundary` | a comparison moved by its edge: `<` ↔ `<=`, `>` ↔ `>=` |
+| `constant` | a threshold constant nudged up and down (a number in a comparison, an UPPER_CASE module constant): ±1, or ±10 % |
+| `branch` | a rule branch swapped: the bodies of an if / else, `a if c else b` → `b if c else a` |
+| `drop` | a check dropped: a `@cat.check` / `@cat.constraint` function that always answers True, a guard `if …: raise` that never raises |
+
+```python
+from solvi.testing import mutants
+
+rep = mutants.run("gallery/04_security_alert/cases.json")
+print(rep.score, rep.killed, rep.survived)          # killed / (killed + survived)
+for m in rep.survivors():
+    print(m.line, m.kind, m.description)            # 61 boundary > → >= ...
+```
+
+A mutant is *killed* when a case fails or times out (`timeout=`, 5 s per case by default), *survives* when every case
+still passes, and is *stillborn* — left out of the score — when the task does not load or the System cannot be built.
+The cases must pass on the catalog as it is (else a ValueError). The original files are never written: each mutant runs
+from a copy of the task's directory, so a `{"system": "run.py:system"}` factory next to the task loads the mutant too.
+`kinds=` / `--kinds flip,drop` picks the faults, `limit=` / `--limit N` spreads N mutants over the file, `isolate=True`
+runs each case in its own process.
+
+A survivor is either a gap — write a case that tells the two apart, such as an input on the threshold — or an
+equivalent mutant that no input can tell apart: in the security-alert entry the guard that raises on missing coordinates
+survives being dropped, because the arithmetic that follows fails on the missing value anyway and the question abstains
+as before. Read a survivor before writing a case for it.
+
+On the fifteen gallery entries (9–16 cases each, timeout 10 s): 801 mutants, 445 killed, score 0.56 (0.39 for the skill
+picker to 0.81 for credit adverse action), 36 s in all — 3 ms per mutant on a small rule catalog, 330 ms on the review
+triage entry, which fits its deciders when the System is built. By kind: flipped comparisons 0.81 caught, swapped
+branches 0.80, dropped checks 0.74, moved edges 0.24, nudged constants 0.26 — the gallery's cases test the behaviour on
+either side of a threshold and rarely the threshold itself; `boundary(cases, n)` above writes cases on the thresholds.
+
 ## Verdicts across runs, known bugs, a degraded environment
 
 On a live environment one pass or fail says little. `solvi.testing.history` keeps the outcomes of the same cases over
