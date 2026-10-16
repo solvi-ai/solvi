@@ -5,14 +5,14 @@ destructive commands (rm -rf outside /tmp, DROP/TRUNCATE, DELETE without WHERE, 
 secrets in the arguments (API keys, bearer tokens, passwords), and the rollback plan: the inverse of every state-changing step,
 newest first (restore from a named backup, push back the SHA the force push overwrote, revert via the transaction log).
 Hard checks: an exposed secret -> escalate + rotate; destruction nobody can undo -> escalate; destruction with a way back ->
-roll_back. (When several hard checks fail, the first by name decides; the names are chosen so escalate wins.)
+roll_back. (When several hard checks fail, the strictest verdict decides: approve < roll_back < escalate.)
 solvi's hash-chained trace of this audit is itself the audit record: replay re-derives every finding from the raw log.
 Try: delete the "db" backup, or change a step's tool to "send_email"."""
 import re
 
 from solvi import Answer, Catalog, Question
 
-cat = Catalog()
+cat = Catalog(combine="strictest")       # several failed checks: the verdict last in its options wins
 DESTRUCTIVE = [("rm -rf", r"\brm\s+-(?:[a-z]*r[a-z]*f|[a-z]*f[a-z]*r)[a-z]*\s+(?!/tmp/)(\S+)"),
                ("DROP", r"\bDROP\s+(?:TABLE|DATABASE|SCHEMA)\s+(?:IF EXISTS\s+)?(\w+)"),
                ("TRUNCATE", r"\bTRUNCATE\s+(?:TABLE\s+)?(\w+)"),

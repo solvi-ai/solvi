@@ -507,7 +507,7 @@ def catalog_fingerprint(catalog):
     code_fingerprint)."""
     items = [(n, p) for n, p in catalog.parts.items()] + [(p.name, p) for p in catalog.rules.values()] + \
             [("constraint:" + n, p) for n, p in catalog.constraints.items()]
-    combine = getattr(catalog, "combine", "first")
+    combine = getattr(catalog, "combine", "strictest")
     key = tuple((n, id(p), id(p.func), id(p.model), len(p.alternatives or ()), len(p.inputs)) for n, p in items) + (combine,)
     cached = getattr(catalog, "_fp_cache", None)
     if cached is not None and cached[0] == key:
@@ -520,7 +520,8 @@ def catalog_fingerprint(catalog):
     finally:
         if token is not None:
             var.reset(token)
-    out = {"fp": digest(sorted(parts.items())) if combine == "first" else digest(sorted(parts.items()), ("combine", combine)),
+    # the default ("strictest" since 1.2) leaves the fingerprint as it was; "first" is marked
+    out = {"fp": digest(sorted(parts.items())) if combine == "strictest" else digest(sorted(parts.items()), ("combine", combine)),
            "parts": parts, "calls": calls}
     catalog._fp_cache = (key, out)
     return out

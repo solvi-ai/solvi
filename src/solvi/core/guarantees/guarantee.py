@@ -504,7 +504,37 @@ def guard_question(system, question, examples=None, *, max_error=None, max_risk=
     how many came from where and their stored ids (calibrate again without them to undo it).
     The other arguments, the methods and their promises: calibrate() and the module docstring.
     → the calibration report ({"threshold", "n", "answered", "error", "risk", "support", "separation", "promise", ...};
-    for an attached promise, its report)."""
+    for an attached promise, its report).
+
+    Every call is logged in `system.guard_history`, in order: {"question", "time" (seconds since the epoch), "outcome"
+    ("installed", "failed" or "removed"), "replaced" (a guarantee was in force before the call — a failed attempt
+    removes it too, so none is then in force), "method", "n", "threshold", "answered", "promise" (installed), "error"
+    (failed: the exception's type and message)}."""
+    import time
+    log = getattr(system, "guard_history", None)
+    if log is None:
+        log = system.guard_history = []
+    entry = {"question": question, "time": time.time(), "replaced": question in getattr(system, "guards", {})}
+    try:
+        rep = _guard_question(system, question, examples, max_error=max_error, max_risk=max_risk, method=method,
+                              delta=delta, signal=signal, answer=answer, groups=groups, min_group=min_group,
+                              min_support=min_support, correct=correct, folds=folds, seed=seed, weak=weak,
+                              promise=promise, corrections=corrections, sources=sources)
+    except Exception as e:
+        log.append({**entry, "outcome": "failed", "error": f"{type(e).__name__}: {e}"})
+        raise
+    if examples is False:
+        log.append({**entry, "outcome": "removed"})
+    else:
+        r = rep or {}
+        log.append({**entry, "outcome": "installed", "method": r.get("method"), "n": r.get("n"),
+                    "threshold": r.get("threshold"), "answered": r.get("answered"), "promise": r.get("promise")})
+    return rep
+
+
+def _guard_question(system, question, examples, *, max_error, max_risk, method, delta, signal, answer, groups,
+                    min_group, min_support, correct, folds, seed, weak, promise, corrections, sources):
+    """guard_question without the log."""
     if examples is False:
         old = system.guards.pop(question, None)
         if old is not None:

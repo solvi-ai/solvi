@@ -152,7 +152,8 @@ class System:
         one since 1.0 ("measured" was removed: it showed no measured benefit).
         early_exit: True (default) — when a hard check fails, the steps only the questions it settles needed are skipped
         (the expensive rest is not paid for); the decision's record then holds no values for them, and a part listed in
-        `requires` may not have run. False — every step of the flow runs anyway: the answers are the same (the failed
+        `requires` may not have run — statistics over such records (the system report's "forced_split") cannot say
+        whether the check changed the answer. False — every step of the flow runs anyway: the answers are the same (the failed
         hard check still decides), `res.values` and the trace hold every fact and rule value, and the trace says so
         (`trace.early_exit` is False). `ask(..., early_exit=...)` overrides it for one ask.
         lang: the language of what solvi renders for people — res.audit(), solvi.show, safeguard_summary() — "en" (default)
@@ -211,6 +212,7 @@ class System:
         self.calib: dict[str, tuple] = {}         # question → (a, b): confidence' = σ(a·logit(confidence) + b)
         self.shift_watch = {}                     # question → an out-of-domain watch (System.calibrate(watch=), experimental)
         self.guards = {}                          # question → solvi.core.guarantees.guarantee.QuestionGuard (System.guarantee)
+        self.guard_history = []                   # every System.guarantee attempt, in order (guard_question's docstring)
         self.learned_rules = {}                   # question → RuleList (readable rules learned from examples)
         if order not in ("default", "learned"):
             raise ValueError('order must be "default" or "learned"')
@@ -1248,7 +1250,8 @@ class System:
         error among the answers given alone ≤ it with probability ≥ 1 − delta, learn-then-test) or method="empirical";
         on the answer's confidence, a computed fact or any signal (signal=), one-sided (answer=), per group (groups=).
         Below the threshold the question abstains with the reason; the promise is recorded with every answer.
-        examples=False removes it. → the calibration report. See solvi.core.guarantees.guarantee.guard_question."""
+        examples=False removes it. Every attempt is logged in `self.guard_history` (installed, failed, removed). → the
+        calibration report. See solvi.core.guarantees.guarantee.guard_question."""
         from .guarantees.guarantee import guard_question
         return guard_question(self, question, examples, **kw)
 
@@ -1536,8 +1539,9 @@ def _read_of_trace(trace):
 
 def _combine_failed(catalog, q, failed):
     """Several false hard checks govern q (catalog order) → the list whose first decides: as given under
-    Catalog(combine="first"), with a warning when their answers differ; under "strictest" the one whose answer comes
-    last in q's options (no `then` answer for q: an abstention, strictest of all)."""
+    Catalog(combine="first"); under "strictest" (the default since 1.2) the one whose answer comes last in q's options
+    (no `then` answer for q: an abstention, strictest of all), and the first declared where the options give no order.
+    A warning names them when their answers differ, unless the mode was chosen and applies."""
     import warnings
     keys = []
     for f, part in failed:
@@ -1552,14 +1556,20 @@ def _combine_failed(catalog, q, failed):
         return failed
     desc = ", ".join(f"{f} → " + ("abstain" if a is _ABSTAIN else "a function" if callable(a) else
                                   "an unusable answer" if a is _BAD else repr(a)) for (f, _), a in zip(failed, keys))
-    mode = getattr(catalog, "combine", "first")
-    if mode == "first" and getattr(catalog, "combine_chosen", False):
+    mode = getattr(catalog, "combine", "strictest")
+    chosen = getattr(catalog, "combine_chosen", False)
+    if mode == "first" and chosen:
         return failed                                 # Catalog(combine="first"): the declaration order is the priority
     opts = list(q.answer.options or [])
     if mode == "strictest" and opts and all(a is _ABSTAIN or (a is not _BAD and not callable(a) and a in opts)
                                             for a in keys):
         rank = [math.inf if a is _ABSTAIN else opts.index(a) for a in keys]
         best = max(range(len(failed)), key=lambda i: (rank[i], -i))
+        if not chosen:                                # the 1.2 default: said once per such decision, as before
+            warnings.warn(f"question {q.name!r}: several hard checks are false with different `then` answers ({desc}); "
+                          f"the strictest by the question's option order, {failed[best][0]}, decides (the default since "
+                          "1.2; Catalog(combine=\"first\") keeps the declaration order, Catalog(combine=\"strictest\") "
+                          "silences this)", UserWarning, stacklevel=2)
         return [failed[best]] + [x for i, x in enumerate(failed) if i != best]
     warnings.warn(f"question {q.name!r}: several hard checks are false with different `then` answers ({desc}); the "
                   f"first declared, {failed[0][0]}, decides"

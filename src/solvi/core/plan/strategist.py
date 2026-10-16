@@ -219,8 +219,8 @@ def plan(catalog, questions, init_keys, heads=None):
 # OrderModel — per hard check, P(this check fails on this input) from facts known before running it (init_state and
 # optionally cheap computed facts). The executor then runs hard checks one at a time, most expected saving first
 # (P(fail) × cost it can save ÷ cost to evaluate), and stops as soon as the failed ones settle every question. Answers do
-# not depend on the order: a question is settled only when every hard check declared before the deciding one (among those
-# governing it) has been evaluated — exactly the "first declared failed check decides" rule.
+# not depend on the order: a question is settled only when every hard check governing it has been evaluated (the strictest
+# failed one decides), or under Catalog(combine="first") every one declared before the deciding one.
 # ProducerPolicy — for a fact with several producers, the order in which to try them on this input: predicted
 # P(accepted) and P(agrees with the reference producer | accepted), and cost. Outputs are still accepted only by the
 # producer's own validator; the policy only chooses who goes first. It learns from the outcomes of past runs, instantly.

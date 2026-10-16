@@ -488,6 +488,21 @@ def _observed_only(state, observed):
     return [observed]
 
 
+@dataclass(frozen=True)
+class Delta:
+    """One action's predicted effect of an intervention (LawSet.intervention): the prediction before and after, the law
+    behind each (None: no law, the base predictor's value), change (after − before for numbers, else None), changed
+    (None where a side is Undetermined) and covered (a law speaks on both sides)."""
+    action: Any
+    before: Any
+    after: Any
+    law_before: Any
+    law_after: Any
+    change: Any
+    changed: bool | None
+    covered: bool
+
+
 class LawSet:
     """Laws over one grammar, most specific first (see the package docstring).
 
@@ -700,6 +715,26 @@ class LawSet:
         if isinstance(value, Undetermined):
             return value, None
         return value, self.applied(state, action)
+
+    def intervention(self, state_before, state_after, actions, base: Callable | None = None, *,
+              disagree: str | None = None) -> list[Delta]:
+        """The predicted effect of an intervention that turns `state_before` into `state_after`, per action → [Delta]
+        in the order of `actions` (a string action may be given alone): the prediction before and after with the law behind
+        each (`explain`; None: no law applies, the value is the base predictor's), `change` (after − before when both
+        are numbers, else None), `changed` (the two disagree by the set's `agrees`; None where either side is
+        Undetermined) and `covered` — a law, not the base, speaks on both sides. An uncovered effect is a guess: the
+        laws say nothing about the intervention there. disagree: as for `predict`."""
+        acts = [actions] if isinstance(actions, (str, bytes)) else list(actions)
+        out = []
+        for a in acts:
+            vb, lb = self.explain(state_before, a, base, disagree=disagree)
+            va, la = self.explain(state_after, a, base, disagree=disagree)
+            undetermined = isinstance(vb, Undetermined) or isinstance(va, Undetermined)
+            num = (not undetermined and all(isinstance(v, (int, float)) and not isinstance(v, bool) for v in (vb, va)))
+            out.append(Delta(a, vb, va, lb, la, (va - vb) if num else None,
+                             None if undetermined else not self.agrees(vb, va),
+                             lb is not None and la is not None))
+        return out
 
     def hypothesis(self, candidate: Candidate) -> Callable:
         """The predictor this set would be with `candidate` accepted (nothing is changed): for the probe planner."""
