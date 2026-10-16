@@ -88,6 +88,24 @@ started from a failing test built on the reproduction; the numbers are before �
 
 ### Changed (breaking)
 
+-  **`Certificate`: the alarm now bets on breaks of a stated size.** The detector is the mean of two Bernoulli
+  likelihood-ratio CUSUMs against failure rates 1.5× and 2× the promise (`alternatives=(1.5, 2)`, a standard CUSUM
+  against stated alternatives run in parallel, Lorden 1971, averaged: a mixture e-detector), level 50 (= 5/δ at the
+  default δ 0.1; other δ untested; the level does not follow δ). A multiple with r · promise ≥ 1 is left out (at a
+  promise of 2/3 or more the old alarm is used). The old alarm (bet ½/promise, level 1/δ) is a burst detector whose
+  level must grow as the promise shrinks: it fired on 67–100 % of 3000-outcome streams running at a quarter to a half of
+  the promise. Measured on simulated Bernoulli streams, promises 0.05–0.3, two seed sets: ≤ 1 % false alarms on streams
+  at ≤ half the promise, 100 % of 2×/3× breaks caught, faster than the quietest fixed level of the old alarm per promise
+  in 12 of 16 settings (by hundreds of outcomes at promise 0.05, where that level also misses 14–20 % of 2× breaks) and
+  1–2 outcomes slower in one (promise 0.2, break ×3). That loss was accepted under a tolerance bar (a loss of at most
+  max(3 outcomes, 10 %) counts as none) written after a first run showed it; under the original bar the result is
+  inconclusive. A per-promise k-of-W window counter is faster on 2× breaks at promises ≤ 0.2 (by 44–68 outcomes at 0.05)
+  but alarms far more near the promise. The alarm is a change detector, not a δ-level test: P(an alarm within L
+  outcomes) ≤ L/50 is a bound over a horizon, empty past 50 outcomes, and a unit running exactly at its promise is
+  retired within a few thousand outcomes (43–100 % of 3000-outcome streams); the certification's anytime-valid guarantee
+  is unchanged. The alternatives and the level were chosen on development streams at δ 0.1; i.i.d. streams with step
+  breaks only. `alternatives=None` restores the old alarm; `alarm=` still sets the level; `to_dict()` always carries
+  `alternatives`.
 - **The drift monitor is on by default when the guarantee has at least 500 calibration examples.**
   `build(monitor="auto")` is the new default (`MONITOR_MIN_REFERENCE = 500`); `monitor=None` turns it off,
   `monitor=True` turns it on at any size. A monitor whose reference is short cries wolf — the known effect of estimated
@@ -134,6 +152,30 @@ started from a failing test built on the reproduction; the numbers are before �
 
 ### Added
 
+-  **Laws (experimental): `Buffer(window=N)`, `LawSet(recent=M, readmit="grown")`, `LawSet(memo=True)`,
+  `LawSet.proposals`** (opt-in; defaults unchanged). A windowed buffer keeps its last N rows and scores exactly as a
+  fresh buffer of them; the sized rule's N never decreases when rows leave, and a candidate counts again once the window
+  has turned over. `recent=M` judges a law's running precision on its last M observations; `readmit="grown"` waits for a
+  full turnover after a retirement. On synthetic streams whose laws change abruptly (two conjunctive laws over 12 atoms,
+  one flipped and one replaced at each of five switches, phases of 1,500–2,500 rows), `window=150, recent=50` re-learned
+  the new laws in 605 rows on average, a periodic reset tuned under the same rule in 1,080, and the default did not
+  re-learn within any phase; prequential accuracy 0.796 against 0.755 (reset) and 0.692 (default), with 0 wrong laws
+  among 1,221 accepted (reset 3 of 1,258); no arm accepted a law on streams without laws. The window length was tuned to
+  this phase length; synthetic abrupt drift only. The first measurement was mis-scored (a cache bug: 31 wrong laws that
+  were in fact 1) and the bar was then relaxed to ≤ 3; this run's 0 also meets the original bar of 0. The memo and the
+  proposals count are unit-tested, not measured. A known mechanism (FLORA, Widmer and Kubat 1996; ADWIN, Bifet and
+  Gavaldà 2007).
+-  **`solvi.experimental.audit.AuditWatch`** (opt-in): a Bernoulli CUSUM on a check run on a random share of decisions
+  (`Dispatcher(audit=)`), its threshold simulated with the share and the reference's sampling error — a known method
+  (continuous sampling inspection with a proportion CUSUM) packaged for a check that is otherwise bought only where the
+  system is unsure. Measured once on an intent-routing stream (100 replays): with the check's failure rate rising from
+  0.20 to 0.60 at one point, a 10 % audit flagged it in 96 of 100 within 300 decisions (median 118; a 20 % audit 98 of
+  100, median 75) with 4 of 100 false flags on unchanged streams; the same CUSUM on only the decisions the policy bought
+  the check for: 57 of 100 (median 176), 9 false flags; the drift monitor on the system's own answers cannot see it by
+  design, since the system did not change. The library's `NumericDrift` on the same audited values flags sooner but with
+  14 of 100 false flags (not level-matched). Condition: a reference of 800 decisions, all checked. One task, one break
+  size; a smaller break is slower; the flag says the check disagrees with the system more often, not which of them
+  broke.
 - `solvi honesty --control [N]` (opt-in; default off, outputs and baselines unchanged): the same answers scored
   against shuffled gold — within each question, gold permuted across cases, N seeded permutations averaged, no extra
   system calls — reported as `control` with the same metric names and `discriminates` (real confident_error_rate at

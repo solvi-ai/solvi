@@ -141,6 +141,24 @@ against 5.2–5.4 there, and 11.7 against 7.6 on a single-law benchmark, where a
 97.5 % of trials — give it 12 or more. Three or more missing laws are not measured; `coverage` is not checked in this
 mode; synthetic boolean worlds only.
 
+`Buffer(window=N)`, `LawSet(recent=M, readmit="grown")`, `LawSet(memo=True)` and `LawSet.proposals` (opt-in, 1.2; the
+defaults are unchanged) let a law set follow a stream whose laws change: the buffer keeps its last N rows, a law's
+running precision counts only its last M observations, and a retired law is readmitted only after the window has turned
+over. On synthetic streams whose laws change abruptly (two conjunctive laws over 12 atoms, one flipped and one replaced
+at each of five switches, phases of 1,500–2,500 rows), `Buffer(window=150)` with `LawSet(recent=50, readmit="grown")`
+re-learned the new laws in 605 rows on average (30 of 500 switches censored), where a periodic reset tuned under the
+same rule took 1,080 (83 censored) and the library default did not re-learn within any phase (an oracle with known
+switch points: 238); prequential accuracy 0.796 against 0.755 (reset) and 0.692 (default), oracle 0.813, with 0 wrong
+laws among 1,221 accepted (reset 3 of 1,258); no arm accepted a law on streams without laws (a property of the sized
+rule, shared by all arms). The window length was tuned to this phase length: another drift rate needs another window,
+and an adaptive window is not built. Synthetic abrupt drift only — no gradual, incremental or recurring drift, no real
+stream. The first measurement of this feature was mis-scored (a cache bug: 31 wrong laws that were in fact 1) and the
+bar was then relaxed to at most 3 wrong laws; this run meets it at 0, as it meets the original bar of 0. The score memo
+(`memo=True`) and the proposals count are built and unit-tested, not measured. A sliding window with forgetting and a
+retirement on recent performance is a standard answer to concept drift (FLORA, Widmer and Kubat 1996; ADWIN, Bifet and
+Gavaldà 2007; Gama et al. 2014); what is the library's is only how the sized rule's N behaves under a window (it never
+decreases; a candidate counts again after a full turnover) and `readmit="grown"`.
+
 - **Missing:** on a game simulator with written mechanics the laws closed 94% of the gap between a learned map and the written mechanics (20 fresh worlds, 4,731 transitions, one run; 0.892 → 0.988, ceiling 0.994), but random candidates under the same test came within 1.1 points — the measurement's pre-registered bar for that control (random candidates at most +2 points over the base) was missed by +8.4 — so the mismatch is a compact proposal heuristic and the test does the work; on a real MCP filesystem server with a path policy, probes planned from mismatches took refusals from 6 to 0 in one session (200 calls per session, one run; random probes: 48 to 29); still missing: a grammar too large to enumerate, retirement of weak laws nothing contradicts, wiring into a System's decisions, and a script for the two measurements (the toys: benchmarks/laws_toy.py); a ranker of candidates for expensive checks (RankedProposer, a bag-of-atoms model trained on tasks drawn from the grammar) cut the checks to the true condition from 69.7 in the blind order to 2.1 on synthetic tasks of one grammar, in distribution only; ranking by the joint statistic of the whole condition over the logged rows (JointRanker, no training; with no rows it is the blind order — the statistic needs rows) needed 1.00 / 17 / 1.01 checks (medians 1 / 1 / 1) on three synthetic settings of the library's own grammars (five seeds × 60 tasks) against 85 / 2,182 / 126 in the blind order (85 a different draw of tasks from the 69.7 above: five seeds against one) and 2.1 / 591 / 7.7 for the trained bag of atoms, a shuffled-rows control worse than the blind order (112 / 2,434 / 166), the gain on the deep setting showing from about 20 logged rows and full by 300, the same law accepted under every order in 894 of 900 tasks; before a buffer has rows, a prior order over the condition's own features learned from synthetic tasks of the task family (PriorRanker, which falls back to the blind order unless its held-out checks are 5% below the blind order's) needed 208 checks at 0 rows against 1,245 blind on a skewed family (deep conditions whose features are drawn unevenly by a chosen skew; 5,112 candidates per task; five seeds, 300 tasks, training and test tasks from the same sampler) and needed 0.83–0.93 of blind on the three uniform settings (on the first it fell back in 2 of 5 seeds); HandoverRanker blends the two — the joint Jaccard plus 20 / (20 + rows) times the prior's rank in [0, 1] — and on the skewed family needed 184 / 98.6 / 8.9 checks at 20 / 100 / 300 rows against 208 for the prior and 1,019 / 361 / 16.8 for the joint statistic, but on the deep uniform setting at 300 rows 27.2 against 17.2 (111 of 300 tasks worse, 31 better, medians 2 and 1; the pre-registered 5 % bar missed there; a smaller n0 not measured); measured once on a live file server (8 mismatches; candidates contradicted by logged rows skipped free): every order spent 29 probes in all, because 1–5 candidates per mismatch were left to probe and the true conditions were single atoms — the shortest hypotheses, which the length-first order meets first — so ranking can pay only where many consistent hypotheses remain after the free checks, the control first; the acceptance sized by the candidates tested on a buffer (on a synthetic buffer with no law the fixed thresholds accepted a law in 100 of 100 buffers, the sized rule in 0 of 100), admission by discriminating probes (on a synthetic world at 8 checks a random held-out sample accepted a wrong law in 0.593 of the trials, the probes in none) and abstention where laws that are not exceptions of one another disagree are measured on synthetic worlds only, not yet on the game simulator or the file server; the live probe-based learner can admit false laws on policies the grammar cannot express (observed once per control policy) — admission by probes or sized acceptance is the open item.
 - **Script:** `benchmarks/laws_toy.py` (two deterministic toys that reproduce both findings in miniature; `pytest -m
   slow tests/test_laws_toy.py`); `benchmarks/laws_rank_joint.py` (the three ranking settings; one seed per run, `--seed`;
@@ -273,24 +291,35 @@ fall, so a monitor that only watches for a drop misses it.
 
 ## `audit`
 
-What a small random audit buys. `Dispatcher(audit=)` marks a random share of decisions for labelling; this module uses
-those labels together with everything else. `ppi_mean` is prediction-powered inference (Angelopoulos, Bates,
-Fannjiang, Jordan and Zrnic, *Prediction-powered inference*, Science 2023; the power-tuned weight of PPI++, Angelopoulos,
-Duchi and Zrnic 2023): a prediction of the quantity on every decision — 1 − confidence for "wrong", or the label a
-person or an outcome gave where there is one — corrected by the audited decisions' gap between truth and prediction.
-Unbiased whatever the prediction's bias; never wider than the audit alone, up to the estimation of the weight.
-`ppi_calibrate` sets a guarantee threshold from it (learn-then-test, fixed sequence from the strictest threshold down;
-install it with `system.guarantee(question, promise=p)`), `ppi_paired_harm` tests at the end of a window whether a
-candidate run beside the current system is worse. `AuditWatch` follows a check's failure rate on the audited share with
-a Bernoulli CUSUM whose threshold is simulated with the audit share and the reference's own error — for a check that is
-otherwise bought only where the system is unsure, where it disagrees anyway and a break goes unseen. Since 1.2.
+A check that is not run on every decision (an expensive second opinion, a person's look) can break without anyone
+seeing it: the decisions it is bought for are the unsure ones, where it disagrees anyway. `AuditWatch` runs it on a
+random share of decisions as well (`Dispatcher(audit=)` marks them) and follows its failure rate on that share with a
+Bernoulli CUSUM whose threshold is simulated with the audit share, the horizon and the reference's own sampling error.
+Since 1.2.
 
-The intervals are the method's normal (CLT) intervals: valid as the audit grows, not exact for a handful of audited
-decisions. The PPI promise holds for inputs like the audited stream, not for the next, drifted one.
+This is a known method, packaged: inspection of a random fraction of a running stream is Dodge's continuous sampling
+plan (Ann. Math. Stat. 1943), a CUSUM on each inspected 0/1 outcome is the Bernoulli CUSUM of Reynolds and Stoumbos
+(J. Qual. Tech. 1999), and `odds=2` is the log-likelihood-ratio tuning to an odds ratio of 2 of Steiner, Cook,
+Farewell and Treasure (Biostatistics 2000). Labels seen only where a policy chose to look are the selective-labels
+problem; a uniformly random slice beside the policy is the standard remedy.
 
-- **Missing:** no measured gain yet: whether the PPI threshold and harm test gate refits on a drifting stream better than the stored corrections alone, and whether the audit watch sees a broken check that the decisions which buy it do not, are both still to be measured (pre-registered stands); the intervals are normal (CLT) intervals, valid as the audit grows
+Measured once on an intent-routing stream (100 replays, a check whose failure rate rises from 0.20 to 0.60 at one
+point, alpha 0.05 per 600 decisions): a 10 % audit flagged the break in 96 of 100 within 300 decisions (median 118; a
+20 % audit 98 of 100, median 75) with 4 of 100 false flags on unchanged streams. The same CUSUM on only the decisions
+the policy bought the check for: 57 of 100 (median 176), 9 false flags. The drift monitor on the system's own answers
+cannot see it by design, since the system did not change. The library's `NumericDrift` on the same audited values
+flags sooner (24 decisions on average) but with 14 of 100 false flags: a Gaussian detector on 0/1 values, not
+level-matched, and a level-matched comparison was not run. AuditWatch's merit is that it holds its false-alarm level.
+Condition: the reference was the check run on 800 random decisions, all checked; with only the audited share of a
+reference (about 80 items) the threshold widens and detection is slower than measured here.
+
+- **Missing:** one task family (intent routing, a TF-IDF + logistic-regression router, a nearest-neighbour second
+  opinion) and one break size (odds × 6 while the CUSUM is tuned to × 2; a doubling will be slower, unmeasured); a
+  short reference unmeasured; a break confined to the decisions the policy never buys was not planted, so "sees what
+  the bought check cannot" is untested. A flag says the check disagrees with the system more often, not which of them
+  broke.
 - **Script:** none yet. **Deadline:** 1.2.
-- API: `solvi.experimental.audit` (`ppi_mean`, `ppi_calibrate`, `ppi_paired_harm`, `AuditWatch`).
+- API: `solvi.experimental.audit` (`AuditWatch`).
 
 ## Graduated and removed
 

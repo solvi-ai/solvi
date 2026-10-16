@@ -40,19 +40,19 @@ def test_alarm_restarts_and_resets_the_detector():
     assert evs == [False, False, True] and not e.certified and e.alarms == 1 and e.detector == 1.0
 
 
-def test_validation_and_default_unchanged():
+def test_validation_and_the_old_alarm_on_request():
     with pytest.raises(ValueError):
         Certificate(promise=0.1, alternatives=(1.0,))
     with pytest.raises(ValueError):
         Certificate(promise=0.4, alternatives=(3.0,))
     with pytest.raises(ValueError):
         Certificate(promise=0.1, alternatives=())
-    c = Certificate(promise=0.05)
-    assert c.alternatives is None and "alternatives" not in c.to_dict()
+    c = Certificate(promise=0.05, alternatives=None)
+    assert c.alternatives is None and c.to_dict()["alternatives"] is None
     e = c.process()
     for _ in range(50):
         e.update(True, alone=True)
-    assert e.update(False, alone=True)["alarm"]     # the default bet: one failure alone at 5 % is still an alarm
+    assert e.update(False, alone=True)["alarm"]     # the old bet: one failure alone at 5 % is an alarm
     assert Certificate(promise=0.1, alternatives=(2, 3)).to_dict()["alternatives"] == [2.0, 3.0]
 
 
@@ -82,6 +82,17 @@ def test_a_doubled_rate_is_caught():
     assert caught >= 48
 
 
-def test_default_level_with_alternatives_is_five_over_delta():
-    assert Certificate(promise=0.1, delta=0.1, alternatives=(1.5, 2.0)).alarm == pytest.approx(50.0)
-    assert Certificate(promise=0.1, delta=0.1).alarm == pytest.approx(10.0)
+def test_the_default_alarm_bets_on_breaks_at_level_fifty():
+    c = Certificate(promise=0.1, delta=0.1)
+    assert c.alternatives == (1.5, 2.0) and c.alarm == pytest.approx(50.0)
+    assert c.to_dict()["alternatives"] == [1.5, 2.0]
+    assert Certificate(promise=0.1, delta=0.05).alarm == pytest.approx(50.0)      # the level does not follow delta
+    assert Certificate(promise=0.1, delta=0.1, alternatives=None).alarm == pytest.approx(10.0)   # old alarm: 1/delta
+    assert Certificate(promise=0.1, alarm=300).alarm == pytest.approx(300.0)
+
+
+def test_one_failure_at_a_small_promise_is_no_longer_an_alarm():
+    e = Certificate(promise=0.05).process()
+    for _ in range(50):
+        e.update(True, alone=True)
+    assert not e.update(False, alone=True)["alarm"]

@@ -168,13 +168,23 @@ def test_the_certificate_needs_its_clean_outcomes_and_once_certified_stays_certi
 
 
 def test_the_alarm_on_alone_outcomes_restarts_the_process():
+    # the default alarm: CUSUMs against 1.5x and 2x the promise, level 50 — a run of failures, not one failure
     e = Certificate(promise=0.05, delta=0.1).process()
+    for _ in range(50):
+        e.update(True, alone=True)
+    assert e.certified
+    evs = [e.update(False, alone=True)["alarm"] for _ in range(7)]   # mean(1.5^k, 2^k): 37.7 at k=6, 72.6 at k=7
+    assert evs == [False] * 6 + [True] and not e.certified and e.alarms == 1 and e.remaining() == 50
+
+
+def test_the_old_alarm_on_alone_outcomes_restarts_the_process():
+    e = Certificate(promise=0.05, delta=0.1, alternatives=None).process()
     for _ in range(50):
         e.update(True, alone=True)
     assert e.certified
     ev = e.update(False, alone=True)                 # at 5%, one failure alone is an alarm (e-detector ≥ 1/δ)
     assert ev["alarm"] and not e.certified and e.alarms == 1 and e.remaining() == 50
-    e2 = Certificate(promise=0.3, delta=0.1).process()
+    e2 = Certificate(promise=0.3, delta=0.1, alternatives=None).process()
     for _ in range(e2.cert.need):
         e2.update(True, alone=True)
     assert e2.certified and not e2.update(False, alone=True)["alarm"]   # at 30% one failure is not enough
@@ -229,11 +239,13 @@ def test_match_is_the_most_specific_certified_skill_and_retirement_and_recertifi
         ks.observe(specific, True, alone=False)
     assert ks.match(s, "door") is specific
     ev = None
-    for _ in range(3):
+    n_fail = 0
+    for _ in range(12):        # the default alarm at promise 0.5 bets on 1.5x only: 1.5^k >= 50 at the 10th failure
         ev = ks.observe(specific, False, alone=True, state=s)
+        n_fail += 1
         if specific.status == "retired":
             break
-    assert specific.status == "retired" and ev["retired"] and ks.match(s, "door") is general
+    assert specific.status == "retired" and ev["retired"] and ks.match(s, "door") is general and n_fail == 10
     assert specific in ks.retired()
     for _ in range(2):
         ev = ks.observe(specific, True, alone=False)
