@@ -589,17 +589,32 @@ class FreshEnvironments:
     (a policy that raises); (3) replay — the candidate replays its first `replay` selection worlds with the same
     actions; (4) confirmation — on `confirm`, the bootstrap lower bound of the paired gain is > `min_lower`; (5)
     progress not lower — the upper bound of the paired progress change on `confirm` is ≥ −`progress_tolerance`
-    (a rule that makes the agent overcautious is refused). Everything measured is recorded."""
+    (a rule that makes the agent overcautious is refused). Everything measured is recorded.
+
+    handed_over (opt-in): `handed_over(row)` → bool, a world the candidate handed over (abstained, escalated). When
+    progress is the share answered, an honest change that hands over more is "lower progress" and was refused: with
+    handed_over, such a world takes the version in force's progress in the progress comparison (a refusal is neither
+    progress nor regress; its score — a failure avoided — still counts). Recorded as "handed_over" per set."""
     name = "fresh_environments"
 
     def __init__(self, env: Callable, agent: Callable, *, select, confirm, score: Callable | None = None,
                  progress: Callable | None = None, max_steps: int = 200, boot: int = 2000, seed: int = 0,
-                 min_lower: float = 0.0, progress_tolerance: float = 0.0, replay: int = 2):
+                 min_lower: float = 0.0, progress_tolerance: float = 0.0, replay: int = 2,
+                 handed_over: Callable | None = None):
         self.env, self.agent, self.select, self.confirm = env, agent, select, confirm
         self.score = score or (lambda r: 0.0 if r["failed"] else 1.0)
         self.progress = progress or (lambda r: r["progress"])
         self.max_steps, self.boot, self.seed = max_steps, boot, seed
         self.min_lower, self.progress_tolerance, self.replay = min_lower, progress_tolerance, replay
+        self.handed_over = handed_over
+
+    def _progress(self, rb, rc):
+        """The paired progress lists; a world the candidate handed over takes the base's progress (with handed_over)."""
+        pb = [self.progress(r) for r in rb]
+        if self.handed_over is None:
+            return pb, [self.progress(r) for r in rc], None
+        ho = [bool(self.handed_over(r)) for r in rc]
+        return pb, [b if h else self.progress(r) for b, h, r in zip(pb, ho, rc)], sum(ho)
 
     def _seeds(self, s, change, ctx):
         return list(s(change, ctx) if callable(s) else s)
@@ -636,10 +651,12 @@ class FreshEnvironments:
         errs = sum(r["errors"] for r in cc)
         cm, clo, chi = paired_bootstrap([self.score(r) for r in cb], [self.score(r) for r in cc], boot=self.boot,
                                         seed=self.seed + 1)
-        pm, plo, phi = paired_bootstrap([self.progress(r) for r in cb], [self.progress(r) for r in cc], boot=self.boot,
-                                        seed=self.seed + 2)
+        pb, pc, ho = self._progress(cb, cc)
+        pm, plo, phi = paired_bootstrap(pb, pc, boot=self.boot, seed=self.seed + 2)
         meas["confirm"] = {"worlds": len(conf), "gain": [cm, clo, chi], "progress": [pm, plo, phi],
                            "failed": [sum(r["failed"] for r in cb), sum(r["failed"] for r in cc)]}
+        if ho is not None:
+            meas["confirm"]["handed_over"] = ho
         if errs:
             return StageVerdict.refuse(f"the candidate's rules crashed in {errs} confirmation world(s)", meas)
         if clo <= self.min_lower:
