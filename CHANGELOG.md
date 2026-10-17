@@ -183,7 +183,9 @@ reproduction.
 - `diff` names both causes when a part's own code and a function it calls changed; traces record each calling part's own
   fingerprint. Older records keep the old wording.
 - Example 26 (a build update through the change pipeline) holds on build seeds 0–4 with the default split: a hard check
-  sends refunds larger than the order to a person, and those requests are the refusal set.
+  sends refunds larger than the order to a person, and those requests are the refusal set. Its canaries allow one
+  request of slack against the 2 % promise: 100 draws cannot tell 2 % from 3 %, and with no slack the first update's
+  verdict turned on one canary and differed between processors.
 
 ### Added
 

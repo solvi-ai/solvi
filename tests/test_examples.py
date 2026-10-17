@@ -47,7 +47,7 @@ def test_build_head_update_through_changes():
         head = ex.BuildHead("v0")
         assert all(head.live.ask(s).answer is None for s in ex.MUST_HAND_OVER)
         stages = [KnownFailures(), SliceGuard(ex.slices, tol=0.02, min_n=30),
-                  Canaries.drawn(ex.honesty, ex.POOL, 100, baseline={"confident_error_rate": 0.02}, tolerance=0.0,
+                  Canaries.drawn(ex.honesty, ex.POOL, 100, baseline={"confident_error_rate": 0.02}, tolerance=0.01,
                                  perfect=None)]
         pipe = Pipeline(stages, None, targets=[head], approval={"update": "gate"}, refusals=ex.MUST_HAND_OVER,
                         order="cheap_first")
