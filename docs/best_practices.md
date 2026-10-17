@@ -413,6 +413,14 @@ candidates takes hundreds of rows even for a deterministic law. **The need:** a 
 not failing.** Collect more held-out rows, test fewer candidates, declare `space=`, or pass `sized=False` knowingly and
 treat the fixed bar's false accepts as the known price; the measurements above ran with `sized=False`.
 
+**The sized test assumes independent held-out rows; count support by distinct object when rows revisit the same ones.**
+The bound treats every held-out row as a fresh draw. Rows from a random walk revisit the same objects with the same
+persistent attributes, so twenty rows may be three objects seen many times: the support looks large, the binomial tail
+looks small, and a law right only on those few objects passes. On a relational stand with random-walk streams, a law
+that passed on 14 held-out rows (13 right) came from 3 (world, object) pairs and was right on 41 % of fresh rows. Draw
+the held-out states independently (fresh starts, or one row per object), or count a law's support by distinct object
+rather than by row before you read δ as a promise.
+
 **Where the world answers questions, admit by discriminating probes, not by a random sample.** The author's earlier
 research line measured that a hypothesis "certified" on 8 random held-out examples is wrong more often the larger the
 space (0, 0.105, 0.193 at 17, 1,462, 124,287 hypotheses), and that 6 queries chosen to tell the survivors apart bring
@@ -462,6 +470,16 @@ your wrong-accept cap: 0.99–0.999 held a 5 % cap at 5–10 % noise, and at 20 
 give it more answers there (at 48 it was right in 91 % with 0.4 % wrong). A wrong ε, noise that depends on the state
 and several missing laws are not measured; the mechanism is covered by
 [tests/test_laws_noise.py](../tests/test_laws_noise.py), the numbers come from synthetic worlds only.
+
+**The likelihood weight only ranks the candidates you offered; the fit check stops a wrong one being accepted when the
+true law is missing.** `noise=` compares the offered hypotheses with each other, so when the true law is not among the
+candidates the least-bad wrong one can hold all of the weight — in 1.2.0 a logged buffer alone gave it there, with no
+probe asked. The admission now also checks that the chosen law fits ε where it applies (logged rows and asked probes):
+more misses than Binomial(n, ε) allows at `fit_level` (default 0.01), or fewer than `fit_support` rows (default 1),
+returns "undetermined" with a reason that says the law does not fit the noise. When you see that reason, offer more
+candidates (a larger `k`, other atoms) rather than lowering `level`. Few rows give the check little power (two misses
+in five at ε = 0.05 pass), so raise `fit_support` if a handful of answers can decide; `fit_level=None` turns it off.
+Covered by [tests/test_laws_noise_fit.py](../tests/test_laws_noise_fit.py).
 
 **When a law may stop holding for a while and come back, suspend it instead of retiring it: `LawSet(on_fall="suspend")`;
 keep the default `reactivate_min=10` unless your observations are clean.** On synthetic streams a returning law came

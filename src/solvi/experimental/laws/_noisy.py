@@ -1,6 +1,13 @@
 """Admission by probes when an answer can be wrong (`LawSet.admit_by_probes(..., noise=ε)`): the hypotheses keep a
 weight instead of being dropped by one answer, the probes are chosen by expected information gain under that noise
-(`split(score="eig")`), and a law is accepted only when one class of hypotheses holds at least `level` of the weight."""
+(`split(score="eig")`), and a law is accepted only when one class of hypotheses holds at least `level` of the weight
+and the chosen law fits the answers at noise ε where it applies.
+
+The weight compares only the offered hypotheses with each other (a closed world): when the true law is not among the
+candidates, the least-bad wrong one can still hold all of the weight. The fit check guards that open world: on the rows
+where the chosen law applies (the logged buffer rows and the asked probes) a right law disagrees with an answer only
+by noise, so its misses follow Binomial(n, ε) at most; more misses than that allows at `fit_level` (one-sided), or
+fewer than `fit_support` such rows, and nothing is accepted."""
 from __future__ import annotations
 
 import math
@@ -10,8 +17,9 @@ from ._probes import eig, groups_of
 
 
 def admit_noisy(ls, cands, ask: Callable[[Any, Any], Any], *, pool: list, safe, budget: int, buffer, exclude,
-                read_only, cost, eq, noise: float, level: float):
-    from ._core import Admission, Transition, _key
+                read_only, cost, eq, noise: float, level: float,
+                fit_level: float | None = 0.01, fit_support: int = 1):
+    from ._core import Admission, Transition, _key, _log_tail
     from ._probes import _ro
 
     E = eq or (lambda u, v: u == v)
@@ -120,9 +128,6 @@ def admit_noisy(ls, cands, ask: Callable[[Any, Any], Any], *, pool: list, safe, 
         return undetermined(why)
     if 0 in cls[top]:
         return undetermined(f"the set without a new law is the likely class: {why}")
-    if len(ls.laws) >= ls.cap:
-        ls.capped += 1
-        return undetermined("the cap of active laws is reached")
     j = min((j for j in cls[top] if hyps[j] is not None), key=lambda j: (len(hyps[j].condition), j))
     c = hyps[j]
     rows = list(asked)
@@ -131,6 +136,20 @@ def admit_noisy(ls, cands, ask: Callable[[Any, Any], Any], *, pool: list, safe, 
     sup = [r for r in rows if _key(r.action) == _key(c.action)
            and set(c.condition) <= set(ls.grammar.true(r.state, r.action))]
     hits = sum(1 for r in sup if E(ls.apply(c.effect, r.state), r.observed))
+    if fit_level is not None:
+        n, miss = len(sup), len(sup) - hits
+        if n < fit_support:
+            return undetermined(f"too little support to check the fit: the law applies on {n} of the rows seen "
+                                f"(fit_support {fit_support}); {why}")
+        tail = math.exp(_log_tail(n, miss, e))
+        if tail < fit_level:
+            return undetermined(f"the likely law does not fit the noise: it disagrees with {miss} of the {n} answers "
+                                f"where it applies (precision {hits / n:.3f}); P[Binomial({n}, {e:g}) ≥ {miss}] = "
+                                f"{tail:.2g} < fit_level {fit_level:g} — the true law may not be among the candidates "
+                                f"({why})")
+    if len(ls.laws) >= ls.cap:
+        ls.capped += 1
+        return undetermined("the cap of active laws is reached")
     net = sum(1 for r in sup if E(ls.apply(c.effect, r.state), r.observed)
               and not E(ls.predict(r.state, r.action, disagree="first"), r.observed))
     law = ls._accept(c, born="probe", support=len(sup), hits=hits, net=net, sources=tuple(r.id for r in sup))
