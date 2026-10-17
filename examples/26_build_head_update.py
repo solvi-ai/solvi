@@ -18,7 +18,7 @@ then version 1 is rolled back with a reason, and proposing it again is refused a
     given alone, 0.2 for a hand-over, 0 for a right answer), also against the original version, so small steps do not
     add up;
   - Canaries.drawn: the confident-error rate on 100 held-out requests drawn per change by the stage's secret, against the
-    promise;
+    promise with one request of slack (100 draws cannot tell 2% from 3%; with no slack the verdict turned on one canary);
   - RefusalRegression (always on): requests that must go to a person (here: refunds larger than the order) stay with a
     person in every version;
   - the order is cheap first (Pipeline(order="cheap_first")), so a candidate the failure memory knows is not re-built.
@@ -143,7 +143,7 @@ def update(data, why):
 if __name__ == "__main__":
     head = BuildHead("v0")
     stages = [KnownFailures(), SliceGuard(slices, tol=0.02, min_n=30),
-              Canaries.drawn(honesty, POOL, 100, baseline={"confident_error_rate": 0.02}, tolerance=0.0, perfect=None)]
+              Canaries.drawn(honesty, POOL, 100, baseline={"confident_error_rate": 0.02}, tolerance=0.01, perfect=None)]
     with tempfile.TemporaryDirectory() as tmp:
         pipe = Pipeline(stages, Path(tmp) / "changes.jsonl", targets=[head], approval={"update": "gate"},
                         refusals=MUST_HAND_OVER, order="cheap_first")
