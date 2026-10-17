@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+- **`admit_by_probes(..., noise=ε)` no longer accepts a law that does not fit the noise.** The likelihood weight compares
+  only the candidates offered, so when the true law was not among them the least-bad wrong one could win — a logged
+  buffer alone accepted a law right on about half of the rows where it fired, with no probe asked. Before accepting, the
+  chosen law is now checked against ε on the rows where it applies (logged rows and asked probes): more misses than
+  Binomial(n, ε) allows at `fit_level` (new, default 0.01), or fewer such rows than `fit_support` (new, default 1),
+  gives "undetermined" with the reason "the likely law does not fit the noise …" (or "too little support to check the
+  fit …"). Where the right law is offered the outcome is unchanged. `fit_level=None` restores the old behaviour.
+
+### Docs
+- Best practices, laws: the sized held-out test assumes independent rows; rows that revisit the same objects (random
+  walks) overstate the support — draw held-out states independently or count support by distinct object. Also a note
+  on the fit check of the noisy admission.
+
 ## 1.2.0 — 2026-10-17 — stricter defaults, mutants for your cases, the extractor without torch
 
 What matters most, in one place (details in the sections below; every number is measured once and said where):

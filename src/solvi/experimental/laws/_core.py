@@ -1088,7 +1088,8 @@ class LawSet:
                         order: str = "split", unique: bool = True, seed: int = 0, tol: float | None = None,
                         same: Callable[[Any, Any], bool] | None = None, assume_one_law: bool = False,
                         rtol: float | None = None, coverage: str = "warn", max_new: int | None = None,
-                        noise: float | None = None, level: float = 0.95) -> Admission:
+                        noise: float | None = None, level: float = 0.95, fit_level: float | None = 0.01,
+                        fit_support: int = 1) -> Admission:
         """Admit one of `candidates` by asking the world where they disagree (CEGIS-style), not by a random held-out
         sample. ask(state, action) → the observation (the environment, or an exact model of it); probes: the (state,
         action) pairs you may ask about (a finite pool; also what the equivalence classes are computed on); safe:
@@ -1166,7 +1167,20 @@ class LawSet:
         law, else "undetermined". It assumes one law is missing (the witness guard is not used), the noise is
         independent between answers, and ε is known; `coverage` is not checked and `classes` lists every class (no
         class is dropped). order="split", unique=True and max_new=None only. Logged `buffer` rows count as answers
-        under the same noise."""
+        under the same noise.
+
+        The weight compares only the offered hypotheses with each other (a closed world): it says which candidate is
+        least bad, not that it is right. When the true law is not among the candidates, a wrong one can hold all of the
+        weight — in 1.2.0, with the hidden law x0 ∧ x1 not offered, 200 logged rows gave "x0" all of it and it was
+        accepted with 0 probes asked, right on 56 of the 101 rows where it fired at ε = 0.05
+        (tests/test_laws_noise_fit.py). So the chosen law must also fit the answers (fit_level,
+        fit_support; the open-world guard): on the rows where it applies (logged buffer rows of its action, every
+        group but `exclude`, and the asked probes) a right law misses only by noise, at most Binomial(n, ε). With m
+        misses on n rows, P[Binomial(n, ε) ≥ m] < fit_level (default 0.01: a right law with independent answers and
+        the stated ε is refused by this check at most 1 % of the time), or n < fit_support (default 1), gives
+        "undetermined" with a reason that says the likely law does not fit the noise (or that there is too little
+        support to check the fit). Few rows give the check little power — two misses in five at ε = 0.05 still pass —
+        so raise fit_support when a few answers can carry the weight. fit_level=None: no fit check (as in 1.2.0)."""
         if noise is not None:
             if not 0.0 < float(noise) < 0.5:
                 raise ValueError("noise is the chance an answer is wrong: 0 < noise < 0.5 (None: answers are exact)")
@@ -1174,6 +1188,10 @@ class LawSet:
                 raise ValueError("level is a probability strictly between 0 and 1")
             if order != "split" or not unique or max_new is not None:
                 raise ValueError("noise= takes order='split', unique=True and max_new=None")
+            if fit_level is not None and not 0.0 <= float(fit_level) < 1.0:
+                raise ValueError("fit_level is a probability 0 ≤ fit_level < 1, or None (no fit check)")
+            if int(fit_support) < 0:
+                raise ValueError("fit_support is a number of rows ≥ 0")
         if order not in ("split", "random"):
             raise ValueError(f"order is 'split' or 'random', not {order!r}")
         if max_new not in (None, 1, 2):
@@ -1200,7 +1218,9 @@ class LawSet:
         if noise is not None:
             from ._noisy import admit_noisy
             return admit_noisy(self, cands, ask, pool=pool, safe=safe, budget=budget, buffer=buffer, exclude=exclude,
-                               read_only=read_only, cost=cost, eq=eq, noise=float(noise), level=float(level))
+                               read_only=read_only, cost=cost, eq=eq, noise=float(noise), level=float(level),
+                               fit_level=None if fit_level is None else float(fit_level),
+                               fit_support=int(fit_support))
         if max_new == 2:
             from ._versions import admit_up_to_two
             return admit_up_to_two(self, cands, ask, pool=pool, safe=safe, budget=budget, buffer=buffer,
