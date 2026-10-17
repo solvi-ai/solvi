@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.2.1 — unreleased
 
 ### Fixed
 - **`admit_by_probes(..., noise=ε)` no longer accepts a law that does not fit the noise.** The likelihood weight compares
