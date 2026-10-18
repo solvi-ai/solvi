@@ -39,6 +39,34 @@
   admitted, retired by the check and re-admitted in every round by default (1,500 of 1,500 admissions); with
   held_out, 0; the right law on an unbiased pool was never refused (300 of 300, also with 5% flipped answers).
   Opt-in; experimental until a second task confirms it.
+- **Laws (experimental): `Grammar(implies=...)` — atom implications by construction** (opt-in; the default is
+  unchanged). `{atom: [implied atoms]}` or a function name → names, closed transitively, also through
+  `grammar.add(atom, implies=)`; `grammar.implied(condition)`, `grammar.check_implies(buffer)` (the rows that break a
+  declaration; a `Buffer` warns on the first). `conditions` no longer gives a condition holding an atom and one it
+  implies, and `admit_by_probes` never lists an implied atom as untested — before, `target=tree` and
+  `target=tree ∧ target blocked` could not be told apart, so `coverage="undetermined"` refused the law for ever.
+  On the gridworld with probes (`benchmarks/laws_toy.py`, `gridworld_probes`, 20 seeds, budget 8; a pool of 600
+  states with random inventories): admissions refused for an implied atom 485 → 0, laws admitted 81 → 99, probes per
+  law 26.9 → 12.5, gap closed 0.62 → 0.81, false laws on 20 fresh worlds 0 → 0; on a pool of walked states (counters
+  barely vary) 536 → 0 refusals but 0 → 0 laws: other atoms that never varied still refuse. Null buffers with a
+  declared chain: 0 of 100 false accepts, N 301 → 277 (`tests/test_laws_implies.py`).
+- **Laws (experimental, opt-in): `admit_by_probes(..., coverage="varied", coverage_on=buffer(s))`** — refuse only
+  for an untested atom that took both values on the coverage rows (and `held_out=` when given) where the shortest
+  condition holds; an atom that never varied anywhere is listed in `untested` and does not block. The rows are read
+  through atom bitsets, never scored (no N increment). Same gridworld: laws admitted 139 (random pool) and 111 (walked
+  pool, where "undetermined" admits none), gap closed 0.95 / 0.73, false laws 0 / 0 over 20 seeds — an Occam choice:
+  a law may be too general on states nobody produced (the names stay in `untested`).
+- **Laws (experimental, not yet confirmed on a second task): `LawSet(equivalent=[(e1, e2, guard_atom), ...])`** —
+  declared effect equivalences ("under `guard_atom`, e1 and e2 are one effect"; or a function
+  `(e1, e2, condition) → bool`). Candidates of one action and condition whose effects are declared one under an atom
+  the condition holds are `congruent`: `mismatch` proposes one, `test` and `admit_by_probes` merge them before
+  scoring / splitting, the accepted law lists the others in `Law.aliases`; `check_equivalent(buffer)` lists the rows
+  that contradict a declaration or an active law's aliases. A guard is required. On the gridworld with both
+  encodings of a +1 offered (relative and absolute; `siblings="undetermined"`): probes per admitted law 12.0 → 8.9
+  (random pool) and 14.3 → 10.4 (walked), laws 118 → 126 / 97 → 105, false laws 0 in both. But admissions refused
+  for congruent twins only were 0 without the declarations too and no accepted law carried an alias, so the
+  mechanism the item is for did not fire there; the gain is not attributed to it (`tests/test_laws_equivalent.py`:
+  a congruent pair accepted with 0 probes between them, 0 of 150 wrong probe admissions with a planted pair).
 - **Laws (experimental): `admit_by_probes(..., commit=False)`**, a dry run: the same decision (the probes are asked
   and counted), but the set, its `version`, `cost["accepted"]` and the next law id are left as they were; the
   returned law has status "proposed". Refusing it needs no `retire`, so `retired` keeps only laws that fell.

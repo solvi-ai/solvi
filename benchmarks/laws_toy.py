@@ -1,6 +1,7 @@
 """The law loop (solvi.experimental.laws) on two deterministic toys, each well under a minute on a laptop CPU:
 
     python benchmarks/laws_toy.py              # both, as JSON
+    python benchmarks/laws_toy.py --probes     # and 1b, the gridworld with probes (20 seeds × 5 arms × 2 pools, ~4 min)
     pytest -m slow tests/test_laws_toy.py      # the same with the bars
 
 1. gridworld() — a grid of walkable (grass, sand), blocked (stone, tree, water) and pickup (apple) cells with written
@@ -11,6 +12,12 @@
    fresh worlds). Arms: the base; the loop with the enumerating proposer; the loop with a random proposer under the same
    held-out test; the written rules (the ceiling). Reported: exact-effect accuracy on the test, the share of the gap
    between the base and the written rules the laws close, the number of laws.
+
+1b. gridworld_probes() — the same gridworld learned by `admit_by_probes` (the written rules answer the probes) from
+   each mismatch of a 300-transition stream: arms with and without `Grammar(implies=)`, `coverage="varied"`, and with
+   both encodings of a +1 offered, with and without the declared equivalences (`LawSet(equivalent=)`). Reported:
+   admissions refused for an implied atom or for congruent twins only, laws admitted, probes per law, false laws on 20
+   fresh worlds, the gap closed.
 
 2. policy() — a stateless path policy, unknown to the agent: read, list and write on paths of a sandbox are allowed,
    except relative paths, paths outside the root, a prefix sibling of the root and paths through a link to a folder or
@@ -108,7 +115,7 @@ def naive_map(state, action):
     return (action in MOVES, 0, 0, 0, "same")
 
 
-def grid_grammar():
+def grid_grammar(implies=False):
     atoms = [Atom(f"target={m}", (lambda m: lambda s, a: target(s, a)[0] == m)(m), feature="target")
              for m in ("grass", "sand", "stone", "tree", "water", "apple", "edge")]
     atoms += [Atom("target walkable", lambda s, a: target(s, a)[0] in WALKABLE, feature="walk"),
@@ -118,7 +125,14 @@ def grid_grammar():
                   Atom(f"{it}>=1", (lambda it: lambda s: s["inv"][it] >= 1)(it), feature=it),
                   Atom(f"{it}<9", (lambda it: lambda s: s["inv"][it] < 9)(it), feature=it),
                   Atom(f"{it}=9", (lambda it: lambda s: s["inv"][it] == 9)(it), feature=it)]
-    return Grammar(atoms, k=3)
+    return Grammar(atoms, k=3, implies=GRID_IMPLIES if implies else None)
+
+
+# implications by construction: a target material fixes walkable / blocked; the counter atoms (one feature each, so
+# never in one condition together) are declared as written
+GRID_IMPLIES = {**{f"target={m}": ["target walkable" if m in WALKABLE else "target blocked"]
+                   for m in ("grass", "sand", "stone", "tree", "water", "apple", "edge")},
+                **{f"{it}=9": [f"{it}>=1"] for it in ITEMS}, **{f"{it}=0": [f"{it}<9"] for it in ITEMS}}
 
 
 def accuracy(predict, rows):
@@ -163,6 +177,152 @@ def gridworld(seeds=(0, 1, 2, 3, 4), **kw):
             "arms": arms, "gap_closed": _mean([r["gap_closed"] for r in runs]),
             "random_minus_laws": arms["random"]["accuracy"] - arms["laws"]["accuracy"],
             "worst_random_minus_laws": min(r["random_minus_laws"] for r in runs), "runs": runs}
+
+
+# ───────────────────────────────────────────── 1b. the gridworld with probes (Grammar(implies=), equivalent=)
+# The written rules answer probes (`ask`); a mismatch on the training stream offers its candidates to
+# `admit_by_probes` over a pool of (state, action) pairs from other worlds, with the logged rows as `buffer`.
+# Effects: the observation (moved, +wood, +stone, +apple, the cell after) — relative counts; with variants=True also
+# the absolute encoding ("set", moved, item, value, cell after) of a +1, so the caller does not know which encoding the
+# world uses. Declared equivalences: +1 ≡ set 1 under item=0.
+def set_effect(state, observed):
+    moved, dw, ds, da, after = observed
+    for it, d in zip(ITEMS, (dw, ds, da)):
+        if d == 1:
+            return ("set", moved, it, state["inv"][it] + 1, after)
+    return None
+
+
+def grid_apply(effect, state):
+    if effect and effect[0] == "set":
+        _, moved, it, v, after = effect
+        d = [v - state["inv"][it] if x == it else 0 for x in ITEMS]
+        return (moved, d[0], d[1], d[2], after)
+    return effect
+
+
+def grid_variants(state, observed):
+    e = set_effect(state, observed)
+    return [observed] if e is None else [observed, e]
+
+
+GRID_EQUIVALENT = [((False, 1, 0, 0, "same"), ("set", False, "wood", 1, "same"), "wood=0"),
+                   ((False, 0, 1, 0, "sand"), ("set", False, "stone", 1, "sand"), "stone=0"),
+                   ((True, 0, 0, 1, "grass"), ("set", True, "apple", 1, "grass"), "apple=0")]
+
+PROBE_ARMS = {
+    # gap 4: the same loop with and without the declared implications
+    "base": dict(implies=False, coverage="undetermined"),
+    "implies": dict(implies=True, coverage="undetermined"),
+    "varied": dict(implies=True, coverage="varied"),
+    # gap 10: both encodings offered; siblings="undetermined" (else the order picks between twins)
+    "variants": dict(implies=True, coverage="varied", variants=True, siblings="undetermined"),
+    "equivalent": dict(implies=True, coverage="varied", variants=True, siblings="undetermined", equivalent=True),
+}
+
+
+def _ref():
+    """A reference set with every declaration, to classify refusals (it admits nothing)."""
+    return LawSet(grid_grammar(implies=True), base=naive_map, apply=grid_apply, equivalent=GRID_EQUIVALENT)
+
+
+def _congruent_only(ref, adm):
+    """An admission refused only because its surviving class holds congruent twins (same condition, effects
+    declared one under an atom it holds)."""
+    if adm.status != "undetermined" or len(adm.classes) != 1 or "cannot tell apart" not in adm.why:
+        return False
+    j, *rest = adm.classes[0]
+    twins = [c for c in rest if len(c.condition) == len(j.condition)]
+    return bool(twins) and all(ref.congruent(j, c) for c in twins)
+
+
+def probe_pool(seed, pool_worlds, steps, inventory="walk"):
+    """(state, action) pairs from random walks on other worlds; inventory="random": each state's counters redrawn
+    uniformly from 0..9 (a pool where every counter atom varies), "walk": as the walker had them."""
+    pool = [(t.state, t.action) for w in range(pool_worlds) for t in episode(1000 * seed + 300 + w, steps)]
+    if inventory == "random":
+        rng = random.Random(f"pool-{seed}")
+        pool = [({**s, "inv": {it: rng.randrange(10) for it in ITEMS}}, a) for s, a in pool]
+    return pool
+
+
+def gridworld_probes_one(seed=0, arm="implies", train_worlds=3, steps=100, pool_worlds=3, cover_worlds=10,
+                         test_worlds=20, budget=8, inventory="walk"):
+    cfg = PROBE_ARMS[arm]
+    g = grid_grammar(implies=cfg.get("implies", False))
+    train = [t for w in range(train_worlds) for t in episode(1000 * seed + w, steps)]
+    pool = probe_pool(seed, pool_worlds, steps, inventory)
+    cover = Buffer(g)
+    for w in range(cover_worlds):
+        cover.extend(episode(1000 * seed + 100 + w, steps))
+    test = [t for w in range(test_worlds) for t in episode(1000 * seed + 200 + w, steps)]
+    ls = LawSet(g, base=naive_map, apply=grid_apply, effects=grid_variants if cfg.get("variants") else None,
+                equivalent=GRID_EQUIVALENT if cfg.get("equivalent") else None)
+    ref, rg = _ref(), grid_grammar(implies=True)
+    buf = Buffer(g)
+    rec = {"admissions": 0, "accepted": 0, "undetermined": 0, "implied_refusals": 0, "congruent_only": 0,
+           "probes": 0, "with_aliases": 0}
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        for t in train:
+            ls.observe(t)
+            buf.add(t)
+            if ls.agrees(ls.predict(t.state, t.action), t.observed):
+                continue
+            cands = ls.mismatch(t.state, t.action, t.observed)
+            if not cands:
+                continue
+            adm = ls.admit_by_probes(cands, written, probes=pool, buffer=buf, budget=budget,
+                                     coverage=cfg["coverage"], siblings=cfg.get("siblings", "shortest"),
+                                     coverage_on=cover if cfg["coverage"] == "varied" else None)
+            rec["admissions"] += 1
+            rec["probes"] += len(adm.asked)
+            if adm.status == "accepted":
+                rec["accepted"] += 1
+                rec["with_aliases"] += bool(adm.law.aliases)
+            else:
+                rec["undetermined"] += 1
+                if adm.untested and adm.classes and set(adm.untested) & rg.implied(adm.classes[0][0].condition):
+                    rec["implied_refusals"] += 1
+                rec["congruent_only"] += _congruent_only(ref, adm)
+    false = set()
+    for t in test:
+        law = ls.applied(t.state, t.action)
+        if law is not None and grid_apply(law.effect, t.state) != t.observed:
+            false.add(law.id)
+    acc = accuracy(ls.predict, test)
+    base, top = accuracy(naive_map, test), accuracy(written, test)
+    rec.update({"seed": seed, "arm": arm, "inventory": inventory, "laws": len(ls.laws), "retired": len(ls.retired),
+                "false_laws": len(false), "false_examples": [x.text() for x in ls.laws if x.id in false][:4],
+                "accuracy": acc, "base": base, "gap_closed": (acc - base) / (top - base) if top > base else None,
+                "probes_per_law": rec["probes"] / rec["accepted"] if rec["accepted"] else None})
+    return rec
+
+
+def gridworld_probes(seeds=tuple(range(20)), arms=tuple(PROBE_ARMS), **kw):
+    """Every arm on every seed → per run and per arm (sums; means of accuracy and gap closed). Measured (20 seeds,
+    budget 8; pool "random": 600 pairs with random inventories / "walk": 300 pairs as walked): implied-atom refusals
+    base 485 / 536 → 0 with implies; laws admitted 81 → 99 (varied 139) / 0 → 0 (varied 111); gap closed 0.62 → 0.81
+    (varied 0.95) / 0 → 0 (varied 0.73); both encodings offered: probes per admitted law 12.0 → 8.9 / 14.3 → 10.4
+    with the equivalences, laws 118 → 126 / 97 → 105, refusals with congruent-only twins 0 in both arms; false laws
+    on the fresh worlds 0 in every arm and seed."""
+    runs = [gridworld_probes_one(s, a, **kw) for s in seeds for a in arms]
+    return {"toy": "gridworld_probes", "seeds": list(seeds), "arms": _probe_summary(runs), "runs": runs}
+
+
+def _probe_summary(runs):
+    out = {}
+    for a in dict.fromkeys(r["arm"] for r in runs):
+        rs = [r for r in runs if r["arm"] == a]
+        sums = {k: sum(r[k] for r in rs) for k in ("admissions", "accepted", "undetermined", "implied_refusals",
+                                                   "congruent_only", "probes", "with_aliases", "false_laws",
+                                                   "laws")}
+        sums["probes_per_law"] = sums["probes"] / sums["accepted"] if sums["accepted"] else None
+        sums["accuracy"] = _mean([r["accuracy"] for r in rs])
+        sums["gap_closed"] = _mean([r["gap_closed"] for r in rs])
+        sums["seeds_with_false_laws"] = sum(r["false_laws"] > 0 for r in rs)
+        out[a] = sums
+    return out
 
 
 # ───────────────────────────────────────────── 2. the path policy
@@ -361,8 +521,11 @@ def _random_probes(ls, buf, rng, space, n, si, step):
 
 def main(argv=None):
     out = {"gridworld": gridworld(), "policy": policy()}
+    if "--probes" in (argv or []):
+        out["gridworld_probes"] = {inv: gridworld_probes(inventory=inv, pool_worlds=pw)
+                                   for inv, pw in (("random", 6), ("walk", 3))}
     for r in out.values():
-        for run in r["runs"]:
+        for run in r.get("runs", []):
             for a in run["arms"].values():
                 a.pop("examples", None)
     print(json.dumps(out, indent=2))

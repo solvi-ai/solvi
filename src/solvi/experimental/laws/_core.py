@@ -53,9 +53,27 @@ class Grammar:
     atom names, at most `k`, at most one per feature; the empty condition () holds everywhere. min_k (default 0): the
     fewest atoms a condition has — min_k=1 forbids the empty condition (a law must name at least one atom), so
     `conditions`, `random_condition` and `check` never give one and `LawSet.mismatch`, `test` and `admit_by_probes`
-    drop a shorter candidate."""
+    drop a shorter candidate.
 
-    def __init__(self, atoms: Iterable[Atom], k: int = 3, *, min_k: int = 0):
+    implies (opt-in, default None): atom implications by construction — {atom name: [the atom names it implies]} or a
+    function name → the names it implies; closed transitively (`a ⇒ b`, `b ⇒ c` gives `a ⇒ c`), also over atoms added
+    later (`add(atom, implies=...)`). An implied atom adds nothing to a condition, so `conditions` never gives a
+    condition holding an atom and one it implies (`x>=2 ∧ x>=1` is `x>=2`: fewer candidates, a smaller N), and
+    `admit_by_probes` never lists an atom the accepted condition implies as untested (without a declaration a
+    property atom that implies an object atom is "untested" for ever: it never varies where the property holds, and
+    `coverage="undetermined"` refuses every such law). A wrong declaration would hide a genuinely untested atom, so a
+    `Buffer` warns on the first row that breaks one (`a` true, `b` false; `check_implies` lists them all)."""
+
+    def __init__(self, atoms: Iterable[Atom], k: int = 3, *, min_k: int = 0,
+                 implies: dict | Callable | None = None):
+        if implies is not None and not (callable(implies) or isinstance(implies, dict)):
+            raise ValueError("implies is None, a dict {atom name: [implied atom names]} or a function name → names")
+        self._implies_fn = implies if callable(implies) else None
+        self._implies: dict[str, set] = {}                       # declared, direct: name → names it implies
+        self._closure: dict[str, frozenset] = {}                 # transitive closure, built lazily
+        if isinstance(implies, dict):
+            for a, bs in implies.items():
+                self._declare(a, bs)
         self.atoms: list[Atom] = []
         self.k = int(k)
         self.min_k = int(min_k)
@@ -67,16 +85,93 @@ class Grammar:
         for a in atoms:
             self.add(a)
 
-    def add(self, atom: Atom) -> Atom:
+    def add(self, atom: Atom, *, implies: Iterable[str] | None = None) -> Atom:
         """Append an atom (a proposer may invent one, e.g. a relational atom). A buffer built before evaluates it on
-        its older rows when a condition first names it. ValueError if the name is taken."""
+        its older rows when a condition first names it. ValueError if the name is taken. implies: the atom names it
+        implies (added to the grammar's declarations, see `Grammar`)."""
         if atom.name in self.by_name:
             raise ValueError(f"two atoms are named {atom.name!r}")
+        if implies is not None:
+            self._declare(atom.name, implies)
         self.position[atom.name] = len(self.atoms)
         self.atoms.append(atom)
         self.by_name[atom.name] = atom
         self.feature[atom.name] = atom.feature
         return atom
+
+    def _declare(self, a, bs):
+        bs = [bs] if isinstance(bs, str) else list(bs)
+        a = str(a)
+        for b in bs:
+            if str(b) == a:
+                raise ValueError(f"an atom implies itself trivially: {a!r}")
+        self._implies.setdefault(a, set()).update(str(b) for b in bs)
+        self._closure = {}
+
+    @property
+    def has_implies(self) -> bool:
+        """Some implication is declared."""
+        return bool(getattr(self, "_implies", None)) or getattr(self, "_implies_fn", None) is not None
+
+    def implies_of(self, name: str) -> frozenset:
+        """The atoms `name` implies, transitively (without itself)."""
+        if not self.has_implies:
+            return frozenset()
+        name = str(name)
+        got = self._closure.get(name)
+        if got is not None:
+            return got
+        out, todo = set(), [name]
+        while todo:
+            x = todo.pop()
+            direct = set(self._implies.get(x, ()))
+            if self._implies_fn is not None:
+                direct |= {str(b) for b in (self._implies_fn(x) or ())}
+            for b in direct:
+                if b not in out and b != name:
+                    out.add(b)
+                    todo.append(b)
+        got = frozenset(out)
+        self._closure[name] = got
+        return got
+
+    def implied(self, condition) -> frozenset:
+        """Every atom the condition implies and does not hold itself (empty without `implies`)."""
+        cond = {str(x) for x in condition}
+        out = set()
+        for x in cond:
+            out |= self.implies_of(x)
+        return frozenset(out - cond)
+
+    def redundant(self, condition) -> bool:
+        """The condition holds an atom and one it implies (`conditions` never gives one)."""
+        cond = {str(x) for x in condition}
+        return any(self.implies_of(x) & cond for x in cond)
+
+    def check_implies(self, buffer: "Buffer") -> list[tuple[str, str, list]]:
+        """The declared implications `a ⇒ b` (transitive ones too) that logged rows of `buffer` contradict — `a` true
+        and `b` false on the row → [(a, b, the row ids)], over every action. Empty without `implies`."""
+        out = []
+        if not self.has_implies:
+            return out
+        for act in list(buffer._rows):
+            rows = buffer._rows[act]
+            if not rows:
+                continue
+            for a in [x.name for x in self.atoms]:
+                bs = self.implies_of(a)
+                if not bs:
+                    continue
+                ma = buffer.match(act, (a,))
+                if not ma:
+                    continue
+                for b in sorted(bs):
+                    if b not in self.by_name:
+                        continue
+                    bad = ma & ~buffer.match(act, (b,))
+                    if bad:
+                        out.append((a, b, buffer.ids(act, bad)))
+        return out
 
     def true(self, state, action) -> tuple[str, ...]:
         """The names of the atoms true for `action` in `state`, sorted."""
@@ -103,12 +198,14 @@ class Grammar:
         return len(tuple(condition)) >= getattr(self, "min_k", 0)
 
     def conditions(self, true: Iterable[str]) -> list[tuple[str, ...]]:
-        """Every condition built from the atoms `true` (in size order, then by name): what holds in one state."""
+        """Every condition built from the atoms `true` (in size order, then by name): what holds in one state. With
+        `implies`, none that holds an atom and one it implies."""
         names = sorted(set(true))
         out = []
+        imp = self.has_implies
         for size in range(getattr(self, "min_k", 0), min(self.k, len(names)) + 1):
             for c in combinations(names, size):
-                if len({self.feature[x] for x in c}) == size:
+                if len({self.feature[x] for x in c}) == size and not (imp and self.redundant(c)):
                     out.append(c)
         return out
 
@@ -177,9 +274,9 @@ class Buffer:
     law (10 worlds of 3 objects with 8 persistent atoms and a persistent coin outcome, 20 random-walk rows per world,
     the 72 candidates of up to two atoms; 1,000 buffers): a law was accepted in 872 by default (support about 20–26
     rows from a few objects) and in 0 with dedup=True; where a law exists (pass exactly where a0 & a1, 20 worlds) the
-    right law was the first accepted in 591 of 1,000 with dedup and 473 without. The bound then assumes distinct
-    situations are independent draws; rows of one situation with different observations (a stochastic outcome) are
-    kept. With a window, a situation that leaves may be added again."""
+    right law was the first accepted in 591 of 1,000 with dedup and 473 without (tests/test_laws_dedup_heldout.py).
+    The bound then assumes distinct situations are independent draws; rows of one situation with different
+    observations (a stochastic outcome) are kept. With a window, a situation that leaves may be added again."""
 
     def __init__(self, grammar: Grammar, window: int | None = None, *, dedup: bool | Callable = False):
         if window is not None and int(window) < 1:
@@ -234,8 +331,12 @@ class Buffer:
         rows.append(t)
         self._width.setdefault(a, []).append(len(self.grammar.atoms))
         atoms = self._atoms.setdefault(a, {})
-        for name in (true if true is not None else self.grammar.true(t.state, t.action)):
+        if true is None:
+            true = self.grammar.true(t.state, t.action)
+        for name in true:
             atoms[name] = atoms.get(name, 0) | bit
+        if getattr(self.grammar, "has_implies", False):
+            self._check_implies(t, true)
         g = _key(t.group)
         groups = self._groups.setdefault(a, {})
         groups[g] = groups.get(g, 0) | bit
@@ -250,6 +351,18 @@ class Buffer:
             while self.n > self.window:
                 self._drop_oldest()
         return True
+
+    def _check_implies(self, t, true):
+        """A row that breaks a declared implication (`a` true, `b` false): warn once per (a, b) on this buffer."""
+        T = set(true)
+        warned = self.__dict__.setdefault("_implies_warned", set())
+        for x in true:
+            for b in self.grammar.implies_of(x):
+                if b not in T and b in self.grammar.by_name and (x, b) not in warned:
+                    warned.add((x, b))
+                    warnings.warn(f"Buffer: row {t.id!r} breaks the declared implication {x!r} ⇒ {b!r} ({x!r} true, "
+                                  f"{b!r} false) — a wrong declaration hides an untested atom from coverage; "
+                                  f"grammar.check_implies(buffer) lists every such row", UserWarning, stacklevel=3)
 
     def _drop_oldest(self):
         """The oldest row leaves: its action's bitsets shift down one bit (bit 0 is the oldest row kept)."""
@@ -411,7 +524,9 @@ class Law:
     told apart from); null: the null precision it was tested against (the effect's base rate, or the set's fixed
     null); need: the clean support the sized rule asked for at that N; level:
     the per-candidate error level δ_N it passed (None: fixed thresholds, `sized=False`, or a law added by hand);
-    admitted: "test" (the held-out buffer), "probes" (`admit_by_probes`) or "hand" (`add`)."""
+    admitted: "test" (the held-out buffer), "probes" (`admit_by_probes`) or "hand" (`add`). aliases: the effects
+    declared one with `effect` under the law's condition (`LawSet(equivalent=)`) and merged into it; `effect` (the
+    first candidate given) is the one applied."""
     id: str
     action: Any
     condition: tuple
@@ -434,6 +549,7 @@ class Law:
     level: float | None = None
     null: float | None = None
     admitted: str = "test"
+    aliases: tuple = ()
     recent: Any = field(default=None, repr=False)      # the last observations (1 right, 0 wrong) with LawSet(recent=)
     doubt: Any = field(default=None, repr=False)       # suspended: the last observations where it would apply
 
@@ -761,7 +877,21 @@ class LawSet:
     reactivated (`reactivated` counts) with its running counts reset — judged on fresh observations only, not on the
     buffer that retired it. `doubt_probe(probes)` names a probe where a suspended law and the set disagree (to ask
     the world, then `step` it). At most `suspended_cap` (default 50) are kept; the oldest is then retired. The test may
-    also accept the same law again (it leaves `suspended` then). `suspend(law)` / `reactivate(law)` by hand."""
+    also accept the same law again (it leaves `suspended` then). `suspend(law)` / `reactivate(law)` by hand.
+    equivalent (opt-in, experimental, default None): declared effect equivalences — [(e1, e2, guard_atom), ...]: "under
+    the atom `guard_atom`, the effects e1 and e2 are one effect" (a relative `+1` and an absolute `=1` under
+    `count=0`; a move along the facing and in the action direction under "facing = action"); or a function
+    `equivalent(e1, e2, condition)` → bool, a declaration about a whole condition for effects that are not literals.
+    Two candidates of one action and one condition whose effects are declared one under an atom the condition holds
+    are `congruent`: the same hypothesis wherever the condition holds, so no state can tell them apart. `mismatch`
+    proposes one of them (the first; fewer candidates, a smaller N), `test` and `admit_by_probes` merge them before
+    scoring / splitting, and the accepted law lists the others in `Law.aliases` — under `siblings="undetermined"` they
+    no longer count as conditions the pool cannot tell apart. Candidates whose condition does not hold the guard are
+    not congruent (the probes must separate them, as without a declaration). A guard is required (None: ValueError).
+    A declaration that is false where the guard holds is caught on rows only: `check_equivalent(buffer)` lists the
+    rows that contradict it, and a law that is wrong where its alias would be right falls by its running precision.
+    Use `effects=` variants when you do not know which encoding the world uses; `equivalent` when you know where
+    they coincide."""
 
     def __init__(self, grammar: Grammar, *, base: Callable | None = None, apply: Callable | None = None,
                  effects: Callable | None = None, proposer: Proposer | None = None, min_support: int = 5,
@@ -772,7 +902,7 @@ class LawSet:
                  ties: str = "earlier", tol: float | None = None, rtol: float | None = None,
                  same: Callable[[Any, Any], bool] | None = None, recent: int | None = None, memo: bool = False,
                  on_fall: str = "retire", reactivate_min: int = 10, suspended_cap: int = 50,
-                 rivals: bool = False):
+                 rivals: bool = False, equivalent: Iterable[tuple] | Callable | None = None):
         if disagree not in ("first", "abstain"):
             raise ValueError(f"disagree is 'first' or 'abstain', not {disagree!r}")
         if not 0.0 < float(delta) < 1.0:
@@ -804,6 +934,19 @@ class LawSet:
             null = float(null)
         self.null = null
         self.rivals = bool(rivals)
+        if equivalent is None or callable(equivalent):
+            self.equivalent = equivalent
+        else:
+            decl = []
+            for d in equivalent:
+                d = tuple(d)
+                if len(d) != 3:
+                    raise ValueError(f"an equivalence is (e1, e2, guard_atom), not {d!r}")
+                if d[2] is None:
+                    raise ValueError(f"an equivalence needs a guard atom (where the two effects coincide): {d!r}")
+                decl.append((d[0], d[1], str(d[2])))
+            self.equivalent = decl or None
+        self._aliases: dict = {}           # (action, condition, effect) of a merged candidate → its alias effects
         self.refused_rival = 0             # passing candidates refused for an indistinguishable rival (rivals=True)
         self.refused_held_out = 0          # probe admissions refused by admit_by_probes(held_out=)
         self.disagree = disagree
@@ -990,6 +1133,84 @@ class LawSet:
             return self.base(state, action) if self.base is not None else None
         return predict
 
+    # ----------------------------------------------------------------------------------- effect equivalences
+    def congruent(self, c1: Candidate, c2: Candidate) -> bool:
+        """The same action and condition, and effects declared one under an atom the condition holds (`equivalent`):
+        the two candidates predict alike wherever the condition holds. False without declarations."""
+        eq = getattr(self, "equivalent", None)
+        if eq is None or _key(c1.action) != _key(c2.action) \
+                or tuple(sorted(c1.condition)) != tuple(sorted(c2.condition)):
+            return False
+        if _key(c1.effect) == _key(c2.effect):
+            return True
+        if callable(eq):
+            return bool(eq(c1.effect, c2.effect, tuple(c1.condition)))
+        k = {_key(c1.effect), _key(c2.effect)}
+        cond = set(c1.condition)
+        return any(g in cond and {_key(e1), _key(e2)} == k for e1, e2, g in eq)
+
+    def _merge(self, cands: list) -> list:
+        """One candidate per congruence class (the first given); the others' effects go to `_aliases`."""
+        if getattr(self, "equivalent", None) is None:
+            return cands
+        out, by = [], {}
+        for c in cands:
+            head = None
+            for h in by.get((_key(c.action), tuple(sorted(c.condition))), ()):
+                if self.congruent(h, c) or any(self.congruent(Candidate(h.action, h.condition, e), c)
+                                               for e in self._aliases.get(self._ck(h), ())):
+                    head = h
+                    break
+            if head is None:
+                by.setdefault((_key(c.action), tuple(sorted(c.condition))), []).append(c)
+                out.append(c)
+            elif _key(c.effect) != _key(head.effect):
+                al = self._aliases.get(self._ck(head), ())
+                if all(_key(e) != _key(c.effect) for e in al):
+                    self._aliases[self._ck(head)] = al + (c.effect,)
+        return out
+
+    @staticmethod
+    def _ck(c):
+        return (_key(c.action), tuple(c.condition), _key(c.effect))
+
+    def check_equivalent(self, buffer: Buffer, *, warn: bool = True) -> list[tuple]:
+        """The declared equivalences that logged rows contradict → [(e1, e2, where, row ids)]: a declaration
+        (e1, e2, guard) on rows where the guard holds and `apply(e1, s)` and `apply(e2, s)` disagree (`where` = the
+        guard); and every active law's aliases on rows where its condition holds (`where` = the condition; this also
+        covers a declaring function). warn: one UserWarning naming them. Rows of every action and group."""
+        out = []
+        eq = getattr(self, "equivalent", None)
+
+        def differ(e1, e2, st):
+            try:
+                return not self.agrees(self.apply(e1, st), self.apply(e2, st))
+            except Exception:                                    # an effect that does not apply here: not one effect
+                return True
+
+        if eq is not None and not callable(eq):
+            for e1, e2, g in eq:
+                if g not in self.grammar.by_name:
+                    continue
+                for act in list(buffer._rows):
+                    rows = buffer._rows[act]
+                    m = buffer.match(act, (g,))
+                    bad = [rows[j].id for j in range(len(rows)) if m >> j & 1 and differ(e1, e2, rows[j].state)]
+                    if bad:
+                        out.append((e1, e2, g, bad))
+        for law in self.laws:
+            for e in law.aliases:
+                rows = buffer._rows.get(_key(law.action), [])
+                m = buffer.match(law.action, law.condition)
+                bad = [rows[j].id for j in range(len(rows)) if m >> j & 1 and differ(law.effect, e, rows[j].state)]
+                if bad:
+                    out.append((law.effect, e, law.condition, bad))
+        if out and warn:
+            warnings.warn(f"LawSet: {len(out)} declared effect equivalence(s) contradicted by logged rows: "
+                          + "; ".join(f"{e1!r} ≢ {e2!r} under {w!r} at {ids[:5]}" for e1, e2, w, ids in out),
+                          UserWarning, stacklevel=2)
+        return out
+
     # ----------------------------------------------------------------------------------- mismatch → candidates
     def mismatch(self, state, action, observed) -> list[Candidate]:
         """No mismatch (the prediction is the observation) → []; else the proposer's candidates, without the laws
@@ -999,8 +1220,8 @@ class LawSet:
         active = {(_key(law.action), law.condition, _key(law.effect)) for law in self.laws}
         proposed = list(self.proposer.propose(self, state, action, observed))
         self.cost["candidates"] += len(proposed)
-        return [c for c in proposed if (_key(c.action), tuple(c.condition), _key(c.effect)) not in active
-                and self.grammar.allows(c.condition)]
+        return self._merge([c for c in proposed if (_key(c.action), tuple(c.condition), _key(c.effect)) not in active
+                            and self.grammar.allows(c.condition)])
 
     # ----------------------------------------------------------------------------------- the held-out test
     def _effect_mask(self, buffer, action, effect):
@@ -1145,7 +1366,7 @@ class LawSet:
         included — and net > 0. Best: the largest net, then fewer atoms, then the higher precision, then the earlier
         candidate. → the accepted laws. The check after each acceptance may retire laws (the accepted one too):
         they are in `last_retired` (and in `Step.retired` when `step` ran the test)."""
-        candidates = [c for c in candidates if self.grammar.allows(c.condition)]
+        candidates = self._merge([c for c in candidates if self.grammar.allows(c.condition)])
         self.last_retired = []
         if self.readmit == "grown" and self._retired_at:
             candidates = self._not_readmitted(candidates, buffer)
@@ -1259,7 +1480,8 @@ class LawSet:
                         rtol: float | None = None, coverage: str = "warn", max_new: int | None = None,
                         noise: float | None = None, level: float = 0.95, fit_level: float | None = 0.01,
                         fit_support: int = 1, commit: bool = True, siblings: str = "shortest",
-                        held_out: Buffer | None = None) -> Admission:
+                        held_out: Buffer | None = None, coverage_on: Buffer | Iterable[Buffer] | None = None
+                        ) -> Admission:
         """Admit one of `candidates` by asking the world where they disagree (CEGIS-style), not by a random held-out
         sample. ask(state, action) → the observation (the environment, or an exact model of it); probes: the (state,
         action) pairs you may ask about (a finite pool; also what the equivalence classes are computed on); safe:
@@ -1312,7 +1534,14 @@ class LawSet:
         (a pool where every state is next to the table admits "make & wood ≥ 1 → pickaxe" without "near table";
         the probes agree with both, so the shortest is taken). "warn" (the default): accept as before, list the atoms
         in `Admission.untested` and warn; "undetermined": refuse to accept, with the atoms in `untested`; "ignore":
-        accept silently (before 1.2). Give the pool states where those atoms vary to settle it.
+        accept silently (before 1.2). Give the pool states where those atoms vary to settle it. An atom the
+        shortest condition implies (`Grammar(implies=)`) is never listed: it cannot vary where the condition holds.
+        "varied" (opt-in, experimental): refuse only for an untested atom that took both values on some row of
+        `coverage_on` (one Buffer or several; and of `held_out` when given) where the shortest condition holds — the
+        evidence exists elsewhere in the history and the pool missed it; an atom that never varied anywhere is listed
+        in `untested` and does not block (the shorter law is taken, Occam). Those rows are read through their atom
+        bitsets only (no test, no N increment); with no `coverage_on` / `held_out`, the pool and `buffer=` are all the
+        evidence and nothing blocks.
 
         Measured on a synthetic world (10 binary features, 20 atoms, k = 3; the hidden law a random conjunction of two
         atoms; the 176 candidates Enumerate proposes from one state where it fires; a pool of 200 random states; 300
@@ -1402,14 +1631,20 @@ class LawSet:
             raise ValueError("max_new=2 takes order='split' and unique=True")
         if max_new == 1:
             assume_one_law = True
-        if coverage not in ("warn", "undetermined", "ignore"):
-            raise ValueError(f"coverage is 'warn', 'undetermined' or 'ignore', not {coverage!r}")
+        if coverage not in ("warn", "undetermined", "ignore", "varied"):
+            raise ValueError(f"coverage is 'warn', 'undetermined', 'varied' or 'ignore', not {coverage!r}")
+        if coverage_on is not None:
+            coverage_on = [coverage_on] if isinstance(coverage_on, Buffer) else list(coverage_on)
+            if not all(isinstance(b, Buffer) for b in coverage_on):
+                raise ValueError("coverage_on is a Buffer or an iterable of Buffers")
         if siblings not in ("shortest", "undetermined"):
             raise ValueError(f"siblings is 'shortest' or 'undetermined', not {siblings!r}")
         if siblings == "undetermined" and max_new == 2:
             raise ValueError("siblings='undetermined' takes max_new=None or 1")
         if held_out is not None:
             kw = {k: v for k, v in locals().items() if k not in ("self", "candidates", "ask", "commit", "held_out")}
+            if coverage == "varied":
+                kw["coverage_on"] = list(coverage_on or []) + [held_out]
             return self._held_out_admission(lambda: self.admit_by_probes(candidates, ask, **kw), held_out, exclude)
         from ._probes import groups_of, sameness, split
         eq = sameness(tol, same, rtol=rtol) if (tol, rtol, same) != (None, None, None) else self.same
@@ -1422,6 +1657,7 @@ class LawSet:
             if k not in seen and self.grammar.allows(c.condition):
                 seen.add(k)
                 cands.append(c)
+        cands = self._merge(cands)
         pool = list(probes)
         rng = random.Random(seed)
         if noise is not None:
@@ -1614,7 +1850,8 @@ class LawSet:
         def untested_of(j, members):
             """The atoms longer members of j's class add to j's condition that never varied where j's condition holds
             (on the pool and every row seen, j's action only)."""
-            extra = sorted({n for m in members for n in cands[m].condition} - set(cands[j].condition))
+            extra = sorted({n for m in members for n in cands[m].condition} - set(cands[j].condition)
+                           - self.grammar.implied(cands[j].condition))
             if not extra:
                 return []
             ka, cond = _key(cands[j].action), set(cands[j].condition)
@@ -1652,10 +1889,17 @@ class LawSet:
             j = min(alive, key=order_key)
             members = next((g for g in cls if j in g), [j])
         gap = untested_of(j, members) if coverage != "ignore" else []
-        if gap and coverage == "undetermined":
+        if gap and coverage == "varied":
+            block = [n for n in gap
+                     if any(_varied(b, cands[j].action, cands[j].condition, n) for b in coverage_on or ())]
+            if block:
+                return undetermined(f"the atom(s) {block} never varied on the pool where the shortest candidate holds "
+                                    f"but did on the coverage rows — the pool missed evidence that exists: {why}",
+                                    untested=gap)
+        elif gap and coverage == "undetermined":
             return undetermined(f"the atom(s) {gap} never varied where the shortest candidate holds — the pool cannot "
                                 f"tell it from a longer one of its class: {why}", untested=gap)
-        if gap:
+        if gap and coverage != "varied":
             warnings.warn(f"admit_by_probes: the atom(s) {gap} never varied on the pool where the accepted law "
                           f"{cands[j].condition} holds — it may be too general (a longer candidate adding them "
                           f"predicts the same on every probe); add pool states where they vary, or pass "
@@ -1746,7 +1990,8 @@ class LawSet:
         self._seq += 1
         law = Law(id=f"law-{self._seq}", action=c.action, condition=tuple(c.condition), effect=c.effect,
                   support=support, hits=hits, precision=(hits / support) if support else None, net=net, born=born,
-                  proposer=c.proposer, sources=sources, seq=self._seq)
+                  proposer=c.proposer, sources=sources, seq=self._seq,
+                  aliases=tuple(getattr(self, "_aliases", {}).get(self._ck(c), ())))
         self.laws.append(law)
         self.laws.sort(key=self._order)
         self._laws_version += 1
@@ -2116,6 +2361,18 @@ class LawSet:
                 store.retire(iid, why=law.why or "retired")
             out[law.id] = iid
         return out
+
+
+def _varied(buffer, action, condition, name) -> bool:
+    """On `buffer`'s rows of `action` (every group) where `condition` holds, the atom `name` took both values. Bitsets
+    only (`match`), never a score: reading these rows is not a test."""
+    if name not in buffer.grammar.by_name or any(x not in buffer.grammar.by_name for x in condition):
+        return False
+    m = buffer.match(action, tuple(condition))
+    if not m:
+        return False
+    mn = buffer.match(action, (name,))
+    return bool(m & mn) and bool(m & ~mn)
 
 
 def _arity2(fn):
