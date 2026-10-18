@@ -117,8 +117,7 @@ better than its null: P[Binomial(support, null) ≥ hits] ≤ δ_N, N = the cand
 (`buffer.tested`), δ_N = δ / (N·(N + 1)) — summing to below δ however long the stream runs — or δ / space when you
 declare `space=` (Bonferroni). The null (`null=`): "base", the default — "no better than chance": the effect's base rate
 among the buffer's rows of that action (the proposing group left out), floored at 0.05 and capped at min_precision — or
-a fixed precision (`null=0.9`: the law must beat 0.9) — or "parent" (opt-in): an exception that refines an active law
-with another effect is tested against its effect's rate on the rest of that law's rows (see `LawSet`). min_precision stays a separate filter on the observed precision.
+a fixed precision (`null=0.9`: the law must beat 0.9). min_precision stays a separate filter on the observed precision.
 A fixed null close to 1 is the wrong question in a deterministic world: a law right on hundreds of rows can still fail
 to beat 0.9 at tens of thousands of candidates. The need: a deterministic law needs ⌈ln(1/δ_N) / ln(1/null)⌉ rows, with δ_N = δ / (N·(N + 1)): at 52,000 candidates and δ = 0.1, 9 rows at a base rate of 3% (floored to 5%), 68 at 70%, and 228 against a fixed null of 0.9 (at 821 candidates: 6, 45, 150); errors ask for more. On buffers with no law
 (2,000 rows; an effect independent of 40 sparse atoms; the 821 conditions of at most two atoms) the fixed thresholds
