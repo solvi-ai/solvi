@@ -107,7 +107,7 @@ what was missing, and was written by hand around solvi's records, is planned her
 ## Next (1.2.1 and after): from a grid-game agent built on the laws module
 
 An agent that learns the rules of a grid puzzle game from its own moves used `solvi.experimental.laws` as a library
-and had to write twelve pieces itself. Each row says what it had to write and why; eight are in 1.2.1, two of them
+and had to write twelve pieces itself. Each row says what it had to write and why; ten are in 1.2.1, three of them
 experimental until a second task confirms them.
 
 ### Verification soundness
@@ -125,8 +125,8 @@ experimental until a second task confirms them.
 |---|---|---|
 | **Laws: negated atoms (`Grammar(negations=True)` or a `not:` template)** | "Transform unless the noun is itself" could only be a general law plus an exception, and the exception is never learned once the general law is retired (no mismatch left); the agent added a negated atom by hand | planned |
 | **Laws: `Grammar(min_k=1)`** | A law cannot be required to name at least one atom; the agent wrapped the proposer to drop the empty condition | in 1.2.1 |
-| **Laws: atom implications and coverage over a second buffer (`Grammar(implies=...)`)** | Atoms implied by construction (a property atom implies its object atom) are reported "untested" for ever, so `coverage="undetermined"` refused every law, and an atom that varied elsewhere in the agent's history is not seen; the agent kept an implication table and checked the whole held-out buffer | planned |
-| **Laws: declared effect equivalences** | Two relative effects that agree by construction (a move in the facing direction and a move by the action) leave classes no probe can split, and `admit_by_probes` spends its whole budget before saying so; skip classes that agree wherever the distinguishing atom can hold | planned |
+| **Laws: atom implications and coverage over a second buffer (`Grammar(implies=...)`)** | Atoms implied by construction (a property atom implies its object atom) are reported "untested" for ever, so `coverage="undetermined"` refused every law, and an atom that varied elsewhere in the agent's history is not seen; the agent kept an implication table and checked the whole held-out buffer. On a gridworld with probes, refusals for an implied atom 485 → 0, laws 81 → 99, false laws 0; `coverage="varied"` 139 laws, 0 false | in 1.2.1 (opt-in; `coverage="varied"` experimental) |
+| **Laws: declared effect equivalences** | Two relative effects that agree by construction (a move in the facing direction and a move by the action) leave classes no probe can split, and `admit_by_probes` spends its whole budget before saying so; skip classes that agree wherever the distinguishing atom can hold. `LawSet(equivalent=)` merges congruent candidates (`Law.aliases`); on the gridworld second task the bars held (0 false laws, probes per law 12.0 → 8.9) but congruent-only refusals were 0 without it too | experimental in 1.2.1 (opt-in; the second task did not exercise it) |
 
 ### Agent ergonomics
 

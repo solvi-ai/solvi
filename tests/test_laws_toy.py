@@ -56,3 +56,19 @@ def test_the_toy_script_is_importable_and_says_what_it_measures():
     mod = _toy()
     assert callable(mod.gridworld) and callable(mod.policy)
     assert "written" in (mod.__doc__ or "")
+
+
+@pytest.mark.slow
+def test_the_gridworld_with_probes_declared_implications_and_equivalences():
+    """Grammar(implies=) and LawSet(equivalent=) on the gridworld with probes (the written rules answer), a pool of
+    600 (state, action) pairs with random inventories, five seeds. The 20-seed run on two pools: CHANGELOG 1.2.1."""
+    t0 = time.time()
+    toy = _toy()
+    r = toy.gridworld_probes(seeds=range(5), arms=("base", "implies", "variants", "equivalent"),
+                             inventory="random", pool_worlds=6)["arms"]
+    assert time.time() - t0 < 120
+    base, imp, var, eq = (r[a] for a in ("base", "implies", "variants", "equivalent"))
+    assert base["implied_refusals"] > 0 and imp["implied_refusals"] == 0
+    assert imp["accepted"] >= base["accepted"] and imp["gap_closed"] >= base["gap_closed"]
+    assert eq["congruent_only"] == 0 and eq["probes_per_law"] <= var["probes_per_law"]
+    assert all(a["false_laws"] == 0 for a in r.values())
