@@ -20,7 +20,7 @@ from __future__ import annotations
 
 from typing import Any, Callable
 
-from ._core import Admission, Candidate, Transition, _arity2, _key
+from ._core import Admission, Candidate, Transition, Unknown, _arity2, _key
 
 __all__ = ["admit_up_to_two"]
 
@@ -200,6 +200,7 @@ def admit_up_to_two(ls, cands: list[Candidate], ask: Callable[[Any, Any], Any], 
         return [[ids[i] for i in g] for g in groups_of(views, veq)]
 
     asked: list[Transition] = []
+    unknown: list[Transition] = []
     done: set[int] = set()
     ok_safe = (lambda i: True) if safe is None else (lambda i: bool(safe(*pool[i])))
     ro = None if read_only is None else (lambda st, ac: read_only(*pool[st]) if _arity2(read_only)
@@ -226,7 +227,7 @@ def admit_up_to_two(ls, cands: list[Candidate], ask: Callable[[Any, Any], Any], 
                 why = "one class left"
                 break
             reps = [(lambda st, ac, k=g[0], b=best: vec[("view", b, k)][st]) for g in gs]
-        if len(asked) >= int(budget):
+        if len(asked) + len(unknown) >= int(budget):
             why = f"the budget of {int(budget)} probes is spent"
             break
         pr = split(reps, lambda st, ac: ok_safe(st), [(i, pool[i][1]) for i in range(len(pool)) if i not in done],
@@ -242,11 +243,14 @@ def admit_up_to_two(ls, cands: list[Candidate], ask: Callable[[Any, Any], Any], 
         done.add(i)
         x, a = pool[i]
         obs = ask(x, a)
+        if obs is Unknown:                               # spent; refutes and supports nothing
+            unknown.append(Transition(x, a, obs, group="probe", id=f"unknown-{len(unknown) + 1}-{i}"))
+            continue
         asked.append(Transition(x, a, obs, group="probe", id=f"probe-{len(asked) + 1}-{i}"))
         see(x, a, obs, pinf[i])
         if phase == 2:
             expand()                                     # new witnesses may form new pairs
-    ls.cost["probes"] += len(asked)
+    ls.cost["probes"] += len(asked) + len(unknown)
     if phase == 1:                                       # the budget ran out among the singles
         expand()
         best = best_of()
@@ -260,7 +264,7 @@ def admit_up_to_two(ls, cands: list[Candidate], ask: Callable[[Any, Any], Any], 
 
     def undetermined(reason):
         return Admission("undetermined", None, shown, asked, refuted_hyps, null, reason, [],
-                         [cands[m] for m in range(n) if m not in set(alive_c)], [], laws=[])
+                         [cands[m] for m in range(n) if m not in set(alive_c)], [], laws=[], unknown=unknown)
 
     if best is None:
         return undetermined("no hypothesis survived" + (f" ({why})" if why else ""))
@@ -297,4 +301,4 @@ def admit_up_to_two(ls, cands: list[Candidate], ask: Callable[[Any, Any], Any], 
         accepted.append(law)
     return Admission("accepted", accepted[0], shown, asked, refuted_hyps, null,
                      why + (" (two new laws)" if len(accepted) == 2 else ""), [],
-                     [cands[m] for m in range(n) if m not in set(alive_c)], [], laws=accepted)
+                     [cands[m] for m in range(n) if m not in set(alive_c)], [], laws=accepted, unknown=unknown)
