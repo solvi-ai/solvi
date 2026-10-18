@@ -2,6 +2,24 @@
 
 ## 1.2.1 — unreleased
 
+### Added
+- **Laws (experimental): `LawSet(rivals=True)` refuses a law the buffer cannot tell from another** (opt-in; the default
+  is unchanged). A candidate that passes the held-out test is refused while another offered candidate or an active law
+  with the same action and effect, and a condition neither wider nor narrower, matches exactly the same held-out rows
+  (at least one); `refused_rival` counts, `rival_of(buffer, candidate, others)` names the rival and
+  `why_not(..., others=)` reports `failed="rival"`. Before, the order of the candidates chose. On a grid-game-shaped
+  world with levels arriving one at a time (1,000 streams) and the counterexample to a wrong law on 10% of levels, the
+  wrong law was the first accepted in 198 streams and in 0 with rivals (the right one 763 → 816; 65 streams accepted
+  nothing within 20 levels); at 30%, false accepts 17 → 15; noise with no exception: 0 accepts in each of three
+  settings, with and without. The cost: a true law waits until a held-out row tells it from its rivals.
+- **Laws (experimental): `LawSet.version`**, a public counter that goes up on every admission, retirement,
+  suspension, reactivation and withdrawal from `suspended`, for planners that cache answers. `Buffer` and `LawSet`
+  now pickle without their `id()`-keyed caches (the buffer's `where` cache, the score memo); the cache keys are
+  rebuilt from the live objects on unpickle, so a resumed run cannot read an entry made for another function.
+- **Laws (experimental): `admit_by_probes(..., commit=False)`**, a dry run: the same decision (the probes are asked
+  and counted), but the set, its `version`, `cost["accepted"]` and the next law id are left as they were; the
+  returned law has status "proposed". Refusing it needs no `retire`, so `retired` keeps only laws that fell.
+
 ### Fixed
 - **`admit_by_probes(..., noise=ε)` no longer accepts a law that does not fit the noise.** The likelihood weight compares
   only the candidates offered, so when the true law was not among them the least-bad wrong one could win — a logged
