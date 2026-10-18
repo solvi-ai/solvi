@@ -276,7 +276,14 @@ class Buffer:
     rows from a few objects) and in 0 with dedup=True; where a law exists (pass exactly where a0 & a1, 20 worlds) the
     right law was the first accepted in 591 of 1,000 with dedup and 473 without (tests/test_laws_dedup_heldout.py).
     The bound then assumes distinct situations are independent draws; rows of one situation with different
-    observations (a stochastic outcome) are kept. With a window, a situation that leaves may be added again."""
+    observations (a stochastic outcome) are kept. With a window, a situation that leaves may be added again.
+
+    void(row_ids) (experimental): rows whose label is no longer trusted (it was read off a law that has since fallen;
+    `solvi.experimental.laws.factored` calls it for row provenance) leave every test: `allowed`, `group_mask` and
+    `rows` skip them, so support, hits, nulls, `check` and an admission's logged rows no longer see them. They stay in
+    the buffer: `len`, `n` and `tested` (the N of the sized bound, which counts candidates tested, not rows kept) do
+    not decrease, and their atoms still count as evidence that an atom varies (`match`, coverage="varied").
+    `voided` counts them."""
 
     def __init__(self, grammar: Grammar, window: int | None = None, *, dedup: bool | Callable = False):
         if window is not None and int(window) < 1:
@@ -303,6 +310,8 @@ class Buffer:
         self.left = 0                                            # rows that left the window
         self.version = 0
         self._arrival: deque = deque()                           # the action of each row kept, oldest first
+        self._void: dict[Any, int] = {}                          # action → bitset of voided rows (`void`)
+        self.voided = 0                                          # rows voided, in all
 
     def situation(self, t: Transition, true=None):
         """The key `dedup` compares rows by: (group, action, the atoms true, the observation) for dedup=True, else
@@ -386,6 +395,8 @@ class Buffer:
                 groups[g] = m
             else:
                 del groups[g]
+        if self._void.get(a):
+            self._void[a] >>= 1
         for ck in [ck for ck in self._cache if ck[0] == a]:
             m, done = self._cache[ck]
             self._cache[ck] = (m >> 1, max(0, done - 1))
@@ -411,6 +422,8 @@ class Buffer:
     def __setstate__(self, state):
         self.__dict__.update(state)
         self._cache = {}
+        self.__dict__.setdefault("_void", {})
+        self.__dict__.setdefault("voided", 0)
 
     def __len__(self):
         return self.n
@@ -432,6 +445,34 @@ class Buffer:
         self.tested += new
         return new
 
+    def void(self, row_ids: Iterable[str]) -> int:
+        """Take the rows with these ids out of every test (see the class docstring) → how many were newly voided.
+        Unknown ids are ignored; voiding twice is a no-op. `version` changes when any row was voided."""
+        ids = {str(i) for i in row_ids}
+        if not ids:
+            return 0
+        new = 0
+        for a, rows in self._rows.items():
+            v = self._void.get(a, 0)
+            for j, t in enumerate(rows):
+                if t.id in ids and not v >> j & 1:
+                    v |= 1 << j
+                    new += 1
+            if v:
+                self._void[a] = v
+        if new:
+            self.voided += new
+            self.version += 1
+        return new
+
+    def is_void(self, row_id: str) -> bool:
+        """Is a row with this id voided (and still in the buffer)?"""
+        for a, rows in self._rows.items():
+            v = self._void.get(a, 0)
+            if v and any(t.id == row_id and v >> j & 1 for j, t in enumerate(rows)):
+                return True
+        return False
+
     def groups(self) -> list:
         """The groups, in order of first appearance."""
         return list(self._order)
@@ -441,19 +482,22 @@ class Buffer:
         acts = [_key(action)] if action is not None else list(self._rows)
         out = []
         for a in acts:
-            out += [t for t in self._rows.get(a, ()) if exclude is None or _key(t.group) != _key(exclude)]
+            v = self._void.get(a, 0)
+            out += [t for j, t in enumerate(self._rows.get(a, ())) if not v >> j & 1
+                    and (exclude is None or _key(t.group) != _key(exclude))]
         return out
 
     # bitsets over the rows of one action
     def allowed(self, action, exclude=None) -> int:
         a = _key(action)
-        m = (1 << len(self._rows.get(a, ()))) - 1
+        m = ((1 << len(self._rows.get(a, ()))) - 1) & ~self._void.get(a, 0)
         if exclude is not None:
             m &= ~self._groups.get(a, {}).get(_key(exclude), 0)
         return m
 
     def group_mask(self, action, group) -> int:
-        return self._groups.get(_key(action), {}).get(_key(group), 0)
+        a = _key(action)
+        return self._groups.get(a, {}).get(_key(group), 0) & ~self._void.get(a, 0)
 
     def match(self, action, condition) -> int:
         a = _key(action)
