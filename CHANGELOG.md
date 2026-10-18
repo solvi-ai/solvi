@@ -70,6 +70,25 @@
 - **Laws (experimental): `admit_by_probes(..., commit=False)`**, a dry run: the same decision (the probes are asked
   and counted), but the set, its `version`, `cost["accepted"]` and the next law id are left as they were; the
   returned law has status "proposed". Refusing it needs no `retire`, so `retired` keeps only laws that fell.
+- **Laws (experimental, pending a second task): `solvi.experimental.laws.factored` — a multi-law (factored)
+  transition model.** `FactoredModel(channels, extract, delta=0.1)`: one `LawSet` and one held-out `Buffer` per
+  `Channel` (the channel name is the action slot), the caller's extraction turning one transition into `Row`s of
+  several channels, dedup within a group (`new_group`), δ split equally over the channels (`share=` a dict for an
+  uneven split) so that P[any law no better than its null in any channel] ≤ Σ δ_c by the union bound, row provenance
+  (`Row(depends=)` names laws of other channels the row's label relied on; when such a law leaves the active set the
+  rows are voided and leave the running precision they were counted in, rows naming it are refused, the laws accepted
+  on them are flagged `stale`), `version`, `predict` memoised per version, `admit` (admit_by_probes with
+  siblings="undetermined", coverage="varied" and the held-out check of the other groups; one attempt per row and
+  group; probe admissions reported outside δ), `report()` (per channel N, need, rows per transition, voided, dropped,
+  refused, stale; "bound"), `to_knowledge`, `to_module` per channel. The turn skeleton and the row extraction stay the
+  caller's. New on `Buffer`: `void(row_ids)` (voided rows leave `allowed`, `group_mask` and `rows`; N and `len` do not
+  decrease). On a synthetic push world (movers, push, stop, vanish; properties random per world; 150 training worlds,
+  20 fresh; `benchmarks/laws_factored_toy.py`, 5 seeds): next-state accuracy 1.000 on every seed, 0 false laws, the
+  written laws literally in 4 of 5 seeds (seed 0: one law as two narrower ones with the same predictions on every
+  reachable state); a single joint `LawSet` over the whole local observation 0.947–0.952 with 2 laws. A planted wrong
+  law falls and its dependent rows are voided; 0 false laws after. Null channels (3 × 40 sparse atoms, 821 conditions
+  each, 100 trials): any false law in any channel 0 of 100 at δ = 0.1 (fixed thresholds: 100 of 100). Experimental
+  until a second task (MiniGrid) confirms it.
 
 ### Fixed
 - **`admit_by_probes(..., noise=ε)` no longer accepts a law that does not fit the noise.** The likelihood weight compares

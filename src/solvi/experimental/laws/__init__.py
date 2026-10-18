@@ -31,6 +31,12 @@ Proposers (`Proposer`: `propose(lawset, state, action, observed)` → candidates
 true in the mismatched state. `RandomProposer`: conditions drawn from the whole grammar — the control. `CallableProposer`:
 any function, an LLM among them; it proposes, the test decides.
 
+Several law sets predicting one step together (experimental, pending a second task): `solvi.experimental.laws.factored`
+— `FactoredModel(channels, extract, delta=)` keeps one LawSet and held-out buffer per channel, splits δ over the
+channels (joint false-accept bound Σ δ_c by the union bound), drops duplicate rows within a group, voids rows whose
+label relied on a law of another channel once that law falls (`Row(depends=)`, `Buffer.void`), and reports per channel.
+The turn skeleton and the row extraction stay yours.
+
 The probe planner. Where each test is a call into a live system, `split(hypotheses, safe, probes, read_only=, cost=)`
 picks the safe probe whose predicted outcomes split the hypotheses most — read-only actions before writes — and
 `discriminate(laws_a, laws_b, safe, probes)` the cheapest safe probe where two law sets differ; `lawset.hypothesis(c)`
