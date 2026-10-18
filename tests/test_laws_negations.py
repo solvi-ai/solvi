@@ -88,20 +88,21 @@ def test_true_gives_one_literal_per_atom_and_the_literal_shares_the_atoms_featur
         Grammar([], negations="some")
 
 
-def test_refine_allows_a_negation_only_beside_a_positive_atom_and_only_where_the_atom_varies():
+def test_refine_allows_one_negation_and_only_where_the_atom_varies():
     g = word_grammar("refine")
-    assert not g.allows(("not:nself",)) and g.allows(("not:nself", "nsubj"))
+    assert g.allows(("not:nself",)) and g.allows(("not:nself", "nsubj"))         # a lone negation (decision 44)
     assert not g.allows(("not:d0", "not:nself", "nsubj"))
     with pytest.raises(ValueError):
-        g.check(("not:nself",))
+        g.check(("not:d0", "not:nself"))
+    assert not Grammar(word_grammar().atoms, k=2, min_k=1, negations="refine").allows(("not:nself",))
     s = {"nsubj": True, "nself": False, "d0": False, "d1": False, "d2": False, "d3": False}
     T = g.true(s, "turn")
     assert all(not g.is_negated(x) for c in g.conditions(T) for x in c)        # no buffer: positive only
     b = Buffer(g)
     for i, (subj, me, d0) in enumerate([(1, 0, 0), (1, 1, 0), (1, 0, 0), (0, 0, 1)]):
         b.add(Transition({"nsubj": subj, "nself": me, "d0": d0, "d1": 0, "d2": 0, "d3": 0}, "turn", "x", id=f"r{i}"))
-    # under nsubj, nself took both values; d0..d3 never varied there
-    assert g.refinements(T, b, "turn") == [("not:nself", "nsubj")]
+    # on the action's rows nself and d0 took both values (the lone literals); under nsubj only nself did
+    assert g.refinements(T, b, "turn") == [("not:d0",), ("not:nself",), ("not:nself", "nsubj")]
     assert b.match("turn", ("nsubj", "not:nself")) == 0b101
     all_g = word_grammar("all")
     assert ("not:nself",) in all_g.conditions(all_g.true(s, "turn"))
@@ -142,6 +143,39 @@ def test_every_literal_candidate_scored_is_counted_in_n():
     assert lit                                                           # refinements were scored and counted
 
 
+def run_unless_r(negations, seed=0, logged=300, stream=60):
+    """A lone negation: every noun becomes unless R holds ("transform unless R" is the law `not:R`)."""
+    rng = random.Random(seed)
+    atoms = [Atom("R", _Key("R"), code='s["R"]')] + [Atom(f"d{i}", _Key(f"d{i}")) for i in range(4)]
+    g = Grammar(atoms, k=2, negations=negations)
+
+    def state():
+        return {"R": rng.random() < 0.4, **{f"d{i}": rng.random() < 0.5 for i in range(4)}}
+
+    def truth(s):
+        return "same" if s["R"] else "become"
+
+    b = Buffer(g)
+    for r in range(logged):
+        s = state()
+        b.add(Transition(s, "turn", truth(s), group=f"log{r % 10}", id=f"l{r}"))
+    ls = LawSet(g, base=lambda s, a: "same", min_support=5, min_precision=0.9)
+    for i in range(stream):
+        s = state()
+        ls.step(Transition(s, "turn", truth(s), group=f"s{i}", id=f"s{i}"), b, remember=True)
+    checks = [state() for _ in range(1000)]
+    wrong = [law for law in ls.laws if any(law.holds(g.true(s, "turn")) and law.effect != truth(s) for s in checks)]
+    return ls, wrong
+
+
+def test_known_answer_a_lone_negated_law_is_learned_under_refine_not_without():
+    pos, wrong = run_unless_r(False)
+    assert not [law for law in pos.laws if law.effect == "become" and law not in wrong]
+    ls, wrong = run_unless_r("refine")
+    assert [law.condition for law in ls.laws if law.effect == "become"] == [("not:R",)], [x.text() for x in ls.laws]
+    assert wrong == []
+
+
 # ───────────────────────────────────────────── candidates per mismatch: "refine" vs "all" vs positive
 def channel(n, t, v, rows=200, seed=0):
     """A channel-like grammar of n one-feature atoms; the mismatched state has atoms 0..t-1 true; on the logged rows
@@ -172,9 +206,9 @@ def test_candidate_multipliers_against_the_design(n, t, v, all_ratio):
     pos = 1 + t + comb(t, 2)
     assert got[False] == pos
     assert got["all"] == 1 + n + comb(n, 2)                              # the full literal grammar at k = 2
-    assert got["refine"] == pos + t * v                                  # one negation beside each one-atom P
+    assert got["refine"] == pos + v + t * v              # the lone not:a and one negation beside each one-atom P
     assert abs(got["all"] / pos - all_ratio) < 0.6                       # design: 8×, 8×, 7×, 19×, 23×
-    assert got["refine"] / pos <= 8                                      # design: 3–8× (measured 1.9–3.1×)
+    assert got["refine"] / pos <= 8                                      # design: 3–8× (measured 2.1–3.9×)
     assert got["refine"] < got["all"]
 
 
@@ -217,7 +251,7 @@ def null_accepts(reps, p_effect, seed=7, n_atoms=40):
 def test_null_false_accepts_stay_below_delta_under_both_modes(p_effect):
     reps = 20
     acc, n_ref = null_accepts(reps, p_effect)
-    assert n_ref > 821                                                   # refine adds literals to the 821 positive
+    assert n_ref == 821 + 40 + 40 * 39                                   # positive + lone + one beside each atom
     assert acc["all"] / reps <= 0.1 and acc["refine"] / reps <= 0.1      # measured: 0 of 100 at both rates
 
 

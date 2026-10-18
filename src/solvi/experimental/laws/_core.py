@@ -90,17 +90,19 @@ class Grammar:
     the atom's feature (so `a` and `not:a` never share a condition); `true(state, action)` then gives one literal per
     atom (the atom or its negation), `check` / `allows` / `Law.holds` / `Buffer.match` read literals (the buffer
     computes a literal's rows as the complement of the atom's: no new storage), the compiled code is `not (<expr>)`.
-    "refine" (the documented mode): a negated literal enters a condition only next to ≥ 1 positive atom, one per
-    condition, and only where the atom varies under it — `Enumerate` adds `P ∧ not:a` to a positive condition P that
-    holds in the mismatched state only when `a` took both values on the held-out rows P matches (an exception to cut
-    out; `refinements`); min_k counts positive atoms. "all": every literal is an atom like any other (the full literal
-    grammar: 1 + n + C(n, 2) conditions per state at k = 2, n atoms) — for small grammars and for measurement. The
+    "refine" (the documented mode): at most one negated literal per condition, and only where the atom varies —
+    `Enumerate` adds `P ∧ not:a` to a positive condition P that holds in the mismatched state only when `a` took both
+    values on the held-out rows P matches (an exception to cut out), and the lone `not:a` when `a` took both values on
+    the held-out rows of the action (one extra candidate per atom: "transform unless R" is the law `not:R`);
+    `refinements` gives both; min_k counts positive atoms, so min_k ≥ 1 keeps lone negations out. "all": every
+    literal is an atom like any other (the full literal grammar: 1 + n + C(n, 2) conditions per state at k = 2, n
+    atoms) — for small grammars and for measurement. The
     sized bound is unchanged in form: every literal candidate scored is counted in N (`Buffer.tested`) and tested at
     δ_N. Under "refine" which candidates are proposed depends on the buffer (which atoms vary under P) — as `Enumerate`
     already depends on the state; every proposed candidate is counted, so the per-candidate level holds and the sum
     still bounds. Candidates per mismatch, k = 2, one atom per feature, measured in tests/test_laws_negations.py:
-    "refine" 3–8×, "all" 8–23× the positive grammar's on the design's channel-like grammars; null buffers (40 sparse
-    atoms, 2,000 rows) accepted no law under either mode."""
+    "refine" 2.1–3.9×, "all" 7.2–22.5× the positive grammar's on the design's channel-like grammars; null buffers (40
+    sparse atoms, 2,000 rows, the effect independent at 70 % and 3 %) accepted no law in 100 under either mode."""
 
     def __init__(self, atoms: Iterable[Atom], k: int = 3, *, min_k: int = 0,
                  implies: dict | Callable | None = None, negations: bool | str = False):
@@ -268,19 +270,17 @@ class Grammar:
             raise ValueError(f"{cond}: fewer than min_k={self.min_k} " +
                              ("positive atoms" if getattr(self, "negations", False) else "atoms"))
         if not self._refine_ok(cond):
-            raise ValueError(f"{cond}: under negations='refine' a negated literal needs a positive atom beside it "
-                             f"and is one per condition")
+            raise ValueError(f"{cond}: under negations='refine' a condition holds at most one negated literal")
         return cond
 
     def _refine_ok(self, cond) -> bool:
         if getattr(self, "negations", False) != "refine":
             return True
-        n = sum(1 for x in cond if self.is_negated(x))
-        return n == 0 or (n == 1 and len(cond) >= 2)
+        return sum(1 for x in cond if self.is_negated(x)) <= 1
 
     def allows(self, condition) -> bool:
-        """The condition has at least min_k (positive) atoms and, under negations="refine", its negated literal (at
-        most one) stands beside a positive atom (the other rules are `check`'s)."""
+        """The condition has at least min_k (positive) atoms and, under negations="refine", at most one negated
+        literal (the other rules are `check`'s)."""
         cond = tuple(condition)
         return len(self.positive(cond)) >= getattr(self, "min_k", 0) and self._refine_ok(cond)
 
@@ -305,9 +305,10 @@ class Grammar:
     def refinements(self, true: Iterable[str], buffer: "Buffer", action, exclude=None,
                     conditions: Iterable[tuple] | None = None) -> list[tuple[str, ...]]:
         """negations="refine": the conditions `P ∧ not:a` for each positive condition P of `conditions` (default
-        `conditions(true)`) with 1 ≤ |P| < k and each negated literal `not:a` true in the state, of another feature,
+        `conditions(true)`) with 0 ≤ |P| < k and each negated literal `not:a` true in the state, of another feature,
         where `a` took both values on the rows of `action` that P matches in `buffer` (without the group `exclude`) — an
-        exception exists there to cut out. [] in the other modes or without a buffer."""
+        exception exists there to cut out; P = () (the lone `not:a`, where `a` varies on the action's rows) when the
+        empty condition is in `conditions` or min_k is 0. [] in the other modes or without a buffer."""
         if getattr(self, "negations", False) != "refine" or buffer is None:
             return []
         T = set(true)
@@ -321,8 +322,10 @@ class Grammar:
         imp = self.has_implies
         masks: dict = {}
         out = []
+        if getattr(self, "min_k", 0) == 0 and () not in base:
+            base = [()] + list(base)
         for P in base:
-            if not P or len(P) >= self.k or any(self.is_negated(x) for x in P):
+            if len(P) >= self.k or any(self.is_negated(x) for x in P):
                 continue
             m = buffer.match(action, P) & allowed
             if not m:
