@@ -74,15 +74,16 @@
 - **Laws (experimental, pending a second task): `Grammar(negations="refine" | "all")` — negated literals**
   (opt-in; default False, unchanged). A literal `not:<atom>` per atom, of the atom's feature; `grammar.true` gives one
   literal per atom, `Buffer.match` computes a literal's rows as the complement (no new storage), the compiled code is
-  `not (<expr>)`. `"refine"` (the documented mode): a negated literal enters a condition only beside a positive atom,
-  one per condition, and `Enumerate` adds `P ∧ not:a` only where `a` took both values on the held-out rows P matches
-  (`grammar.refinements(true, buffer, action)`, `grammar.candidates(...)`); min_k counts positive atoms. `"all"`: every
+  `not (<expr>)`. `"refine"` (the documented mode): one negated literal per condition; `Enumerate` adds `P ∧ not:a` only
+  where `a` took both values on the held-out rows P matches, and the lone `not:a` where `a` varies on the action's
+  held-out rows (`grammar.refinements(true, buffer, action)`, `grammar.candidates(...)`); min_k counts positive atoms. `"all"`: every
   literal is an atom (for small grammars and measurement). Every literal candidate scored counts in N, so δ_N follows.
   On a "transform unless the noun is itself" world the positive grammar learned no law and both modes learned
-  `nsubj ∧ not:nself → become`, 0 wrong laws on 1,000 check states. Candidates per mismatch (k = 2, one atom per
-  feature) on the channel-like grammars of the design: `"all"` 8.0×, 7.2×, 19×, 22.5× the positive grammar's;
-  `"refine"` 1.9–3.1× (one negation beside each one-atom condition, v = 2–8 varying atoms). Null buffers (40 sparse
-  atoms, 2,000 rows, the effect independent at 70 % and 3 %; 2,381 refine and 3,201 all candidates): 0 of 100 false
+  `nsubj ∧ not:nself → become`, 0 wrong laws on 1,000 check states; on "become unless R" the positive grammar
+  learned no law and "refine" learned the lone `not:R → become`, 0 wrong. Candidates per mismatch (k = 2, one atom
+  per feature) on the channel-like grammars of the design: `"all"` 8.0×, 7.2×, 19×, 22.5× the positive grammar's;
+  `"refine"` 2.1–3.9× (the lone negations plus one beside each one-atom condition, v = 2–8 varying atoms). Null
+  buffers (40 sparse atoms, 2,000 rows, the effect independent at 70 % and 3 %; 2,421 refine and 3,201 all candidates): 0 of 100 false
   accepts per mode and rate; the fixed thresholds accepted 100 of 100 at 70 % (`tests/test_laws_negations.py`).
   The second task (graph_laws families F5 / D1) is pre-registered, not yet run.
 - **Laws (experimental): `admit_by_probes(..., commit=False)`**, a dry run: the same decision (the probes are asked
