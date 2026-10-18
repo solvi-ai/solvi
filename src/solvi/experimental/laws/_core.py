@@ -40,6 +40,28 @@ class Atom:
         return f"Atom({self.name!r}, feature={self.feature!r})"
 
 
+NEG = "not:"
+
+
+class _Negated:
+    """The function of a negated literal: not atom(state, action). A class, not a lambda, so a grammar pickles as its
+    atoms do."""
+    __slots__ = ("atom",)
+
+    def __init__(self, atom):
+        self.atom = atom
+
+    def __call__(self, state, action):
+        return not self.atom(state, action)
+
+
+def _negated(atom: "Atom") -> "Atom":
+    """The literal `not:<name>` of an atom: same feature (an atom and its negation never share a condition), code
+    `not (<expr>)` (None when the atom has none: it is refused by the compiler like the atom), the atom's defs."""
+    return Atom(NEG + atom.name, _Negated(atom), atom.feature,
+                code=f"not ({atom.code})" if atom.code is not None else None, defs=atom.defs)
+
+
 def _required_args(fn):
     try:
         ps = inspect.signature(fn).parameters.values()
@@ -62,10 +84,29 @@ class Grammar:
     `admit_by_probes` never lists an atom the accepted condition implies as untested (without a declaration a
     property atom that implies an object atom is "untested" for ever: it never varies where the property holds, and
     `coverage="undetermined"` refuses every such law). A wrong declaration would hide a genuinely untested atom, so a
-    `Buffer` warns on the first row that breaks one (`a` true, `b` false; `check_implies` lists them all)."""
+    `Buffer` warns on the first row that breaks one (`a` true, `b` false; `check_implies` lists them all).
+
+    negations (experimental, opt-in, default False): a literal "not:<name>" per atom, true where the atom is false, of
+    the atom's feature (so `a` and `not:a` never share a condition); `true(state, action)` then gives one literal per
+    atom (the atom or its negation), `check` / `allows` / `Law.holds` / `Buffer.match` read literals (the buffer
+    computes a literal's rows as the complement of the atom's: no new storage), the compiled code is `not (<expr>)`.
+    "refine" (the documented mode): a negated literal enters a condition only next to ≥ 1 positive atom, one per
+    condition, and only where the atom varies under it — `Enumerate` adds `P ∧ not:a` to a positive condition P that
+    holds in the mismatched state only when `a` took both values on the held-out rows P matches (an exception to cut
+    out; `refinements`); min_k counts positive atoms. "all": every literal is an atom like any other (the full literal
+    grammar: 1 + n + C(n, 2) conditions per state at k = 2, n atoms) — for small grammars and for measurement. The
+    sized bound is unchanged in form: every literal candidate scored is counted in N (`Buffer.tested`) and tested at
+    δ_N. Under "refine" which candidates are proposed depends on the buffer (which atoms vary under P) — as `Enumerate`
+    already depends on the state; every proposed candidate is counted, so the per-candidate level holds and the sum
+    still bounds. Candidates per mismatch, k = 2, one atom per feature, measured in tests/test_laws_negations.py:
+    "refine" 3–8×, "all" 8–23× the positive grammar's on the design's channel-like grammars; null buffers (40 sparse
+    atoms, 2,000 rows) accepted no law under either mode."""
 
     def __init__(self, atoms: Iterable[Atom], k: int = 3, *, min_k: int = 0,
-                 implies: dict | Callable | None = None):
+                 implies: dict | Callable | None = None, negations: bool | str = False):
+        if negations not in (False, None, "refine", "all"):
+            raise ValueError('negations is False, "refine" or "all"')
+        self.negations = negations or False
         if implies is not None and not (callable(implies) or isinstance(implies, dict)):
             raise ValueError("implies is None, a dict {atom name: [implied atom names]} or a function name → names")
         self._implies_fn = implies if callable(implies) else None
@@ -91,13 +132,33 @@ class Grammar:
         implies (added to the grammar's declarations, see `Grammar`)."""
         if atom.name in self.by_name:
             raise ValueError(f"two atoms are named {atom.name!r}")
+        if getattr(self, "negations", False) and atom.name.startswith(NEG):
+            raise ValueError(f"{atom.name!r}: the prefix {NEG!r} names a negated literal when negations are on")
         if implies is not None:
             self._declare(atom.name, implies)
         self.position[atom.name] = len(self.atoms)
         self.atoms.append(atom)
         self.by_name[atom.name] = atom
         self.feature[atom.name] = atom.feature
+        if getattr(self, "negations", False):
+            neg = _negated(atom)
+            self.by_name[neg.name] = neg
+            self.feature[neg.name] = atom.feature
         return atom
+
+    # ---- negated literals (negations="refine" / "all")
+    def is_negated(self, name) -> bool:
+        """`name` is a negated literal `not:<atom>` of this grammar (False when negations are off)."""
+        return bool(getattr(self, "negations", False)) and str(name).startswith(NEG) and str(name) in self.by_name
+
+    def positive(self, condition) -> tuple[str, ...]:
+        """The positive atoms of a condition (all of it when negations are off)."""
+        return tuple(x for x in condition if not self.is_negated(x))
+
+    def literals(self) -> list[str]:
+        """Every literal a condition can hold: the atoms in grammar order, then (negations on) their negations."""
+        names = [a.name for a in self.atoms]
+        return names + [NEG + x for x in names] if getattr(self, "negations", False) else names
 
     def _declare(self, a, bs):
         bs = [bs] if isinstance(bs, str) else list(bs)
@@ -136,17 +197,28 @@ class Grammar:
         return got
 
     def implied(self, condition) -> frozenset:
-        """Every atom the condition implies and does not hold itself (empty without `implies`)."""
+        """Every atom the condition implies and does not hold itself (empty without `implies`); with negations also
+        the contrapositive: `not:b` implies `not:a` for every declared `a ⇒ b`."""
         cond = {str(x) for x in condition}
         out = set()
-        for x in cond:
+        for x in self.positive(cond):
             out |= self.implies_of(x)
+        negs = {x[len(NEG):] for x in cond if self.is_negated(x)}
+        if negs and self.has_implies:
+            out |= {NEG + a.name for a in self.atoms if self.implies_of(a.name) & negs}
         return frozenset(out - cond)
 
     def redundant(self, condition) -> bool:
-        """The condition holds an atom and one it implies (`conditions` never gives one)."""
+        """The condition holds an atom and one it implies (`conditions` never gives one); with negations also
+        `not:b ∧ not:a` for `a ⇒ b` (the second adds nothing) and the contradiction `a ∧ not:b` (it never holds)."""
         cond = {str(x) for x in condition}
-        return any(self.implies_of(x) & cond for x in cond)
+        pos = set(self.positive(cond))
+        if not self.has_implies:
+            return False
+        if any(self.implies_of(x) & pos for x in pos):
+            return True
+        negs = {x[len(NEG):] for x in cond - pos}
+        return any(self.implies_of(x) & negs for x in pos | negs)
 
     def check_implies(self, buffer: "Buffer") -> list[tuple[str, str, list]]:
         """The declared implications `a ⇒ b` (transitive ones too) that logged rows of `buffer` contradict — `a` true
@@ -174,7 +246,10 @@ class Grammar:
         return out
 
     def true(self, state, action) -> tuple[str, ...]:
-        """The names of the atoms true for `action` in `state`, sorted."""
+        """The names of the atoms true for `action` in `state`, sorted; with negations the literals true there, one per
+        atom (the atom or `not:<atom>`)."""
+        if getattr(self, "negations", False):
+            return tuple(sorted(a.name if a(state, action) else NEG + a.name for a in self.atoms))
         return tuple(sorted(a.name for a in self.atoms if a(state, action)))
 
     def check(self, condition) -> tuple[str, ...]:
@@ -189,25 +264,92 @@ class Grammar:
             raise ValueError(f"{cond}: at most one atom per feature")
         if len(cond) > self.k:
             raise ValueError(f"{cond}: more than k={self.k} atoms")
-        if len(cond) < getattr(self, "min_k", 0):
-            raise ValueError(f"{cond}: fewer than min_k={self.min_k} atoms")
+        if len(self.positive(cond)) < getattr(self, "min_k", 0):
+            raise ValueError(f"{cond}: fewer than min_k={self.min_k} " +
+                             ("positive atoms" if getattr(self, "negations", False) else "atoms"))
+        if not self._refine_ok(cond):
+            raise ValueError(f"{cond}: under negations='refine' a negated literal needs a positive atom beside it "
+                             f"and is one per condition")
         return cond
 
+    def _refine_ok(self, cond) -> bool:
+        if getattr(self, "negations", False) != "refine":
+            return True
+        n = sum(1 for x in cond if self.is_negated(x))
+        return n == 0 or (n == 1 and len(cond) >= 2)
+
     def allows(self, condition) -> bool:
-        """The condition has at least min_k atoms (the other rules are `check`'s)."""
-        return len(tuple(condition)) >= getattr(self, "min_k", 0)
+        """The condition has at least min_k (positive) atoms and, under negations="refine", its negated literal (at
+        most one) stands beside a positive atom (the other rules are `check`'s)."""
+        cond = tuple(condition)
+        return len(self.positive(cond)) >= getattr(self, "min_k", 0) and self._refine_ok(cond)
 
     def conditions(self, true: Iterable[str]) -> list[tuple[str, ...]]:
         """Every condition built from the atoms `true` (in size order, then by name): what holds in one state. With
-        `implies`, none that holds an atom and one it implies."""
+        `implies`, none that holds an atom and one it implies. negations="all": from every literal true;
+        "refine": from the positive atoms only (the negated ones come from `refinements`, which reads the buffer)."""
+        neg = getattr(self, "negations", False)
         names = sorted(set(true))
+        if neg == "refine":
+            names = [x for x in names if not self.is_negated(x)]
         out = []
         imp = self.has_implies
-        for size in range(getattr(self, "min_k", 0), min(self.k, len(names)) + 1):
+        lo = 0 if neg == "all" else getattr(self, "min_k", 0)
+        for size in range(lo, min(self.k, len(names)) + 1):
             for c in combinations(names, size):
-                if len({self.feature[x] for x in c}) == size and not (imp and self.redundant(c)):
+                if len({self.feature[x] for x in c}) == size and not (imp and self.redundant(c)) \
+                        and (neg != "all" or self.allows(c)):
                     out.append(c)
         return out
+
+    def refinements(self, true: Iterable[str], buffer: "Buffer", action, exclude=None,
+                    conditions: Iterable[tuple] | None = None) -> list[tuple[str, ...]]:
+        """negations="refine": the conditions `P ∧ not:a` for each positive condition P of `conditions` (default
+        `conditions(true)`) with 1 ≤ |P| < k and each negated literal `not:a` true in the state, of another feature,
+        where `a` took both values on the rows of `action` that P matches in `buffer` (without the group `exclude`) — an
+        exception exists there to cut out. [] in the other modes or without a buffer."""
+        if getattr(self, "negations", False) != "refine" or buffer is None:
+            return []
+        T = set(true)
+        negs = sorted(x for x in T if self.is_negated(x))
+        if not negs:
+            return []
+        base = self.conditions(T) if conditions is None else [tuple(c) for c in conditions]
+        allowed = buffer.allowed(action, exclude)
+        if not allowed:
+            return []
+        imp = self.has_implies
+        masks: dict = {}
+        out = []
+        for P in base:
+            if not P or len(P) >= self.k or any(self.is_negated(x) for x in P):
+                continue
+            m = buffer.match(action, P) & allowed
+            if not m:
+                continue
+            feats = {self.feature[x] for x in P}
+            for nx in negs:
+                if self.feature[nx] in feats:
+                    continue
+                a = nx[len(NEG):]
+                ma = masks.get(a)
+                if ma is None:
+                    ma = masks[a] = buffer.match(action, (a,))
+                if m & ma and m & ~ma:
+                    c = tuple(sorted(P + (nx,)))
+                    if not (imp and self.redundant(c)):
+                        out.append(c)
+        return out
+
+    def candidates(self, true: Iterable[str], buffer: "Buffer | None" = None, action=None,
+                   exclude=None) -> list[tuple[str, ...]]:
+        """The conditions `Enumerate` proposes for one state: `conditions(true)`, plus `refinements` under
+        negations="refine" when a buffer is given. Their number times the effect variants is what a mismatch adds
+        to N (the sized bound's candidate count) at most — fewer when some were scored before."""
+        conds = self.conditions(true)
+        if getattr(self, "negations", False) == "refine" and buffer is not None:
+            conds = conds + self.refinements(true, buffer, action, exclude, conds)
+        return conds
 
     def sizes(self, true: Iterable[str]) -> list[int]:
         """How many conditions of each size 0..k `conditions(true)` gives."""
@@ -217,13 +359,24 @@ class Grammar:
         return n
 
     def random_condition(self, rng: random.Random, size: int) -> tuple[str, ...]:
-        """A condition of `size` atoms drawn from the whole grammar (one per feature)."""
+        """A condition of `size` atoms drawn from the whole grammar (one per feature); with negations from the full
+        literal grammar, a negated literal turned positive where min_k or "refine" needs it."""
         by_feat: dict[str, list[str]] = {}
+        neg = getattr(self, "negations", False)
         for a in self.atoms:
             by_feat.setdefault(a.feature, []).append(a.name)
+            if neg:
+                by_feat[a.feature].append(NEG + a.name)
         feats = sorted(by_feat)
         size = min(max(size, getattr(self, "min_k", 0)), len(feats))
-        return tuple(sorted(rng.choice(by_feat[f]) for f in rng.sample(feats, size)))
+        c = [rng.choice(by_feat[f]) for f in rng.sample(feats, size)]
+        if neg:
+            for i in range(len(c)):
+                if self.allows(c):
+                    break
+                if self.is_negated(c[i]):
+                    c[i] = c[i][len(NEG):]
+        return tuple(sorted(c))
 
 
 # ───────────────────────────────────────────── transitions and the buffer
@@ -342,7 +495,10 @@ class Buffer:
         atoms = self._atoms.setdefault(a, {})
         if true is None:
             true = self.grammar.true(t.state, t.action)
+        neg = getattr(self.grammar, "negations", False)
         for name in true:
+            if neg and self.grammar.is_negated(name):
+                continue                                         # a literal's rows: the complement, at match time
             atoms[name] = atoms.get(name, 0) | bit
         if getattr(self.grammar, "has_implies", False):
             self._check_implies(t, true)
@@ -503,7 +659,13 @@ class Buffer:
         a = _key(action)
         m = (1 << len(self._rows.get(a, ()))) - 1
         atoms = self._atoms.get(a, {})
+        neg = getattr(self.grammar, "negations", False)
         for name in condition:
+            if neg and self.grammar.is_negated(name):
+                base = name[len(NEG):]
+                self._index_late(a, base)
+                m &= ~atoms.get(base, 0)
+                continue
             self._index_late(a, name)
             m &= atoms.get(name, 0)
         return m
@@ -643,11 +805,18 @@ class Proposer(Protocol):
 
 class Enumerate:
     """The default: every condition the grammar builds from the atoms true in the mismatched state, with every effect
-    variant of the observation (lawset.effects)."""
+    variant of the observation (lawset.effects). Under Grammar(negations="refine") also the grammar's `refinements`
+    on the buffer `LawSet.step` tests on (without the mismatch's group); a direct `mismatch` call has no buffer and
+    proposes the positive conditions only."""
     name = "enumerate"
 
     def propose(self, lawset, state, action, observed):
-        conds = lawset.grammar.conditions(lawset.grammar.true(state, action))
+        g = lawset.grammar
+        if getattr(g, "negations", False) == "refine":
+            buf, exclude = getattr(lawset, "_proposing", None) or (None, None)
+            conds = g.candidates(g.true(state, action), buf, action, exclude)
+        else:
+            conds = g.conditions(g.true(state, action))
         return [Candidate(action, c, e, self.name) for e in lawset.effects(state, observed) for c in conds]
 
 
@@ -2201,10 +2370,12 @@ class LawSet:
         st = Step(t, predicted, law, miss, retired=retired)
         if miss:
             self.transition = t
+            self._proposing = (buffer, t.group)
             try:
                 cands = self.mismatch(t.state, t.action, t.observed)
             finally:
                 self.transition = None
+                self._proposing = None
             st.candidates = len(cands)
             self._last_tested = 0
             st.accepted = self.test(cands, buffer, exclude=t.group) if cands else []

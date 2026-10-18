@@ -50,7 +50,7 @@ def atom_features(lawset: LawSet | None, buffer: Buffer, action, effect, *, excl
     E = _effect_mask(lawset, buffer, action, effect) & allowed
     n_all = allowed.bit_count()
     base = E.bit_count() / n_all if n_all else 0.0
-    names = [a.name for a in g.atoms]
+    names = g.literals() if hasattr(g, "literals") else [a.name for a in g.atoms]   # negated literals as atoms
     masks = {x: buffer.match(action, (x,)) & allowed for x in names}
     X = np.zeros((len(names), len(FEATURES)))
     for i, x in enumerate(names):
@@ -281,7 +281,10 @@ _OPS = (("!=", "!="), (">=", ">="), ("<=", "<="), ("==", "="), ("=", "="), (">",
 
 def atom_kind(name: str) -> str:
     """An atom's comparison type, read off its name: the first of != >= <= == = > < it contains ("==" reads as "="),
-    else "bool"."""
+    else "bool". A negated literal ("not:<atom>", Grammar(negations=...)) is its own kind "not", so a prior fitted on
+    positive-only tasks has no rate for it and falls back to blind rather than scoring it as the atom."""
+    if name.startswith("not:"):
+        return "not"
     for op, kind in _OPS:
         if op in name:
             return kind
