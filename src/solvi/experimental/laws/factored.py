@@ -38,6 +38,14 @@ The guarantee.
   N never decreases. A law accepted on voided rows is flagged `stale` in the report (no automatic re-test; it falls by
   its running precision as before). While the named law stands, a channel's bound is conditional on it.
 
+The action slot (action=, opt-in). A channel's name is its LawSet's action slot, so the caller's own action is an
+atom of the channel's grammar like any other, and a channel law may leave it out — generalise over actions the data
+never varied (MiniGrid stand, gap 1 v1: `front: key fits -> door open`, right for toggle, wrong for every other action).
+FactoredModel(action="act") names the feature of the action atoms: in every channel every candidate law must name an
+action value (an atom of that feature), unless the channel is declared Channel(..., action_free=True) (a channel whose
+effect does not depend on the action). A channel without an atom of that feature is refused at construction. The
+candidates dropped are counted (`report()[c]["action_dropped"]`); fewer candidates also make N smaller.
+
 Dedup (dedup="group", the default): a row whose key — `Row.key`, default (channel, state, observed) — was already
 logged in the current group is dropped (no new draw); the same row in another group counts again. dedup=False logs
 every row. Rows of one transition are not independent draws even within a channel: the report prints rows per
@@ -84,14 +92,34 @@ class Channel:
     options (apply, effects, proposer, min_support, min_precision, null, rivals, ...). delta is set by the model."""
 
     def __init__(self, name: str, grammar: Grammar, base: Callable | None = None, *, apply: Callable | None = None,
-                 effects: Callable | None = None, proposer=None, **lawset_kwargs):
+                 effects: Callable | None = None, proposer=None, action_free: bool = False, **lawset_kwargs):
         if "delta" in lawset_kwargs:
             raise ValueError("a channel's delta is set by FactoredModel(delta=, share=), not on the Channel")
         if "sized" in lawset_kwargs or "acceptance" in lawset_kwargs:
             raise ValueError("FactoredModel's joint bound needs the sized acceptance; sized= / acceptance= are not "
                              "options of a Channel")
         self.name, self.grammar, self.base = str(name), grammar, base
+        self.action_free = bool(action_free)
         self.kwargs = dict(lawset_kwargs, apply=apply, effects=effects, proposer=proposer)
+
+
+class _ActionBound:
+    """The per-channel action slot: a proposer that keeps only candidates whose condition names a value of the
+    caller's action feature (one atom of that feature) — a channel law never generalises over actions."""
+
+    def __init__(self, inner, grammar: Grammar, feature: str):
+        self.inner, self.grammar, self.feature = inner, grammar, feature
+        self.name = getattr(inner, "name", "enumerate")
+        self.dropped = 0
+
+    def propose(self, lawset, state, action, observed):
+        out = []
+        for c in self.inner.propose(lawset, state, action, observed):
+            if any(self.grammar.by_name[n].feature == self.feature for n in c.condition if n in self.grammar.by_name):
+                out.append(c)
+            else:
+                self.dropped += 1
+        return out
 
 
 @dataclass
@@ -130,7 +158,8 @@ class FactoredModel:
     laws[c] → LawSet, buffers[c] → the held-out Buffer, local[c] → the current group's Buffer."""
 
     def __init__(self, channels: Iterable[Channel], extract: Extractor | Callable | None = None, *,
-                 delta: float = 0.1, share: str | dict = "equal", dedup: str | bool = "group"):
+                 delta: float = 0.1, share: str | dict = "equal", dedup: str | bool = "group",
+                 action: str | None = None):
         chans = list(channels)
         if not chans:
             raise ValueError("a FactoredModel needs at least one channel")
@@ -163,8 +192,17 @@ class FactoredModel:
         self.laws: dict[str, LawSet] = {}
         self.buffers: dict[str, Buffer] = {}
         self.local: dict[str, Buffer] = {}
+        self.action = action
+        self._bound: dict = {}
         for c in chans:
             kw = {k: v for k, v in c.kwargs.items() if v is not None or k not in ("apply", "effects", "proposer")}
+            if action is not None and not c.action_free:
+                if not any(a.feature == action for a in c.grammar.atoms):
+                    raise ValueError(f"channel {c.name!r}: its grammar has no atom of the action feature {action!r} "
+                                     f"(add the action atoms, or declare the channel action_free=True)")
+                from ._core import Enumerate
+                kw["proposer"] = self._bound[c.name] = _ActionBound(kw.get("proposer") or Enumerate(), c.grammar,
+                                                                    action)
             self.laws[c.name] = LawSet(c.grammar, base=c.base, delta=deltas[c.name], sized=True, **kw)
             self.buffers[c.name] = Buffer(c.grammar)
             self.local[c.name] = Buffer(c.grammar)
@@ -408,7 +446,9 @@ class FactoredModel:
                        "tested": buf.tested, "delta": self.deltas[ch], "null": act.get("null"), "need": act.get("need"),
                        "rows": c["rows"], "transitions": tr, "rows_per_transition": (c["rows"] / tr) if tr else None,
                        "voided": c["voided"], "dropped": c["dropped"], "refused": c["refused"],
-                       "probe_admitted": c["probe_admitted"], "stale": self.stale(ch)}
+                       "probe_admitted": c["probe_admitted"], "stale": self.stale(ch),
+                       "action": ("free" if self.channels[ch].action_free else self.action) if self.action else None,
+                       "action_dropped": self._bound[ch].dropped if ch in self._bound else 0}
         out["bound"] = self.bound
         out["probe_admitted"] = sum(self.counts[ch]["probe_admitted"] for ch in self.names)
         return out
