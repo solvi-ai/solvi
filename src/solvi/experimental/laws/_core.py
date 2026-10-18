@@ -345,7 +345,8 @@ class Law:
     the applied law, from the last test; status: "active" | "retired"; why: the retirement's reason. tested: the
     candidates scored on the buffer when it was accepted (with the sized acceptance, the N of its bound; admitted by
     probes: the candidates it was told apart from); null: the null precision it was tested against (the effect's
-    base rate, or the set's fixed null); need: the clean support the sized rule asked for at that N; level:
+    base rate, the parent null — then `parent` is the id of the law it refines, null="parent" — or the set's fixed
+    null); need: the clean support the sized rule asked for at that N; level:
     the per-candidate error level δ_N it passed (None: fixed thresholds, `sized=False`, or a law added by hand);
     admitted: "test" (the held-out buffer), "probes" (`admit_by_probes`) or "hand" (`add`)."""
     id: str
@@ -370,6 +371,7 @@ class Law:
     level: float | None = None
     null: float | None = None
     admitted: str = "test"
+    parent: str | None = None
     recent: Any = field(default=None, repr=False)      # the last observations (1 right, 0 wrong) with LawSet(recent=)
     doubt: Any = field(default=None, repr=False)       # suspended: the last observations where it would apply
 
@@ -610,7 +612,18 @@ class LawSet:
     than its null passes with probability ≤ δ_N, and over every candidate tested on the buffer the chance of any such
     acceptance is ≤ delta — on the same null buffers: 0 of 100. With the base null that statement is "better than
     chance", not "precision above min_precision" (the filter adds that on the observed rows). The bound assumes the
-    held-out rows are independent draws and the candidates were not chosen by looking at them. sized=False: the
+    held-out rows are independent draws and the candidates were not chosen by looking at them.
+    null="parent" (opt-in) tests an exception against the law it overrides: when an active law of the same action has
+    a condition that is a proper subset of the candidate's and another effect (`parent_of`: the most specific such
+    law), the null is the candidate effect's rate on that law's held-out rows outside the candidate's condition,
+    add-one smoothed, floored and capped as the base rate (`parent_rate`); with no such law, or no such row, it is the
+    base rate. The bound then reads "the candidate's condition picks out its effect more often than the rest of the
+    parent's rows do", at the same δ_N. The null is estimated on rows disjoint from the candidate's, but from the same
+    buffer, and its sampling error is not in the bound (as for the base rate, on fewer rows); the parent may itself
+    have been accepted on this buffer, and its acceptance selects rows where the candidate's effect is rare — the
+    add-one estimate and the floor are the only guard. Measured on noise in a parent's rows with no exception (78
+    candidates, 80 rows, the parent by hand or learned on the same buffer): 0–2 accepts in 1,000 buffers at δ = 0.1;
+    a known exception (one row per group) needed 5 supporting groups instead of 8. sized=False: the
     fixed thresholds (the measurements ran so). Each accepted Law records `tested` (N), `null`, `need` and
     `level`. N counts distinct candidates: the same (action, condition, effect) scored again on the buffer — the next
     mismatch proposing it again — does not raise it (it did before 1.2: the same 56 candidates scored three times on an
@@ -693,8 +706,8 @@ class LawSet:
         self.sized, self.delta = acceptance == "sized", float(delta)
         self.space = int(space) if space is not None else None
         if isinstance(null, str):
-            if null != "base":
-                raise ValueError(f"null is 'base' or a precision strictly between 0 and 1, not {null!r}")
+            if null not in ("base", "parent"):
+                raise ValueError(f"null is 'base', 'parent' or a precision strictly between 0 and 1, not {null!r}")
         elif not 0.0 < float(null) < 1.0:
             raise ValueError("a fixed null is a precision strictly between 0 and 1")
         else:
@@ -958,16 +971,68 @@ class LawSet:
             return True
         if null is None:
             if isinstance(self.null, str):
-                raise ValueError("this set's null is the base rate: pass null=lawset.base_rate(buffer, action, effect)")
+                raise ValueError("this set's null is estimated from the buffer: pass null=lawset.null_for(buffer, "
+                                 "candidate) (or lawset.base_rate(buffer, action, effect))")
             null = self.null
         if support < sized_need(tested, self.delta, null, self.space):
             return False
         return _log_tail(int(support), int(hits), float(null)) <= math.log(
             sized_level(tested, self.delta, self.space)) + 1e-12
 
+    def parent_of(self, candidate: Candidate) -> Law | None:
+        """The law an exception candidate refines (used by null="parent"): the most specific active law of the same
+        action whose condition is a proper subset of the candidate's and whose effect differs — the first such law in
+        the set's order (most specific first, ties by `ties`); None when there is none."""
+        cond = set(candidate.condition)
+        a, e = _key(candidate.action), _key(candidate.effect)
+        for law in self.laws:
+            if _key(law.action) == a and _key(law.effect) != e and set(law.condition) < cond:
+                return law
+        return None
+
+    def parent_rate(self, buffer: Buffer, candidate: Candidate, exclude=None) -> tuple[float, Law] | None:
+        """The parent null of a candidate (null="parent") → (null, parent law), or None when the candidate has no
+        parent (`parent_of`) or the parent has no held-out row outside the candidate's condition. The rows: those the
+        parent's condition matches (every group but `exclude`) that the candidate's condition does not match — so the
+        null is estimated on rows disjoint from the ones the candidate is tested on. The rate: (k + 1) / (n + 2), k of
+        those n rows whose observation the candidate's effect predicts (add-one, so 0 of 10 is 0.083, not 0), floored
+        at 0.05 and capped at min_precision (0.95 when that is 1), as the base rate is."""
+        parent = self.parent_of(candidate)
+        if parent is None:
+            return None
+        a = candidate.action
+        rest = (buffer.match(a, parent.condition) & buffer.allowed(a, exclude)
+                & ~buffer.match(a, tuple(candidate.condition)))
+        n = rest.bit_count()
+        if not n:
+            return None
+        k = (rest & self._effect_mask(buffer, a, candidate.effect)).bit_count()
+        cap = self.min_precision if self.min_precision < 1.0 else 0.95
+        return min(max((k + 1) / (n + 2), self.NULL_FLOOR), cap), parent
+
+    def null_for(self, buffer: Buffer, candidate: Candidate, exclude=None) -> float:
+        """The null `test` holds `candidate` to: the set's fixed null; null="base": `base_rate`; null="parent": the
+        parent null (`parent_rate`) when the candidate refines an active law with another effect, else `base_rate`."""
+        if not isinstance(self.null, str):
+            return self.null
+        if self.null == "parent":
+            got = self.parent_rate(buffer, candidate, exclude)
+            if got is not None:
+                return got[0]
+        return self.base_rate(buffer, candidate.action, candidate.effect, exclude)
+
     def _null_of(self, buffer, c, exclude, cache):
         if not isinstance(self.null, str):
             return self.null
+        if self.null == "parent":
+            k = (self._laws_version, _key(c.action), tuple(c.condition), _key(c.effect))
+            if k not in cache:
+                got = self.parent_rate(buffer, c, exclude)
+                cache[k] = got[0] if got is not None else self._null_of_base(buffer, c, exclude, cache)
+            return cache[k]
+        return self._null_of_base(buffer, c, exclude, cache)
+
+    def _null_of_base(self, buffer, c, exclude, cache):
         k = (_key(c.action), _key(c.effect))
         if k not in cache:
             cache[k] = self.base_rate(buffer, c.action, c.effect, exclude)
@@ -1028,6 +1093,7 @@ class LawSet:
             if best is None or len(self.laws) >= self.cap:
                 break
             _, _, c, sup, hits, net, nl = best
+            par = self.parent_rate(buffer, c, exclude) if self.sized and self.null == "parent" else None
             m = self._rows_of(c, buffer, exclude, views[_key(c.action)])[0]
             law = self._accept(c, born=exclude, support=sup, hits=hits, net=net,
                                sources=tuple(buffer.ids(c.action, m)))
@@ -1037,6 +1103,7 @@ class LawSet:
                 law.level = sized_level(n_tested, self.delta, self.space)
                 law.null = nl
                 law.need = sized_need(n_tested, self.delta, nl, self.space)
+                law.parent = par[1].id if par is not None else None
             out.append(law)
             self.last_retired += self.check(buffer, c.action)
         return out
@@ -1703,7 +1770,7 @@ class LawSet:
         k = (_key(c.action), tuple(c.condition), _key(c.effect))
         N = max(1, buffer.tested + buffer._new_test(k))
         sup, hits, net = self.score(c, buffer, exclude)
-        null = (self.base_rate(buffer, c.action, c.effect, exclude) if isinstance(self.null, str) else self.null)
+        null = self.null_for(buffer, c, exclude)
         need = (max(self.min_support, sized_need(N, self.delta, null, self.space)) if self.sized
                 else max(1, self.min_support))
         out = {"passes": False, "failed": None, "reason": "", "support": sup, "hits": hits, "net": net,
