@@ -421,6 +421,16 @@ that passed on 14 held-out rows (13 right) came from 3 (world, object) pairs and
 the held-out states independently (fresh starts, or one row per object), or count a law's support by distinct object
 rather than by row before you read δ as a promise.
 
+**When two candidate conditions can match the same held-out rows, turn on `LawSet(rivals=True)`.** By default the
+test cannot tell `mover OPEN & cell STOP -> pass` from `mover OPEN & cell SHUT -> pass` while no key was pushed into a
+wall, and the candidates' order decides. With rivals on, a passing candidate is refused while another offered candidate
+(or an active law) with the same effect and a condition neither wider nor narrower matches exactly its held-out rows.
+On a grid-game-shaped world with levels arriving one at a time and the separating row on 10% of levels, the wrong law
+was the first accepted in 198 of 1,000 streams by default and in 0 with rivals (right 763 → 816); at 30%, false
+accepts 17 → 15 of 1,000; noise with no exception: 0 accepts either way. The price is delay: in 65 of the 1,000 streams
+nothing was accepted within 20 levels, because the right law waits for a row that tells it apart. Probe for that row
+(`admit_by_probes`) when you can ask the world. Covered by [tests/test_laws_rivals.py](../tests/test_laws_rivals.py).
+
 **Where the world answers questions, admit by discriminating probes, not by a random sample.** The author's earlier
 research line measured that a hypothesis "certified" on 8 random held-out examples is wrong more often the larger the
 space (0, 0.105, 0.193 at 17, 1,462, 124,287 hypotheses), and that 6 queries chosen to tell the survivors apart bring
@@ -430,6 +440,12 @@ left; otherwise it returns "undetermined" with the classes. On a synthetic world
 with the shortest survivor accepted a wrong law in 0.593 of 300 trials, the probes in none (0.987 right, 0.013
 undetermined with `assume_one_law=True`; under the 1.2 default, which keeps witnesses against a second missing law,
 0.897 right at 8 checks and 1.000 at 10, no wrong admission in the trials). Ask only where the rest of your law set and base are right, or a right candidate is refuted with them.
+
+**To veto a probe admission with your own check, ask for a dry run: `admit_by_probes(..., commit=False)`.** It returns
+the same decision without adding the law (status "proposed"); add it with `add` once your check agrees. Admitting and
+then calling `retire` records a law that never fell as retired, which mixes "never used" with "fell later" in
+`retired`. A planner that caches answers should key them on `LawSet.version`, which moves on every admission,
+retirement and suspension; and a law set or buffer that is pickled to resume a run drops its `id()`-keyed caches.
 
 **When two laws may be missing at once, use `admit_by_probes(..., max_new=2)` and give it at least 12 probes.** It is
 a known method — a version space (Mitchell 1982) over law sets with up to two new laws, split by discriminating

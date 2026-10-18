@@ -236,6 +236,17 @@ class Buffer:
         for t in ts:
             self.add(t)
 
+    def __getstate__(self):
+        """Pickled without `_cache`: its keys hold `id()`s of the comparison functions (`apply`, `base`, `same`),
+        which name other objects in another process. The cache is rebuilt from the rows on first use."""
+        state = self.__dict__.copy()
+        state["_cache"] = {}
+        return state
+
+    def __setstate__(self, state):
+        self.__dict__.update(state)
+        self._cache = {}
+
     def __len__(self):
         return self.n
 
@@ -342,10 +353,11 @@ class Law:
     acceptance (rows of every group but `born`), counted on the rows where it would be the applied law (the set's
     `support_on`); sources: the ids of the rows it was accepted on (the same rows); n / hits_after:
     observations from other groups since, while it was the law applied; held: (hits, n) on the buffer rows where it is
-    the applied law, from the last test; status: "active" | "retired"; why: the retirement's reason. tested: the
-    candidates scored on the buffer when it was accepted (with the sized acceptance, the N of its bound; admitted by
-    probes: the candidates it was told apart from); null: the null precision it was tested against (the effect's
-    base rate, or the set's fixed null); need: the clean support the sized rule asked for at that N; level:
+    the applied law, from the last test; status: "active" | "retired" | "suspended" | "proposed" (a dry run's,
+    `admit_by_probes(commit=False)`); why: the retirement's reason. tested: the candidates scored on the buffer
+    when it was accepted (with the sized acceptance, the N of its bound; admitted by probes: the candidates it was
+    told apart from); null: the null precision it was tested against (the effect's base rate, or the set's fixed
+    null); need: the clean support the sized rule asked for at that N; level:
     the per-candidate error level δ_N it passed (None: fixed thresholds, `sized=False`, or a law added by hand);
     admitted: "test" (the held-out buffer), "probes" (`admit_by_probes`) or "hand" (`add`)."""
     id: str
@@ -616,6 +628,21 @@ class LawSet:
     mismatch proposing it again — does not raise it (it did before 1.2: the same 56 candidates scored three times on an
     unchanged buffer made N 168).
 
+    rivals (opt-in, default False): a candidate that passes is refused while an indistinguishable rival exists —
+    another offered candidate or an active law with the same action and effect, a condition neither wider nor
+    narrower, matching exactly the same held-out rows (at least one; `rival_of`); `refused_rival` counts the refusals.
+    What it guarantees: no law is accepted on a buffer that cannot tell its condition from another offered one — the
+    choice is never made by the order of the candidates. What it does not: a rival that was not offered is not seen,
+    and a law with no rival is judged by the bound above as before. What it costs: a true law waits until the data
+    tell it from its rivals (a held-out row where they differ). Measured on a grid-game-shaped world (a key pushed into
+    a STOP door passes, into a STOP wall blocks; the right `mover OPEN & cell SHUT -> pass`, the wrong
+    `mover OPEN & cell STOP -> pass` right on every row but key-into-wall ones; levels arrive one at a time, up to 20,
+    the first accepted law counts; 1,000 streams): with a key-into-wall row on 10% of levels the wrong law was first
+    in 198 streams by default and in 0 with rivals, the right one in 763 and 816, and in 65 streams nothing was
+    accepted within 20 levels (0 by default); at 30%, false accepts (a law below 0.9 precision on a 3,000-level
+    reference) 17 → 15. Noise in an overridden law's rows with no exception (78 candidates on 80 rows): 0 accepts in
+    715, 1,000 and 905 buffers at δ = 0.1, with and without rivals (tests/test_laws_rivals.py).
+
     acceptance: "sized" (the default with sized=True), "fixed" (sized=False) or "exact" — for few-shot buffers, where
     the sized rule cannot pass anything (3 groups × 6 rows, a deterministic one-atom law: 0 of 20 learned): a candidate
     passes when it is right on every held-out row where it applies, with support ≥ min_support, and net > 0; no
@@ -669,7 +696,8 @@ class LawSet:
                  readmit: str = "any", acceptance: str | None = None, confirm: Callable | None = None,
                  ties: str = "earlier", tol: float | None = None, rtol: float | None = None,
                  same: Callable[[Any, Any], bool] | None = None, recent: int | None = None, memo: bool = False,
-                 on_fall: str = "retire", reactivate_min: int = 10, suspended_cap: int = 50):
+                 on_fall: str = "retire", reactivate_min: int = 10, suspended_cap: int = 50,
+                 rivals: bool = False):
         if disagree not in ("first", "abstain"):
             raise ValueError(f"disagree is 'first' or 'abstain', not {disagree!r}")
         if not 0.0 < float(delta) < 1.0:
@@ -700,6 +728,8 @@ class LawSet:
         else:
             null = float(null)
         self.null = null
+        self.rivals = bool(rivals)
+        self.refused_rival = 0             # passing candidates refused for an indistinguishable rival (rivals=True)
         self.disagree = disagree
         if support_on not in ("applied", "matched"):
             raise ValueError(f"support_on is 'applied' or 'matched', not {support_on!r}")
@@ -739,6 +769,29 @@ class LawSet:
         self._seq = 0
         self._last_tested = 0
         self._base_key = ("base", id(base)) if self._cmp is None else ("base", id(base), self._cmp)
+
+    @property
+    def version(self) -> int:
+        """A counter that goes up whenever the set's laws change: a law admitted (`test`, `admit_by_probes`, `add`,
+        `reactivate`), retired, suspended or withdrawn from `suspended`. A planner that caches answers recomputes when
+        it moved. Not changed by a dry run (`admit_by_probes(..., commit=False)`), by predictions or by `observe`
+        when no law falls. Kept across pickling."""
+        return self._laws_version
+
+    def __getstate__(self):
+        """Pickled without the score memo (keyed by the buffer's `id()`); the `id()`-based cache keys are rebuilt
+        on unpickle from the objects the set holds then."""
+        state = self.__dict__.copy()
+        state["_memo"], state["_memo_at"] = {}, None
+        return state
+
+    def __setstate__(self, state):
+        self.__dict__.update(state)
+        self._memo, self._memo_at = {}, None
+        cmp = self._cmp
+        if cmp is not None and cmp[0] == "same":
+            self._cmp = ("same", id(self.same))
+        self._base_key = ("base", id(self.base)) if self._cmp is None else ("base", id(self.base), self._cmp)
 
     @property
     def proposals(self):
@@ -945,6 +998,41 @@ class LawSet:
         share = (allowed & self._effect_mask(buffer, action, effect)).bit_count() / n
         return min(max(share, self.NULL_FLOOR), cap)
 
+    def rival_of(self, buffer: Buffer, candidate: Candidate, others: Iterable[Candidate] = (), exclude=None):
+        """An indistinguishable rival of `candidate` on the held-out rows (every group but `exclude`) → the rival's
+        condition, or None. A rival: an active law or one of `others`, of the same action and effect, whose condition
+        is neither a subset nor a superset of the candidate's and matches exactly the same held-out rows (at least
+        one) — the two differ on no held-out row, so the buffer cannot say which condition is the law. A refinement
+        (a superset condition matching the same rows) is not a rival: the shorter one wins on length. With
+        rivals=True `test` refuses a candidate that has one (see the class docstring)."""
+        return self._rival(buffer, candidate, list(others), exclude, {})
+
+    def _rival(self, buffer, c, others, exclude, cache):
+        a, e = _key(c.action), _key(c.effect)
+        if (a, e) not in cache:
+            allowed = buffer.allowed(c.action, exclude)
+            seen, groups = set(), {}
+            pool = [(x.action, tuple(x.condition)) for x in others if _key(x.action) == a and _key(x.effect) == e]
+            pool += [(law.action, tuple(law.condition)) for law in self.laws
+                     if _key(law.action) == a and _key(law.effect) == e]
+            for act, cond in pool:
+                if cond in seen:
+                    continue
+                seen.add(cond)
+                m = buffer.match(act, cond) & allowed
+                if m:
+                    groups.setdefault(m, []).append(cond)
+            cache[(a, e)] = (allowed, groups)
+        allowed, groups = cache[(a, e)]
+        cond = tuple(c.condition)
+        m = buffer.match(c.action, cond) & allowed
+        mine = set(cond)
+        for other in groups.get(m, ()) if m else ():
+            o = set(other)
+            if not (o <= mine or mine <= o):
+                return other
+        return None
+
     def passes(self, support: int, hits: int, tested: int, null: float | None = None) -> bool:
         """The acceptance on counts alone (net aside): support ≥ min_support, hits ≥ min_precision · support, and with
         sized=True P[Binomial(support, null) ≥ hits] ≤ sized_level(tested, delta, space). null: the set's fixed null
@@ -1002,6 +1090,7 @@ class LawSet:
         refused: set = set()                       # passed, but `confirm` said no
         for _ in range(accept):
             views = {}
+            rivals: dict = {}
             passing = []
             active = {(_key(law.action), law.condition, _key(law.effect)) for law in self.laws}
             for i, c in enumerate(candidates):
@@ -1016,6 +1105,9 @@ class LawSet:
                     continue
                 nl = self._null_of(buffer, c, exclude, nulls) if self.sized else None
                 if not self.passes(sup, hits, n_tested, nl):
+                    continue
+                if self.rivals and self._rival(buffer, c, candidates, exclude, rivals) is not None:
+                    self.refused_rival += 1
                     continue
                 passing.append(((net, -len(cond), hits / sup, -i), i, c, sup, hits, net, nl))
             passing.sort(key=lambda r: r[0], reverse=True)
@@ -1089,7 +1181,7 @@ class LawSet:
                         same: Callable[[Any, Any], bool] | None = None, assume_one_law: bool = False,
                         rtol: float | None = None, coverage: str = "warn", max_new: int | None = None,
                         noise: float | None = None, level: float = 0.95, fit_level: float | None = 0.01,
-                        fit_support: int = 1) -> Admission:
+                        fit_support: int = 1, commit: bool = True) -> Admission:
         """Admit one of `candidates` by asking the world where they disagree (CEGIS-style), not by a random held-out
         sample. ask(state, action) → the observation (the environment, or an exact model of it); probes: the (state,
         action) pairs you may ask about (a finite pool; also what the equivalence classes are computed on); safe:
@@ -1180,7 +1272,16 @@ class LawSet:
         the stated ε is refused by this check at most 1 % of the time), or n < fit_support (default 1), gives
         "undetermined" with a reason that says the likely law does not fit the noise (or that there is too little
         support to check the fit). Few rows give the check little power — two misses in five at ε = 0.05 still pass —
-        so raise fit_support when a few answers can carry the weight. fit_level=None: no fit check (as in 1.2.0)."""
+        so raise fit_support when a few answers can carry the weight. fit_level=None: no fit check (as in 1.2.0).
+
+        commit=False: a dry run. The same decision is made (the probes are asked and spent, `cost["probes"]` counts
+        them), and the Admission is returned as with commit=True, but the set is left as it was: the law(s) of an
+        "accepted" admission are not added (their status is "proposed"), no suspended law is moved, and `version`,
+        `cost["accepted"]` and the next law's id are unchanged. Add the law afterwards with `add` (admitted="hand")
+        or run again with commit=True; refusing it needs no `retire`, so `retired` keeps only laws that fell."""
+        if not commit:
+            kw = {k: v for k, v in locals().items() if k not in ("self", "candidates", "ask", "commit")}
+            return self._dry_run(lambda: self.admit_by_probes(candidates, ask, **kw))
         if noise is not None:
             if not 0.0 < float(noise) < 0.5:
                 raise ValueError("noise is the chance an answer is wrong: 0 < noise < 0.5 (None: answers are exact)")
@@ -1459,6 +1560,24 @@ class LawSet:
         return Admission("accepted", law, classes, asked, refuted, null, why or "one class left", [], out, gap,
                          laws=[law])
 
+    def _dry_run(self, run):
+        """Run an admission and put the set back as it was before (laws, retired, suspended and their status,
+        the id counter, version, the accepted count, the score memo); the admitted laws get status "proposed"."""
+        laws, retired, suspended = list(self.laws), list(self.retired), list(self.suspended)
+        marks = [(x, x.status, x.why) for x in suspended]
+        seq, version, accepted = self._seq, self._laws_version, self.cost["accepted"]
+        try:
+            out = run()
+        finally:
+            self.laws[:], self.retired[:], self.suspended[:] = laws, retired, suspended
+            for x, status, why in marks:
+                x.status, x.why = status, why
+            self._seq, self._laws_version, self.cost["accepted"] = seq, version, accepted
+            self._memo, self._memo_at = {}, None
+        for law in out.laws or ([out.law] if out.law is not None else []):
+            law.status = "proposed"
+        return out
+
     def _accept(self, c, *, born, support=0, hits=0, net=0, sources=()):
         if self.suspended:
             k = (_key(c.action), tuple(c.condition), _key(c.effect))
@@ -1566,6 +1685,7 @@ class LawSet:
             old = self.suspended.pop(0)
             old.status = "retired"
             self.retired.append(old)
+            self._laws_version += 1
 
     def reactivate(self, law: Law):
         """Put a suspended law back in use, its running counts reset (judged from here on)."""
@@ -1624,6 +1744,7 @@ class LawSet:
             self.suspended.remove(law)
             law.status, law.why = "retired", why
             self.retired.append(law)
+            self._laws_version += 1
             return
         if law in self.laws:
             self.laws.remove(law)
@@ -1685,7 +1806,7 @@ class LawSet:
             lo, hi = (lo, mid) if ok(mid) else (mid, hi)
         return hi
 
-    def why_not(self, candidate: Candidate, buffer: Buffer, exclude=None) -> dict:
+    def why_not(self, candidate: Candidate, buffer: Buffer, exclude=None, others: Iterable[Candidate] = ()) -> dict:
         """Why `test` would not accept `candidate` on `buffer` (the held-out rows of every group but `exclude`) — the
         first of its tests the candidate fails, in the order `test` applies them, and by how much. Read-only: the
         buffer's N and the set's cost are not touched. → {"passes", "failed", "reason" (in words), "support", "hits",
@@ -1695,7 +1816,9 @@ class LawSet:
         law), "readmit" (retired on a buffer this size, readmit="grown"), "cap" (the set holds `cap` laws), "net"
         (it removes no more errors than it adds where it would be the applied law), "min_support", "min_precision",
         "exact" (acceptance="exact": wrong on some row it applies to), "sized_need" (fewer rows than the sized rule
-        needs at this N), "sized_bound" (enough rows, but the binomial tail against the null is above δ_N). tested: the
+        needs at this N), "sized_bound" (enough rows, but the binomial tail against the null is above δ_N), "rival"
+        (rivals=True: an active law or one of `others` — the other candidates of the same test — is an
+        indistinguishable rival, `rival_of`; "rival" in the result names its condition). tested: the
         N `test` would score it at (this candidate counted when it is new to the buffer); need: the support a law right
         on every row needs at that N (min_support when not sized); short: rows short of `need` for the support tests,
         hits short of min_precision · support for "min_precision", else 0."""
@@ -1745,6 +1868,12 @@ class LawSet:
                 if not self.passes(sup, hits, N, null):
                     return fail("sized_bound", f"{hits}/{sup} right is not far enough above the null {null:.3g} at "
                                                f"N={N} candidates (δ_N = {sized_level(N, self.delta, self.space):.3g})")
+        if self.rivals:
+            r = self.rival_of(buffer, c, others, exclude)
+            if r is not None:
+                out["rival"] = r
+                return fail("rival", f"{r} matches exactly the same held-out rows with the same effect (neither wider "
+                                     f"nor narrower): the buffer cannot tell which condition is the law")
         out.update(passes=True, reason="it passes every test" + (" (confirm is still asked)" if self.confirm else ""))
         return out
 
