@@ -413,6 +413,17 @@ candidates takes hundreds of rows even for a deterministic law. **The need:** a 
 not failing.** Collect more held-out rows, test fewer candidates, declare `space=`, or pass `sized=False` knowingly and
 treat the fixed bar's false accepts as the known price; the measurements above ran with `sized=False`.
 
+**Test an exception against the law it overrides: `LawSet(null="parent")`.** Under the base null an exception is held
+to its effect's share over every row of the action, which is high when that effect is common elsewhere ("pass" on 42%
+of moves), although it is rare on the rows of the general law it overrides ("a STOP cell blocks"). With
+`null="parent"` a candidate whose condition strictly refines an active law with another effect is tested against its
+effect's rate on the rest of that law's rows (add-one, floored at 0.05); without such a law nothing changes. On a
+synthetic world with one exception row per group (base rate 4/9) the exception was accepted after 5 supporting groups
+instead of 8 (min_support was the bar), and with noise and no exception in the parent's rows (78 candidates, 80 rows)
+it accepted 0–2 of 1,000 buffers at δ = 0.1, the base null 0. The null comes from the same buffer as the parent law,
+and its sampling error is not in the bound: give the parent law enough rows before relying on it. Covered by
+[tests/test_laws_null_parent.py](../tests/test_laws_null_parent.py); not yet measured on a game.
+
 **The sized test assumes independent held-out rows; count support by distinct object when rows revisit the same ones.**
 The bound treats every held-out row as a fresh draw. Rows from a random walk revisit the same objects with the same
 persistent attributes, so twenty rows may be three objects seen many times: the support looks large, the binomial tail

@@ -2,6 +2,18 @@
 
 ## 1.2.1 — unreleased
 
+### Added
+- **Laws (experimental): `LawSet(null="parent")` — an exception is tested against the law it overrides** (opt-in; the
+  default `null="base"` is unchanged). A candidate whose condition is a proper superset of an active law's with another
+  effect (`LawSet.parent_of`: the most specific such law) is tested against its effect's rate on that law's held-out
+  rows outside the candidate's condition (`LawSet.parent_rate`: add-one, floored at 0.05, capped as the base rate),
+  not against the effect's share over every row of the action; with no such law it is the base rate.
+  `LawSet.null_for(buffer, candidate)` gives the null `test` uses; an accepted law records `Law.parent`. A known
+  exception (one row per group, base rate 4/9) was accepted after 5 supporting groups instead of 8; with noise and no
+  exception in the parent's rows, 0–2 false accepts in 1,000 buffers at δ = 0.1 (the base null: 0). The null is
+  estimated from the same buffer the parent may have been accepted on; its sampling error is not in the bound.
+  `why_not` reports the same null.
+
 ### Fixed
 - **`admit_by_probes(..., noise=ε)` no longer accepts a law that does not fit the noise.** The likelihood weight compares
   only the candidates offered, so when the true law was not among them the least-bad wrong one could win — a logged
