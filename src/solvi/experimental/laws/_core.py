@@ -1699,8 +1699,18 @@ class LawSet:
                 return None
             if applied:
                 return "applied" if not E(p, obs) else None
-            return "narrow" if (not hold) and not E(inf[1], obs) and E(self.apply(c.effect, x), obs) else None
+            return "narrow" if (not hold) and not E(inf[1], obs) and any(E(self.apply(e, x), obs)
+                                                                        for e in effects_of(c)) else None
 
+        def effects_of(c):
+            """The candidate's effect and, when congruent candidates were merged into it, their effects (aliases):
+            outside its condition a merged candidate is "too narrow" when any of them is what was observed."""
+            al = self._aliases.get(self._ck(c), ()) if getattr(self, "equivalent", None) is not None else ()
+            return (c.effect,) + tuple(al)
+
+        merged = {j for j, c in enumerate(cands) if len(effects_of(c)) > 1}
+        ghosts: set[int] = set()        # merged candidates refuted only as too narrow: kept as rivals (see below)
+        rows_seen: list = []            # every logged row and asked probe, (state, action, observation, info)
         acts = {_key(c.action): c.action for c in cands}
         alive = list(range(len(cands)))
         null = True
@@ -1714,6 +1724,9 @@ class LawSet:
             nonlocal alive, refuted, null
             if not assume_one_law:
                 seen.append((x, a, obs, inf))
+            rows_seen.append((x, a, obs, inf))
+            for j in [j for j in ghosts if refutes(cands[j], x, a, obs, inf) == "applied"]:
+                ghosts.discard(j)
             keep = []
             for j in alive:
                 k = refutes(cands[j], x, a, obs, inf)
@@ -1721,6 +1734,8 @@ class LawSet:
                     keep.append(j)
                 elif k == "narrow" and not assume_one_law:
                     narrow.add(j)
+                if k == "narrow" and j in merged:
+                    ghosts.add(j)
             refuted += len(alive) - len(keep)
             kept = set(keep)
             fell.extend(j for j in alive if j not in kept)
@@ -1786,6 +1801,24 @@ class LawSet:
         def groups():
             return classes_of(alive + ([-1] if null else []))
 
+        def told_apart(g, j):
+            """A logged row or asked probe where the set with g and the set with j predict differently: j survived it,
+            so g's claim was checked there."""
+            return any(not E(pred(cands[g], x, a, inf)[0], pred(cands[j], x, a, inf)[0]) for x, a, _, inf in rows_seen)
+
+        def ghost_rival(j):
+            """A merged candidate refuted only as too narrow (its own effects were wrong outside its condition, so it
+            cannot be the missing law alone — but neither, perhaps, can j) that predicts otherwise than j somewhere on
+            the pool and was never told apart from j on a row seen → its index, else None. Without this the merge
+            can remove the class whose presence made the probes check j (a congruent twin that is never "too narrow"
+            stays a rival class when it is not merged)."""
+            for g in sorted(ghosts):
+                if g == j or told_apart(g, j):
+                    continue
+                if any(not pe(u, v) for i, (u, v) in enumerate(zip(vector(g), vector(j))) if i not in done):
+                    return g
+            return None
+
         asked: list[Transition] = []
         unknown: list[Transition] = []
         done: set[int] = set()
@@ -1793,6 +1826,12 @@ class LawSet:
         why = ""
         while True:
             gs = groups()
+            if order == "split" and len(gs) <= 1 and gs and gs[0][0] >= 0:
+                g = ghost_rival(gs[0][0])
+                if g is not None:
+                    vec[-3] = vector(g)                          # a merged twin's rival: tell the class apart from it
+                    gs = [gs[0], [-3]]
+                    why = "one class left, a merged twin's rival too"
             if order == "split" and len(gs) <= 1:
                 ws, alt = witnesses(gs[0][0]) if gs and gs[0][0] >= 0 and len(gs[0]) == len(alive) else ([], None)
                 if not ws:
@@ -1878,6 +1917,9 @@ class LawSet:
                 return undetermined(f"{len(ws)} candidate(s) refuted only as too narrow are right wherever they were "
                                     f"applied and predict otherwise than the surviving class — more than one law may "
                                     f"be missing: {why}", ws)
+            if order == "split" and ghost_rival(j) is not None:
+                return undetermined(f"a merged congruent candidate refuted only as too narrow predicts otherwise than "
+                                    f"the surviving class on the pool and no probe told them apart: {why}")
             members = cls[0]
             twins = [cands[m].condition for m in members[1:] if len(cands[m].condition) == len(cands[j].condition)]
             if siblings == "undetermined" and twins:
