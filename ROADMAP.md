@@ -104,6 +104,38 @@ what was missing, and was written by hand around solvi's records, is planned her
 | **A run id and parent-decision links across storages** | One run writes to many stores from several processes: a run id and the parent decision in every record, and one chronology across the stores | done (1.2, opt-in `run_context` + `chronology`) |
 | **Laws: coarse outcomes and a hierarchical base out of the box** | `solvi.experimental.laws` with outcomes grouped coarser than the observation and a base predictor that backs off from specific to general; the per-action row need is in the run report since 1.1.1 (`LawSet.report`) | done (1.2, `laws.coarse`, `laws.BackoffBase`) |
 
+## Next (1.2.1 and after): from a grid-game agent built on the laws module
+
+An agent that learns the rules of a grid puzzle game from its own moves used `solvi.experimental.laws` as a library
+and had to write twelve pieces itself. Each row says what it had to write and why; three small ones are in 1.2.1.
+
+### Verification soundness
+
+| Item | What it gives | Status |
+|---|---|---|
+| **Laws: refuse a law the held-out rows cannot tell from another** | `LawSet(rivals=True)`: a passing candidate is refused while another offered candidate or active law with the same effect and a condition neither wider nor narrower matches exactly the same held-out rows; before, the candidates' order chose — with levels one at a time, a wrong law was the first accepted in 198 of 1,000 streams, 0 with rivals (right 763 → 816; a true law waits for a separating row) | in 1.2.1 (opt-in) |
+| **Laws: `admit_by_probes(siblings="undetermined")`** | When one class is left it takes the shortest member, ties by order, even when the class holds other conditions of the same length the pool cannot tell apart (two such conditions came from one observed death); the agent withdrew those admissions itself | planned |
+| **Laws: `admit_by_probes(..., held_out=buffer)`** | A probe admission is judged on the given buffer and the probes only; rows of other groups that already refute it are ignored — a law retired by the held-out check was re-admitted by probes twice in one training run | planned |
+| **Laws: dependent held-out rows — `Buffer(dedup=True)` or per-group effective counts** | The sized bound counts every row, so an agent replaying the same situation inflates support; the agent deduplicated by situation before each step. Today only a docs note (count support by distinct object: a law that passed on 14 rows from 3 objects was right on 41 % of fresh rows) | planned |
+
+### Law language
+
+| Item | What it gives | Status |
+|---|---|---|
+| **Laws: negated atoms (`Grammar(negations=True)` or a `not:` template)** | "Transform unless the noun is itself" could only be a general law plus an exception, and the exception is never learned once the general law is retired (no mismatch left); the agent added a negated atom by hand | planned |
+| **Laws: `Grammar(min_k=1)`** | A law cannot be required to name at least one atom; the agent wrapped the proposer to drop the empty condition | planned |
+| **Laws: atom implications and coverage over a second buffer (`Grammar(implies=...)`)** | Atoms implied by construction (a property atom implies its object atom) are reported "untested" for ever, so `coverage="undetermined"` refused every law, and an atom that varied elsewhere in the agent's history is not seen; the agent kept an implication table and checked the whole held-out buffer | planned |
+| **Laws: declared effect equivalences** | Two relative effects that agree by construction (a move in the facing direction and a move by the action) leave classes no probe can split, and `admit_by_probes` spends its whole budget before saying so; skip classes that agree wherever the distinguishing atom can hold | planned |
+
+### Agent ergonomics
+
+| Item | What it gives | Status |
+|---|---|---|
+| **Laws: a factored transition model (`GridWorld` / `InteractiveLearner`)** | A `LawSet` predicts one effect per (state, action); one game turn needs several laws at once (move, push chain, vanish, status). The agent wrote a turn skeleton over five law sets, one per effect channel, and the credit assignment that turns one transition into per-channel rows | research |
+| **Laws: a dry-run admission** | `admit_by_probes(..., commit=False)`: the decision without changing the set (law status "proposed"); before, an admission the caller refused could only be undone by `retire`, which mixed "never used" with "fell later" | in 1.2.1 |
+| **Laws: an `Unknown` answer for `ask`** | A probe whose situation turned out not to be the one asked about (the tile vanished, a second mover interfered) must still return a value; the agent returned a sentinel that refutes whatever applies there. An `Unknown` that refutes nothing and counts as spent | planned |
+| **Laws: `LawSet.version` and pickle-safe caches** | A planner caching answers had to read private counters to see the set change, and `Buffer` cache keys hold `id()`s that are not stable across pickling (the agent cleared them on resume); a public counter and caches dropped on pickling | in 1.2.1 |
+
 ## Library: open items from earlier releases
 
 | Item | What it gives | Status |
