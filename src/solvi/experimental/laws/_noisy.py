@@ -18,8 +18,8 @@ from ._probes import eig, groups_of
 
 def admit_noisy(ls, cands, ask: Callable[[Any, Any], Any], *, pool: list, safe, budget: int, buffer, exclude,
                 read_only, cost, eq, noise: float, level: float,
-                fit_level: float | None = 0.01, fit_support: int = 1):
-    from ._core import Admission, Transition, _key, _log_tail
+                fit_level: float | None = 0.01, fit_support: int = 1, siblings: str = "shortest"):
+    from ._core import Admission, Transition, Unknown, _key, _log_tail
     from ._probes import _ro
 
     E = eq or (lambda u, v: u == v)
@@ -55,6 +55,7 @@ def admit_noisy(ls, cands, ask: Callable[[Any, Any], Any], *, pool: list, safe, 
     cls.sort(key=lambda g: (min(len(hyps[j].condition) if hyps[j] is not None else -1 for j in g), g[0]))
     loglik = [0.0] * len(hyps)                    # per hypothesis; a class's weight: its members' mean likelihood
     asked: list = []
+    unknown: list = []
 
     def observe(x, a, obs, inf, G):
         """Every hypothesis's likelihood of this answer: 1 − ε where it predicts it, else ε / (G − 1)."""
@@ -89,7 +90,7 @@ def admit_noisy(ls, cands, ask: Callable[[Any, Any], Any], *, pool: list, safe, 
         if w[top] >= level:
             why = f"one class holds {w[top]:.3f} of the weight"
             break
-        if len(asked) >= budget:
+        if len(asked) + len(unknown) >= budget:
             why = f"the budget of {budget} answers is spent (best class {w[top]:.3f} < {level})"
             break
         best = None
@@ -110,8 +111,11 @@ def admit_noisy(ls, cands, ask: Callable[[Any, Any], Any], *, pool: list, safe, 
         i = best[1]
         x, a = pool[i]
         obs = ask(x, a)
-        asked.append(Transition(x, a, obs, group="probe", id=f"probe-{len(asked)}"))
         ls.cost["probes"] += 1
+        if obs is Unknown:                                # spent; refutes and supports nothing
+            unknown.append(Transition(x, a, obs, group="probe", id=f"unknown-{len(unknown) + 1}"))
+            continue
+        asked.append(Transition(x, a, obs, group="probe", id=f"probe-{len(asked)}"))
         lo_ok, lo_bad = math.log(1 - e), math.log(e / (len(pg[i]) - 1))
         for j in range(len(hyps)):
             loglik[j] += lo_ok if E(vecs[j][i], obs) else lo_bad
@@ -122,7 +126,7 @@ def admit_noisy(ls, cands, ask: Callable[[Any, Any], Any], *, pool: list, safe, 
     refuted = sum(len([j for j in cls[ci] if hyps[j] is not None]) for ci in range(len(cls)) if w[ci] < 1e-6)
 
     def undetermined(reason):
-        return Admission("undetermined", None, classes, asked, refuted, 0 in cls[top], reason)
+        return Admission("undetermined", None, classes, asked, refuted, 0 in cls[top], reason, unknown=unknown)
 
     if w[top] < level:
         return undetermined(why)
@@ -130,6 +134,11 @@ def admit_noisy(ls, cands, ask: Callable[[Any, Any], Any], *, pool: list, safe, 
         return undetermined(f"the set without a new law is the likely class: {why}")
     j = min((j for j in cls[top] if hyps[j] is not None), key=lambda j: (len(hyps[j].condition), j))
     c = hyps[j]
+    twins = [hyps[m].condition for m in cls[top] if m != j and hyps[m] is not None
+             and len(hyps[m].condition) == len(c.condition)]
+    if siblings == "undetermined" and twins:
+        return undetermined(f"the likely class holds {len(twins) + 1} conditions of {len(c.condition)} atom(s) the "
+                            f"pool cannot tell apart ({c.condition}, {', '.join(map(str, twins))}): {why}")
     rows = list(asked)
     if buffer is not None:
         rows = [r for r in buffer.rows(c.action, exclude)] + rows
@@ -155,7 +164,7 @@ def admit_noisy(ls, cands, ask: Callable[[Any, Any], Any], *, pool: list, safe, 
     law = ls._accept(c, born="probe", support=len(sup), hits=hits, net=net, sources=tuple(r.id for r in sup))
     law.admitted, law.tested = "probes", len(cands)
     ls.cost["accepted"] += 1
-    return Admission("accepted", law, classes, asked, refuted, False, why, [], [], [], laws=[law])
+    return Admission("accepted", law, classes, asked, refuted, False, why, [], [], [], laws=[law], unknown=unknown)
 
 
 __all__ = ["admit_noisy"]

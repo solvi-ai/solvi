@@ -50,11 +50,17 @@ def _required_args(fn):
 
 class Grammar:
     """The hypothesis space, written by you: the atoms and the largest conjunction `k`. A condition is a sorted tuple of
-    atom names, at most `k`, at most one per feature; the empty condition () holds everywhere."""
+    atom names, at most `k`, at most one per feature; the empty condition () holds everywhere. min_k (default 0): the
+    fewest atoms a condition has — min_k=1 forbids the empty condition (a law must name at least one atom), so
+    `conditions`, `random_condition` and `check` never give one and `LawSet.mismatch`, `test` and `admit_by_probes`
+    drop a shorter candidate."""
 
-    def __init__(self, atoms: Iterable[Atom], k: int = 3):
+    def __init__(self, atoms: Iterable[Atom], k: int = 3, *, min_k: int = 0):
         self.atoms: list[Atom] = []
         self.k = int(k)
+        self.min_k = int(min_k)
+        if not 0 <= self.min_k <= self.k:
+            raise ValueError(f"min_k is a number of atoms 0 ≤ min_k ≤ k ({self.k}), not {min_k!r}")
         self.by_name: dict[str, Atom] = {}
         self.feature: dict[str, str] = {}
         self.position: dict[str, int] = {}
@@ -88,13 +94,19 @@ class Grammar:
             raise ValueError(f"{cond}: at most one atom per feature")
         if len(cond) > self.k:
             raise ValueError(f"{cond}: more than k={self.k} atoms")
+        if len(cond) < getattr(self, "min_k", 0):
+            raise ValueError(f"{cond}: fewer than min_k={self.min_k} atoms")
         return cond
+
+    def allows(self, condition) -> bool:
+        """The condition has at least min_k atoms (the other rules are `check`'s)."""
+        return len(tuple(condition)) >= getattr(self, "min_k", 0)
 
     def conditions(self, true: Iterable[str]) -> list[tuple[str, ...]]:
         """Every condition built from the atoms `true` (in size order, then by name): what holds in one state."""
         names = sorted(set(true))
         out = []
-        for size in range(min(self.k, len(names)) + 1):
+        for size in range(getattr(self, "min_k", 0), min(self.k, len(names)) + 1):
             for c in combinations(names, size):
                 if len({self.feature[x] for x in c}) == size:
                     out.append(c)
@@ -113,7 +125,7 @@ class Grammar:
         for a in self.atoms:
             by_feat.setdefault(a.feature, []).append(a.name)
         feats = sorted(by_feat)
-        size = min(size, len(feats))
+        size = min(max(size, getattr(self, "min_k", 0)), len(feats))
         return tuple(sorted(rng.choice(by_feat[f]) for f in rng.sample(feats, size)))
 
 
@@ -155,11 +167,28 @@ class Buffer:
     bound is over every candidate tested on the stream, not on the rows kept), and a candidate scored again counts
     again once the window has turned over since it was last counted — `window` rows added since then, so it is judged
     on other rows: a new test. Within one turnover a re-score is not counted, as on a buffer without a window. Without
-    a window (the default) nothing leaves and N counts distinct candidates as before."""
+    a window (the default) nothing leaves and N counts distinct candidates as before.
 
-    def __init__(self, grammar: Grammar, window: int | None = None):
+    dedup (experimental, opt-in): a row whose situation is already in the buffer is not added (`add` returns False,
+    `duplicates` counts it). The situation: dedup=True — (group, action, the atoms true, the observation); a function
+    `dedup(t)` → a key — (group, action, that key), e.g. an object id to count support by distinct object. The sized
+    test treats every held-out row as an independent draw; an agent that replays the same situation (a random walk
+    revisiting a few objects) adds the same draw many times and inflates support. Measured on a synthetic world with no
+    law (10 worlds of 3 objects with 8 persistent atoms and a persistent coin outcome, 20 random-walk rows per world,
+    the 72 candidates of up to two atoms; 1,000 buffers): a law was accepted in 872 by default (support about 20–26
+    rows from a few objects) and in 0 with dedup=True; where a law exists (pass exactly where a0 & a1, 20 worlds) the
+    right law was the first accepted in 591 of 1,000 with dedup and 473 without. The bound then assumes distinct
+    situations are independent draws; rows of one situation with different observations (a stochastic outcome) are
+    kept. With a window, a situation that leaves may be added again."""
+
+    def __init__(self, grammar: Grammar, window: int | None = None, *, dedup: bool | Callable = False):
         if window is not None and int(window) < 1:
             raise ValueError("window is a number of rows ≥ 1, or None")
+        if not (isinstance(dedup, bool) or callable(dedup)):
+            raise ValueError("dedup is True, False or a function of a Transition → its situation key")
+        self.dedup = dedup
+        self.duplicates = 0                                      # rows not added: their situation was in the buffer
+        self._situations: dict = {}                              # situation key → rows kept with it
         self.window = int(window) if window is not None else None
         self.grammar = grammar
         self._rows: dict[Any, list[Transition]] = {}            # action → its rows, in order
@@ -178,14 +207,34 @@ class Buffer:
         self.version = 0
         self._arrival: deque = deque()                           # the action of each row kept, oldest first
 
+    def situation(self, t: Transition, true=None):
+        """The key `dedup` compares rows by: (group, action, the atoms true, the observation) for dedup=True, else
+        (group, action, dedup(t)). None without dedup."""
+        if not self.dedup:
+            return None
+        if self.dedup is True:
+            if true is None:
+                true = self.grammar.true(t.state, t.action)
+            return (_key(t.group), _key(t.action), tuple(true), _key(t.observed))
+        return (_key(t.group), _key(t.action), _key(self.dedup(t)))
+
     def add(self, t: Transition):
+        """Add a row → True, or False when dedup is on and its situation is already in the buffer (`duplicates`)."""
         a = _key(t.action)
+        true = None
+        if self.dedup:
+            true = self.grammar.true(t.state, t.action)
+            sk = self.situation(t, true)
+            if sk in self._situations:
+                self.duplicates += 1
+                return False
+            self._situations[sk] = 1
         rows = self._rows.setdefault(a, [])
         bit = 1 << len(rows)
         rows.append(t)
         self._width.setdefault(a, []).append(len(self.grammar.atoms))
         atoms = self._atoms.setdefault(a, {})
-        for name in self.grammar.true(t.state, t.action):
+        for name in (true if true is not None else self.grammar.true(t.state, t.action)):
             atoms[name] = atoms.get(name, 0) | bit
         g = _key(t.group)
         groups = self._groups.setdefault(a, {})
@@ -200,6 +249,7 @@ class Buffer:
             self._arrival.append(a)
             while self.n > self.window:
                 self._drop_oldest()
+        return True
 
     def _drop_oldest(self):
         """The oldest row leaves: its action's bitsets shift down one bit (bit 0 is the oldest row kept)."""
@@ -207,6 +257,8 @@ class Buffer:
         rows = self._rows[a]
         t = rows.pop(0)
         self._width[a].pop(0)
+        if self.dedup:
+            self._situations.pop(self.situation(t), None)
         atoms = self._atoms.get(a, {})
         for name in list(atoms):
             m = atoms[name] >> 1
@@ -533,6 +585,27 @@ class Undetermined:
         return f"Undetermined({[law.id for law in self.laws]}, predictions={list(self.predictions)!r})"
 
 
+class _UnknownAnswer:
+    """The type of `Unknown`: what `ask` returns in `admit_by_probes` when the probe's situation turned out not to be
+    the one asked about (the tile vanished, a second mover interfered). It refutes nothing and supports nothing, and
+    the probe counts as spent (budget, `cost["probes"]`, `Admission.unknown`). One instance; compare with `is`."""
+    _one = None
+
+    def __new__(cls):
+        if cls._one is None:
+            cls._one = super().__new__(cls)
+        return cls._one
+
+    def __repr__(self):
+        return "Unknown"
+
+    def __reduce__(self):
+        return (_UnknownAnswer, ())
+
+
+Unknown = _UnknownAnswer()
+
+
 @dataclass
 class Admission:
     """What `admit_by_probes` decided. status: "accepted" (one equivalence class of candidates survived and it is
@@ -547,7 +620,8 @@ class Admission:
     max_new=2; empty when undetermined); untested: the atoms of a longer candidate in the surviving class that the
     shortest one drops and that never varied on the pool and the rows seen where the shortest one holds — the
     evidence cannot tell the shorter law from the longer, so the accepted law may be too general there (see
-    `coverage` of `admit_by_probes`; empty under max_new=2, where coverage is not checked)."""
+    `coverage` of `admit_by_probes`; empty under max_new=2, where coverage is not checked); unknown: the probes whose
+    answer was `Unknown`, as Transitions (spent, used for nothing else)."""
     status: str
     law: Law | None
     classes: list
@@ -559,6 +633,7 @@ class Admission:
     refuted_list: list = field(default_factory=list)
     untested: list = field(default_factory=list)
     laws: list = field(default_factory=list)
+    unknown: list = field(default_factory=list)
 
 
 # ───────────────────────────────────────────── the law set
@@ -730,6 +805,7 @@ class LawSet:
         self.null = null
         self.rivals = bool(rivals)
         self.refused_rival = 0             # passing candidates refused for an indistinguishable rival (rivals=True)
+        self.refused_held_out = 0          # probe admissions refused by admit_by_probes(held_out=)
         self.disagree = disagree
         if support_on not in ("applied", "matched"):
             raise ValueError(f"support_on is 'applied' or 'matched', not {support_on!r}")
@@ -923,7 +999,8 @@ class LawSet:
         active = {(_key(law.action), law.condition, _key(law.effect)) for law in self.laws}
         proposed = list(self.proposer.propose(self, state, action, observed))
         self.cost["candidates"] += len(proposed)
-        return [c for c in proposed if (_key(c.action), tuple(c.condition), _key(c.effect)) not in active]
+        return [c for c in proposed if (_key(c.action), tuple(c.condition), _key(c.effect)) not in active
+                and self.grammar.allows(c.condition)]
 
     # ----------------------------------------------------------------------------------- the held-out test
     def _effect_mask(self, buffer, action, effect):
@@ -1068,7 +1145,7 @@ class LawSet:
         included — and net > 0. Best: the largest net, then fewer atoms, then the higher precision, then the earlier
         candidate. → the accepted laws. The check after each acceptance may retire laws (the accepted one too):
         they are in `last_retired` (and in `Step.retired` when `step` ran the test)."""
-        candidates = list(candidates)
+        candidates = [c for c in candidates if self.grammar.allows(c.condition)]
         self.last_retired = []
         if self.readmit == "grown" and self._retired_at:
             candidates = self._not_readmitted(candidates, buffer)
@@ -1181,7 +1258,8 @@ class LawSet:
                         same: Callable[[Any, Any], bool] | None = None, assume_one_law: bool = False,
                         rtol: float | None = None, coverage: str = "warn", max_new: int | None = None,
                         noise: float | None = None, level: float = 0.95, fit_level: float | None = 0.01,
-                        fit_support: int = 1, commit: bool = True) -> Admission:
+                        fit_support: int = 1, commit: bool = True, siblings: str = "shortest",
+                        held_out: Buffer | None = None) -> Admission:
         """Admit one of `candidates` by asking the world where they disagree (CEGIS-style), not by a random held-out
         sample. ask(state, action) → the observation (the environment, or an exact model of it); probes: the (state,
         action) pairs you may ask about (a finite pool; also what the equivalence classes are computed on); safe:
@@ -1278,7 +1356,30 @@ class LawSet:
         them), and the Admission is returned as with commit=True, but the set is left as it was: the law(s) of an
         "accepted" admission are not added (their status is "proposed"), no suspended law is moved, and `version`,
         `cost["accepted"]` and the next law's id are unchanged. Add the law afterwards with `add` (admitted="hand")
-        or run again with commit=True; refusing it needs no `retire`, so `retired` keeps only laws that fell."""
+        or run again with commit=True; refusing it needs no `retire`, so `retired` keeps only laws that fell.
+
+        siblings: "shortest" (the default) — the shortest candidate of the one class left is accepted, ties by the order
+        given, even when the class holds other conditions of the same length; "undetermined" — then refuse: the pool
+        cannot tell those conditions apart and the order would choose (two conditions of one atom each that predict
+        alike on every probe). unique=True and max_new=None or 1; under noise= the likely class is read the same way.
+
+        ask may return `Unknown` (from solvi.experimental.laws) when the probe's situation turned out not to be the
+        one asked about: the answer refutes nothing and supports nothing, the probe counts as spent (budget,
+        `cost["probes"]`) and is listed in `Admission.unknown`, not in `asked`.
+
+        held_out (experimental, opt-in): a buffer of rows from other groups (every group but `exclude` counts) that
+        the admission must not contradict. After the probes choose, the law (each law under max_new=2) is counted on
+        the rows where it would be the applied law: right on h of n. It is refused — "undetermined", the set left as
+        it was, `refused_held_out` counts — when P[Binomial(n, min_precision) ≤ h] ≤ delta: a law whose precision is
+        at least min_precision is refused this way with probability at most delta when those rows are independent
+        draws; one right on every row is never refused. Unlike `buffer=`, where any wrong row refutes a candidate,
+        the held-out rows may hold noise. The rule is about the admitted law
+        on those rows, not a bound over the candidates the probes chose among. Measured (a hidden law of two atoms
+        among 16, a probe pool where its second atom always holds so the probes cannot tell the one-atom law from it,
+        60 logged rows of three other groups, 5 rounds of admit-then-`check`, 300 trials): by default the wrong law was
+        admitted, retired by the check and admitted again in every round (1,500 of 1,500 admissions wrong); with
+        held_out, 0 admissions; with 5% of the logged answers flipped, the same. On an unbiased pool the right law was
+        admitted in all 300 trials either way (with flipped answers too: no right law refused)."""
         if not commit:
             kw = {k: v for k, v in locals().items() if k not in ("self", "candidates", "ask", "commit")}
             return self._dry_run(lambda: self.admit_by_probes(candidates, ask, **kw))
@@ -1303,6 +1404,13 @@ class LawSet:
             assume_one_law = True
         if coverage not in ("warn", "undetermined", "ignore"):
             raise ValueError(f"coverage is 'warn', 'undetermined' or 'ignore', not {coverage!r}")
+        if siblings not in ("shortest", "undetermined"):
+            raise ValueError(f"siblings is 'shortest' or 'undetermined', not {siblings!r}")
+        if siblings == "undetermined" and max_new == 2:
+            raise ValueError("siblings='undetermined' takes max_new=None or 1")
+        if held_out is not None:
+            kw = {k: v for k, v in locals().items() if k not in ("self", "candidates", "ask", "commit", "held_out")}
+            return self._held_out_admission(lambda: self.admit_by_probes(candidates, ask, **kw), held_out, exclude)
         from ._probes import groups_of, sameness, split
         eq = sameness(tol, same, rtol=rtol) if (tol, rtol, same) != (None, None, None) else self.same
         E = eq or (lambda u, v: u == v)
@@ -1311,7 +1419,7 @@ class LawSet:
         seen = set()
         for c in candidates:
             k = (_key(c.action), tuple(c.condition), _key(c.effect))
-            if k not in seen:
+            if k not in seen and self.grammar.allows(c.condition):
                 seen.add(k)
                 cands.append(c)
         pool = list(probes)
@@ -1321,7 +1429,7 @@ class LawSet:
             return admit_noisy(self, cands, ask, pool=pool, safe=safe, budget=budget, buffer=buffer, exclude=exclude,
                                read_only=read_only, cost=cost, eq=eq, noise=float(noise), level=float(level),
                                fit_level=None if fit_level is None else float(fit_level),
-                               fit_support=int(fit_support))
+                               fit_support=int(fit_support), siblings=siblings)
         if max_new == 2:
             from ._versions import admit_up_to_two
             return admit_up_to_two(self, cands, ask, pool=pool, safe=safe, budget=budget, buffer=buffer,
@@ -1443,6 +1551,7 @@ class LawSet:
             return classes_of(alive + ([-1] if null else []))
 
         asked: list[Transition] = []
+        unknown: list[Transition] = []
         done: set[int] = set()
         ok_safe = (lambda i: True) if safe is None else (lambda i: bool(safe(*pool[i])))
         why = ""
@@ -1456,7 +1565,7 @@ class LawSet:
                 vec[-2] = alt                                    # tell the class apart from the several-laws one
                 gs = [gs[0], [-2]]
                 why = "one class left, a several-laws alternative too"
-            if len(asked) >= int(budget):
+            if len(asked) + len(unknown) >= int(budget):
                 why = f"the budget of {int(budget)} probes is spent"
                 break
             if not alive:
@@ -1484,9 +1593,12 @@ class LawSet:
             done.add(i)
             x, a = pool[i]
             obs = ask(x, a)
+            if obs is Unknown:
+                unknown.append(Transition(x, a, obs, group="probe", id=f"unknown-{len(unknown) + 1}-{i}"))
+                continue
             asked.append(Transition(x, a, obs, group="probe", id=f"probe-{len(asked) + 1}-{i}"))
             see(x, a, obs, pinfo(i))
-        self.cost["probes"] += len(asked)
+        self.cost["probes"] += len(asked) + len(unknown)
         order_key = (lambda j: (len(cands[j].condition), j))
         cls = sorted((sorted(g, key=order_key) for g in classes_of(alive)), key=lambda g: order_key(g[0]))
         classes = [[cands[j] for j in g] for g in cls]
@@ -1497,7 +1609,7 @@ class LawSet:
 
         def undetermined(reason, ws=(), untested=()):
             return Admission("undetermined", None, classes, asked, refuted, null, reason, [cands[d] for d in ws], out,
-                             list(untested))
+                             list(untested), unknown=unknown)
 
         def untested_of(j, members):
             """The atoms longer members of j's class add to j's condition that never varied where j's condition holds
@@ -1530,6 +1642,12 @@ class LawSet:
                                     f"applied and predict otherwise than the surviving class — more than one law may "
                                     f"be missing: {why}", ws)
             members = cls[0]
+            twins = [cands[m].condition for m in members[1:] if len(cands[m].condition) == len(cands[j].condition)]
+            if siblings == "undetermined" and twins:
+                return undetermined(f"the surviving class holds {len(twins) + 1} conditions of "
+                                    f"{len(cands[j].condition)} atom(s) the pool cannot tell apart "
+                                    f"({cands[j].condition}, "
+                                    f"{', '.join(map(str, twins))}): {why}")
         else:
             j = min(alive, key=order_key)
             members = next((g for g in cls if j in g), [j])
@@ -1558,24 +1676,63 @@ class LawSet:
         law.admitted, law.tested = "probes", len(cands)
         self.cost["accepted"] += 1
         return Admission("accepted", law, classes, asked, refuted, null, why or "one class left", [], out, gap,
-                         laws=[law])
+                         laws=[law], unknown=unknown)
+
+    def _snapshot(self):
+        return (list(self.laws), list(self.retired), list(self.suspended),
+                [(x, x.status, x.why) for x in self.suspended], self._seq, self._laws_version, self.cost["accepted"])
+
+    def _restore(self, snap):
+        """Put the set back as it was at `_snapshot` (laws, retired, suspended and their status, the id counter,
+        version, the accepted count; the score memo is dropped)."""
+        laws, retired, suspended, marks, seq, version, accepted = snap
+        self.laws[:], self.retired[:], self.suspended[:] = laws, retired, suspended
+        for x, status, why in marks:
+            x.status, x.why = status, why
+        self._seq, self._laws_version, self.cost["accepted"] = seq, version, accepted
+        self._memo, self._memo_at = {}, None
 
     def _dry_run(self, run):
-        """Run an admission and put the set back as it was before (laws, retired, suspended and their status,
-        the id counter, version, the accepted count, the score memo); the admitted laws get status "proposed"."""
-        laws, retired, suspended = list(self.laws), list(self.retired), list(self.suspended)
-        marks = [(x, x.status, x.why) for x in suspended]
-        seq, version, accepted = self._seq, self._laws_version, self.cost["accepted"]
+        """Run an admission and put the set back as it was before; the admitted laws get status "proposed"."""
+        snap = self._snapshot()
         try:
             out = run()
         finally:
-            self.laws[:], self.retired[:], self.suspended[:] = laws, retired, suspended
-            for x, status, why in marks:
-                x.status, x.why = status, why
-            self._seq, self._laws_version, self.cost["accepted"] = seq, version, accepted
-            self._memo, self._memo_at = {}, None
+            self._restore(snap)
         for law in out.laws or ([out.law] if out.law is not None else []):
             law.status = "proposed"
+        return out
+
+    def held_out_fit(self, law: Law, buffer: Buffer, exclude=None) -> tuple[int, int, float]:
+        """(hits, n, p) of an active law on `buffer`'s rows of every group but `exclude` where it is the applied law:
+        p = P[Binomial(n, min_precision) ≤ hits], the chance a law of precision min_precision is right this seldom
+        (1.0 on no rows). `admit_by_probes(held_out=)` refuses an admission whose p ≤ delta."""
+        _, _, _, take = self._view(buffer, law.action, exclude)
+        t = take.get(law.id, 0)
+        n = t.bit_count()
+        h = (t & self._effect_mask(buffer, law.action, law.effect)).bit_count()
+        if n == 0 or h >= n:
+            return h, n, 1.0
+        p0 = self.min_precision
+        if p0 >= 1.0:
+            return h, n, 0.0
+        return h, n, math.exp(_log_tail(n, n - h, 1.0 - p0))
+
+    def _held_out_admission(self, run, held_out, exclude):
+        snap = self._snapshot()
+        out = run()
+        if out.status != "accepted":
+            return out
+        for law in out.laws or [out.law]:
+            h, n, p = self.held_out_fit(law, held_out, exclude)
+            if p <= self.delta:
+                self._restore(snap)
+                self.refused_held_out += 1
+                why = (f"the held-out rows refute {law.condition} -> {law.effect!r}: right on {h} of the {n} rows of "
+                       f"other groups where it would apply; P[Binomial({n}, {self.min_precision:g}) ≤ {h}] = {p:.2g} "
+                       f"≤ delta {self.delta:g}")
+                return Admission("undetermined", None, out.classes, out.asked, out.refuted, out.null, why,
+                                 out.witnesses, out.refuted_list, out.untested, laws=[], unknown=out.unknown)
         return out
 
     def _accept(self, c, *, born, support=0, hits=0, net=0, sources=()):

@@ -16,6 +16,29 @@
   suspension, reactivation and withdrawal from `suspended`, for planners that cache answers. `Buffer` and `LawSet`
   now pickle without their `id()`-keyed caches (the buffer's `where` cache, the score memo); the cache keys are
   rebuilt from the live objects on unpickle, so a resumed run cannot read an entry made for another function.
+- **Laws (experimental): `Grammar(min_k=1)`** — conditions have at least `min_k` atoms (min_k=1: no empty
+  condition). `conditions`, `random_condition` and `check` follow it; `LawSet.mismatch`, `test` and `admit_by_probes`
+  drop shorter candidates; new `Grammar.allows(condition)`. Default 0, unchanged.
+- **Laws (experimental): an `Unknown` probe answer.** `ask` in `admit_by_probes` may return
+  `solvi.experimental.laws.Unknown` when the probe's situation was not the one asked about: it refutes and supports
+  nothing, counts as spent (budget, `cost["probes"]`) and is listed in `Admission.unknown` (new), not `asked`. In the
+  default, noisy and two-law modes.
+- **Laws (experimental): `admit_by_probes(..., siblings="undetermined")`** — refuse when the one class left holds
+  other conditions of the same length as the shortest (the pool cannot tell them apart; before, the order of the
+  candidates chose). Default "shortest", unchanged.
+- **Laws (experimental, not yet confirmed on a second task): `Buffer(dedup=True | key)`** — a row whose situation
+  (group, action, atoms true, observation; or a key of your own, e.g. an object id) is already in the buffer is not
+  added (`duplicates` counts). On a synthetic world with no law and random-walk rows over 3 objects per world, a law
+  was accepted in 872 of 1,000 buffers by default and 0 with dedup; with a real law the right one was first in 591
+  (473 without). Opt-in; it enters as experimental until a second task confirms it.
+- **Laws (experimental, not yet confirmed on a second task): `admit_by_probes(..., held_out=buffer)`** — a probe
+  admission is refused ("undetermined", the set unchanged, `refused_held_out`) when the rows of other groups where it
+  would apply show it right on h of n with P[Binomial(n, min_precision) ≤ h] ≤ delta; a law of precision
+  ≥ min_precision is refused so with probability ≤ delta (independent rows). `LawSet.held_out_fit(law, buffer)`.
+  On a synthetic world where the probes cannot tell a one-atom law from the right two-atom one, the wrong law was
+  admitted, retired by the check and re-admitted in every round by default (1,500 of 1,500 admissions); with
+  held_out, 0; the right law on an unbiased pool was never refused (300 of 300, also with 5% flipped answers).
+  Opt-in; experimental until a second task confirms it.
 - **Laws (experimental): `admit_by_probes(..., commit=False)`**, a dry run: the same decision (the probes are asked
   and counted), but the set, its `version`, `cost["accepted"]` and the next law id are left as they were; the
   returned law has status "proposed". Refusing it needs no `retire`, so `retired` keeps only laws that fell.

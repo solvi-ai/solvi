@@ -224,7 +224,7 @@ from ._compile import CompiledCheck, check_compiled, load_module
 from ._confidence import Abstained, LawConfidence, LawStats, fisher_p
 from ._history import Context, History, Past, Same, Tracker
 from ._core import (Admission, Atom, Buffer, CallableProposer, Candidate, Delta, Enumerate, Grammar, Law, LawSet, Proposer,
-                    RandomProposer, Step, Transition, Undetermined, sized_level, sized_need)
+                    RandomProposer, Step, Transition, Undetermined, Unknown, sized_level, sized_need)
 from ._probes import Probe, discriminate, eig, split
 from ._rank import (FEATURES, BagOfAtomsRanker, FeatureRanker, HandoverRanker, JointRanker, PriorRanker, RankedProposer,
                     SyntheticTask, atom_features, atom_kind, candidate_features, checks_to, synthetic_task)
@@ -237,4 +237,4 @@ __all__ = ["Abstained", "Admission", "Atom", "BackoffBase", "BagOfAtomsRanker", 
            "OutcomeClass", "Past", "Proposer", "RandomProposer",
            "RankedProposer", "Same", "Step", "SyntheticTask", "Transition", "atom_features", "atom_kind", "candidate_features",
            "check_compiled", "checks_to", "coarse", "discriminate", "eig", "fisher_p", "load_module", "sized_level", "sized_need", "split",
-           "synthetic_task", "Tracker", "Undetermined"]
+           "synthetic_task", "Tracker", "Undetermined", "Unknown"]

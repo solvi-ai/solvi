@@ -419,7 +419,9 @@ persistent attributes, so twenty rows may be three objects seen many times: the 
 looks small, and a law right only on those few objects passes. On a relational stand with random-walk streams, a law
 that passed on 14 held-out rows (13 right) came from 3 (world, object) pairs and was right on 41 % of fresh rows. Draw
 the held-out states independently (fresh starts, or one row per object), or count a law's support by distinct object
-rather than by row before you read δ as a promise.
+rather than by row before you read δ as a promise. `Buffer(dedup=True)` (experimental) keeps one row per situation and
+group, or `Buffer(dedup=lambda t: t.state["object"])` one per object: on a synthetic random walk over 3 objects per
+world with no law at all, a law was accepted in 872 of 1,000 buffers by default and in 0 with dedup.
 
 **When two candidate conditions can match the same held-out rows, turn on `LawSet(rivals=True)`.** By default the
 test cannot tell `mover OPEN & cell STOP -> pass` from `mover OPEN & cell SHUT -> pass` while no key was pushed into a
