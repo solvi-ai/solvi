@@ -211,11 +211,11 @@ GRID_EQUIVALENT = [((False, 1, 0, 0, "same"), ("set", False, "wood", 1, "same"),
                    ((True, 0, 0, 1, "grass"), ("set", True, "apple", 1, "grass"), "apple=0")]
 
 PROBE_ARMS = {
-    # gap 4: the same loop with and without the declared implications
+    # the same loop with and without the declared implications
     "base": dict(implies=False, coverage="undetermined"),
     "implies": dict(implies=True, coverage="undetermined"),
     "varied": dict(implies=True, coverage="varied"),
-    # gap 10: both encodings offered; siblings="undetermined" (else the order picks between twins)
+    # both encodings of an effect offered; siblings="undetermined" (else the order picks between twins)
     "variants": dict(implies=True, coverage="varied", variants=True, siblings="undetermined"),
     "equivalent": dict(implies=True, coverage="varied", variants=True, siblings="undetermined", equivalent=True),
 }

@@ -1,6 +1,6 @@
 """FactoredModel(action=): the per-channel action slot.
 
-Known answer from the MiniGrid stand (stuff/stands_1019/minigrid, VERDICT_GAP_1.md, seed 1): the front channel learned
+Known answer from a MiniGrid run (seed 1): the front channel learned
 `key fits -> door open` with no action atom — right for toggle, wrong for every other action facing a locked door with
 its key, which the walks rarely produced. With the action slot every channel law names an action value."""
 import random

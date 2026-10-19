@@ -30,7 +30,7 @@
   (group, action, atoms true, observation; or a key of your own, e.g. an object id) is already in the buffer is not
   added (`duplicates` counts). On a synthetic world with no law and random-walk rows over 3 objects per world, a law
   was accepted in 872 of 1,000 buffers by default and 0 with dedup; with a real law the right one was first in 591
-  (473 without). On a second task (graph_laws, 2,000 tasks, dedup by world and actor) it did what it targets and
+  (473 without). On a second task (relational laws over generated graphs, 2,000 tasks, dedup by world and actor) it did what it targets and
   cost found laws: wrong laws per admission 0.415 → 0.112 (and 0.157 → 0.052 on a second setting), but the share of
   true laws found 0.369 → 0.330, below the bar set before the run (0.332). It stays experimental and opt-in; turn it on
   where a few objects are revisited many times and fewer, surer laws are worth the loss.
@@ -3868,7 +3868,7 @@ weights are not published.
 
 ### Typed decisions
 
-- The decider (`solvi.decide`) answers typed questions; L14b–L14e checkpoints (`l14b_decider v1`) load, score and hash
+- The decider (`solvi.decide`) answers typed questions; the text-only checkpoints (`l14b_decider v1`) load, score and hash
   exactly as before.
   - Question kinds from types: `choice` (`Literal[...]`, an Enum; with "other" as an abstain threshold), `multi`
     (`list[Literal[...]]`), `score` (`solvi.typed.Scale[Literal[...]]`, 2–10 ordered levels → an ordinal answer; the value
@@ -3877,7 +3877,7 @@ weights are not published.
     per field: its type the kind, its description the task), `model.questions(cat, PydanticModel, fact)`;
     `Answer.from_type(Scale[...])` is ordinal; `solvi.typed.question_kind`, `Scale`, `Ordinal`.
   - Input: a text, or a state — a dict, list, pydantic model or dataclass — serialized by `solvi.decide.state_text` as key
-    paths (`customer.tier: pro`), exactly the L14f training serialization ("paths"; also "tree" and "json", as the checkpoint
+    paths (`customer.tier: pro`), exactly the typed v1 checkpoints' training serialization ("paths"; also "tree" and "json", as the checkpoint
     declares). A decision reading several facts serializes `{fact: value}`.
   - Output per question: probabilities, a calibrated confidence (a temperature per kind) and act / escalate. The model's act
     signal (an act head, optionally through a shipped act calibrator) below its threshold rejects the decision as the new
@@ -3888,7 +3888,7 @@ weights are not published.
     fallback producer runs if there is one. Provenance stays `decided`; `record.extra` has the act probability.
   - Several questions per forward pass: when the checkpoint declares `multi_question`, the strategist groups decision
     parts reading the same facts with the same model (`flow.batches`) and the executor scores each group in one pass
-    (`model.passes` counts them; the block layout of L14f — input encoded once, questions do not see each other — with a
+    (`model.passes` counts them; the block layout of the typed v1 format — input encoded once, questions do not see each other — with a
     fallback to one question per pass); records name their shared pass (`extra["pass"]`) and replay re-scores it.
     `model.decide_pass(input, parts)`. Catalogs without decisions do no extra work.
   - `adapt` / `fit` / `teach` per kind: a free shift per option (choice, multi), an ordinal-aware tilt and spread over the
@@ -3921,14 +3921,14 @@ weights are not published.
     `{option: score}` (a key function) or an ordered list, or a model's probabilities (confidence: Plackett–Luce);
     constraints see the tuple and joint decoding repairs a model's ranking.
   - **Estimate**: `Estimate[edges]` / `Answer.estimate(bins | lo, hi, step, coverage=0.8, unit=, integer=)` — open-ended
-    bins labelled like the L14g decider's; a rule returns a number (confidence 1) or a distribution; the value is the middle
+    bins labelled like the answer-primitives decider's; a rule returns a number (confidence 1) or a distribution; the value is the middle
     of the median bin, `result.interval` the bins holding the central coverage, the confidence their mass.
   - **Confidence as a primitive**: for every kind the probability that the answer, as returned, is right (the guide's
     table); `res.overall["by_kind"]` gives per kind the answered count and the product of their confidences. `Result`
     gains `kind`, `evidence`, `extra` (JSON too); `Question` gains `require_evidence`; `AnswerType` gains `unknown`, `k`,
     `bins`, `coverage`, `unit`, `source`, `type` (dumped only when set).
-  - The decider (`solvi.decide`) requests them from a checkpoint that declares them — the L14g contract
-    (`"subformat": "l14g typed v2"`, docs/decide_format.md §9, aligned with `exps_v2/experiments/l14g_format.py`): modes
+  - The decider (`solvi.decide`) requests them from a checkpoint that declares them — the answer-primitives contract
+    (`"subformat": "l14g typed v2"`, docs/decide_format.md §9, aligned with its training code): modes
     `rank`, `number`, `span`; the "not stated" logit (joint softmax with the options; sigmoid for multi; the null span for
     spans); a pointer (start / end columns over the input's tokens, full layout only) for span answers and evidence quotes
     (`evidence=True`); `model.decision(..., Maybe[...] | Span[T] | Rank[...] | Estimate[...])`, `model.has_unknown`,
@@ -3956,7 +3956,7 @@ weights are not published.
 
 ### Experimental
 
-- `ModelStrategist.load(path)`: a segment model (the L3–L6 typed decomposer, compressed to 34.5M parameters; torch or ONNX,
+- `ModelStrategist.load(path)`: a segment model (the typed decomposer, compressed to 34.5M parameters; torch or ONNX,
   format `solvi_strategist v1`) proposes producers where declared costs do not settle the choice; every proposal and the
   whole plan are verified by code, a rejected one falls back to code's plan; provenance `proposed` with the model's
   fingerprint when the model chose. What it learned is roughly the cost hints in docstrings — declare `cost=` instead.
@@ -3977,11 +3977,11 @@ weights are not published.
   attacker re-hashes the chain; before, such an edit replayed as ok.
 - A hard check that raises while it runs now makes the questions it governs abstain ("hard check … could not be
   evaluated"); before, the question was answered as if the check had passed (also in 0.4.x).
-- The pointer applies the checkpoint's `temperature.span` to the start / end scores and the null span (as the L14g
+- The pointer applies the checkpoint's `temperature.span` to the start / end scores and the null span (as the answer-primitives
   calibration fitted it), for spans and evidence.
 - A typed span (`Span[float]`) whose best span does not parse ('149.90 EUR') takes the best span's part that does ('149.90'),
   with the probability mass of the spans between them; never a span outside the best one (then "type rejected" as before).
-- An l14g act calibrator scores plain yes / no and choice questions too (its `p_unknown` / `kind=` features were missing
+- An answer-primitives act calibrator scores plain yes / no and choice questions too (its `p_unknown` / `kind=` features were missing
   when a question did not allow "not stated": the decision failed with `KeyError`).
 - `solvi.__version__`; `tools/smoke_decide.py` runs a decider checkpoint end to end through solvi on torch and ONNX (every
   kind, the pointer's tokenizer offsets, several questions per pass, replay, JSON, backend agreement, latency).

@@ -1,6 +1,6 @@
-"""Gap 10 fix: a merged congruent candidate stays a rival and the "too narrow" refutation reads every alias.
+"""A merged congruent candidate stays a rival and the "too narrow" refutation reads every alias.
 
-Known answer from the MiniGrid stand (stuff/stands_1019/minigrid, VERDICT_GAP_10.md, pos seed 6): facing west into an
+Known answer from a MiniGrid run (position rules, seed 6): facing west into an
 open door, both encodings offered (relative `fwd`, absolute (dx, dy)) with `fwd ≡ abs(DIR_VEC[d])` declared under
 `dir=d`. A logged forward-onto-goal row (a second missing law) refutes every `fwd` candidate as too narrow; the merge
 had folded the guarded absolute twin into the refuted `fwd` head, so the unguarded `door open -> abs(-1, 0)` (wrong for

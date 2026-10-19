@@ -40,7 +40,7 @@ The guarantee.
 
 The action slot (action=, opt-in). A channel's name is its LawSet's action slot, so the caller's own action is an
 atom of the channel's grammar like any other, and a channel law may leave it out — generalise over actions the data
-never varied (MiniGrid stand, gap 1 v1: `front: key fits -> door open`, right for toggle, wrong for every other action).
+never varied (measured on MiniGrid: `front: key fits -> door open`, right for toggle, wrong for every other action).
 FactoredModel(action="act") names the feature of the action atoms: in every channel every candidate law must name an
 action value (an atom of that feature), unless the channel is declared Channel(..., action_free=True) (a channel whose
 effect does not depend on the action). A channel without an atom of that feature is refused at construction. The
