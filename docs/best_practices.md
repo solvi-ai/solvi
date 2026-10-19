@@ -416,7 +416,7 @@ treat the fixed bar's false accepts as the known price; the measurements above r
 **The sized test assumes independent held-out rows; count support by distinct object when rows revisit the same ones.**
 The bound treats every held-out row as a fresh draw. Rows from a random walk revisit the same objects with the same
 persistent attributes, so twenty rows may be three objects seen many times: the support looks large, the binomial tail
-looks small, and a law right only on those few objects passes. On a relational stand with random-walk streams, a law
+looks small, and a law right only on those few objects passes. On relational laws over generated graphs with random-walk streams, a law
 that passed on 14 held-out rows (13 right) came from 3 (world, object) pairs and was right on 41 % of fresh rows. Draw
 the held-out states independently (fresh starts, or one row per object), or count a law's support by distinct object
 rather than by row before you read δ as a promise. `Buffer(dedup=True)` (experimental) keeps one row per situation and
