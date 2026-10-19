@@ -58,13 +58,18 @@ def test_fast_is_faster_on_many_cases(tmp_path):
               "expected": {"route": "billing" if i % 3 != 1 else "support"}} for i in range(300)]
     f = _write(tmp_path, cases)
     testing.run_file(f, fast=True)                                # warm up the imports
-    t0 = time.perf_counter()
-    full = testing.run_file(f)
-    t1 = time.perf_counter()
-    fast = testing.run_file(f, fast=True)
-    t2 = time.perf_counter()
-    assert full.passed == fast.passed == 300
-    assert (t2 - t1) * 1.5 < (t1 - t0), (t1 - t0, t2 - t1)
+    testing.run_file(f)
+    t_full, t_fast = [], []                                       # interleaved rounds, the best of each: one slow round
+    for _ in range(5):                                            # on a loaded machine cannot decide the comparison
+        t0 = time.perf_counter()
+        full = testing.run_file(f)
+        t1 = time.perf_counter()
+        fast = testing.run_file(f, fast=True)
+        t2 = time.perf_counter()
+        t_full.append(t1 - t0)
+        t_fast.append(t2 - t1)
+        assert full.passed == fast.passed == 300
+    assert min(t_fast) * 1.5 < min(t_full), (t_full, t_fast)
 
 
 def test_safeguards_cases_are_asked_in_full_and_regressions_still_fail(tmp_path):
