@@ -866,6 +866,71 @@ class CallableProposer:
         return out
 
 
+class BudgetedProposer:
+    """Another proposer's candidates cut to a budget, in the inner order: at most `candidates` candidates over all
+    mismatches, and proposals for at most `mismatches` mismatches (None: no cap). `used`, `used_neg`, `mismatches_seen`
+    and `last` (the candidates of the last call) after a call. Wrap the ranked proposer (`RankedProposer`) so the cut
+    keeps the best-ranked candidates.
+
+    neg_budget (with `Grammar(negations=...)`): a candidate whose condition holds a negated literal is charged to its
+    own budget of `neg_budget` candidates, the others to `candidates`; proposing stops when the positive budget is
+    spent (or the mismatch cap is reached), so the positive candidates of every mismatch are exactly those the same
+    proposer gives without negations. Default (None): `neg_budget = candidates` — a separate budget of the same size;
+    0 drops the negated candidates; "shared": one budget of `candidates` for both, cut in the inner order (the
+    behaviour before the option). Under a shared budget negated literals use up the budget before the mismatch that
+    proposes the true positive law is reached: on a second task (graph_laws, the program size growing with each
+    mismatch, 2,000 candidates) found fell from 0.64 to 0.55 and 0.25 to 0.11 on two families that need no negation,
+    and a separate budget restored all 21 lost tasks in a replay. The cost: up to `candidates + neg_budget` candidates
+    per task, and every one tested counts in the sized bound's N (`Buffer.tested`); in that replay 1.5–1.9× the shared
+    budget's candidates per task. Without negations (or with no negated candidate) it is a plain budget."""
+
+    def __init__(self, inner, candidates: int, *, neg_budget: "int | str | None" = None, mismatches: int | None = None):
+        if neg_budget is not None and neg_budget != "shared" and (not isinstance(neg_budget, int) or neg_budget < 0):
+            raise ValueError('neg_budget is None, "shared" or an int >= 0')
+        if not isinstance(candidates, int) or candidates < 0:
+            raise ValueError("candidates is an int >= 0")
+        self.inner, self.candidates, self.max_mismatches = inner, candidates, mismatches
+        self.neg_budget = candidates if neg_budget is None else neg_budget
+        self.name = getattr(inner, "name", "budgeted")
+        self.used = self.used_neg = self.mismatches_seen = 0
+        self.last: list = []
+
+    def spent(self) -> bool:
+        """No further call proposes anything (the positive / shared budget or the mismatch cap is used up)."""
+        if self.max_mismatches is not None and self.mismatches_seen >= self.max_mismatches:
+            return True
+        if self.neg_budget == "shared":
+            return self.used + self.used_neg >= self.candidates
+        return self.used >= self.candidates
+
+    def cut(self, cands, grammar) -> list:
+        """Charge `cands` (one mismatch's, in order) to the budgets and return the kept ones, in order."""
+        neg = [any(grammar.is_negated(x) for x in c.condition) for c in cands]
+        if self.neg_budget == "shared":
+            kept = list(cands)[: max(0, self.candidates - self.used - self.used_neg)]
+            n_neg = sum(neg[: len(kept)])
+            self.used += len(kept) - n_neg
+            self.used_neg += n_neg
+            return kept
+        kept = []
+        for c, is_neg in zip(cands, neg):
+            if is_neg and self.used_neg < self.neg_budget:
+                kept.append(c)
+                self.used_neg += 1
+            elif not is_neg and self.used < self.candidates:
+                kept.append(c)
+                self.used += 1
+        return kept
+
+    def propose(self, lawset, state, action, observed):
+        self.last = []
+        if self.spent():
+            return []
+        self.mismatches_seen += 1
+        self.last = self.cut(list(self.inner.propose(lawset, state, action, observed)), lawset.grammar)
+        return self.last
+
+
 # ───────────────────────────────────────────── the sized acceptance
 def _binom_tail(n: int, k: int, p: float) -> float:
     """P[Binomial(n, p) ≥ k]."""

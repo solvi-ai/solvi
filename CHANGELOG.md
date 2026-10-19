@@ -71,6 +71,16 @@
   streams: no rule in either arm. Limits: one grid family; the declarations were written by hand and true (a false one
   is caught only on logged rows by `check_equivalent`, or when the rule later fails); deterministic world, exact
   probe answers.
+- **Laws (experimental): `BudgetedProposer(inner, candidates, neg_budget=, mismatches=)` — a candidate budget with
+  its own budget for negated literals.** Cuts another proposer's candidates to a task budget in its order; a candidate
+  whose condition holds a negated literal is charged to `neg_budget` (default: the same size as `candidates`;
+  `"shared"`: one budget, the cut in order), the others to `candidates`, and proposing stops when the positive budget
+  is spent — so the positive candidates of every mismatch are those the proposer gives without negations. Why: on the
+  second task of `negations="refine"` (graph_laws, 2,000 candidates shared) the negated candidates used the budget up
+  before the mismatch that proposes the true positive law: found 0.64 → 0.55 and 0.25 → 0.11 on two families that
+  need no negation. Within-mismatch reordering (positives first) and a tie-break against negations recovered none of
+  the 21 lost tasks in a replay; the separate budget all 21, at about 1.5–1.9× the candidates per task (each counted
+  in N). A re-check on fresh tasks is pre-registered.
 - **Laws (experimental, pending a second task): `Grammar(negations="refine" | "all")` — negated literals**
   (opt-in; default False, unchanged). A literal `not:<atom>` per atom, of the atom's feature; `grammar.true` gives one
   literal per atom, `Buffer.match` computes a literal's rows as the complement (no new storage), the compiled code is
