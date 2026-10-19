@@ -60,7 +60,7 @@ from collections import Counter
 from dataclasses import dataclass, field
 from typing import Any, Callable, Iterable, Protocol
 
-from ._core import Admission, Buffer, Grammar, Law, LawSet, Step, Transition, Unknown, _key
+from ._core import Admission, Buffer, Grammar, Law, LawSet, Transition, Unknown, _key
 
 __all__ = ["Channel", "Extractor", "FactoredModel", "FactoredStep", "Row", "Unknown"]
 
@@ -388,13 +388,12 @@ class FactoredModel:
 
     # ------------------------------------------------------------------------------- admission by probes
     def admit(self, channel: str, row: Row, ask: Callable[[Any], Any], probes: Iterable[Any], *, budget: int = 8,
-              held_out: bool = True, **kw) -> Admission | None:
+              **kw) -> Admission | None:
         """Admit a law for a mismatched row by asking the world (`LawSet.admit_by_probes`) with the library's guards:
         the current group's logged rows refute candidates (buffer=local[channel]), siblings="undetermined" (the pool
         cannot tell two conditions of one length apart → refuse), coverage="varied" over the channel's held-out buffer
-        (an atom that varied elsewhere but not on the pool → refuse), and the held-out check on the rows of other
-        groups (held_out=False: off). ask(state) → the observation, or `Unknown`; probes: channel states that may be
-        asked. One attempt per (channel, row key, group); None when already tried, when the row is no mismatch, or
+        (an atom that varied elsewhere but not on the pool → refuse). ask(state) → the observation, or `Unknown`;
+        probes: channel states that may be asked. One attempt per (channel, row key, group); None when already tried, when the row is no mismatch, or
         when nothing is proposed. Probe-admitted laws are outside δ (counted in the report). kw overrides
         admit_by_probes options."""
         self._check(channel)
@@ -413,9 +412,7 @@ class FactoredModel:
         opts.update(kw)
         pool = [(s, channel) for s in probes]
 
-        def run():
-            return ls.admit_by_probes(cands, lambda s, a: ask(s), probes=pool, **opts)
-        adm = ls._held_out_admission(run, self.buffers[channel], self.group) if held_out else run()
+        adm = ls.admit_by_probes(cands, lambda s, a: ask(s), probes=pool, **opts)
         if adm.status == "accepted":
             self.counts[channel]["probe_admitted"] += len(adm.laws or [adm.law])
         self._sync()
