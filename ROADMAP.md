@@ -111,6 +111,12 @@ and had to write twelve pieces itself. Each row says what it had to write and wh
 dedup and the factored model, experimental with the limits a second task measured), one is not shipped and one is
 under diagnosis.
 
+Scope after a real log: the module is for environments whose behaviour follows discrete rules (measured on grid games
+and relational laws over generated graphs). On AgentDojo write calls, with laws learned as exceptions to a provenance
+guard's verdicts, the opt-in features below showed no measured gain over the default, and harmful let-through stayed
+above 0.15 (0.177 all on, 0.218 default, at about 0.10 false interruptions; a tuned gradient-boosting model on the same
+atoms: 0.188). For noisy behavioural logs a calibrated scorer is the tool; the features stay opt-in.
+
 ### Verification soundness
 
 | Item | What it gives | Status |
@@ -118,6 +124,7 @@ under diagnosis.
 | **Laws: refuse a law the held-out rows cannot tell from another** | `LawSet(rivals=True)`: a passing candidate is refused while another offered candidate or active law with the same effect and a condition neither wider nor narrower matches exactly the same held-out rows; before, the candidates' order chose — with levels one at a time, a wrong law was the first accepted in 198 of 1,000 streams, 0 with rivals (right 763 → 816; a true law waits for a separating row) | in 1.2.1 (opt-in) |
 | **Laws: `admit_by_probes(siblings="undetermined")`** | When one class is left it takes the shortest member, ties by order, even when the class holds other conditions of the same length the pool cannot tell apart (two such conditions came from one observed death); the agent withdrew those admissions itself | in 1.2.1 (opt-in) |
 | **Laws: `admit_by_probes(..., held_out=buffer)`** | A probe admission is judged on the given buffer and the probes only; rows of other groups that already refute it are ignored — a law retired by the held-out check was re-admitted by probes twice in one training run | not shipped: on a real task (relational laws, 2,000 tasks) its errors lie where the held-out rows don't look — 95 of the 152 wrong probe-admitted laws were right on, or silent on, the held-out rows; the check refused 0–12 admissions. Kept on a branch |
+| **Laws on a real agent tool-call log** | Laws as exceptions to a provenance guard's verdicts on AgentDojo write calls (1,213 held-out rows, 30 tasks): every opt-in feature on against the default — coverage the same (ratio 0.981, CI 0.896–1.051), soundness inconclusive (false-law share 0.157 vs 0.073, CI of the difference includes 0), no gain; harmful let-through 0.177 (default 0.218) at about 0.10 false interruptions, above the 0.15 line and about a tuned gradient-boosting model on the same atoms (0.188 at 0.089) | measured, no gain: module scope narrowed to rule-governed environments; for noisy behavioural logs use a calibrated scorer |
 | **Laws: dependent held-out rows — `Buffer(dedup=True)` or per-group effective counts** | The sized bound counts every row, so an agent replaying the same situation inflates support; the agent deduplicated by situation before each step. Today only a docs note (count support by distinct object: a law that passed on 14 rows from 3 objects was right on 41 % of fresh rows) | experimental in 1.2.1 (opt-in, off by default): on a second task (2,000 tasks) wrong laws per admission 0.415 → 0.112, but true laws found 0.369 → 0.330, below the bar set before the run |
 
 ### Law language

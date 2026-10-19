@@ -16,6 +16,13 @@ in its order; with `Grammar(negations=...)` the candidates with a negated litera
 default the same size; `"shared"`: one budget), so they never crowd out a later mismatch's positive candidates. Both are experimental and off by default; an
 admitted negated law can steer the search away from the true law (numbers in the best practices).
 
+Scope: environments whose behaviour follows discrete rules — the features were measured on grid games and relational
+laws over generated graphs. On a real agent tool-call log (write calls of the public AgentDojo benchmark, laws learned
+as exceptions to a provenance guard's verdicts) the opt-in 1.2.1 features showed no measured gain over the default
+(coverage ratio 0.981, soundness inconclusive) and harmful writes let through stayed above 0.15 (0.177 with every
+feature on, 0.218 with the default, at about 0.10 false interruptions), about a tuned gradient-boosting model on the
+same atoms (0.188). For noisy behavioural logs use a calibrated scorer.
+
 ::: solvi.experimental.laws
 
 ## `solvi.experimental.laws.factored`

@@ -133,6 +133,14 @@
   fit …"). Where the right law is offered the outcome is unchanged. `fit_level=None` restores the old behaviour.
 
 ### Docs
+- **Laws: scope narrowed to environments whose behaviour follows discrete rules** (`solvi.experimental.laws` docstring,
+  experimental.md, the API page, best practices, ROADMAP). The features were measured on grid games and relational laws
+  over generated graphs. On a real agent tool-call log (AgentDojo write calls, 1,213 held-out rows from 30 tasks; laws
+  learned as exceptions to a provenance guard's verdicts) the opt-in 1.2.1 features showed no measured gain over the
+  default: coverage the same (ratio 0.981, CI 0.896–1.051), soundness inconclusive (false-law share 0.157 against
+  0.073), no pre-registered gain criterion met; harmful let-through stayed above 0.15 (0.177 all on, 0.218 default, at
+  about 0.10 false interruptions), about a tuned gradient-boosting model on the same atoms (0.188 at 0.089). For noisy
+  behavioural logs use a calibrated scorer. No code change.
 - Best practices, laws: the sized held-out test assumes independent rows; rows that revisit the same objects (random
   walks) overstate the support — draw held-out states independently or count support by distinct object. Also a note
   on the fit check of the noisy admission.
