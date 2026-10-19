@@ -394,8 +394,10 @@ class FactoredModel:
         cannot tell two conditions of one length apart → refuse), coverage="varied" over the channel's held-out buffer
         (an atom that varied elsewhere but not on the pool → refuse). ask(state) → the observation, or `Unknown`;
         probes: channel states that may be asked. One attempt per (channel, row key, group); None when already tried, when the row is no mismatch, or
-        when nothing is proposed. Probe-admitted laws are outside δ (counted in the report). kw overrides
-        admit_by_probes options."""
+        when nothing is proposed. Probe-admitted laws are outside δ (counted in the report). No held-out check: rows of
+        other groups that contradict the admitted law do not refuse it here (that check is not shipped; ROADMAP, "Laws:
+        `admit_by_probes(..., held_out=buffer)`"); the held-out test can retire it later. kw overrides admit_by_probes
+        options."""
         self._check(channel)
         if row.channel != channel:
             raise ValueError(f"row of channel {row.channel!r} given to admit({channel!r}, ...)")

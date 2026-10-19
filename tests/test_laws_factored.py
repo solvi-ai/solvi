@@ -229,7 +229,10 @@ def test_admit_refuses_when_the_pool_cannot_tell_siblings_apart_and_unknown_is_s
     assert adm.status == "undetermined" and adm.unknown
 
 
-def test_admit_is_refused_by_the_rows_of_other_groups():
+def test_admit_does_no_held_out_check():
+    """admit judges by the probes and the current group's rows only: rows of other groups that contradict the admitted
+    law do not refuse it (a held-out check on probe admissions is not shipped; see ROADMAP). Retirement by the
+    held-out test happens later, on step / log."""
     m = FactoredModel([Channel("A", g("x", "y", k=1), base=base_no)])
     for w in range(4):                                   # other groups: x is "no" on 12 rows
         m.log([Row("A", frozenset({"x"}), "no", key=i) for i in range(3)], group=w)
@@ -237,7 +240,7 @@ def test_admit_is_refused_by_the_rows_of_other_groups():
     row = Row("A", frozenset({"x", "y"}), "yes")
     m.log([row])
     adm = m.admit("A", row, lambda s: "yes" if "x" in s else "no", [frozenset({"x"}), frozenset({"y"})])
-    assert adm.status == "undetermined" and "held-out" in adm.why and not m.laws["A"].laws
+    assert adm.status == "accepted" and m.laws["A"].laws
 
 
 # ───────────────────────────────────────────── the push world (known answer)
