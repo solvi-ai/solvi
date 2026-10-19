@@ -1,5 +1,5 @@
-"""A multi-law (factored) transition model (experimental, pending a second task): several law sets that predict one
-step together, each over its own channel, with one joint error budget.
+"""A multi-law (factored) transition model (experimental; use it for accuracy, not to learn from fewer transitions):
+several law sets that predict one step together, each over its own channel, with one joint error budget.
 
     from solvi.experimental.laws.factored import Channel, Row, FactoredModel
 
@@ -51,7 +51,9 @@ logged in the current group is dropped (no new draw); the same row in another gr
 every row. Rows of one transition are not independent draws even within a channel: the report prints rows per
 transition per channel so a caller sees a channel that logs many rows per step.
 
-Measured on the push-world toy (benchmarks/laws_factored_toy.py) and a null simulation; see the tests
+Measured on the push-world toy (benchmarks/laws_factored_toy.py: 1.000 next-state accuracy, 0 false laws, 5 seeds), a
+null simulation, and MiniGrid (3 environments, 5 fresh seeds: 0.999 against 0.984 for one joint LawSet, 0.94× and
+1.05× its transitions against a bar of 0.6×, false laws on states the environments never reach in both); see the tests
 (tests/test_laws_factored.py)."""
 from __future__ import annotations
 

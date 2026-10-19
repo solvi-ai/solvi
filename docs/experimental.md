@@ -163,7 +163,7 @@ decreases; a candidate counts again after a full turnover) and `readmit="grown"`
 - **Scope:** environments whose behaviour follows discrete rules. The features were measured on rule-governed worlds
   (grid games, relational laws over generated graphs). On a real agent tool-call log — write calls of the public
   AgentDojo benchmark (1,213 held-out rows from 30 tasks), laws learned as exceptions to a provenance guard's verdicts —
-  the opt-in 1.2.1 features showed no measured gain over the default: coverage the same (650 against 663 freed rows,
+  the opt-in 1.3.0 features showed no measured gain over the default: coverage the same (650 against 663 freed rows,
   ratio 0.981, CI 0.896–1.051), soundness inconclusive (false-law share 0.157 against 0.073, the difference's CI
   includes 0), no pre-registered gain criterion met; harmful writes let through stayed above 0.15 (0.177 with every
   feature on, 0.218 with the default, at about 0.10 false interruptions), about the level of a tuned gradient-boosting

@@ -16,7 +16,7 @@
 Where it fits. The module is for environments whose behaviour follows discrete rules. Its features were measured on
 rule-governed worlds: grid games and relational laws over generated graphs. On a real agent tool-call log (write calls
 of the public AgentDojo benchmark, 1,213 held-out rows from 30 tasks; laws learned as exceptions to a provenance
-guard's verdicts) the opt-in 1.2.1 features showed no measured gain over the default: coverage the same (650 against
+guard's verdicts) the opt-in 1.3.0 features showed no measured gain over the default: coverage the same (650 against
 663 freed rows, ratio 0.981, CI 0.896–1.051), soundness inconclusive (false-law share 0.157 against 0.073, the
 difference's CI includes 0), no pre-registered gain criterion met. Harmful writes let through stayed above 0.15 — 0.177
 with every feature on, 0.218 with the default, at about 0.10 false interruptions — about the level of a tuned
@@ -43,7 +43,8 @@ candidates, neg_budget=)`: another proposer cut to a task budget; with negated l
 never crowd out the positive candidates of a later mismatch. `CallableProposer`:
 any function, an LLM among them; it proposes, the test decides.
 
-Several law sets predicting one step together (experimental, pending a second task): `solvi.experimental.laws.factored`
+Several law sets predicting one step together (experimental: on MiniGrid more accurate than one joint LawSet, 0.999
+against 0.984, but no saving in transitions): `solvi.experimental.laws.factored`
 — `FactoredModel(channels, extract, delta=)` keeps one LawSet and held-out buffer per channel, splits δ over the
 channels (joint false-accept bound Σ δ_c by the union bound), drops duplicate rows within a group, voids rows whose
 label relied on a law of another channel once that law falls (`Row(depends=)`, `Buffer.void`), and reports per channel.
