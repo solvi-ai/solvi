@@ -80,8 +80,8 @@
   before the mismatch that proposes the true positive law: found 0.64 → 0.55 and 0.25 → 0.11 on two families that
   need no negation. Within-mismatch reordering (positives first) and a tie-break against negations recovered none of
   the 21 lost tasks in a replay; the separate budget all 21, at about 1.5–1.9× the candidates per task (each counted
-  in N). A re-check on fresh tasks is pre-registered.
-- **Laws (experimental, pending a second task): `Grammar(negations="refine" | "all")` — negated literals**
+  in N). Opt-in, off by default.
+- **Laws (experimental, off by default): `Grammar(negations="refine" | "all")` — negated literals**
   (opt-in; default False, unchanged). A literal `not:<atom>` per atom, of the atom's feature; `grammar.true` gives one
   literal per atom, `Buffer.match` computes a literal's rows as the complement (no new storage), the compiled code is
   `not (<expr>)`. `"refine"` (the documented mode): one negated literal per condition; `Enumerate` adds `P ∧ not:a` only
@@ -95,7 +95,7 @@
   `"refine"` 2.1–3.9× (the lone negations plus one beside each one-atom condition, v = 2–8 varying atoms). Null
   buffers (40 sparse atoms, 2,000 rows, the effect independent at 70 % and 3 %; 2,421 refine and 3,201 all candidates): 0 of 100 false
   accepts per mode and rate; the fixed thresholds accepted 100 of 100 at 70 % (`tests/test_laws_negations.py`).
-  The second task (relational laws over generated graphs, the families that need a negation) is pre-registered, not yet run.
+  On fresh tasks (relational laws over generated graphs) with the separate budget: found 0.18 → 0.39 and 0.15 → 0.50 on two families that need a negation; unsound laws not higher; candidates ×1.63; found lower by one task in 97 on one family and one in 87 on another that need no negation. Warning: an admitted negated law can steer the search away from the true law.
 - **Laws (experimental): `admit_by_probes(..., commit=False)`**, a dry run: the same decision (the probes are asked
   and counted), but the set, its `version`, `cost["accepted"]` and the next law id are left as they were; the
   returned law has status "proposed". Refusing it needs no `retire`, so `retired` keeps only laws that fell.

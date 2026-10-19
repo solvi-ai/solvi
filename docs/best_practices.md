@@ -687,7 +687,11 @@ version: a document version may rightly redefine what goes to a person, so decla
    Under one shared budget they used it up before the mismatch that proposes the true positive law was reached: on a
    second task found fell 0.64 → 0.55 and 0.25 → 0.11 on two families that need no negation; ordering positives first
    or a tie-break against negations recovered none of 21 lost tasks, the separate budget all 21 (a replay; the cost is
-   about 1.5–1.9× the candidates per task, all counted in the sized bound's N).
+   about 1.5–1.9× the candidates per task, all counted in the sized bound's N). Both are experimental and off by
+   default. On fresh tasks (relational laws over generated graphs) with the separate budget: found 0.18 → 0.39 and
+   0.15 → 0.50 on two families that need a negation, unsound laws not higher, candidates ×1.63; found lower by one
+   task in 97 on one family and one in 87 on another that need no negation. Turn negations on only where a law
+   needs an exception: an admitted negated law can steer the search away from the true law.
 
 On two toys ([relations_library_toy.py](../benchmarks/relations_library_toy.py), five seeds each) the library found
 every level — a path tree's "denied if an ancestor directory is named secret and the depth is at least 3" (three levels)
