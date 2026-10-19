@@ -1066,3 +1066,22 @@ is wrong on a tenth of them. Label the shadowed answers so that the outcome does
 **Turn on `cache=` only for catalogs whose parts are pure** (no clock, randomness or I/O). A long input makes hashing
 most of a hit (0.43–0.74× the time of an uncached ask on 3.7k floats, against at most 0.17× on small inputs). Run
 `replay_all` on the store now and then: an impure part shows there as a recompute mismatch on the `cache_of` records.
+
+## A compact decider: a ~70M encoder with distillation
+
+**For a pointer-head decider (encoder + heads, code executes the program), start from Ettin-68m and distil from the larger
+model.** On TAT-QA arithmetic (test, 3 seeds) Ettin-68m fine-tuned with soft targets from a 149M ModernBERT-base teacher gave
+72.1 % against 72.4 % for the 149M model (within 0.3 points, not significant), with 70.25M / 44.47M parameters (total / without
+the embedding matrix) against 153.75M / 115.07M and 0.45–0.47× its CPU latency (ONNX Runtime, 4 threads, batch 1, two quiet
+sessions on one Intel Xeon type; 0.50× at 1,024 tokens). On a second task (typed decisions over JSON states, 2,000 test
+questions, 3 seeds, no distillation) the same 68m encoder gave 75.7 % against 74.6 % for the 150m one.
+
+- **Distillation pays most for a mid-size student.** +2.1 points over the same encoder without it at 32M (33.07M total), +0.6
+  (not significant) at 68M, +1.1 (not significant) at 17M — the known capacity-gap pattern, not a monotone trend.
+- **Below ~40M the parity is not reached.** Ettin-32m with distillation gave 70.1 % on TAT-QA arithmetic (0.17× latency) and
+  71.8 % against 74.6 % on typed decisions — about 0.96 of the larger model, short of a statistically clear 0.95.
+- **Dynamic int8 on CPU keeps accuracy but did not speed this up** (0.91–0.93× latency, 0.87× memory; loss 0.05–0.14 points).
+- **A table-structure prior** (row and column embeddings, permutation-equivariant row choice) gave no gain over an
+  equal-parameter dense head on either size.
+- Arithmetic on this pipeline saturates around 72–73 % from 68M to 395M encoders, so part of the parity is the pipeline's
+  ceiling; one task family per number, no transfer claim.
