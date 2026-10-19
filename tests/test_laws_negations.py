@@ -90,7 +90,7 @@ def test_true_gives_one_literal_per_atom_and_the_literal_shares_the_atoms_featur
 
 def test_refine_allows_one_negation_and_only_where_the_atom_varies():
     g = word_grammar("refine")
-    assert g.allows(("not:nself",)) and g.allows(("not:nself", "nsubj"))         # a lone negation (decision 44)
+    assert g.allows(("not:nself",)) and g.allows(("not:nself", "nsubj"))         # a lone negation is allowed
     assert not g.allows(("not:d0", "not:nself", "nsubj"))
     with pytest.raises(ValueError):
         g.check(("not:d0", "not:nself"))
