@@ -13,3 +13,10 @@ action, the joint statistic from there on; `last` says which scored) or the cont
 statistic, no training); the candidates themselves never change.
 
 ::: solvi.experimental.laws
+
+## `solvi.experimental.laws.factored`
+
+A multi-law (factored) transition model: one `LawSet` and held-out `Buffer` per channel, δ split over the channels,
+row provenance. Experimental: more accurate than one joint `LawSet` on MiniGrid, no saving in transitions.
+
+::: solvi.experimental.laws.factored
