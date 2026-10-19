@@ -682,6 +682,12 @@ version: a document version may rightly redefine what goes to a person, so decla
    proposer whose program is then checked like any other candidate (`proposer=`).
 5. Rank candidates only when a check is expensive (`RankedProposer`): by the joint statistic of the whole condition
    first (`JointRanker`, no training), a learned ranker only after it.
+6. With negated literals (`Grammar(negations="refine")`) and a candidate budget, give the negated candidates their
+   own budget (`BudgetedProposer(inner, 2000, neg_budget=...)`; the default is a separate budget of the same size).
+   Under one shared budget they used it up before the mismatch that proposes the true positive law was reached: on a
+   second task found fell 0.64 → 0.55 and 0.25 → 0.11 on two families that need no negation; ordering positives first
+   or a tie-break against negations recovered none of 21 lost tasks, the separate budget all 21 (a replay; the cost is
+   about 1.5–1.9× the candidates per task, all counted in the sized bound's N).
 
 On two toys ([relations_library_toy.py](../benchmarks/relations_library_toy.py), five seeds each) the library found
 every level — a path tree's "denied if an ancestor directory is named secret and the depth is at least 3" (three levels)

@@ -11,6 +11,9 @@ grammar; it reads no rows and falls back to the blind order when it learned noth
 among the candidates; `mode="switch"`: the prior below `min_rows` logged rows of the
 action, the joint statistic from there on; `last` says which scored) or the control `FeatureRanker` (a raw per-atom
 statistic, no training); the candidates themselves never change.
+`BudgetedProposer(inner, candidates, neg_budget=, mismatches=)` cuts another proposer's candidates to a task budget
+in its order; with `Grammar(negations=...)` the candidates with a negated literal get their own budget (`neg_budget`,
+default the same size; `"shared"`: one budget), so they never crowd out a later mismatch's positive candidates.
 
 ::: solvi.experimental.laws
 

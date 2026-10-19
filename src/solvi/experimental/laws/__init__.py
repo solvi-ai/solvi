@@ -28,7 +28,9 @@ state)` and `effects(state, observed)` let an effect be a change ("+1 wood") tha
 different states.
 
 Proposers (`Proposer`: `propose(lawset, state, action, observed)` → candidates). `Enumerate` (default): every condition
-true in the mismatched state. `RandomProposer`: conditions drawn from the whole grammar — the control. `CallableProposer`:
+true in the mismatched state. `RandomProposer`: conditions drawn from the whole grammar — the control. `BudgetedProposer(inner,
+candidates, neg_budget=)`: another proposer cut to a task budget; with negated literals they get their own budget, so they
+never crowd out the positive candidates of a later mismatch. `CallableProposer`:
 any function, an LLM among them; it proposes, the test decides.
 
 Several law sets predicting one step together (experimental, pending a second task): `solvi.experimental.laws.factored`
@@ -229,7 +231,7 @@ from ._coarse import BackoffBase, OutcomeClass, coarse
 from ._compile import CompiledCheck, check_compiled, load_module
 from ._confidence import Abstained, LawConfidence, LawStats, fisher_p
 from ._history import Context, History, Past, Same, Tracker
-from ._core import (Admission, Atom, Buffer, CallableProposer, Candidate, Delta, Enumerate, Grammar, Law, LawSet, Proposer,
+from ._core import (Admission, Atom, Buffer, BudgetedProposer, CallableProposer, Candidate, Delta, Enumerate, Grammar, Law, LawSet, Proposer,
                     RandomProposer, Step, Transition, Undetermined, Unknown, sized_level, sized_need)
 from ._probes import Probe, discriminate, eig, split
 from ._rank import (FEATURES, BagOfAtomsRanker, FeatureRanker, HandoverRanker, JointRanker, PriorRanker, RankedProposer,
@@ -237,7 +239,7 @@ from ._rank import (FEATURES, BagOfAtomsRanker, FeatureRanker, HandoverRanker, J
 
 warn_on_import(__name__)
 
-__all__ = ["Abstained", "Admission", "Atom", "BackoffBase", "BagOfAtomsRanker", "Buffer", "CallableProposer", "Candidate",
+__all__ = ["Abstained", "Admission", "Atom", "BackoffBase", "BagOfAtomsRanker", "Buffer", "BudgetedProposer", "CallableProposer", "Candidate",
            "CompiledCheck", "Context", "Delta", "Enumerate",
            "FEATURES", "FeatureRanker", "Grammar", "HandoverRanker", "History", "JointRanker", "Law", "LawConfidence", "LawSet", "LawStats", "PriorRanker", "Probe",
            "OutcomeClass", "Past", "Proposer", "RandomProposer",
