@@ -13,7 +13,8 @@ action, the joint statistic from there on; `last` says which scored) or the cont
 statistic, no training); the candidates themselves never change.
 `BudgetedProposer(inner, candidates, neg_budget=, mismatches=)` cuts another proposer's candidates to a task budget
 in its order; with `Grammar(negations=...)` the candidates with a negated literal get their own budget (`neg_budget`,
-default the same size; `"shared"`: one budget), so they never crowd out a later mismatch's positive candidates.
+default the same size; `"shared"`: one budget), so they never crowd out a later mismatch's positive candidates. Both are experimental and off by default; an
+admitted negated law can steer the search away from the true law (numbers in the best practices).
 
 ::: solvi.experimental.laws
 
