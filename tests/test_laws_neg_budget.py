@@ -1,6 +1,6 @@
 """solvi.experimental.laws (experimental): `BudgetedProposer(inner, candidates, neg_budget=, mismatches=)` — a candidate
 budget where candidates with a negated literal are charged to their own budget, so they never crowd out the positive
-candidates of a later mismatch (the cause of the found loss on the graph_laws second task of negations="refine")."""
+candidates of a later mismatch (the cause of the found loss on the second task (relational laws over generated graphs) of negations="refine")."""
 from __future__ import annotations
 
 import warnings

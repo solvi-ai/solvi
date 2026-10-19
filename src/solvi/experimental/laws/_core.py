@@ -878,7 +878,7 @@ class BudgetedProposer:
     proposer gives without negations. Default (None): `neg_budget = candidates` — a separate budget of the same size;
     0 drops the negated candidates; "shared": one budget of `candidates` for both, cut in the inner order (the
     behaviour before the option). Under a shared budget negated literals use up the budget before the mismatch that
-    proposes the true positive law is reached: on a second task (graph_laws, the program size growing with each
+    proposes the true positive law is reached: on a second task (relational laws over generated graphs, the program size growing with each
     mismatch, 2,000 candidates) found fell from 0.64 to 0.55 and 0.25 to 0.11 on two families that need no negation,
     and a separate budget restored all 21 lost tasks in a replay. The cost: up to `candidates + neg_budget` candidates
     per task, and every one tested counts in the sized bound's N (`Buffer.tested`); in that replay 1.5–1.9× the shared
