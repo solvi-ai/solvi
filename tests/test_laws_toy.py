@@ -61,7 +61,7 @@ def test_the_toy_script_is_importable_and_says_what_it_measures():
 @pytest.mark.slow
 def test_the_gridworld_with_probes_declared_implications_and_equivalences():
     """Grammar(implies=) and LawSet(equivalent=) on the gridworld with probes (the written rules answer), a pool of
-    600 (state, action) pairs with random inventories, five seeds. The 20-seed run on two pools: CHANGELOG 1.2.1."""
+    600 (state, action) pairs with random inventories, five seeds. The 20-seed run on two pools: CHANGELOG 1.3.0."""
     t0 = time.time()
     toy = _toy()
     r = toy.gridworld_probes(seeds=range(5), arms=("base", "implies", "variants", "equivalent"),

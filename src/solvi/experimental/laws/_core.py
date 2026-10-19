@@ -101,7 +101,7 @@ class Grammar:
     δ_N. Under "refine" which candidates are proposed depends on the buffer (which atoms vary under P) — as `Enumerate`
     already depends on the state; every proposed candidate is counted, so the per-candidate level holds and the sum
     still bounds. Candidates per mismatch, k = 2, one atom per feature, measured in tests/test_laws_negations.py:
-    "refine" 2.1–3.9×, "all" 7.2–22.5× the positive grammar's on the design's channel-like grammars; null buffers (40
+    "refine" 2.1–3.9×, "all" 7.2–22.5× the positive grammar's on grammars shaped like a grid game's effect channels; null buffers (40
     sparse atoms, 2,000 rows, the effect independent at 70 % and 3 %) accepted no law in 100 under either mode."""
 
     def __init__(self, atoms: Iterable[Atom], k: int = 3, *, min_k: int = 0,
@@ -1103,7 +1103,7 @@ class LawSet:
     rivals (opt-in, default False): a candidate that passes is refused while an indistinguishable rival exists —
     another offered candidate or an active law with the same action and effect, a condition neither wider nor
     narrower, matching exactly the same held-out rows (at least one; `rival_of`); `refused_rival` counts the refusals.
-    What it guarantees: no law is accepted on a buffer that cannot tell its condition from another offered one — the
+    What it ensures: no law is accepted on a buffer that cannot tell its condition from another offered one — the
     choice is never made by the order of the candidates. What it does not: a rival that was not offered is not seen,
     and a law with no rival is judged by the bound above as before. What it costs: a true law waits until the data
     tell it from its rivals (a held-out row where they differ). Measured on a grid-game-shaped world (a key pushed into

@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.2.1 — unreleased
+## 1.3.0 — 2026-10-19 — laws for rule-governed worlds: rivals, negations, a factored model
 
 ### Added
 - **Laws (experimental): `LawSet(rivals=True)` refuses a law the buffer cannot tell from another** (opt-in; the default
@@ -51,7 +51,7 @@
   through atom bitsets, never scored (no N increment). Same gridworld: laws admitted 139 (random pool) and 111 (walked
   pool, where "undetermined" admits none), gap closed 0.95 / 0.73, false laws 0 / 0 over 20 seeds — an Occam choice:
   a law may be too general on states nobody produced (the names stay in `untested`).
-- **Laws (experimental): `LawSet(equivalent=[(e1, e2, guard_atom), ...])`** —
+- **Laws (experimental, opt-in; default None): `LawSet(equivalent=[(e1, e2, guard_atom), ...])`** —
   declared effect equivalences ("under `guard_atom`, e1 and e2 are one effect"; or a function
   `(e1, e2, condition) → bool`). Candidates of one action and condition whose effects are declared one under an atom
   the condition holds are `congruent`: `mismatch` proposes one, `test` and `admit_by_probes` merge them before
@@ -68,7 +68,9 @@
   0 probes. On MiniGrid (3 layouts, 20 seeds, probes answered by the simulator, budget 8): position rules 15 from 2,908
   probes with 2 wrong → 24 from 84 probes, none wrong on all 3,116 local states, accuracy 0.93 → 0.99; facing rules
   none admitted in 22,845 probes → 34 from 193 probes, none wrong, accuracy 0.68 → 0.95; 100 permuted control
-  streams: no rule in either arm. Limits: one grid family; the declarations were written by hand and true (a false one
+  streams: no rule in either arm. No accepted law carried an alias on MiniGrid either: the gain is the merged twin
+  staying a rival, so that the "too narrow" rule refutes the guarded absolute candidate and the general relative law
+  is admitted. Limits: one grid family; the declarations were written by hand and true (a false one
   is caught only on logged rows by `check_equivalent`, or when the rule later fails); deterministic world, exact
   probe answers.
 - **Laws (experimental): `BudgetedProposer(inner, candidates, neg_budget=, mismatches=)` — a candidate budget with
@@ -91,11 +93,15 @@
   On a "transform unless the noun is itself" world the positive grammar learned no law and both modes learned
   `nsubj ∧ not:nself → become`, 0 wrong laws on 1,000 check states; on "become unless R" the positive grammar
   learned no law and "refine" learned the lone `not:R → become`, 0 wrong. Candidates per mismatch (k = 2, one atom
-  per feature) on the channel-like grammars of the design: `"all"` 8.0×, 7.2×, 19×, 22.5× the positive grammar's;
+  per feature) on four grammars shaped like a grid game's effect channels: `"all"` 8.0×, 7.2×, 19×, 22.5× the positive grammar's;
   `"refine"` 2.1–3.9× (the lone negations plus one beside each one-atom condition, v = 2–8 varying atoms). Null
   buffers (40 sparse atoms, 2,000 rows, the effect independent at 70 % and 3 %; 2,421 refine and 3,201 all candidates): 0 of 100 false
   accepts per mode and rate; the fixed thresholds accepted 100 of 100 at 70 % (`tests/test_laws_negations.py`).
-  On fresh tasks (relational laws over generated graphs) with the separate budget: found 0.18 → 0.39 and 0.15 → 0.50 on two families that need a negation; unsound laws not higher; candidates ×1.63; found lower by one task in 97 on one family and one in 87 on another that need no negation. Warning: an admitted negated law can steer the search away from the true law.
+  On fresh tasks (relational laws over generated graphs) with the separate budget: found 0.18 → 0.39 and 0.15 → 0.50
+  on two families that need a negation; unsound laws not higher; candidates ×1.63; found lower by one task in 97 on one
+  family and one in 87 on another that need no negation — the first is below the bar set before the run (at least
+  0.95× the positive grammar's share: 0.175 against 0.176), so the measurement failed as set and the feature ships
+  experimental. Warning: an admitted negated law can steer the search away from the true law.
 - **Laws (experimental): `admit_by_probes(..., commit=False)`**, a dry run: the same decision (the probes are asked
   and counted), but the set, its `version`, `cost["accepted"]` and the next law id are left as they were; the
   returned law has status "proposed". Refusing it needs no `retire`, so `retired` keeps only laws that fell.
@@ -124,7 +130,8 @@
   model. Experimental: use it for accuracy, not to learn from fewer transitions.
 
 ### Fixed
-- **`admit_by_probes(..., noise=ε)` no longer accepts a law that does not fit the noise.** The likelihood weight compares
+- **`admit_by_probes(..., noise=ε)` no longer accepts a law that does not fit the noise.** **Behaviour change** for every
+  noisy admission; `fit_level=None` restores 1.2.0's outcome. The likelihood weight compares
   only the candidates offered, so when the true law was not among them the least-bad wrong one could win — a logged
   buffer alone accepted a law right on about half of the rows where it fired, with no probe asked. Before accepting, the
   chosen law is now checked against ε on the rows where it applies (logged rows and asked probes): more misses than
@@ -136,7 +143,7 @@
 - **Laws: scope narrowed to environments whose behaviour follows discrete rules** (`solvi.experimental.laws` docstring,
   experimental.md, the API page, best practices, ROADMAP). The features were measured on grid games and relational laws
   over generated graphs. On a real agent tool-call log (AgentDojo write calls, 1,213 held-out rows from 30 tasks; laws
-  learned as exceptions to a provenance guard's verdicts) the opt-in 1.2.1 features showed no measured gain over the
+  learned as exceptions to a provenance guard's verdicts) the opt-in 1.3.0 features showed no measured gain over the
   default: coverage the same (ratio 0.981, CI 0.896–1.051), soundness inconclusive (false-law share 0.157 against
   0.073), no pre-registered gain criterion met; harmful let-through stayed above 0.15 (0.177 all on, 0.218 default, at
   about 0.10 false interruptions), about a tuned gradient-boosting model on the same atoms (0.188 at 0.089). For noisy
@@ -144,7 +151,9 @@
 - Best practices, laws: the sized held-out test assumes independent rows; rows that revisit the same objects (random
   walks) overstate the support — draw held-out states independently or count support by distinct object. Also a note
   on the fit check of the noisy admission.
-
+- Best practices: a recipe for a compact pointer-head decider (a 68M encoder distilled from a 149M one: 72.1 against
+  72.4 % on TAT-QA arithmetic, 3 seeds, at 0.45–0.47× CPU latency; below ~40M parity is not reached), with a ROADMAP
+  row. Research notes, not a shipped model.
 ## 1.2.0 — 2026-10-17 — stricter defaults, mutants for your cases, the extractor without torch
 
 What matters most, in one place (details in the sections below; every number is measured once and said where):

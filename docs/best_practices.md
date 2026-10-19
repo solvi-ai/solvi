@@ -381,7 +381,7 @@ values?", solvi-base said yes to calls it should have refused. Grounding and pol
 **Use it where behaviour follows discrete rules; on noisy behavioural logs use a calibrated scorer.** The module's
 features were measured on rule-governed worlds (grid games, relational laws over generated graphs). On a real agent
 tool-call log — write calls of the public AgentDojo benchmark (1,213 held-out rows from 30 tasks), laws learned as
-exceptions to a provenance guard's verdicts — the opt-in 1.2.1 features showed no measured gain over the default
+exceptions to a provenance guard's verdicts — the opt-in 1.3.0 features showed no measured gain over the default
 (coverage ratio 0.981, CI 0.896–1.051; false-law share 0.157 against 0.073, inconclusive), and harmful writes let
 through stayed above 0.15: 0.177 with every feature on, 0.218 with the default, at about 0.10 false interruptions —
 about a tuned gradient-boosting model on the same atoms (0.188 at 0.089 false interruptions).
@@ -425,13 +425,13 @@ treat the fixed bar's false accepts as the known price; the measurements above r
 The bound treats every held-out row as a fresh draw. Rows from a random walk revisit the same objects with the same
 persistent attributes, so twenty rows may be three objects seen many times: the support looks large, the binomial tail
 looks small, and a law right only on those few objects passes. On relational laws over generated graphs with random-walk streams, a law
-that passed on 14 held-out rows (13 right) came from 3 (world, object) pairs and was right on 41 % of fresh rows. Draw
+that passed on 14 held-out rows (13 right) came from 3 (world, actor) pairs and was right on 41 % of fresh rows. Draw
 the held-out states independently (fresh starts, or one row per object), or count a law's support by distinct object
 rather than by row before you read δ as a promise. `Buffer(dedup=True)` (experimental) keeps one row per situation and
 group, or `Buffer(dedup=lambda t: t.state["object"])` one per object: on a synthetic random walk over 3 objects per
 world with no law at all, a law was accepted in 872 of 1,000 buffers by default and in 0 with dedup. It is not free:
 on a second task (2,000 tasks of relational laws, dedup by world and actor) wrong laws per admission fell 0.415 →
-0.112, but the share of true laws found fell 0.369 → 0.330, because the buffer shrank about sixfold and fewer right
+0.112, but the share of true laws found fell 0.369 → 0.330, because the held-out buffer shrank about sixfold (661 → 111 rows on average) and fewer right
 laws passed the sized test. Turn it on where a few objects are revisited many times and a wrong law costs more than a
 missed one.
 
@@ -698,7 +698,8 @@ version: a document version may rightly redefine what goes to a person, so decla
    about 1.5–1.9× the candidates per task, all counted in the sized bound's N). Both are experimental and off by
    default. On fresh tasks (relational laws over generated graphs) with the separate budget: found 0.18 → 0.39 and
    0.15 → 0.50 on two families that need a negation, unsound laws not higher, candidates ×1.63; found lower by one
-   task in 97 on one family and one in 87 on another that need no negation. Turn negations on only where a law
+   task in 97 on one family and one in 87 on another that need no negation (the first below the bar set before the
+   run, 0.175 against 0.176). Turn negations on only where a law
    needs an exception: an admitted negated law can steer the search away from the true law.
 
 On two toys ([relations_library_toy.py](../benchmarks/relations_library_toy.py), five seeds each) the library found
