@@ -26,19 +26,14 @@
 - **Laws (experimental): `admit_by_probes(..., siblings="undetermined")`** — refuse when the one class left holds
   other conditions of the same length as the shortest (the pool cannot tell them apart; before, the order of the
   candidates chose). Default "shortest", unchanged.
-- **Laws (experimental, not yet confirmed on a second task): `Buffer(dedup=True | key)`** — a row whose situation
+- **Laws (experimental, off by default): `Buffer(dedup=True | key)`** — a row whose situation
   (group, action, atoms true, observation; or a key of your own, e.g. an object id) is already in the buffer is not
   added (`duplicates` counts). On a synthetic world with no law and random-walk rows over 3 objects per world, a law
   was accepted in 872 of 1,000 buffers by default and 0 with dedup; with a real law the right one was first in 591
-  (473 without). Opt-in; it enters as experimental until a second task confirms it.
-- **Laws (experimental, not yet confirmed on a second task): `admit_by_probes(..., held_out=buffer)`** — a probe
-  admission is refused ("undetermined", the set unchanged, `refused_held_out`) when the rows of other groups where it
-  would apply show it right on h of n with P[Binomial(n, min_precision) ≤ h] ≤ delta; a law of precision
-  ≥ min_precision is refused so with probability ≤ delta (independent rows). `LawSet.held_out_fit(law, buffer)`.
-  On a synthetic world where the probes cannot tell a one-atom law from the right two-atom one, the wrong law was
-  admitted, retired by the check and re-admitted in every round by default (1,500 of 1,500 admissions); with
-  held_out, 0; the right law on an unbiased pool was never refused (300 of 300, also with 5% flipped answers).
-  Opt-in; experimental until a second task confirms it.
+  (473 without). On a second task (graph_laws, 2,000 tasks, dedup by world and actor) it did what it targets and
+  cost found laws: wrong laws per admission 0.415 → 0.112 (and 0.157 → 0.052 on a second setting), but the share of
+  true laws found 0.369 → 0.330, below the bar set before the run (0.332). It stays experimental and opt-in; turn it on
+  where a few objects are revisited many times and fewer, surer laws are worth the loss.
 - **Laws (experimental): `Grammar(implies=...)` — atom implications by construction** (opt-in; the default is
   unchanged). `{atom: [implied atoms]}` or a function name → names, closed transitively, also through
   `grammar.add(atom, implies=)`; `grammar.implied(condition)`, `grammar.check_implies(buffer)` (the rows that break a
@@ -51,12 +46,12 @@
   barely vary) 536 → 0 refusals but 0 → 0 laws: other atoms that never varied still refuse. Null buffers with a
   declared chain: 0 of 100 false accepts, N 301 → 277 (`tests/test_laws_implies.py`).
 - **Laws (experimental, opt-in): `admit_by_probes(..., coverage="varied", coverage_on=buffer(s))`** — refuse only
-  for an untested atom that took both values on the coverage rows (and `held_out=` when given) where the shortest
+  for an untested atom that took both values on the coverage rows where the shortest
   condition holds; an atom that never varied anywhere is listed in `untested` and does not block. The rows are read
   through atom bitsets, never scored (no N increment). Same gridworld: laws admitted 139 (random pool) and 111 (walked
   pool, where "undetermined" admits none), gap closed 0.95 / 0.73, false laws 0 / 0 over 20 seeds — an Occam choice:
   a law may be too general on states nobody produced (the names stay in `untested`).
-- **Laws (experimental, not yet confirmed on a second task): `LawSet(equivalent=[(e1, e2, guard_atom), ...])`** —
+- **Laws (experimental): `LawSet(equivalent=[(e1, e2, guard_atom), ...])`** —
   declared effect equivalences ("under `guard_atom`, e1 and e2 are one effect"; or a function
   `(e1, e2, condition) → bool`). Candidates of one action and condition whose effects are declared one under an atom
   the condition holds are `congruent`: `mismatch` proposes one, `test` and `admit_by_probes` merge them before
@@ -67,19 +62,26 @@
   for congruent twins only were 0 without the declarations too and no accepted law carried an alias, so the
   mechanism the item is for did not fire there; the gain is not attributed to it (`tests/test_laws_equivalent.py`:
   a congruent pair accepted with 0 probes between them, 0 of 150 wrong probe admissions with a planted pair).
+  A merged candidate stays a rival: a candidate refuted only as too narrow is kept with its aliases, the refutation
+  reads every alias (the order the encodings are listed in no longer matters), and a class is not accepted while an
+  unrefuted rival still disagrees with it on the pool. Without that rule a wrong absolute move rule was admitted with
+  0 probes. On MiniGrid (3 layouts, 20 seeds, probes answered by the simulator, budget 8): position rules 15 from 2,908
+  probes with 2 wrong → 24 from 84 probes, none wrong on all 3,116 local states, accuracy 0.93 → 0.99; facing rules
+  none admitted in 22,845 probes → 34 from 193 probes, none wrong, accuracy 0.68 → 0.95; 100 permuted control
+  streams: no rule in either arm. Limits: one grid family; the declarations were written by hand and true (a false one
+  is caught only on logged rows by `check_equivalent`, or when the rule later fails); deterministic world, exact
+  probe answers.
 - **Laws (experimental): `admit_by_probes(..., commit=False)`**, a dry run: the same decision (the probes are asked
   and counted), but the set, its `version`, `cost["accepted"]` and the next law id are left as they were; the
   returned law has status "proposed". Refusing it needs no `retire`, so `retired` keeps only laws that fell.
-- **Laws (experimental, pending a second task): `solvi.experimental.laws.factored` — a multi-law (factored)
-  transition model.** `FactoredModel(channels, extract, delta=0.1)`: one `LawSet` and one held-out `Buffer` per
+- **Laws (experimental): `solvi.experimental.laws.factored` — a multi-law (factored) transition model.** `FactoredModel(channels, extract, delta=0.1)`: one `LawSet` and one held-out `Buffer` per
   `Channel` (the channel name is the action slot), the caller's extraction turning one transition into `Row`s of
   several channels, dedup within a group (`new_group`), δ split equally over the channels (`share=` a dict for an
   uneven split) so that P[any law no better than its null in any channel] ≤ Σ δ_c by the union bound, row provenance
   (`Row(depends=)` names laws of other channels the row's label relied on; when such a law leaves the active set the
   rows are voided and leave the running precision they were counted in, rows naming it are refused, the laws accepted
   on them are flagged `stale`), `version`, `predict` memoised per version, `admit` (admit_by_probes with
-  siblings="undetermined", coverage="varied" and the held-out check of the other groups; one attempt per row and
-  group; probe admissions reported outside δ), `report()` (per channel N, need, rows per transition, voided, dropped,
+  siblings="undetermined" and coverage="varied" over the channel's buffer; one attempt per row and group; probe admissions reported outside δ), `report()` (per channel N, need, rows per transition, voided, dropped,
   refused, stale; "bound"), `to_knowledge`, `to_module` per channel. The turn skeleton and the row extraction stay the
   caller's. New on `Buffer`: `void(row_ids)` (voided rows leave `allowed`, `group_mask` and `rows`; N and `len` do not
   decrease). On a synthetic push world (movers, push, stop, vanish; properties random per world; 150 training worlds,
@@ -87,8 +89,14 @@
   written laws literally in 4 of 5 seeds (seed 0: one law as two narrower ones with the same predictions on every
   reachable state); a single joint `LawSet` over the whole local observation 0.947–0.952 with 2 laws. A planted wrong
   law falls and its dependent rows are voided; 0 false laws after. Null channels (3 × 40 sparse atoms, 821 conditions
-  each, 100 trials): any false law in any channel 0 of 100 at δ = 0.1 (fixed thresholds: 100 of 100). Experimental
-  until a second task (MiniGrid) confirms it.
+  each, 100 trials): any false law in any channel 0 of 100 at δ = 0.1 (fixed thresholds: 100 of 100).
+  `FactoredModel(action=)` names the action feature: every channel law must hold an atom of it (candidates without one
+  are dropped, `report()[c]["action_dropped"]`) unless the channel is `Channel(action_free=True)`, so a law cannot
+  generalise over actions the data never varied. Measured limits on MiniGrid (3 envs, 5 fresh seeds, 4 channels):
+  more accurate than one joint `LawSet` (0.999 vs 0.984 next-state accuracy, 10.8 vs 13.4 laws), but no data saving
+  (environment transitions to final accuracy 0.94× and 1.05× the joint model's in two runs, against a bar of 0.6×),
+  and false laws on states the envs never reach (e.g. picking up a key while already carrying one), as in the joint
+  model. Experimental: use it for accuracy, not to learn from fewer transitions.
 
 ### Fixed
 - **`admit_by_probes(..., noise=ε)` no longer accepts a law that does not fit the noise.** The likelihood weight compares

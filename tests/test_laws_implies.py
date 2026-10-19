@@ -86,13 +86,13 @@ def states(near=None, rng=None, n=40):
     return out
 
 
-def admit(g, world, cands, *, coverage, coverage_on=None, held_out=None):
+def admit(g, world, cands, *, coverage, coverage_on=None):
     ls = LawSet(g, base=lambda s, a: "nothing")
     pool = [(s, "make") for s in states(near=True)]        # every probe next to the table
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        return ls.admit_by_probes(cands, world, probes=pool, budget=8, coverage=coverage, coverage_on=coverage_on,
-                                  held_out=held_out)
+        return ls.admit_by_probes(cands, world, probes=pool, budget=8, coverage=coverage,
+                                  coverage_on=coverage_on)
 
 
 def logged(g, world, near=None, group="h"):
@@ -113,9 +113,6 @@ def test_varied_refuses_when_the_atom_varied_on_the_second_buffer_and_accepts_wh
     assert a.status == "undetermined" and a.untested == ["near"] and "coverage rows" in a.why
     a = admit(g, world, CANDS, coverage="varied", coverage_on=[logged(g, world, near=True)])
     assert a.status == "accepted" and a.law.condition == ("wood",) and a.untested == ["near"]
-    # held_out= is read as a coverage buffer too (and still checked as before)
-    a = admit(g, world, CANDS, coverage="varied", held_out=logged(g, world))
-    assert a.status == "undetermined"
 
 
 def test_an_implied_atom_is_never_listed_and_does_not_block():
@@ -154,7 +151,6 @@ def null_buffer(rng, g, rows=1500, n=8, groups=10):
 
 
 def test_false_accepts_on_null_buffers_stay_below_delta_and_n_is_smaller():
-    rng = random.Random(3)
     out = {}
     for implies in (False, True):
         g = thresholds(n=8, implies=implies)

@@ -992,7 +992,6 @@ class LawSet:
             self.equivalent = decl or None
         self._aliases: dict = {}           # (action, condition, effect) of a merged candidate → its alias effects
         self.refused_rival = 0             # passing candidates refused for an indistinguishable rival (rivals=True)
-        self.refused_held_out = 0          # probe admissions refused by admit_by_probes(held_out=)
         self.disagree = disagree
         if support_on not in ("applied", "matched"):
             raise ValueError(f"support_on is 'applied' or 'matched', not {support_on!r}")
@@ -1229,7 +1228,7 @@ class LawSet:
         def differ(e1, e2, st):
             try:
                 return not self.agrees(self.apply(e1, st), self.apply(e2, st))
-            except Exception:                                    # an effect that does not apply here: not one effect
+            except Exception:  # noqa: BLE001 — an effect that does not apply here: not one effect
                 return True
 
         if eq is not None and not callable(eq):
@@ -1524,7 +1523,7 @@ class LawSet:
                         rtol: float | None = None, coverage: str = "warn", max_new: int | None = None,
                         noise: float | None = None, level: float = 0.95, fit_level: float | None = 0.01,
                         fit_support: int = 1, commit: bool = True, siblings: str = "shortest",
-                        held_out: Buffer | None = None, coverage_on: Buffer | Iterable[Buffer] | None = None
+                        coverage_on: Buffer | Iterable[Buffer] | None = None
                         ) -> Admission:
         """Admit one of `candidates` by asking the world where they disagree (CEGIS-style), not by a random held-out
         sample. ask(state, action) → the observation (the environment, or an exact model of it); probes: the (state,
@@ -1581,10 +1580,10 @@ class LawSet:
         accept silently (before 1.2). Give the pool states where those atoms vary to settle it. An atom the
         shortest condition implies (`Grammar(implies=)`) is never listed: it cannot vary where the condition holds.
         "varied" (opt-in, experimental): refuse only for an untested atom that took both values on some row of
-        `coverage_on` (one Buffer or several; and of `held_out` when given) where the shortest condition holds — the
+        `coverage_on` (one Buffer or several) where the shortest condition holds — the
         evidence exists elsewhere in the history and the pool missed it; an atom that never varied anywhere is listed
         in `untested` and does not block (the shorter law is taken, Occam). Those rows are read through their atom
-        bitsets only (no test, no N increment); with no `coverage_on` / `held_out`, the pool and `buffer=` are all the
+        bitsets only (no test, no N increment); with no `coverage_on`, the pool and `buffer=` are all the
         evidence and nothing blocks.
 
         Measured on a synthetic world (10 binary features, 20 atoms, k = 3; the hidden law a random conjunction of two
@@ -1638,21 +1637,7 @@ class LawSet:
 
         ask may return `Unknown` (from solvi.experimental.laws) when the probe's situation turned out not to be the
         one asked about: the answer refutes nothing and supports nothing, the probe counts as spent (budget,
-        `cost["probes"]`) and is listed in `Admission.unknown`, not in `asked`.
-
-        held_out (experimental, opt-in): a buffer of rows from other groups (every group but `exclude` counts) that
-        the admission must not contradict. After the probes choose, the law (each law under max_new=2) is counted on
-        the rows where it would be the applied law: right on h of n. It is refused — "undetermined", the set left as
-        it was, `refused_held_out` counts — when P[Binomial(n, min_precision) ≤ h] ≤ delta: a law whose precision is
-        at least min_precision is refused this way with probability at most delta when those rows are independent
-        draws; one right on every row is never refused. Unlike `buffer=`, where any wrong row refutes a candidate,
-        the held-out rows may hold noise. The rule is about the admitted law
-        on those rows, not a bound over the candidates the probes chose among. Measured (a hidden law of two atoms
-        among 16, a probe pool where its second atom always holds so the probes cannot tell the one-atom law from it,
-        60 logged rows of three other groups, 5 rounds of admit-then-`check`, 300 trials): by default the wrong law was
-        admitted, retired by the check and admitted again in every round (1,500 of 1,500 admissions wrong); with
-        held_out, 0 admissions; with 5% of the logged answers flipped, the same. On an unbiased pool the right law was
-        admitted in all 300 trials either way (with flipped answers too: no right law refused)."""
+        `cost["probes"]`) and is listed in `Admission.unknown`, not in `asked`."""
         if not commit:
             kw = {k: v for k, v in locals().items() if k not in ("self", "candidates", "ask", "commit")}
             return self._dry_run(lambda: self.admit_by_probes(candidates, ask, **kw))
@@ -1685,11 +1670,6 @@ class LawSet:
             raise ValueError(f"siblings is 'shortest' or 'undetermined', not {siblings!r}")
         if siblings == "undetermined" and max_new == 2:
             raise ValueError("siblings='undetermined' takes max_new=None or 1")
-        if held_out is not None:
-            kw = {k: v for k, v in locals().items() if k not in ("self", "candidates", "ask", "commit", "held_out")}
-            if coverage == "varied":
-                kw["coverage_on"] = list(coverage_on or []) + [held_out]
-            return self._held_out_admission(lambda: self.admit_by_probes(candidates, ask, **kw), held_out, exclude)
         from ._probes import groups_of, sameness, split
         eq = sameness(tol, same, rtol=rtol) if (tol, rtol, same) != (None, None, None) else self.same
         E = eq or (lambda u, v: u == v)
@@ -2031,38 +2011,6 @@ class LawSet:
             self._restore(snap)
         for law in out.laws or ([out.law] if out.law is not None else []):
             law.status = "proposed"
-        return out
-
-    def held_out_fit(self, law: Law, buffer: Buffer, exclude=None) -> tuple[int, int, float]:
-        """(hits, n, p) of an active law on `buffer`'s rows of every group but `exclude` where it is the applied law:
-        p = P[Binomial(n, min_precision) ≤ hits], the chance a law of precision min_precision is right this seldom
-        (1.0 on no rows). `admit_by_probes(held_out=)` refuses an admission whose p ≤ delta."""
-        _, _, _, take = self._view(buffer, law.action, exclude)
-        t = take.get(law.id, 0)
-        n = t.bit_count()
-        h = (t & self._effect_mask(buffer, law.action, law.effect)).bit_count()
-        if n == 0 or h >= n:
-            return h, n, 1.0
-        p0 = self.min_precision
-        if p0 >= 1.0:
-            return h, n, 0.0
-        return h, n, math.exp(_log_tail(n, n - h, 1.0 - p0))
-
-    def _held_out_admission(self, run, held_out, exclude):
-        snap = self._snapshot()
-        out = run()
-        if out.status != "accepted":
-            return out
-        for law in out.laws or [out.law]:
-            h, n, p = self.held_out_fit(law, held_out, exclude)
-            if p <= self.delta:
-                self._restore(snap)
-                self.refused_held_out += 1
-                why = (f"the held-out rows refute {law.condition} -> {law.effect!r}: right on {h} of the {n} rows of "
-                       f"other groups where it would apply; P[Binomial({n}, {self.min_precision:g}) ≤ {h}] = {p:.2g} "
-                       f"≤ delta {self.delta:g}")
-                return Admission("undetermined", None, out.classes, out.asked, out.refuted, out.null, why,
-                                 out.witnesses, out.refuted_list, out.untested, laws=[], unknown=out.unknown)
         return out
 
     def _accept(self, c, *, born, support=0, hits=0, net=0, sources=()):

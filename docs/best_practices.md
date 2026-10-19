@@ -421,7 +421,11 @@ that passed on 14 held-out rows (13 right) came from 3 (world, object) pairs and
 the held-out states independently (fresh starts, or one row per object), or count a law's support by distinct object
 rather than by row before you read δ as a promise. `Buffer(dedup=True)` (experimental) keeps one row per situation and
 group, or `Buffer(dedup=lambda t: t.state["object"])` one per object: on a synthetic random walk over 3 objects per
-world with no law at all, a law was accepted in 872 of 1,000 buffers by default and in 0 with dedup.
+world with no law at all, a law was accepted in 872 of 1,000 buffers by default and in 0 with dedup. It is not free:
+on a second task (2,000 tasks of relational laws, dedup by world and actor) wrong laws per admission fell 0.415 →
+0.112, but the share of true laws found fell 0.369 → 0.330, because the buffer shrank about sixfold and fewer right
+laws passed the sized test. Turn it on where a few objects are revisited many times and a wrong law costs more than a
+missed one.
 
 **When two candidate conditions can match the same held-out rows, turn on `LawSet(rivals=True)`.** By default the
 test cannot tell `mover OPEN & cell STOP -> pass` from `mover OPEN & cell SHUT -> pass` while no key was pushed into a
@@ -448,6 +452,23 @@ the same decision without adding the law (status "proposed"); add it with `add` 
 then calling `retire` records a law that never fell as retired, which mixes "never used" with "fell later" in
 `retired`. A planner that caches answers should key them on `LawSet.version`, which moves on every admission,
 retirement and suspension; and a law set or buffer that is pickled to resume a run drops its `id()`-keyed caches.
+
+**When two encodings of one effect agree by construction, declare it: `LawSet(equivalent=[(e1, e2, guard_atom)])`.**
+"One cell forward" and "one cell east" agree on every state where the agent faces east, so no probe can split them
+and a learner that admits a rule only when one hypothesis is left spends its budget and gives up. Declared, the two
+are one class before probing, and the merged twin stays a rival until the probes refute it on every encoding it
+carries. On MiniGrid (one grid family, 3 layouts, 20 seeds, probes answered by the simulator, budget 8): position
+rules 15 from 2,908 probes (2 wrong) → 24 from 84 (none wrong on all 3,116 local states), accuracy 0.93 → 0.99;
+facing rules none in 22,845 probes → 34 from 193 (none wrong), accuracy 0.68 → 0.95. Declare only what is true: a
+false declaration is caught only on logged rows (`check_equivalent(buffer)`) or when the rule later fails. Measured in
+a deterministic world with exact answers.
+
+**Use `FactoredModel` for accuracy, not to learn from fewer transitions.** One `LawSet` per channel with
+`FactoredModel(action=...)` (every channel law names the action) was more accurate on MiniGrid than one joint
+`LawSet` over the whole observation (next-state accuracy 0.999 vs 0.984, 10.8 vs 13.4 laws, 5 seeds), but needed
+about as many environment transitions (0.94× and 1.05× the joint model's in two runs). Both models admitted false laws
+on states the environments never reach (facing a key while already carrying one): a law is only as general as the
+states your walks produce, so check it on the states that matter to you.
 
 **When two laws may be missing at once, use `admit_by_probes(..., max_new=2)` and give it at least 12 probes.** It is
 a known method — a version space (Mitchell 1982) over law sets with up to two new laws, split by discriminating
