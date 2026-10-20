@@ -145,6 +145,21 @@ atoms: 0.188). For noisy behavioural logs a calibrated scorer is the tool; the f
 | **Laws: an `Unknown` answer for `ask`** | A probe whose situation turned out not to be the one asked about (the tile vanished, a second mover interfered) must still return a value; the agent returned a sentinel that refutes whatever applies there. An `Unknown` that refutes nothing and counts as spent | in 1.3.0 |
 | **Laws: `LawSet.version` and pickle-safe caches** | A planner caching answers had to read private counters to see the set change, and `Buffer` cache keys hold `id()`s that are not stable across pickling (the agent cleared them on resume); a public counter and caches dropped on pickling | in 1.3.0 |
 
+## Toward evidence for audits (planned)
+
+What an operator or auditor of a decision system asks for — logs, human oversight, declared accuracy, monitoring — mostly exists in solvi already (the hash-chained decisions store and replay, guarantees with their assumptions, drift monitors, audits of an answer). These are the cheap pieces still missing; each is useful beyond any one regulation.
+
+| Item | What it gives | Status |
+|---|---|---|
+| **Who reviewed, and how an escalation was closed** | A reviewer / operator field on every record, and a record that resolves an escalation to a person and links it to what was taught from it | planned |
+| **Suspend a system** | `suspend(by=, why=)` on a System or Dispatcher: it stops deciding, and the stop and the restart are records in the chain | planned |
+| **Retention** | A policy with a minimum and a maximum age for the decisions store; closed segments archived, not silently deleted | planned |
+| **Export for an auditor** | `solvi export`: the records as JSONL / CSV (OpenTelemetry later) with the schema version and the head hash, so a reader can check nothing is missing | planned |
+| **A signed head** | An HMAC or Ed25519 signature over the chain's head and a helper to publish the anchor elsewhere, so the whole chain cannot be rewritten unnoticed | planned |
+| **A technical-documentation bundle** | `solvi report --annex`: model fingerprints, calibrations with their assumptions, the honesty baseline, drift settings, version history in one package | planned |
+| **Incidents** | A record kind for an incident with its severity and the time it became known, linked to the decisions involved | planned |
+| **Per-group metrics and over-reliance** | Per-group error and abstention in the system report, and a measure of how often people accept the system's answer unchanged | planned |
+
 ## Library: open items from earlier releases
 
 | Item | What it gives | Status |
