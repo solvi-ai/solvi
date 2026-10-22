@@ -604,10 +604,13 @@ a plan on a fresh fork) and the real environment is never stepped by the planner
 that re-simulation, never because a model said it works: in the gridworld toy, sequences compiled without it reached no
 goal. **A skill is used alone only while its outcomes keep the certificate** (`Certificate`): before it is certified,
 System 2 re-verifies it on the exact model at every use, so every use has an outcome — a certificate fed only by the
-decisions the system made alone can certify what it never tested. Budget the need: a fresh certificate takes 50 clean
-outcomes at 5% and δ 0.1 (25 at 10%, 12 at 20%; with the default bet 0.9 — the count depends on it), so a skill used
-once per episode needs about fifty episodes before it acts alone; pool the certificate by goal or over the set (the
-promise is then the pool's) or accept a looser promise on short streams. In the toy (20 fresh layouts × 5 seeds) the set
+decisions the system made alone can certify what it never tested. Budget the need: a fresh certificate takes 61 clean
+outcomes at 5% and δ 0.1 (30 at 10%, 14 at 20%; with the default bet 0.9 — the count depends on it), and more after
+each restart (91, then 108 at 5%: since 1.4 the v-th certification bets against δ_v = 6δ/(π²v²), so every certificate
+ever issued holds together; `delta_split=False` keeps the full δ at each restart — 50, 25 and 12 — and each certificate
+then holds alone), so a skill used once per episode needs about sixty episodes before it acts alone; pool the
+certificate by goal or over the set (the promise is then the pool's) or accept a looser promise on short streams. The
+measurements below were taken before 1.4, with the full δ at each restart. In the toy (20 fresh layouts × 5 seeds) the set
 certified at 20% between the ninth and the thirteenth episode and System 1's share reached 0.81 in the last five with
 every goal still reached; per skill nothing certified within 20 episodes; the 20% promise pooled over the set was chosen
 after these runs — at 5% nothing certified within the toy's 20 episodes (as the changelog says). **Cases did not
