@@ -52,6 +52,21 @@
 - **`Guard.fingerprint()`**: what decides a guard's calls as one hash, read from its declarations (tools with their
   schemas and functions, policies, functions, firewalls, the authorizer, settings); building nothing. The process
   records it per guard node instead of reading the guard's private attributes.
+- **`systemone`: a probability floor for services that round** (`prob_floor="auto"`). Hosted decision models round
+  probabilities (Jev to 0.01), and an exact 0 on the right option became log(1e-6) ≈ −13.8, which drags fit, teach and
+  calibration (a third-party measurement on Jev, https://github.com/scienthoon/jev-ood-calibration: choice temperature
+  refit to 3.29 with a 1e-6 floor, 1.30 with 0.005). The floor is now half the step of the grid a reply's probabilities
+  lie on (0.01 → 0.005, 0.1 → 0.05); a reply on no grid of 10^-1 … 10^-4 reads bit for bit as before. A float sets the
+  floor, None keeps 1e-6; any value but "auto" enters the fingerprint, so stored records and the golden fingerprints
+  stay valid. A decision records the floor in `extra["systemone"]["prob_floor"]` when it is not 1e-6.
+- **`systemone`: the service's own `confidence` is kept** in `extra["systemone"]["confidence"]` (Jev's Choice / Score
+  number, distinct from the probability; per option for a multi-label question), and a guarantee can be set on it:
+  `System.guarantee(..., signal="extra:systemone.confidence")` — the new `signal="extra:<path>"` reads any number the
+  answer's decision recorded; an answer without it abstains with the reason.
+- **`systemone(max_options=)`**: the most options the service takes in a choice (Jev 255, Solar Decide 26, by their
+  docs); a question with more is refused when it is built, with a `ValueError` that names the limit, instead of
+  escalating on every request. A scorer can declare such limits with `check_item(name, item)`, called by
+  `DecideModel.decision`.
 
 ### Fixed
 - **A code fingerprint no longer depends on whether the code has run yet.** A module global set on first use

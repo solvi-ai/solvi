@@ -4,6 +4,7 @@ import io
 import json
 import urllib.error
 
+import numpy as np
 import pytest
 
 from solvi import Answer, Catalog, Question, System, Unknown
@@ -361,3 +362,111 @@ def test_the_url_keeps_its_query_and_the_trace_records_it_without_credentials_or
         assert "QSECRET" not in shown and "pw" not in shown
     plain = systemone("http://127.0.0.1:8009/", "jev")              # a plain URL: the fingerprint it always had
     assert plain.scorer.fingerprint().startswith("systemone|http://127.0.0.1:8009/v1/systemone|jev")
+
+
+# ------------------------------------------------------------------- 1.4: probability floor, the service's confidence, option limit
+def choice_reply(probs, **more):
+    return Scripted(lambda q: {"type": "choice", "choice": max(probs, key=probs.get), "probabilities": probs, **more})
+
+
+def test_a_reply_rounded_to_a_grid_is_floored_at_half_its_step_not_at_1e_6():
+    """Jev rounds to 0.01: an exact 0 on the right option was log(1e-6) ≈ −13.8, which drags fit / calibration (their
+    refit choice temperature 3.29 with a 1e-6 floor, 1.30 with 0.005). Auto: half the grid step, recorded."""
+    m = systemone("http://localhost:8009", "jev", opener=choice_reply({"billing": 0.99, "shipping": 0.0}))
+    d = m.decision("team", "Which team?", "email", TEAMS).decide("hello")
+    assert d.extra["systemone"]["prob_floor"] == pytest.approx(0.005)
+    assert d.probs["shipping"] == pytest.approx(0.005 / 0.995, rel=1e-6)
+    old = systemone("http://localhost:8009", "jev", opener=choice_reply({"billing": 0.99, "shipping": 0.0}),
+                    prob_floor=None).decision("team", "Which team?", "email", TEAMS).decide("hello")
+    assert "prob_floor" not in old.extra["systemone"] and old.probs["shipping"] == pytest.approx(1e-6 / 0.990001)
+    tenth = systemone("http://localhost:8009", "jev", opener=Scripted(lambda q: {"type": "noul", "noul": 1.0}))
+    u = tenth.decision("urgent", "Urgent?", "email", type=bool).decide("hello")       # on the 0.1 grid: floor 0.05
+    assert u.extra["systemone"]["prob_floor"] == pytest.approx(0.05) and u.probs["yes"] == pytest.approx(0.95)
+    multi = systemone("http://localhost:8009", "jev", opener=Scripted(lambda q: {"type": "noul", "noul": 0.0}))
+    z = multi.scorer.logits([Item("Which?", ("a", "b"), None, "x", True)])[0]["logits"]
+    assert np.allclose(z, np.log(0.05 / 0.95))
+
+
+def test_a_reply_on_no_grid_reads_bit_for_bit_as_before():
+    probs = {"billing": 0.8123456789, "shipping": 0.0}
+    it = Item("Which team?", tuple(TEAMS), tuple(TEAMS.values()), "hello")
+    auto = systemone("http://localhost:8009", "jev", opener=choice_reply(probs)).scorer.logits([it])[0]
+    none = systemone("http://localhost:8009", "jev", opener=choice_reply(probs), prob_floor=None).scorer.logits([it])[0]
+    before = np.log(np.clip(np.array([probs["billing"], probs["shipping"]]), 1e-6, None))      # 1.3's reading
+    assert np.array_equal(auto["logits"], before) and np.array_equal(none["logits"], before)
+    assert "prob_floor" not in auto["info"]["systemone"]
+    noul = Scripted(lambda q: {"type": "noul", "noul": 0.123456789})
+    m = systemone("http://localhost:8009", "jev", opener=noul)
+    assert np.array_equal(m.scorer.logits([Item("Urgent?", ("yes", "no"), None, "x")])[0]["logits"],
+                          np.log(np.array([0.123456789, 1 - 0.123456789])))
+
+
+def test_an_explicit_floor_is_used_fingerprinted_and_checked_the_default_hashes_as_before():
+    auto = systemone("https://router.example/api", "vendor/model")
+    assert auto.scorer.fingerprint() == "systemone|https://router.example/api/v1/systemone|vendor/model"   # as in 0.7.0
+    fps = {systemone("https://router.example/api", "vendor/model", prob_floor=f).fingerprint() for f in (0.01, 0.02, None)}
+    assert len(fps) == 3 and auto.fingerprint() not in fps
+    m = systemone("http://localhost:8009", "jev", opener=choice_reply({"billing": 0.8123456789, "shipping": 0.0}),
+                  prob_floor=0.01)
+    d = m.decision("team", "Which team?", "email", TEAMS).decide("hello")
+    assert d.extra["systemone"]["prob_floor"] == 0.01 and d.probs["shipping"] == pytest.approx(0.01 / 0.8223456789)
+    for bad in (0, 0.5, -1, "0.01", True, float("nan"), "Auto"):
+        with pytest.raises(ValueError):
+            systemone("http://localhost:8009", "jev", prob_floor=bad)
+
+
+def test_the_services_confidence_is_recorded_per_decision_and_only_when_it_is_a_number():
+    probs = {"billing": 0.7, "shipping": 0.3}
+    d = systemone("http://localhost:8009", "jev", opener=choice_reply(probs, confidence=0.42)).decision(
+        "team", "Which team?", "email", TEAMS).decide("hello")
+    assert d.extra["systemone"]["confidence"] == 0.42 and d.probs["billing"] == pytest.approx(0.7)
+    for shape in ({}, {"confidence": "high"}, {"confidence": None}, {"confidence": True}):     # Sage-like replies, junk
+        d = systemone("http://localhost:8009", "jev", opener=choice_reply(probs, **shape)).decision(
+            "team", "Which team?", "email", TEAMS).decide("hello")
+        assert "confidence" not in d.extra["systemone"] and not d.escalate and d.value == "billing"
+    multi = systemone("http://localhost:8009", "jev", opener=Scripted(lambda q: {"type": "noul", "noul": 0.8,
+                                                                                 "confidence": 0.6}))
+    d = multi.decision("tags", "Which apply?", "email", TEAMS, multi=True).decide("hello")
+    assert d.extra["systemone"]["confidence"] == {"billing": 0.6, "shipping": 0.6}
+
+
+class Confident(FakeService):
+    """Always answers billing at 0.6 — but its own confidence knows: high when the text is about a charge."""
+
+    def __call__(self, req, timeout=None):
+        body = json.loads(req.data.decode())
+        text = body["state"].lower()
+        conf = {} if "silent" in text else {"confidence": 0.9 if "charged" in text else 0.2}
+        return io.BytesIO(json.dumps({"model": body["model"], "answers": {
+            n: {"type": "choice", "choice": "billing", "probabilities": {"billing": 0.6, "shipping": 0.4}, **conf}
+            for n in body["questions"]}}).encode())
+
+
+def test_a_guarantee_can_be_set_on_the_services_confidence():
+    m = systemone("http://localhost:8009", "jev", opener=Confident())
+    cat = Catalog()
+    m.decision("team", "Which team?", "email", TEAMS).question(cat, "route")
+    s = System(cat, [Question("route", "Route", Answer.choice(list(TEAMS)))])
+    examples = ([({"email": f"I was charged twice ({k})"}, "billing") for k in range(40)]
+                + [({"email": f"my parcel is late ({k})"}, "shipping") for k in range(40)])
+    rep = s.guarantee("route", examples, max_risk=0.1, signal="extra:systemone.confidence")
+    assert 0.2 < rep["threshold"] <= 0.9
+    ok, no = s.ask({"email": "charged again"})["route"], s.ask({"email": "a parcel"})["route"]
+    assert ok.status == "ok" and ok.answer == "billing" and ok.extra["guarantee"]["value"] == 0.9
+    assert no.status == "abstain"
+    silent = s.ask({"email": "silent: charged"})["route"]                  # no confidence in the reply: not read
+    assert silent.status == "abstain" and "recorded no 'systemone.confidence'" in json.dumps(silent.model_dump())
+
+
+def test_a_question_with_more_options_than_the_service_takes_is_refused_when_built():
+    m = systemone("http://localhost:8009", "jev", opener=FakeService(), max_options=3)
+    m.decision("three", "Which?", "email", ["a", "b", "c"])
+    with pytest.raises(ValueError, match=r"4 options.*max_options=3.*split the label set"):
+        m.decision("four", "Which?", "email", ["a", "b", "c", "d"])
+    with pytest.raises(ValueError, match="not stated"):
+        m.decision("maybe", "Which?", "email", ["a", "b", "c"], not_stated=True)
+    m.decision("tags", "Which apply?", "email", ["a", "b", "c", "d", "e"], multi=True)    # one noul per option
+    systemone("http://localhost:8009", "jev").decision("many", "Which?", "email", [str(k) for k in range(300)])
+    for bad in (1, 0, 2.5, True, "26"):
+        with pytest.raises(ValueError):
+            systemone("http://localhost:8009", "jev", max_options=bad)
