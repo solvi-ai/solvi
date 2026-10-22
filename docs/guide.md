@@ -4536,6 +4536,19 @@ are the same (overlapping quotes, numbers within a tolerance); `unknown="human"`
 "none of the options fits" — a person decides — for closed options where a new kind of input can come.
 
 The supervision draw is a hash of `seed`, the input and the decision's number, so it is reproducible and replayed.
+`audit=` (a share of the decisions marked for labelling) draws the same way, independently. A plain hash can be
+predicted: with the public default `seed=0`, whoever can vary the inputs can compute which decisions will be supervised
+or audited and steer around them. `secret=` (bytes or str; when None the environment variable `SOLVI_AUDIT_SECRET` is
+read) keys both draws: they become HMAC-SHA256(secret, …) of the same seed, input and number. The secret never enters
+a record, the config fingerprint or the dispatcher's repr; a record says only `"draw_keyed": true`. Replay takes the
+recorded draw, so a dispatcher without the secret replays a keyed record (it does not recompute that draw); with the
+secret it recomputes and checks it. Without a secret the draws are as before, and a dispatcher that samples
+(`supervise` or `audit` strictly between 0 and 1) gives a `PredictableDrawWarning` (`solvi.core.dispatch`) once per process — filter that class where
+the draw need not be hidden.
+
+```python
+d = Dispatcher(system1, AskPath(system2), supervise=0.05, audit=0.02, secret=os.environ["MY_AUDIT_KEY"])
+```
 A drift flag stays up until `d.reset_drift()`; replay takes it as recorded (it depends on the stream before).
 
 ### The slow path

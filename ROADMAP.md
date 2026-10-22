@@ -244,6 +244,7 @@ What an operator or auditor of a decision system asks for — logs, human oversi
 
 | Item | Version |
 |---|---|
+| A secret for the supervision and audit draws (`Dispatcher(secret=)` or `SOLVI_AUDIT_SECRET`): HMAC-SHA256 instead of a public hash, so which decisions get checked cannot be predicted from the inputs; the secret in no record, fingerprint or repr; replay without it takes the recorded draw | 1.4 |
 | A skill certificate's δ spent over its restarts (δ_v = 6δ/(π²v²)), so every certificate a process ever issues holds together with probability ≥ 1 − δ; `delta_split=False` keeps the full δ at each restart | 1.4 |
 | Checks from a field report on 14 test setups: quotes matched on a normalized view (no-break spaces and hyphens, dashes, "…", curly quotes, NFKC; the source's own text kept, the view recorded and replayed), several labelled sources per quote, a `then=` hard check wired into its question's flow by itself, `then=` as a function of facts (recorded, replayed), `res.checks` as data | 1.0 |
 | One entry point for System 1 and System 2 (`solvi.solutions.decisions.build`): labelled examples, a promise and a slow path in, System 1 fitted, its guarantee and the slow path's slice calibrated on examples it did not see, the store wired, every choice explained; measured on four stand tasks against the hand-written setups | 0.9 |

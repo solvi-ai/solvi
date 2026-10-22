@@ -52,6 +52,17 @@
 - **`Guard.fingerprint()`**: what decides a guard's calls as one hash, read from its declarations (tools with their
   schemas and functions, policies, functions, firewalls, the authorizer, settings); building nothing. The process
   records it per guard node instead of reading the guard's private attributes.
+- **A secret for the supervision and audit draws: `Dispatcher(secret=)`** (`solvi.core.dispatch`; security). The
+  draws were `sha256(f"{seed}|{input hash}|{n}")` with the public default `seed=0`, so whoever could vary the inputs
+  could compute which decisions would be supervised or audited and avoid them. With `secret=` (bytes or str; None reads
+  the environment variable `SOLVI_AUDIT_SECRET`) both draws are HMAC-SHA256(secret, …) of the same message. The secret
+  enters no record, config fingerprint or repr; a record made with it carries `"draw_keyed": true`
+  (`Dispatched.keyed`). Replay takes the recorded draw: a dispatcher without the secret replays a keyed record (that
+  draw is not recomputed), one with the secret recomputes and checks it, and a wrong secret is a `draw` mismatch.
+  Without a secret the draws, records and config fingerprints are unchanged bit for bit; a dispatcher that samples
+  (`supervise` or `audit` strictly between 0 and 1) then gives a `PredictableDrawWarning` once per process (a class
+  of its own, so it can be filtered). `solvi.experimental.audit.AuditWatch`'s own draw (used when a decision carries no audit mark) is still
+  a hash of its seed.
 
 ### Fixed
 - **A skill certificate spends δ over its restarts** (`solvi.experimental.skills.Certificate`). After an alarm or a
