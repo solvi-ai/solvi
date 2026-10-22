@@ -244,6 +244,7 @@ What an operator or auditor of a decision system asks for — logs, human oversi
 
 | Item | Version |
 |---|---|
+| `systemone` for services that round and limit: a probability floor at half the reply's grid step (`prob_floor`), the service's own `confidence` recorded and usable as a guarantee signal (`signal="extra:systemone.confidence"`), `max_options` refused when a question is built | 1.4 (dev) |
 | Checks from a field report on 14 test setups: quotes matched on a normalized view (no-break spaces and hyphens, dashes, "…", curly quotes, NFKC; the source's own text kept, the view recorded and replayed), several labelled sources per quote, a `then=` hard check wired into its question's flow by itself, `then=` as a function of facts (recorded, replayed), `res.checks` as data | 1.0 |
 | One entry point for System 1 and System 2 (`solvi.solutions.decisions.build`): labelled examples, a promise and a slow path in, System 1 fitted, its guarantee and the slow path's slice calibrated on examples it did not see, the store wired, every choice explained; measured on four stand tasks against the hand-written setups | 0.9 |
 | Who answers: System 1, the slow path or a person in one recorded decision within a budget (`solvi.core.dispatch`), calibrated per slice of what System 1 hands over (`Dispatcher.calibrate`) | 0.9 |

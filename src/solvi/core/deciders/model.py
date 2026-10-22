@@ -1101,12 +1101,16 @@ class DecideModel:
             raise ValueError('long must be None (truncate), "retrieve" or "full"')
         if long == "full":
             self._check_full(name)
-        return DecisionPart(self, name, task, text_fact, options, descriptions, multi, other, kind=kind, as_bool=as_bool,
+        part = DecisionPart(self, name, task, text_fact, options, descriptions, multi, other, kind=kind, as_bool=as_bool,
                             escalate_below=escalate_below, act_threshold=act_threshold, use_act=use_act,
                             option_order=option_order, permutations=permutations, min_margin=min_margin,
                             long=long, top_k=top_k, rerank=rerank, perturb=perturb, retrieve_query=retrieve_query,
                             score_value=score_value, **{x: v for x, v in prim.items() if v not in (None, False, 0)
                                                          or x == "coverage"})
+        check = getattr(self.scorer, "check_item", None)    # a scorer's own limits (systemone's max_options): ValueError
+        if callable(check):                                 # here, at build time, not on every request
+            check(name, self._item(part.spec, ""))
+        return part
 
     def _check_full(self, name):
         """long="full" needs a long-input length: declared by the checkpoint, or forced at load (with a warning)."""

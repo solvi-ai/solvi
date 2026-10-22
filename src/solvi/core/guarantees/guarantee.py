@@ -395,6 +395,14 @@ class QuestionGuard:
             if act is None:
                 return "no act probability: the question's answer is not a model decision with an act head"
             return float(act)
+        if sig not in vals and sig.startswith("extra:"):   # a detail the answer's decision recorded (a dotted path)
+            rec = next((r for r in trace.records if r.name == f"answer:{self.question}"), None) if trace is not None else None
+            v = getattr(rec, "extra", None) if rec is not None else None
+            for k in sig[len("extra:"):].split("."):
+                v = v.get(k) if isinstance(v, dict) else None
+            if v is None:
+                return f"the answer's decision recorded no {sig[len('extra:'):]!r}"
+            return _number(v, sig)
         if sig not in vals:
             return f"the fact {sig!r} was not computed"
         v = vals[sig]
@@ -508,7 +516,8 @@ def guard_question(system, question, examples=None, *, max_error=None, max_risk=
     see it — the head that answers is fitted on all of them, so the promise is then approximate). False removes the
     question's guarantee.
     signal: "confidence" (default — the answer's confidence), "act" (the act probability of the model decision that
-    answers it), a fact name (any number the catalog computes or the input gives), or a function (result, facts) →
+    answers it), "extra:<path>" (a number the answer's decision recorded in its extra, a dotted path: e.g.
+    "extra:systemone.confidence", a System One service's own confidence), a fact name (any number the catalog computes or the input gives), or a function (result, facts) →
     number. answer: one-sided — the question answers this alone when its signal (default: the answer's probability,
     P(answer)) ≥ the threshold, whatever the most probable answer is, and abstains otherwise ("return the query when
     P(right) ≥ 0.43"). correct: a function (result, label) → bool for answers judged otherwise than by equality (a quote

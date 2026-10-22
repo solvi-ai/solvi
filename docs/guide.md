@@ -1184,7 +1184,8 @@ request, `max_think` / `nothink_threshold` cap them, and the time per request is
 claims about its accuracy are its authors'. How it does inside solvi's checks is on the [benchmark page](vs_llm.md).
 
 **Reference.** The whole signature: `systemone(base_url, model, api_key=None, *, timeout=30.0, opener=None,
-extra_body=None, deterministic=False, retries=2, backoff=1.0, sleep=None, max_len=None)` → a `DecideModel` (backend
+extra_body=None, deterministic=False, retries=2, backoff=1.0, sleep=None, max_len=None, prob_floor="auto",
+max_options=None)` → a `DecideModel` (backend
 `"systemone"`, id `systemone:<model>`), whose `decision(...)` / `decisions(...)` build parts as for a local checkpoint
 (the signature is in [the decider](#the-model-proposes-decisions-with-a-decider)); every option after `api_key` is
 keyword-only.
@@ -1199,6 +1200,8 @@ keyword-only.
 | `deterministic` | False (default): replay checks the recorded output instead of calling the service; True: replay re-runs it and compares (a local server whose output is reproducible) |
 | `opener` | a replacement for urllib's `urlopen` (tests, proxies) |
 | `max_len` | the tokens one request reads under `long="retrieve"` (words and punctuation × 1.3; default 512, at least 64) |
+| `prob_floor` | the smallest probability taken from a reply before its log. `"auto"` (default): half the step of the grid the reply's probabilities lie on (all multiples of 0.01, as Jev rounds them → 0.005; of 0.1 → 0.05; on no grid of 10^-1 … 10^-4 → 1e-6, as before 1.4, bit for bit); a float: that floor for every reply; `None`: 1e-6 always. With a 1e-6 floor one rounded-to-0 probability on the right answer weighs log(1e-6) ≈ −13.8 and drags fit and calibration ([a third-party measurement on Jev](https://github.com/scienthoon/jev-ood-calibration): choice temperature refit to 3.29 with 1e-6, 1.30 with 0.005). Any value but `"auto"` enters the fingerprint |
+| `max_options` | the most options the service takes in one choice question (Jev 255, Solar Decide 26, by their docs; "not stated" counts as one): a question with more is refused when it is built (`ValueError` naming the limit — split the label set into groups); default `None`: not checked |
 
 One question is one request: a System and `decide_pass` ask a remote model their questions about an input one after
 another (the items one scorer call is handed about one text — a multi-label question's options — share a request). The request
@@ -1208,14 +1211,25 @@ its levels), `{"type": "noul", "instructions": <task>}` for yes / no, one `noul`
 ("Does the option … apply?", chosen at 0.5), and with "not stated" allowed one more option (or one more `noul`)
 described as "The input does not state it: …". The reply must be a JSON object whose `answers` holds, per question
 name, `{"probabilities": {option: p}}` (every option, each in [0, 1]) or `{"noul": p}`; the probabilities become the
-decider's logits. `usage`, `cost`, `latency_ms`, `model` and `reasoning` (per question, Jeeves) are read when present.
+decider's logits (each clipped at `prob_floor` first). `usage`, `cost`, `latency_ms`, `model`, `reasoning` (per
+question, Jeeves) and an answer's `confidence` (Jev's Choice / Score) are read when present.
 
 Each decision records `extra["systemone"]`: `endpoint` (the URL without credentials or query), `model`, `served_by`
 (when the reply names another model), `ms` (the request's time here), `questions` (how many questions the request
 answered — the next fields are for the whole request), `usage` (`input_tokens`, `output_tokens`, `reasoning_tokens`, as
 the service gives them), `cost` (the service's own number), `latency_ms` (the service's own time) and `reasoning` (the
 question's chain, cut to 1,000 characters, with its `tokens`, `thought`, `closed` and `truncated` — for the audit; the
-answer comes from the probabilities). The scorer (`model.scorer`) keeps the totals: `requests`, `usage` and `cost`.
+answer comes from the probabilities), `confidence` (the service's own number for the question, distinct from the
+probability — [Jev's docs](https://docs.typesafe.ai/confidence); per option for a multi-label question) and `prob_floor`
+(when the floor used was not 1e-6). The scorer (`model.scorer`) keeps the totals: `requests`, `usage` and `cost`.
+
+To calibrate on the service's confidence rather than solvi's (read from the probabilities), a guarantee reads any number
+the answer's decision recorded with `signal="extra:<path>"`; the labelled examples show which signal separates right
+from wrong answers (an answer whose reply had no confidence abstains, with the reason):
+
+```python
+system.guarantee("route", examples, max_risk=0.05, signal="extra:systemone.confidence")
+```
 
 | What happens | Result |
 |---|---|
