@@ -263,6 +263,15 @@ STATUS: dict[str, dict] = {
               "missing": "one task family and one break size measured (docs/experimental.md); a smaller break, a short "
               "reference and a break confined to the decisions the policy never checks are unmeasured",
               "script": None},
+    "process": {"since": "1.4",
+                "what": "a process of several solvi systems as data (stage 0 of solvi.Process): nodes, edges with "
+                "predicates written as data, merges, loops with a mandatory max_iter and the declared process promise "
+                "(union / end_to_end / per_node), as a JSON spec with a hash stable to key order, a structural diff, "
+                "a Mermaid or text drawing, and from_spec checking every system's fingerprint",
+                "missing": "running the process, its replay, the path promise and the channel to a person (later "
+                "stages); the pre-registered stand (a synthetic multi-expert claims process: E1 promise, E2 scale, "
+                "E3 retraction) is not run",
+                "script": None},
 }
 for _s in STATUS.values():
     _s["deadline"] = DEADLINE

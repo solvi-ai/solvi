@@ -354,3 +354,26 @@ disagrees with the system more often, not which of them broke.
 
 Some ideas were measured and did not make it into solvi, experimental or not; the
 [changelog](../CHANGELOG.md#tried-and-left-out) lists them with what was measured.
+
+## `process`
+
+A process of several solvi systems described as data: stage 0 of `solvi.Process`, the format the later stages (running,
+one trace and replay across the systems, the path promise, the channel to a person) will use
+(`solvi.experimental.process.Process`). Since 1.4.
+
+A node is a `solvi.build` result, a System, a Guard or a question to a person; an edge carries a predicate written as
+data (`{"answer": "kind", "in": ["auto", "property"]}`, `{"status": "abstain"}`, `{"by": "s2"}`,
+`{"confidence_below": 0.5}`, `{"drift": true}`, `and` / `or` / `not`), never a Python function; a node with several
+inputs merges `all` or `any`; an edge that goes back is `loop=True` with `max_iter`, and a cycle without one is a
+`ValueError`. `p.promise(mode="union" | "end_to_end" | "per_node", ...)` records the declared promise (risk, split,
+threshold family, delta); nothing computes it yet. `p.spec()` is JSON with a SHA-256 `hash` of its canonical form
+(stable to the order of keys; the order of edges counts), `Process.from_spec(spec, systems=...)` reads it back byte
+for byte and refuses a system whose fingerprint is not the recorded one (`strict=False` loads it and lists it in
+`mismatched`), `p.diff(other)` names every change by node and edge (down to the part whose fingerprint changed), and
+`p.render("mermaid")` draws it.
+
+- **Missing:** running the process, its replay, the path promise and the channel to a person (later
+  stages); the pre-registered stand (a synthetic multi-expert claims process: E1 promise, E2 scale,
+  E3 retraction) is not run
+- **Script:** none yet. **Deadline:** 1.2.
+- API: [solvi.experimental.process](api/process.md).

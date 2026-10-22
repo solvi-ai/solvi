@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- **Process (experimental): a process of several solvi systems as data** (`solvi.experimental.process`, stage 0 of
+  `solvi.Process`). Nodes (a `solvi.build` result, a System, a Guard or a question to a person), edges with predicates
+  written as data (a closed language: `answer` with eq / in / lt / gt, `status`, `by`, `confidence_below`,
+  `budget_over`, `drift`, and / or / not), merges, loops that must carry `max_iter` (a cycle without one is a
+  `ValueError`) and the declared process promise (`union` with its split, `end_to_end` with its threshold family,
+  `per_node`). `spec()` is JSON with a SHA-256 hash stable to the order of keys; `from_spec` reads it back byte for
+  byte and refuses a system or channel whose fingerprint is not the recorded one (`strict=False` marks it); `diff`
+  names every change by node and edge; `render` draws Mermaid or text. Running, replay, the path promise and the
+  channel to a person come in later stages.
+
 ## 1.3.0 — 2026-10-19 — laws for rule-governed worlds: rivals, negations, a factored model
 
 ### Added
