@@ -85,7 +85,7 @@ NotImplementedError (this stage follows one path). Not yet: `retract`.
 The channel to a person (stage 1b) is a queue: the process does not know when the person answers. `HumanChannel` is an
 abstract class — submit(HumanRequest) → ticket, poll(ticket) → HumanAnswer | None, cancel(ticket, why),
 fingerprint() — that you subclass with your own way to ask (check it with
-solvi.testing.conformance.check_human_channel); built in: `MemoryQueue` (queue.answer(ticket, value, reviewer=),
+check_human_channel in this module); built in: `MemoryQueue` (queue.answer(ticket, value, reviewer=),
 queue.open()) and `CallbackChannel(fn)` (fn(request) → HumanAnswer or None, called at submit and at each poll). A
 question is put by a node of kind "human" (an edge to it is an explicit hand-over; it is given the facts it reads, or
 every fact when it reads none) or by the hand-off of a node. The process submits it and polls once: an answer is
@@ -576,7 +576,7 @@ class HumanAnswer:
 class HumanChannel(abc.ABC):
     """How a process asks a person — a queue: submit a question, get a ticket, poll the ticket later. Subclass it with
     your own way to ask (a ticket system, a review UI, a chat) and check it with
-    solvi.testing.conformance.check_human_channel. The protocol:
+    check_human_channel(make) (in this module). The protocol:
 
     submit(request: HumanRequest) → ticket (a non-empty string, new for every question)
     poll(ticket) → HumanAnswer, or None while there is no answer (KeyError for a ticket it never gave); once a ticket
@@ -2603,7 +2603,105 @@ class PathWatch:
                       None if self.p0 is None else [round(float(v), 12) for v in self.p0], self.n_ref)
 
 
+
+# ------------------------------------------------------------------------- the conformance check of a channel
+def _default_answer(channel, ticket, request):
+    v = f"answer-{request.facts.get('x')}"
+    channel.answer(ticket, v, reviewer="conformance")
+    return v
+
+
+def check_human_channel(make, *, answer=None, n=20):
+    """make: () → a fresh channel (a HumanChannel subclass); answer: (channel, ticket,
+    request) → the value the person answers, after making them answer it your channel's way (default: a MemoryQueue-
+    style `channel.answer(ticket, value, reviewer=)`; a channel that answers by itself returns the value it will give).
+    Checks the protocol — fingerprint stable and equal for two channels made alike; a new non-empty ticket per
+    question; KeyError for a ticket never given; n questions answered, none lost, each poll after the answer gives the
+    same answer with a reviewer; a cancelled ticket polls None — then a process run through it: a question to a person
+    is pending (or answered at once), listed by pending(), resumed by a process loaded afresh from the same spec and
+    store, recorded as a "human" record (ticket, reviewer, the channel's fingerprint, parent: the pending segment), the
+    store verifies. → what was checked."""
+    import tempfile
+    from pathlib import Path
+
+    from ..core.store import JSONLStorage
+    from ..testing.conformance import ConformanceError, _ok
+    answer = answer or _default_answer
+    ch = make()
+    _ok(isinstance(ch, HumanChannel), f"{type(ch).__name__} is not a HumanChannel subclass")
+    fp = ch.fingerprint()
+    _ok(isinstance(fp, str) and fp, f"fingerprint() is a non-empty string, not {fp!r}")
+    _ok(ch.fingerprint() == fp and make().fingerprint() == fp, "fingerprint() is stable, and the same for two "
+                                                              "channels made alike")
+
+    def req(i):
+        return HumanRequest(process="conformance", run=f"r{i}", node="ask", question="q", reason="node",
+                            facts={"x": i}, asked_at=0.0)
+    reqs = [req(i) for i in range(n)]
+    tickets = [ch.submit(r) for r in reqs]
+    _ok(all(isinstance(t, str) and t for t in tickets), "submit() → a ticket, a non-empty string")
+    _ok(len(set(tickets)) == n, f"every question gets its own ticket ({len(set(tickets))} of {n})")
+    try:
+        ch.poll("never-given-" + tickets[0])
+        raise ConformanceError("poll() of a ticket the channel never gave raises KeyError")
+    except KeyError:
+        pass
+    expected = [answer(ch, t, r) for t, r in zip(tickets, reqs)]
+    got = [ch.poll(t) for t in tickets]
+    lost = [t for t, a in zip(tickets, got) if a is None]
+    _ok(not lost, f"every answered question polls its answer: {len(lost)} of {n} lost")
+    for t, a, v in zip(tickets, got, expected):
+        _ok(isinstance(a, HumanAnswer), f"poll({t}) → a HumanAnswer, not {type(a).__name__}")
+        _ok(a.value == v and not a.declined, f"poll({t}) gives the answer given ({a.value!r} ≠ {v!r})")
+        _ok(isinstance(a.reviewer, str) and a.reviewer, f"poll({t}): the answer names its reviewer")
+        b = ch.poll(t)
+        _ok(b is not None and (b.value, b.reviewer) == (a.value, a.reviewer),
+            f"one ticket, one answer: a second poll({t}) gives the same answer")
+    t = ch.submit(req(n))
+    ch.cancel(t, "conformance")
+    _ok(ch.poll(t) is None, "a cancelled ticket polls None")
+    # through a process: pending, resume from a process loaded afresh, the record of the answer
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "process.jsonl"
+        p = Process("conformance", storage=JSONLStorage(path), human=ch)
+        p.node("ask", kind="human", question="q", reads=["x"], writes={"q": "answer"}, end=True)
+        r = p.run({"x": n + 1})
+        _ok(r.status in ("pending", "decided"), f"a run that asks a person is pending or decided, not {r.status}")
+        if r.status == "pending":
+            _ok([x["ticket"] for x in p.pending()] == [r.ticket], "pending() lists the waiting ticket")
+            again = p.resume(r.run)
+            _ok(again.status == "pending" or again.status == "decided", "resume() before the answer: still pending")
+            if again.status == "pending":
+                v = answer(ch, r.ticket, HumanRequest.from_dict(p._open().record(r.stored_id)["asking"]))
+                q = Process.from_spec(p.spec(), human=ch, storage=JSONLStorage(path))
+                _ok([x["ticket"] for x in q.pending()] == [r.ticket], "a process loaded afresh sees the waiting ticket")
+                done = q.resume(r.run)
+            else:
+                done, v, q = again, again.answer, p
+            _ok(done.status == "decided" and done.answer == v, f"resume() after the answer decides with it "
+                                                                 f"({done.status}, {done.answer!r} ≠ {v!r})")
+            _ok(done.continues == r.stored_id, "the resumed run continues the pending segment")
+            _ok(q.pending() == [], "nothing pending after the resume")
+            try:
+                q.resume(r.run)
+                raise ConformanceError("resume() of a decided run raises ProcessRunError")
+            except ProcessRunError:
+                pass
+            parent = r.stored_id
+        else:
+            done, q, parent = r, p, None
+        hum = [s for s in q._open().iter("human")]
+        _ok(len(hum) == 1, f"one \"human\" record per answered question, not {len(hum)}")
+        h = hum[0].data
+        _ok(h["ticket"] == done.path[0]["ticket"] and h["reviewer"] and h["channel"]["fingerprint"] == fp,
+            "the human record holds the ticket, the reviewer and the channel's fingerprint")
+        _ok(parent is None or hum[0].parent == parent, "the human record follows from the pending segment")
+        _ok(done.provenance["q"]["by"] == "human" and done.provenance["q"]["decision"] == hum[0].id,
+            "the answer goes on labelled by \"human\" with its record")
+        _ok(q._open().verify()["ok"], "the process store verifies")
+    return {"fingerprint": fp, "tickets": n, "lost": 0, "cancel": True, "process": r.status}
+
 __all__ = ["FORMAT", "CallbackChannel", "DecisionNode", "GuardNode", "HumanAnswer", "HumanChannel", "HumanNode",
            "HumanRequest", "MemoryQueue", "NodeResult", "NodeRunner", "PathWatch", "Process", "ProcessResult",
-           "ProcessRunError", "ProcessSpecError", "RUNNERS", "SystemNode", "canonical", "check_predicate", "describe",
-           "diff", "fingerprint_of", "holds", "render", "runner_for", "spec_hash"]
+           "ProcessRunError", "ProcessSpecError", "RUNNERS", "SystemNode", "canonical", "check_human_channel",
+           "check_predicate", "describe", "diff", "fingerprint_of", "holds", "render", "runner_for", "spec_hash"]

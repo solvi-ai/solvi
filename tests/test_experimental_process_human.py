@@ -14,14 +14,14 @@ from pathlib import Path
 import pytest
 
 from solvi.core.store import JSONLStorage, chronology
-from solvi.testing.conformance import ConformanceError, check_human_channel
+from solvi.testing.conformance import ConformanceError
 
 from test_experimental_process_run import Echo, _unit_rule, _units, claim_systems, clock, store
 
 with warnings.catch_warnings():
     warnings.simplefilter("ignore")
     from solvi.experimental.process import (CallbackChannel, HumanAnswer, HumanChannel, MemoryQueue,
-                                            NodeResult, Process, ProcessRunError)
+                                            NodeResult, Process, ProcessRunError, check_human_channel)
 
 
 # --- channels: the two built-ins and a foreign one

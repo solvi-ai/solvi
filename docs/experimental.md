@@ -387,7 +387,7 @@ nothing in it. `p.explain(r)` says the path in words.
 
 A person is asked through a queue: the process does not know when the answer comes. `HumanChannel` is an abstract
 class you subclass with your own way to ask — `submit(request) → ticket`, `poll(ticket) → HumanAnswer | None`,
-`cancel(ticket, why)`, `fingerprint()` — and check with `solvi.testing.conformance.check_human_channel`; built in are
+`cancel(ticket, why)`, `fingerprint()` — and check with `solvi.experimental.process.check_human_channel`; built in are
 `MemoryQueue` (`queue.answer(ticket, value, reviewer=)`, `queue.open()`) and `CallbackChannel(fn)` (`fn(request)` →
 an answer or None, called at submit and at every poll). A node of kind `"human"` puts its question (an edge to it is
 an explicit hand-over); a node that abstains or sends its decision to a person with no edge for it hands its question

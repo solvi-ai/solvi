@@ -25,7 +25,7 @@
 - **Process (experimental), stage 1b: asking a person through a queue.** `HumanChannel` is an abstract class (submit a
   `HumanRequest` → a ticket, `poll(ticket)` → a `HumanAnswer` or None, `cancel`, `fingerprint`) that you subclass with
   your own way to ask; `MemoryQueue` (answer / open) and `CallbackChannel(fn)` are built in, and
-  `solvi.testing.conformance.check_human_channel` checks an implementation (a ticket per question, none lost, one
+  `solvi.experimental.process.check_human_channel` checks an implementation (a ticket per question, none lost, one
   answer per ticket, cancel, pending / resume through a process). `Process(human=)` asks through it at a node of kind
   `"human"` and on a hand-off (`on_abstain` / `on_human="handoff"`); an answer not given at once ends the run
   `"pending"` with its ticket; `p.pending()` lists the waiting questions and `p.resume(run)` goes on when the answer
