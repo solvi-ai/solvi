@@ -379,12 +379,32 @@ def test_a_reply_rounded_to_a_grid_is_floored_at_half_its_step_not_at_1e_6():
     old = systemone("http://localhost:8009", "jev", opener=choice_reply({"billing": 0.99, "shipping": 0.0}),
                     prob_floor=None).decision("team", "Which team?", "email", TEAMS).decide("hello")
     assert "prob_floor" not in old.extra["systemone"] and old.probs["shipping"] == pytest.approx(1e-6 / 0.990001)
-    tenth = systemone("http://localhost:8009", "jev", opener=Scripted(lambda q: {"type": "noul", "noul": 1.0}))
-    u = tenth.decision("urgent", "Urgent?", "email", type=bool).decide("hello")       # on the 0.1 grid: floor 0.05
-    assert u.extra["systemone"]["prob_floor"] == pytest.approx(0.05) and u.probs["yes"] == pytest.approx(0.95)
-    multi = systemone("http://localhost:8009", "jev", opener=Scripted(lambda q: {"type": "noul", "noul": 0.0}))
+    tenth = systemone("http://localhost:8009", "jev", opener=choice_reply({"a": 0.9, "b": 0.1, "c": 0.0}))
+    got = tenth.scorer.logits([Item("Which?", ("a", "b", "c"), None, "x")])[0]          # a 0.1 grid reads as 0.01
+    assert got["info"]["systemone"]["prob_floor"] == pytest.approx(0.005)
+    assert np.allclose(got["logits"], np.log([0.9, 0.1, 0.005]))
+    u = systemone("http://localhost:8009", "jev", opener=Scripted(lambda q: {"type": "noul", "noul": 0.9})).decision(
+        "urgent", "Urgent?", "email", type=bool).decide("hello")
+    assert u.extra["systemone"]["prob_floor"] == pytest.approx(0.005) and u.probs["yes"] == pytest.approx(0.9)
+    multi = systemone("http://localhost:8009", "jev", opener=Scripted(lambda q: {"type": "noul", "noul": 0.03}))
     z = multi.scorer.logits([Item("Which?", ("a", "b"), None, "x", True)])[0]["logits"]
-    assert np.allclose(z, np.log(0.05 / 0.95))
+    assert np.allclose(z, np.log(0.03 / 0.97))
+
+
+def test_a_reply_of_exact_zeros_and_ones_shows_no_grid_and_reads_as_before():
+    """A confident 0 / 1 reply keeps its log(1e-6) gap: a floor taken from no evidence of a grid would shrink it."""
+    probs = {"billing": 1.0, "shipping": 0.0}
+    got = systemone("http://localhost:8009", "jev", opener=choice_reply(probs)).scorer.logits(
+        [Item("Which team?", tuple(TEAMS), tuple(TEAMS.values()), "hello")])[0]
+    assert np.array_equal(got["logits"], np.log(np.clip(np.array([1.0, 0.0]), 1e-6, None)))
+    assert "prob_floor" not in got["info"]["systemone"]
+    for p in (0.0, 1.0):
+        m = systemone("http://localhost:8009", "jev", opener=Scripted(lambda q, p=p: {"type": "noul", "noul": p}))
+        assert np.array_equal(m.scorer.logits([Item("Urgent?", ("yes", "no"), None, "x")])[0]["logits"],
+                              np.log(np.array([min(max(p, 1e-6), 1 - 1e-6), 1 - min(max(p, 1e-6), 1 - 1e-6)])))
+        z = m.scorer.logits([Item("Which?", ("a", "b"), None, "x", True)])[0]["logits"]
+        q = min(max(p, 1e-6), 1 - 1e-6)
+        assert np.array_equal(z, np.full(2, np.log(q / (1 - q))))
 
 
 def test_a_reply_on_no_grid_reads_bit_for_bit_as_before():
