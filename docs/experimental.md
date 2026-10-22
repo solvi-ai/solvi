@@ -357,9 +357,9 @@ Some ideas were measured and did not make it into solvi, experimental or not; th
 
 ## `process`
 
-A process of several solvi systems: stages 0 and 1a of `solvi.Process` — the process described as data, and running it
-as one trace across the systems; the later stages (the channel to a person, replay across the systems, the path
-promise, retraction) use the same format (`solvi.experimental.process.Process`). Since 1.4.
+A process of several solvi systems: stages 0 and 1 of `solvi.Process` — the process described as data, running it
+as one trace across the systems, and questions put to a person through a queue; the later stages (replay across the
+systems, the path promise, retraction) use the same format (`solvi.experimental.process.Process`). Since 1.4.
 
 A node is a `solvi.build` result, a System, a Guard or a question to a person; an edge carries a predicate written as
 data (`{"answer": "kind", "in": ["auto", "property"]}`, `{"status": "abstain"}`, `{"by": "s2"}`,
@@ -382,10 +382,29 @@ kind `"process"` indexes the path (ids and hashes only: spec, input, each node's
 wrote, the knowledge snapshot it was given, the edge taken). Every written fact carries a provenance label
 (`r.provenance[fact]`: the node, its decision, by, confidence, trace hash); a node that reads the fact `"provenance"`
 is given those labels. Shared facts go through a `solvi.Knowledge` the systems were built with; the process puts
-nothing in it. `p.explain(r)` says the path in words. A node of kind `"human"`, and an abstention or a person's
-decision with `on_abstain` / `on_human="handoff"`, raise `NotImplementedError` until the channel to a person (the next
-stage); `"abstain"` stops the run there.
+nothing in it. `p.explain(r)` says the path in words.
 
-- **Missing:** the channel to a person (stage S1b: HumanChannel, pending / resume), the process replay, the path promise and the retraction across nodes (later stages); a run follows one path (merge "all" is not run yet); the pre-registered stand (E1 promise, E2 scale at N=300, E3 retraction) is not run — E2 at N=10 is a test, not the stand
+A person is asked through a queue: the process does not know when the answer comes. `HumanChannel` is an abstract
+class you subclass with your own way to ask — `submit(request) → ticket`, `poll(ticket) → HumanAnswer | None`,
+`cancel(ticket, why)`, `fingerprint()` — and check with `solvi.testing.conformance.check_human_channel`; built in are
+`MemoryQueue` (`queue.answer(ticket, value, reviewer=)`, `queue.open()`) and `CallbackChannel(fn)` (`fn(request)` →
+an answer or None, called at submit and at every poll). A node of kind `"human"` puts its question (an edge to it is
+an explicit hand-over); a node that abstains or sends its decision to a person with no edge for it hands its question
+over (`on_abstain` / `on_human="handoff"`, the default; `"abstain"` stops the run there). The process submits and
+polls once: an answer is recorded and the run goes on; none, and `p.run` returns status `"pending"` with the
+`ticket`. `p.pending()` lists the waiting questions, `p.resume(run)` polls again — with no answer the run stays
+pending and nothing is written; with one, a record of kind `"human"` (ticket, value, reviewer, note, the channel's
+fingerprint; its parent is the pending segment) goes into the process store and the run goes on from the node that
+asked as a new `"process"` record with `continues` = the pending one. A process loaded afresh with
+`Process.from_spec(spec, systems=, human=, storage=)` resumes it. The answer is the node's answer: its writes take
+the value, its outcome is status `"ok"` by `"human"`, and the facts it writes carry the label
+`{"by": "human", "decision": <human record>, "reviewer"}`. One ticket, one answer (a recorded answer stands);
+`HumanAnswer(declined=True)` stops the run `"abstain"`; `p.cancel(run, why)` withdraws the question;
+`Process(user_verifier=)` binds an answer to who gave it, as `Guard(user_verifier=)`. A run that asks a person needs
+`Process(storage=)`; the pending segment is the one record that keeps fact values (the facts the run goes on with).
+On ten units exchanging facts over three rounds, 30 runs with 2% of the decisions asking a person (a test, not the
+stand), every ticket was answered once and every run decided.
+
+- **Missing:** the process replay (with pending segments and the human leaf), the path promise and the retraction across nodes with cancelled and re-asked tickets (later stages); a run follows one path (merge "all" is not run yet); the pre-registered stand (E1 promise, E2 scale at N=300, E3 retraction) is not run — E2 at N=10 (with 2% of the decisions asking a person) is a test, not the stand
 - **Script:** none yet. **Deadline:** 1.2.
 - API: [solvi.experimental.process](api/process.md).

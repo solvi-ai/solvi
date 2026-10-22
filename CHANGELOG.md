@@ -20,9 +20,22 @@
   decision). The node decisions are those of calling the systems by hand in the same order (tested record for record).
   Each node runs inside `run_context(parent=` the previous node's decision `)`, so `chronology(stores, run=)` gives the
   path; `Process(storage=)` appends one record of kind `"process"` per run (ids and hashes of the path; the record
-  schema lists the kind among those checked for the envelope). A node of kind `"human"` and a hand-off to a person
-  raise `NotImplementedError` until the channel to a person (stage 1b); `on_abstain` / `on_human="abstain"` stops the
-  run there instead. A merge of `"all"` inputs is not run yet (one path).
+  schema lists the kind among those checked for the envelope). `on_abstain` / `on_human="abstain"` stops the run at a
+  node that abstains or sends its decision to a person. A merge of `"all"` inputs is not run yet (one path).
+- **Process (experimental), stage 1b: asking a person through a queue.** `HumanChannel` is an abstract class (submit a
+  `HumanRequest` → a ticket, `poll(ticket)` → a `HumanAnswer` or None, `cancel`, `fingerprint`) that you subclass with
+  your own way to ask; `MemoryQueue` (answer / open) and `CallbackChannel(fn)` are built in, and
+  `solvi.testing.conformance.check_human_channel` checks an implementation (a ticket per question, none lost, one
+  answer per ticket, cancel, pending / resume through a process). `Process(human=)` asks through it at a node of kind
+  `"human"` and on a hand-off (`on_abstain` / `on_human="handoff"`); an answer not given at once ends the run
+  `"pending"` with its ticket; `p.pending()` lists the waiting questions and `p.resume(run)` goes on when the answer
+  comes, also from a process loaded afresh from the same spec and stores. Each segment of a run is a `"process"`
+  record (`continues`: the segment before); the answer is a `"human"` record (reviewer, note, the channel's
+  fingerprint, parent: the pending segment) and goes on as the node's answer labelled `by: "human"`.
+  `HumanAnswer(declined=True)` stops the run, `p.cancel(run, why)` withdraws the question, `Process(user_verifier=)`
+  binds an answer to who gave it. A human node and a hand-off without a channel are a `ProcessRunError` (they were
+  `NotImplementedError`). On ten units over three rounds, 30 runs with 2% of the decisions asking a person lost no
+  ticket (a test, not the stand). The record schema lists the kind `"human"` (envelope only).
 - **`Guard.fingerprint()`**: what decides a guard's calls as one hash, read from its declarations (tools with their
   schemas and functions, policies, functions, firewalls, the authorizer, settings); building nothing. The process
   records it per guard node instead of reading the guard's private attributes.
