@@ -357,16 +357,17 @@ Some ideas were measured and did not make it into solvi, experimental or not; th
 
 ## `process`
 
-A process of several solvi systems: stages 0 to 2 of `solvi.Process` — the process described as data, running it
-as one trace across the systems, questions put to a person through a queue, and replaying a run from its records; the
-later stages (the path promise, retraction) use the same format (`solvi.experimental.process.Process`). Since 1.4.
+A process of several solvi systems: stages 0 to 3 of `solvi.Process` — the process described as data, running it
+as one trace across the systems, questions put to a person through a queue, replaying a run from its records, and the
+path promise in the modes `union` and `per_node`; the later stages (the `end_to_end` promise, retraction) use the
+same format (`solvi.experimental.process.Process`). Since 1.4.
 
 A node is a `solvi.build` result, a System, a Guard or a question to a person; an edge carries a predicate written as
 data (`{"answer": "kind", "in": ["auto", "property"]}`, `{"status": "abstain"}`, `{"by": "s2"}`,
 `{"confidence_below": 0.5}`, `{"drift": true}`, `and` / `or` / `not`), never a Python function; a node with several
 inputs merges `all` or `any`; an edge that goes back is `loop=True` with `max_iter`, and a cycle without one is a
 `ValueError`. `p.promise(mode="union" | "end_to_end" | "per_node", ...)` records the declared promise (risk, split,
-threshold family, delta); nothing computes it yet. `p.spec()` is JSON with a SHA-256 `hash` of its canonical form
+threshold family, delta); `union` and `per_node` are computed by `p.guarantee()` (below), `end_to_end` comes later. `p.spec()` is JSON with a SHA-256 `hash` of its canonical form
 (stable to the order of keys; the order of edges counts), `Process.from_spec(spec, systems=...)` reads it back byte
 for byte and refuses a system whose fingerprint is not the recorded one (`strict=False` loads it and lists it in
 `mismatched`), `p.diff(other)` names every change by node and edge (down to the part whose fingerprint changed), and
@@ -419,6 +420,25 @@ of a node's record, an edge, a passed fact or a person's record (answer, reviewe
 [trace_spec](trace_spec.md#process-runs-kinds-process-and-human-the-run-record-candidate-for-freezing) as the
 candidate to freeze.
 
-- **Missing:** the path promise and the retraction across nodes with cancelled and re-asked tickets (later stages); a run follows one path (merge "all" is not run yet); the pre-registered stand (E1 promise, E2 scale at N=300, E3 retraction) is not run — E2 at N=10 (with 2% of the decisions asking a person) is a test, not the stand
-- **Script:** none yet. **Deadline:** 1.2.
+The path promise. `p.guarantee()` says what the declared promise gives (`statement`, `in_force`, `bound`, `problems`,
+the share `r_i` and the most runs `m_i` of each node), each run that ends carries `r.automatic` (an end node
+answered and no person answered on the path) and `r.risk` (the process risk while the promise is in force), and
+`p.explain(r)` ends with the promise. `union` (the default): P(a run ends automatically and its end answer is wrong)
+≤ Σ r_i·m_i ≤ r — a union bound over every automatic node of the graph, not over the path a run took. The first wrong
+node of a wrong path was given right inputs, so it is wrong on its own question and answered alone; no independence
+between nodes is assumed. `split="equal"` gives r_i = r / K_auto; `split={node: r_i}` or a function of the spec gives
+your own (a payout's error may cost more than a triage's), with Σ r_i ≤ r checked. m_i counts a node once per run a
+loop can make it run (1 plus the `max_iter` of each loop edge that leads back to it), so an equal split with a loop
+can fall out of force. The promise is in force when every automatic node keeps its own promise at its share (CRC risk
+≤ r_i: `build(max_risk=r_i)`; an LTT node counts at its error level, with probability ≥ 1 − Σ δ_i, and a warning),
+no node was loaded against another fingerprint and the path watch has not flagged. It assumes each node was
+calibrated in place, on what upstream gives it in the process (its errors and the routing included); a node
+calibrated on clean inputs breaks it. `per_node`: each node keeps its own promise and the statement says the end
+error is not bounded. `PathWatch` follows the share of runs that take each edge (two Bernoulli CUSUMs per edge,
+reference runs from the calibration stream, h simulated by resampling them): `p.monitor(PathWatch(), reference=runs)`
+puts `r.path_drift` on every run, and a flag puts the union promise out of force until `reset()`. Whether union is
+valid and what it costs in coverage is the E1 stand (`benchmarks/process_e1.py`), not run yet.
+
+- **Missing:** the `end_to_end` promise (a threshold family calibrated on end-labelled runs), the retraction across nodes with cancelled and re-asked tickets (later stages); a run follows one path (merge "all" is not run yet); the pre-registered stand (E1 promise, E2 scale at N=300, E3 retraction) is not run — E2 at N=10 (with 2% of the decisions asking a person) is a test, not the stand
+- **Script:** `benchmarks/process_e1.py` (E1, the promise: smoke only so far). **Deadline:** 1.2.
 - API: [solvi.experimental.process](api/process.md).

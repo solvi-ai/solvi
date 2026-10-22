@@ -264,7 +264,7 @@ STATUS: dict[str, dict] = {
               "reference and a break confined to the decisions the policy never checks are unmeasured",
               "script": None},
     "process": {"since": "1.4",
-                "what": "a process of several solvi systems (stages 0 to 2 of solvi.Process): nodes, edges with "
+                "what": "a process of several solvi systems (stages 0 to 3 of solvi.Process): nodes, edges with "
                 "predicates written as data, merges, loops with a mandatory max_iter and the declared process promise "
                 "(union / end_to_end / per_node), as a JSON spec with a hash stable to key order, a structural diff, "
                 "a Mermaid or text drawing, and from_spec checking every system's fingerprint; run / explain: each "
@@ -272,13 +272,16 @@ STATUS: dict[str, dict] = {
                 "record of the path; questions to a person through a queue (HumanChannel, MemoryQueue, "
                 "CallbackChannel): a run waits \"pending\" and resume goes on as a new segment, the answer recorded "
                 "with its reviewer; replay / replay_all of a run from its records across its segments, a person's "
-                "answer a leaf recorded and not recomputed, the first divergence named by node and step",
-                "missing": "the path promise and the "
+                "answer a leaf recorded and not recomputed, the first divergence named by node and step; guarantee(): the "
+                "path promise in the modes union (split equal, given or computed, each node's own promise at its "
+                "share, loops counted) and per_node (the end error is not bounded), and a PathWatch on the mix of "
+                "paths",
+                "missing": "the `end_to_end` promise (a threshold family calibrated on end-labelled runs), the "
                 "retraction across nodes with cancelled and re-asked tickets (later stages); a run follows one path "
                 "(merge \"all\" is not run yet); the pre-registered stand (E1 promise, E2 scale at N=300, E3 "
                 "retraction) is not run — E2 at N=10 (with 2% of the decisions asking a person) is a test, not the "
                 "stand",
-                "script": None},
+                "script": "benchmarks/process_e1.py"},
 }
 for _s in STATUS.values():
     _s["deadline"] = DEADLINE

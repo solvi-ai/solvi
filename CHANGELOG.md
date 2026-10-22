@@ -49,11 +49,30 @@
   record format (kinds `"process"` and `"human"`) is written down in `docs/trace_spec.md` as the candidate to freeze
   before the Rust core's stage 0. A run and its replay take each step through one function, so the replay recomputes
   what the run recorded.
+- **Process (experimental), stage 3: the path promise in the modes `union` and `per_node`.** `p.guarantee()` says
+  what the declared promise gives — the statement, whether it is in force and why not, the bound, each node's share
+  `r_i` and the most runs `m_i` it can make in one run — and every run that ends carries `automatic` (an end node
+  answered with no person on the path) and `risk` (the process risk while the promise is in force); `explain` ends
+  with the promise. `union`: P(a run ends automatically and its end answer is wrong) ≤ Σ r_i·m_i ≤ r over every
+  automatic node of the graph, with no independence assumed; `split="equal"` (r / K_auto), `{node: r_i}` or a
+  function of the spec (Σ r_i ≤ r checked); in force when each automatic node keeps its own promise at its share (CRC
+  risk ≤ r_i; an LTT node counts at its error level with Bonferroni over the δ's and a warning), a loop leaves room
+  for the node's repeated runs, no node was loaded against another fingerprint and the path watch has not flagged.
+  `per_node`: each node keeps its own promise and the statement says the end error is not bounded. `PathWatch`
+  (`p.monitor(watch, reference=runs)`) follows the share of runs taking each edge with Bernoulli CUSUMs whose h is
+  simulated by resampling the reference runs; a flag puts the union promise out of force. `end_to_end` is the next
+  stage (`guarantee()` raises `NotImplementedError` for it). The E1 stand's harness is `benchmarks/process_e1.py`
+  (smoke run only; the stand itself is not run).
 - **`Guard.fingerprint()`**: what decides a guard's calls as one hash, read from its declarations (tools with their
   schemas and functions, policies, functions, firewalls, the authorizer, settings); building nothing. The process
   records it per guard node instead of reading the guard's private attributes.
 
 ### Fixed
+- **Process (experimental): a `solvi.build` node that sends its decision to a person is handed over.** A node whose
+  dispatcher answers `by="human"` (status `"human"`) with no edge for it stopped the run `"abstain"` instead of putting
+  its question to the channel (`on_human="handoff"`): the hand-off skipped every result by a person, the dispatcher's
+  included, not only an answer that came through the channel. Run and replay now skip only the channel's answer. Found
+  by the E1 harness.
 - **A code fingerprint no longer depends on whether the code has run yet.** A module global set on first use
   (`_X = None`, filled by the first call) was hashed as None before that call and left out after it, so a Guard tool's
   `System.fingerprint()` taken before the first `guard.call` gave `argument_errors` another fingerprint than one taken

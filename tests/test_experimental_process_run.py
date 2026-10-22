@@ -251,7 +251,7 @@ def test_the_process_record_is_an_index_of_hashes(tmp_path):
     assert "300" not in str(rec["path"]) and "car" not in str(rec)        # values stay in the node stores
     text = p.explain(r)
     assert "triage (decision): by s1, ok answered \"auto\"" in text and "→ fraud because kind in" in text
-    assert text.rstrip().endswith('decided: "pay"')
+    assert 'decided: "pay" (automatically)' in text and "promise (union): P(a run ends automatically" in text
 
 
 # --- facts and their provenance
