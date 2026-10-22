@@ -174,7 +174,8 @@ if CALIBRATION.exists() and calibration_fits(CALIBRATION):
 QUESTIONS.append(reason.question(cat))
 ''',
     "options": '''REASONS = {"damaged": "arrived broken or damaged", "late": "arrived late or never",
-           "wrong_item": "not what was ordered or described", "changed_mind": "no longer wanted"}
+           "wrong_item": "not what was ordered or described", "changed_mind": "no longer wanted",
+           "other": "any other reason"}
 ''',
     "keywords": {"damaged": ["damaged", "broken", "cracked"], "late": ["late", "never arrived", "delayed"],
                  "wrong_item": ["wrong", "different", "not as described"],
@@ -239,7 +240,8 @@ if CALIBRATION.exists() and calibration_fits(CALIBRATION):
 QUESTIONS.append(category.question(cat))
 ''',
     "options": '''CATEGORIES = {"travel": "flights, trains, hotels, taxis", "meals": "food and drinks",
-              "equipment": "hardware and office supplies", "software": "licences and subscriptions"}
+              "equipment": "hardware and office supplies", "software": "licences and subscriptions",
+              "other": "anything else"}
 ''',
     "keywords": {"travel": ["flight", "train", "hotel", "taxi"], "meals": ["lunch", "dinner", "coffee"],
                  "equipment": ["laptop", "monitor", "chair"], "software": ["licence", "license", "subscription"]},

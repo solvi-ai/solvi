@@ -60,6 +60,14 @@
   `"guard": {"event", "by", "reason", "at"}`), and a call denied while paused is a decision of a small system of its
   own, so `guard.replay(id)` reproduces the denial. The pause lives in memory: a Guard made anew starts running; the
   store keeps the events. It supports the "stop button" of the EU AI Act's human-oversight requirement (Art. 14(4)(e)).
+- **`solvi check`: the wording of questions (warnings).** `no_other_option` — a choice a model answers with no
+  catch-all option ("other", "none of these", "unknown", or one described as "anything else"), no decider `other=` and
+  no "not stated"; `numeric_levels` — levels that are bare numbers without a description of each; `compound_question` —
+  a question text with two question marks or "and whether" / "or whether"; `unused_given` — a `System(input_model=)`
+  field nothing reads (only when every question has a rule or a `uses` hint). Each names the question or field and
+  the fix in one line; none is an error, so `solvi check` without `--strict` exits as before. `solvi init
+  --with-model`'s refunds and minimal templates get an `"other"` option, so the scaffold still passes
+  `solvi check --strict`.
 
 ### Fixed
 - **A code fingerprint no longer depends on whether the code has run yet.** A module global set on first use
