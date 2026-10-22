@@ -36,6 +36,19 @@
   binds an answer to who gave it. A human node and a hand-off without a channel are a `ProcessRunError` (they were
   `NotImplementedError`). On ten units over three rounds, 30 runs with 2% of the decisions asking a person lost no
   ticket (a test, not the stand). The record schema lists the kind `"human"` (envelope only).
+- **Process (experimental), stage 2: replay of a process.** `p.replay(run)` re-checks a run from its records alone,
+  across its segments (`continues`) and node by node: the node's record intact in its store and chained to the
+  decision before it, its trace hash, its decision replayed by its own means (`Dispatcher.replay`, `Trace.replay`,
+  `Guard.replay`), the facts it was given against the recorded answers upstream and the input, and the edge taken
+  against its predicate on the recorded answers. A person's answer is a leaf, recorded and not recomputed (its record
+  intact, after the pending segment, the ticket's only answer, the same channel, the request asked). The report names
+  the first divergence (`at`: node, step, segment, position; `kind`: integrity / recompute / missing_part) and lists
+  what the records cannot show (`unchecked`); a pending run replays to `{"ok": True, "pending": ticket}`.
+  `p.replay_all()` replays every run and verifies every store. One tamper of a node record, an edge choice, a passed
+  fact or a `"human"` record (answer, reviewer, parent) names exactly that node in 100 of 100 seeded tampers. The run
+  record format (kinds `"process"` and `"human"`) is written down in `docs/trace_spec.md` as the candidate to freeze
+  before the Rust core's stage 0. A run and its replay take each step through one function, so the replay recomputes
+  what the run recorded.
 - **`Guard.fingerprint()`**: what decides a guard's calls as one hash, read from its declarations (tools with their
   schemas and functions, policies, functions, firewalls, the authorizer, settings); building nothing. The process
   records it per guard node instead of reading the guard's private attributes.

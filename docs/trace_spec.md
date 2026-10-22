@@ -182,6 +182,39 @@ proposer repeats itself. [tests/test_specialist_replay_record.py: a nondetermini
 for byte without a call; `check_specialist` fails a specialist whose replay calls the proposer] On the charts
 benchmark's 50 texts with an LLM proposer every stored run replays byte for byte from its record (50 of 50).
 
+### Process runs (kinds `process` and `human`): the run record, candidate for freezing
+
+The format of a run of `solvi.experimental.process` as it stands at stage 2 — **the candidate to freeze before stage 0
+of the Rust core** (the spec, these two records and the replay walk are data and pure functions; nothing in them calls
+the host). Both kinds are envelope-only in `record.schema.json`; both carry `"run": {"id", "parent"}` in the hash.
+
+- `process` (one per segment of a run, in the process's store): `process` (name), `spec_hash` (the spec's hash),
+  `input_hash` (vhash of the given facts), `mode` and `promise` (the spec's promise record), `path` — per step
+  `{node, kind, store, stored_id, trace_hash, by, status, answers_hash, facts_in_hash, facts_out_hash, knowledge,
+  cost, edge: {to, when, loop} | null}` (+ `ticket`, `handoff` on a step of kind `human`) — `outcome: {status, at,
+  answer_hash}` (`decided` | `abstain` | `pending` | `cancelled`), `continues` (the id of the pending segment this one
+  goes on from; null for the first). A pending segment adds `ticket`, `channel` ({channel, fingerprint}), `asking`
+  (the request: process, run, node, question, reason, facts, provenance, path, answer, deadline, asked_at) and
+  `resume` (node, reason, facts, provenance, taken, state — the one record that keeps fact values). Its `run.parent`
+  is the run's last decision before it.
+- `human` (in the process's store): `process`, `ticket`, `node`, `question`, `reason`, `value`, `declined`,
+  `reviewer`, `note`, `verified`, `asked_at`, `answered_at`, `request_hash` (vhash of the request), `channel`; its
+  `run.parent` is the pending segment (or the decision before it when answered at once). A withdrawal is a `human`
+  record `{ticket, node, question, reason, cancelled: true, why, channel}` followed by a segment `cancelled`.
+- Replay (`Process.replay(run)`) walks the segments by `continues` and each path in order: (1) `record` — the node's
+  record is in its store, intact, of this run, after the decision before it, and agrees with the step; (2)
+  `trace_hash`; (3) `replay` — the node's decision re-checked by its own means (Dispatcher.replay, Trace.replay,
+  Guard.replay); (4) `facts` — the facts given are those the recorded answers upstream and the input give (in the
+  step and in the node's own record), the facts written are its recorded answers; (5) `edge` — the first edge whose
+  predicate holds on the recorded answers is the recorded one; (6) `promise` — the `end_to_end` decision rule (not
+  checked until stage 4). A person's answer is a leaf, recorded and not recomputed: its record is intact, of this
+  run, after the pending segment, the ticket's only record, through the same channel, to the request asked
+  (`request_hash`). A pending run replays to `{"ok": true, "pending": ticket}`. The first divergence is reported as
+  `{"node", "step", "segment", "position"}` with a kind `integrity` | `recompute` | `missing_part`. What the records
+  do not keep is listed under `unchecked` (a guard's tool result is stored as its hash).
+  [tests/test_experimental_process_replay.py: one tamper of a node record, an edge, a passed fact or a `human`
+  record names exactly that node, 100 of 100 seeded tampers]
+
 ## 6. Provenance kinds and statuses
 
 - Every step value has a provenance kind: `given`, `computed`, `quoted`, `decided`, `learned`, `proposed`
