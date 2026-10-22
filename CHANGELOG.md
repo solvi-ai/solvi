@@ -52,6 +52,16 @@
 - **`Guard.fingerprint()`**: what decides a guard's calls as one hash, read from its declarations (tools with their
   schemas and functions, policies, functions, firewalls, the authorizer, settings); building nothing. The process
   records it per guard node instead of reading the guard's private attributes.
+- **The canonical form of a record hash, byte for byte, with test vectors.** `docs/trace_spec.md` §3 now says exactly what
+  a record hash is taken over, so a verifier in another language can recompute it: the hash body by format, then the
+  canonical text — keys sorted by Unicode code point, Python's float spelling (`1e-06`, `1e+16`, `100.0`, `-0.0`;
+  positional from 1e-4 up to 1e16), integers of any size kept apart from floats, which characters are escaped (U+2028
+  and U+2029 are not), `NaN` / `Infinity` only in records written before 0.7 (the writer refuses them) — and where it
+  differs from RFC 8785. `tests/fixtures/canonical_json/vectors.json`: 21 values, a format 1 and a format 2 record and
+  a chain link, each with its canonical text and SHA-256, recomputed by `tests/test_canonical_json_vectors.py`. Nothing
+  written changes: the format and every hash are as before. Documented as a known issue, not fixed: a body appended
+  with non-string dict keys (`{2: …, 10: …}`) is hashed with the keys in number order, and its stored text does not
+  recompute that hash.
 
 ### Fixed
 - **A code fingerprint no longer depends on whether the code has run yet.** A module global set on first use
