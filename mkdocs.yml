@@ -173,6 +173,7 @@ nav:
           - solvi.experimental.relations: api/relations.md
           - solvi.experimental.ood: api/ood.md
           - solvi.experimental.audit: api/audit_watch.md
+          - solvi.experimental.process: api/process.md
   - Changelog: changelog.md
   - Roadmap: roadmap.md
 
