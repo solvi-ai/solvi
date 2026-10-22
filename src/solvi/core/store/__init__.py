@@ -65,8 +65,76 @@ ANY = _Any()                                  # a query / provenance argument th
 
 def _cj(obj):
     """Canonical JSON: sorted keys, no spaces — what the record hash is taken over. New records hold no inf / nan (they are
-    tagged, see entry); records written before 0.7 may, and still hash as they were written (Infinity / NaN)."""
-    return json.dumps(obj, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    tagged, see entry); records written before 0.7 may, and still hash as they were written (Infinity / NaN). Dict keys
+    are turned into their JSON strings before they are sorted (_jkeys), so a dict hashes as it is read back."""
+    return json.dumps(_jkeys(obj), ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
+_INF = float("inf")
+
+
+def _jkey(k):
+    """A dict key as json.dumps writes it: a str as it is, True / False / None as true / false / null, an int and a float
+    by their repr (NaN / Infinity / -Infinity as the encoder writes them); any other key is a TypeError, as in json."""
+    if isinstance(k, str):
+        return k
+    if k is True or k is False:
+        return "true" if k else "false"
+    if k is None:
+        return "null"
+    if isinstance(k, int):
+        return int.__repr__(k)
+    if isinstance(k, float):
+        if k != k:
+            return "NaN"
+        if k in (_INF, -_INF):
+            return "Infinity" if k > 0 else "-Infinity"
+        return float.__repr__(k)
+    raise TypeError(f"keys must be str, int, float, bool or None, not {type(k).__name__}")
+
+
+_SCALARS = frozenset((str, int, float, bool, type(None)))
+
+
+def _jkeys(v):
+    """v with every dict's keys turned into their JSON strings (_jkey), so that sorting them sorts the strings a reader
+    of the stored JSON sees (json.dumps sorts the keys first: {2: .., 10: ..} would come out in number order). Returns
+    v itself when every key is a str already. Two keys that become one string ({1: .., "1": ..}) are a ValueError:
+    json.dumps would write both, and the record would not read back as it was hashed."""
+    t = type(v)
+    if t in _SCALARS:
+        return v
+    if t is list or t is tuple:
+        out = None
+        for i, x in enumerate(v):
+            if type(x) in _SCALARS:
+                continue
+            y = _jkeys(x)
+            if y is not x:
+                if out is None:
+                    out = list(v)
+                out[i] = y
+        return v if out is None else out
+    if not isinstance(v, dict):
+        return v
+    if all(type(k) is str for k in v):
+        out = None
+        for k, x in v.items():
+            if type(x) in _SCALARS:
+                continue
+            y = _jkeys(x)
+            if y is not x:
+                if out is None:
+                    out = dict(v)
+                out[k] = y
+        return v if out is None else out
+    out = {}
+    for k, x in v.items():
+        s = _jkey(k)
+        if s in out:
+            raise ValueError(f"two dict keys give the JSON key {s!r}: a record cannot hold both")
+        out[s] = _jkeys(x)
+    return out
 
 
 @contextlib.contextmanager

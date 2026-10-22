@@ -154,6 +154,13 @@
    "sha256": "28a3483c766cc49737d7a2de5ba6b8ccc86358344fda823f7bd56d77457845b7"
   },
   {
+   "name": "keys that look like numbers sort as strings (a Python int key is turned into its string first)",
+   "kind": "value",
+   "input": "{\"2\":\"a\",\"10\":\"b\",\"-1\":\"c\",\"1.5\":\"d\"}",
+   "canonical": "{\"-1\":\"c\",\"1.5\":\"d\",\"10\":\"b\",\"2\":\"a\"}",
+   "sha256": "08ee4aea92da3b6862501956531bcdd2ab47e501add8e4f28d4cd5c9194d9909"
+  },
+  {
    "name": "legacy (records before 0.7): NaN and Infinity tokens",
    "kind": "value",
    "input": "{\"a\":NaN,\"b\":Infinity,\"c\":-Infinity}",

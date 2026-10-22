@@ -70,9 +70,80 @@ def test_strings_key_order_and_escapes():
         _digest("\ud800")                                # a lone surrogate has no UTF-8 bytes: refused
 
 
-def test_non_string_keys_sort_before_they_become_strings():
-    """Known (docs/trace_spec.md §3, "Canonical form"): a dict with int keys sorts them as numbers, the same dict read
-    back from JSON as strings — a record appended with such a body does not verify. Pinned so a fix is a decision."""
-    d = {2: "a", 10: "b"}
-    assert _cj(d) == '{"2":"a","10":"b"}'
-    assert _cj(json.loads(json.dumps(d))) == '{"10":"b","2":"a"}'
+# --- non-string keys: stringified before sorting (the fix of 1.4.0)
+def _old_cj(obj):
+    return json.dumps(obj, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
+FIXTURES = Path(__file__).parent / "fixtures"
+STORES = sorted(p for p in FIXTURES.rglob("*") if p.suffix in (".jsonl", ".db") and p.parent.name != "canonical_json")
+
+
+def test_non_string_keys_are_written_as_their_json_strings_before_sorting():
+    assert _cj({2: "a", 10: "b"}) == '{"10":"b","2":"a"}' == _cj(json.loads(json.dumps({2: "a", 10: "b"})))
+    assert _cj({True: 1, None: 2, 1.5: 3, -1: 4, "s": [{3: 0}]}) == '{"-1":4,"1.5":3,"null":2,"s":[{"3":0}],"true":1}'
+    assert signature._cj({2: "a", 10: "b"}) == '{"10":"b","2":"a"}'
+    d = {"k": [1, {"x": 2}], "e": {}}                    # string keys only: the same object back, no copy
+    from solvi.core.store import _jkeys
+    assert _jkeys(d) is d
+
+
+@pytest.mark.parametrize("d", [{1: "a", "1": "b"}, {1.0: "a", "1.0": "b"}, {None: 0, "null": 1}, {"x": {True: 0, "true": 1}}])
+def test_two_keys_that_become_one_json_key_are_refused(d):
+    with pytest.raises(ValueError, match="two dict keys"):
+        _cj(d)
+
+
+def test_string_keyed_data_gives_the_same_bytes_as_before_on_every_stored_fixture():
+    """Every record in every store under tests/fixtures canonicalizes to the bytes the old _cj gave: data read from JSON
+    has string keys only, so no stored hash moves."""
+    import sqlite3
+    n = 0
+    for p in STORES:
+        if p.suffix == ".jsonl":
+            rows = [ln for ln in p.read_text(encoding="utf-8").splitlines() if ln.strip()]
+        else:
+            with sqlite3.connect(p) as c:
+                rows = [r[0] for r in c.execute("SELECT body FROM records")]
+        for ln in rows:
+            rec = json.loads(ln)
+            assert _cj(rec) == _old_cj(rec)
+            assert _cj(record_body(rec)) == _old_cj(record_body(rec))
+            n += 1
+    assert n > 50 and len(STORES) >= 9
+
+
+@pytest.mark.parametrize("path", STORES, ids=[str(p.relative_to(FIXTURES)) for p in STORES])
+def test_every_fixture_store_verifies_as_it_did_with_the_old_canonical_json(path, tmp_path, monkeypatch):
+    import shutil
+
+    from solvi.core import store as S
+    for f in path.parent.iterdir():
+        if f.name.startswith(path.name):
+            shutil.copy(f, tmp_path / f.name)
+    new = S.open_storage(str(tmp_path / path.name)).verify()
+    monkeypatch.setattr(S, "_cj", _old_cj)
+    monkeypatch.setattr(signature, "_cj", lambda o: json.dumps(o, ensure_ascii=False, sort_keys=True,
+                                                               separators=(",", ":"), default=repr))
+    old = S.open_storage(str(tmp_path / path.name)).verify()
+    assert new == old
+
+
+@pytest.mark.parametrize("backend", ["jsonl", "sqlite"])
+def test_a_body_with_int_keys_verifies_after_it_is_stored(backend, tmp_path):
+    from solvi.core.store import FORMAT, JSONLStorage, SQLiteStorage
+    st = JSONLStorage(str(tmp_path / "a.jsonl")) if backend == "jsonl" else SQLiteStorage(str(tmp_path / "a.db"))
+    rec = st._append({"v": FORMAT, "kind": "x", "m": {2: "a", 10: "b"}})
+    st._append({"v": FORMAT, "kind": "x", "m": {"z": 1}})
+    v = st.verify()
+    assert v["ok"] and v["problems"] == [] and v["count"] == 2
+    assert record_hash(rec) == rec["hash"]
+
+
+def test_a_body_with_two_keys_for_one_json_key_is_not_stored(tmp_path):
+    from solvi.core.store import FORMAT, JSONLStorage
+    st = JSONLStorage(str(tmp_path / "a.jsonl"))
+    with pytest.raises(ValueError):
+        st._append({"v": FORMAT, "kind": "x", "m": {1: "a", "1": "b"}})
+    st._append({"v": FORMAT, "kind": "x"})
+    assert st.verify()["ok"] and st.verify()["count"] == 1

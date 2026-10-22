@@ -118,7 +118,8 @@ A move to JCS would be a format 3 and is not decided.
 
 - *Whitespace*: none. Separators are `,` and `:`.
 - *Objects*: members sorted by key, comparing keys as sequences of **Unicode code points** (Python's `str` order), at
-  every level. Arrays keep their order. Keys in a stored record are strings (but see "Non-string keys").
+  every level. Arrays keep their order. A key that is not a string in the writer's data is turned into its JSON string
+  first (see "Non-string keys"), so the order is always that of the strings a reader sees.
 - *Strings*: `"`, then each character as itself except: `"` → `\"`, `\` → `\\`, U+0008 → `\b`, U+0009 → `\t`, U+000A →
   `\n`, U+000C → `\f`, U+000D → `\r`, any other character below U+0020 → `\u00XX` with **lowercase** hex (`\u001f`).
   Nothing else is escaped: not `/`, not U+007F, not U+2028 / U+2029, not non-ASCII. The text is encoded as UTF-8. A
@@ -159,12 +160,17 @@ floats by the rule above.
 | lone surrogates | an error | an error |
 | string escapes, U+2028 / U+2029, `/`, U+007F, separators, UTF-8 | the same | the same |
 
-**Non-string keys** (a known issue, not a format rule). `C` sorts a dict's keys *before* turning them into strings: a
-Python dict `{2: "a", 10: "b"}` gives `{"2":"a","10":"b"}`, while the same dict read back from JSON gives
-`{"10":"b","2":"a"}`. A record appended with such a body (a module calling `_append` with data that did not pass
-through JSON) gets a hash its stored text does not recompute: `verify()` reports it as edited. Decisions, corrections
-and specialist runs convert their data to JSON first and are not affected. Two Python values that give the same text
-(`{1: "a"}` and `{"1": "a"}`, a tuple and a list) are the same JSON record, so they are not a collision.
+**Non-string keys** (solvi 1.4.0 and later). Before sorting, `C` turns every dict key that is not a string into the
+string `json.dumps` writes for it: an int by its decimal form, a float by the float rule above (`NaN`, `Infinity`,
+`-Infinity` as those words), `True` / `False` / `None` as `true` / `false` / `null`; any other key type is an error.
+Keys are then sorted as strings: `{2: "a", 10: "b"}` gives `{"10":"b","2":"a"}`, the text of the same dict read back
+from JSON. Two keys that become one string (`{1: "a", "1": "b"}`) are refused (`ValueError`, nothing appended):
+`json.dumps` would write both and the stored record would not read back as it was hashed. For a port this changes
+nothing: a stored record's keys are strings. Before 1.4.0 the keys were sorted in their own type's order before being
+turned into strings, and a body with non-string keys whose number order differs from their string order (written by a
+module that passed data to `_append` without a JSON round trip) got a hash its stored text does not recompute: such
+records still fail `verify()`. Records with string keys only — every record read from a store — hash exactly as before.
+[test_every_fixture_store_verifies_as_it_did_with_the_old_canonical_json]
 
 **The signature's variant** (`solvi.core.store.signature`, §8) takes the same `C` with `default=repr`: a value that is
 not JSON data becomes the string of its `repr`. A stored record is JSON data, so this never applies to it; for other
