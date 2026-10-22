@@ -52,6 +52,14 @@
 - **`Guard.fingerprint()`**: what decides a guard's calls as one hash, read from its declarations (tools with their
   schemas and functions, policies, functions, firewalls, the authorizer, settings); building nothing. The process
   records it per guard node instead of reading the guard's private attributes.
+- **A stop button for Guard: `guard.pause(reason, by=)` / `guard.resume(by=)`.** While paused, every check and call
+  (sync, async, through a session) is denied before any other check (`guard_not_paused`; deny, not escalate, so no
+  approval can be queued while stopped), the reason names who paused and why, no tool runs, and
+  `resolve(..., approve=True)` raises `PermissionError` until `resume`. A pause takes effect for every call that starts
+  after it (a lock around the state). With a storage, pause and resume are events in the store's chain (meta
+  `"guard": {"event", "by", "reason", "at"}`), and a call denied while paused is a decision of a small system of its
+  own, so `guard.replay(id)` reproduces the denial. The pause lives in memory: a Guard made anew starts running; the
+  store keeps the events. It supports the "stop button" of the EU AI Act's human-oversight requirement (Art. 14(4)(e)).
 
 ### Fixed
 - **A code fingerprint no longer depends on whether the code has run yet.** A module global set on first use
@@ -61,6 +69,9 @@
   of `code_fingerprint` and `own_code_fingerprint`: the fingerprint after the first call is the one it had before this
   fix; a function that reads a module constant that stays None gets a new fingerprint (the golden fingerprints are
   unchanged).
+- **`Guard.replay(id)` of a call denied outside a session's allowed tools** replayed it with the tool's own checks and
+  reported a mismatch (`in_session_tools` "not in the catalog"); a stored decision is now replayed with the system that
+  made it, read from its recorded steps (also in the process replay of a guard node).
 
 ## 1.3.0 — 2026-10-19 — laws for rule-governed worlds: rivals, negations, a factored model
 
