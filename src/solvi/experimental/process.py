@@ -1758,8 +1758,7 @@ class _Replay:
                 meta = (rec.get("meta") or {}).get("guard") or {}
                 if rec.get("kind", "ask") != "ask" or not meta:
                     self.fail(node, "record", "integrity", f"record {sid} is not a decision of a guard")
-                tool = meta.get("tool")
-                resp = store.get(sid, sysm.system(tool) if tool is not None else sysm._unknown_system())
+                resp = store.get(sid, sysm._system_of(rec))
                 v = resp.results.get("verdict")
                 out = meta.get("outcome")
                 result = _NotKept(meta.get("result_hash")) if meta.get("executed") and not meta.get("error") else None

@@ -2567,6 +2567,15 @@ rule over the task text cut it to 0.11 but lost 3.4 points of benign utility (95
 calls the task needed; on top of hand-declared tool effects, the same rule cut attack success from 0.022 to 0.007 at
 −1.1 points. Give it the tools you know the task needs; a guessed list costs completed tasks.
 
+**The stop button.** `guard.pause("incident 42: odd payouts", by="alice")` stops the guard: every check and call that
+starts after it is denied (`guard_not_paused`; deny, not escalate, so no approval can be queued while stopped), with a
+reason naming who paused and why, and no tool runs; `resolve(..., approve=True)` raises until `guard.resume(by="alice")`.
+With a storage, the pause and the resume are events in the store's chain (meta `"guard": {"event", "by", "reason",
+"at"}`), and a call denied while paused is a decision of a small system of its own, so `guard.replay(id)` reproduces the
+denial. The pause lives in memory: a Guard made anew (a restart) starts running, and the store keeps the events — pause
+it again at start-up if it must stay stopped. It supports the "stop button" of the EU AI Act's human-oversight
+requirement (Art. 14(4)(e)).
+
 **The store.** With `storage=`, every decision is saved with its trace and `meta["guard"]`: tool, outcome, reasons,
 whether solvi ran the tool, and its error or the hash of its result (the result itself is not stored). `guard.replay(id)`
 re-computes a stored decision with the tool's current checks (`"catalog": "changed"` when they changed since),
