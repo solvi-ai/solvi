@@ -40,6 +40,15 @@
   schemas and functions, policies, functions, firewalls, the authorizer, settings); building nothing. The process
   records it per guard node instead of reading the guard's private attributes.
 
+### Fixed
+- **A code fingerprint no longer depends on whether the code has run yet.** A module global set on first use
+  (`_X = None`, filled by the first call) was hashed as None before that call and left out after it, so a Guard tool's
+  `System.fingerprint()` taken before the first `guard.call` gave `argument_errors` another fingerprint than one taken
+  after it (and two equal guards called in a different order disagreed). A module global that is None is now left out
+  of `code_fingerprint` and `own_code_fingerprint`: the fingerprint after the first call is the one it had before this
+  fix; a function that reads a module constant that stays None gets a new fingerprint (the golden fingerprints are
+  unchanged).
+
 ## 1.3.0 — 2026-10-19 — laws for rule-governed worlds: rivals, negations, a factored model
 
 ### Added
