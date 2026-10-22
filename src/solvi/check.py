@@ -68,6 +68,18 @@ Warnings:
                         question)
   checks_one_family     the checks in a question's flow that declare family= are all of one family (two or more): they
                         err together, so agreeing does not make the answer surer — add a check of another family or code
+ The wording of a question a model answers (no rule, or a rule with model=) — what the model reads:
+  no_other_option       a choice with no catch-all option ("other", "none of these", "unknown", ..., or one described as
+                        "anything else"), no decider other= and no "not stated" (Answer.maybe): when no option fits, the
+                        model still picks one, often confidently
+  numeric_levels        a choice or ordinal whose options are bare numbers ("1".."5") without a description of each: say
+                        what each level means (a dict {level: description})
+ Of every question:
+  compound_question     a question text that asks two things (two question marks, or "and whether" / "or whether"): one
+                        answer cannot say yes to one half and no to the other — split it
+  unused_given          with System(input_model=Model): a field of the model that no part, rule, check, constraint, `uses`
+                        hint or span reads (checked only when every question has a rule or a `uses` hint: a learned
+                        head may read any given fact)
 Notes (never fail):
   mutual_producers      facts derived from each other (net from gross and gross from net), each with a producer
                         outside the loop: the system's strategist plans around it
@@ -88,6 +100,7 @@ from __future__ import annotations
 import ast
 import inspect
 import itertools
+import re
 import textwrap
 from dataclasses import asdict, dataclass, field, replace
 
@@ -187,6 +200,7 @@ def lint(obj, strict=False, max_combos=100_000, sensitive=None):
                 rep.add("warning", "unused_part", name, f"no question's flow uses this {p.kind}")
         _rules(cat, questions, rep)
         _names(cat, system, questions, rep)
+        _wording(cat, system, questions, rep)
     _types(cat, system, given, rep)
     for fact, name, lost in cat.unreadable_validates():
         rep.add("error", "validate_reads_unknown", f"{fact} ({name})",
@@ -539,6 +553,83 @@ def _names(cat, system, questions, rep):
             if x not in cat.parts and x not in fields:
                 rep.add("warning", "uses_unknown", qn, f"`uses` names {x!r}, which is neither a part of the catalog nor a "
                                                        f"field of System(input_model={m.__name__})" + how)
+
+
+# --- the wording of questions
+CATCH_ALL = ("other", "others", "none", "none of the above", "none of these", "other / none", "nothing", "unknown",
+             "not stated", "not sure", "unsure", "unclear", "n/a", "na", "not applicable", "neither", "something else",
+             "other / unknown")
+_COMPOUND = re.compile(r"\b(and|or) whether\b", re.I)
+_CATCH_ALL_TEXT = re.compile(r"\b(anything|everything|something) else\b|\bnone of\b|\bnot listed\b", re.I)
+
+
+def _catch_all(option, description=None):
+    o = " ".join(str(option).strip().lower().replace("_", " ").replace("-", " ").split())
+    return o in CATCH_ALL or o.startswith(("other ", "none ", "unknown ")) \
+        or bool(description and _CATCH_ALL_TEXT.search(str(description)))
+
+
+def _numeric(option):
+    if isinstance(option, bool):
+        return False
+    if isinstance(option, (int, float)):
+        return True
+    try:
+        float(str(option).strip())
+        return True
+    except ValueError:
+        return False
+
+
+def _wording(cat, system, questions, rep):
+    """no_other_option / numeric_levels (questions a model answers), compound_question, unused_given: the checks of a
+    question's wording that need no model."""
+    for qn, q in questions.items():
+        at = q.answer
+        rule = cat.rules.get(qn)
+        by_model = rule is None or getattr(rule, "model", None) is not None
+        if at is not None and by_model:
+            opts = list(at.options or ())
+            spec = getattr(getattr(rule, "func", None), "spec", None)      # a decider's own other= option
+            desc = at.descriptions or {}
+            if at.kind == "choice" and not at.unknown and len(opts) > 1 and getattr(spec, "other", None) is None \
+                    and not any(_catch_all(o, desc.get(o)) for o in opts):
+                rep.add("warning", "no_other_option", qn,
+                        f"the choice {opts} has no catch-all: add an option \"other\" (or \"none of these\", \"unknown\"), "
+                        "or Answer.maybe(...) for \"not stated\"")
+            if at.kind in ("choice", "ordinal") and len(opts) > 1 and all(_numeric(o) for o in opts) \
+                    and any(not (at.descriptions or {}).get(o) for o in opts):
+                rep.add("warning", "numeric_levels", qn,
+                        f"the levels {opts} are bare numbers: say what each means — a dict {{level: description}}, "
+                        f"e.g. {{{opts[0]!r}: \"...\", {opts[-1]!r}: \"...\"}}")
+        text = str(q.text or "")
+        why = "two question marks" if text.count("?") >= 2 else \
+            (f"\"{_COMPOUND.search(text).group(0)}\"" if _COMPOUND.search(text) else None)
+        if why:
+            rep.add("warning", "compound_question", qn,
+                    f"the text asks two things ({why}): split it into two questions, one judgement each")
+    _unused_given(cat, system, questions, rep)
+
+
+def _unused_given(cat, system, questions, rep):
+    m = getattr(system, "input_model", None)
+    fields = getattr(m, "model_fields", None)
+    if not fields:
+        return
+    rules = set(cat.rules)
+    if any(qn not in rules and not q.uses for qn, q in questions.items()):
+        return                                        # a learned head may read any given fact
+    read = {x for _, _, inputs, _ in _readers(cat) for x in inputs}
+    for q in questions.values():
+        read.update(q.uses or ())
+        read.update(q.requires or ())
+        if q.answer is not None and q.answer.kind == "span":
+            read.add(q.answer.source or "doc")
+    for x in fields:
+        if x not in read and x not in cat.parts:
+            rep.add("warning", "unused_given", x,
+                    f"System(input_model={m.__name__}) declares {x!r}, which nothing reads: read it where it matters, "
+                    "or remove it from the model (a field kept only for the record may stay)")
 
 
 # --- types
