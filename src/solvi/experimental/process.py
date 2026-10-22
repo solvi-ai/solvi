@@ -1,8 +1,9 @@
-"""A process of several solvi systems (experimental, stages 0 and 1): the nodes, the edges with predicates written as
+"""A process of several solvi systems (experimental, stages 0 to 2): the nodes, the edges with predicates written as
 data, merges, loops with a mandatory iteration limit and the declared promise — a JSON specification with a hash, a
 structural diff and a drawing (stage 0) — and running it: each node's decision in its own store, chained into one run,
 with an index record of the path (stage 1a), and questions put to a person through a queue, a run waiting for the
-answer and going on when it comes (stage 1b). Replay, the process guarantee and retraction come in later stages.
+answer and going on when it comes (stage 1b) — and replaying a run from its records (stage 2). The process guarantee
+and retraction come in later stages.
 
     from solvi.experimental.process import Process, MemoryQueue
 
@@ -78,7 +79,7 @@ loop}}], "outcome": {status, at, answer_hash}} — an index of hashes and ids; t
 The run ends "decided" at an end node that answered, or "abstain" where it stopped (`why`). A node that abstains, or
 whose decision goes to a person, with no edge for it: on_abstain / on_human = "abstain" stops the run there;
 "handoff" (the default) puts the node's question to a person. A node that merges "all" of several inputs raises
-NotImplementedError (this stage follows one path). Not yet: `replay`, `retract`.
+NotImplementedError (this stage follows one path). Not yet: `retract`.
 
 The channel to a person (stage 1b) is a queue: the process does not know when the person answers. `HumanChannel` is an
 abstract class — submit(HumanRequest) → ticket, poll(ticket) → HumanAnswer | None, cancel(ticket, why),
@@ -101,6 +102,21 @@ recording it resumes from it). HumanAnswer(declined=True) — the person or the 
 answer — stops the run "abstain"; `p.cancel(run, why)` withdraws the question (the channel's cancel, a "human" record
 {cancelled, why}, a segment "cancelled"). Process(user_verifier=fn(answer, request) → identity) binds an answer to
 who gave it (answer.token is checked, not recorded). A run that asks a person needs storage=.
+
+Replay (stage 2). `p.replay(run)` re-checks one run from the records alone → {"ok", "run", "status", "segments",
+"steps", "at", "kind", "reason", "unchecked"} (+ "pending": ticket, + "cancelled": ticket). It walks the segments by
+`continues` and each recorded path as `run` walks it, each node's result loaded from its store instead of asked:
+"record" (the record intact in its store, of this run, after the decision before it, agreeing with the step),
+"trace_hash", "replay" (the decision re-checked by its own means: Dispatcher.replay, Trace.replay, Guard.replay),
+"facts" (the facts given are those the recorded answers upstream and the input give, in the step and in the node's
+own record), "edge" (the first edge that holds on the recorded answers is the recorded one); "promise" (the
+end_to_end rule) waits for stage 4. A person's answer is a leaf, "recorded, not recomputed": its "human" record must
+be intact, follow from the pending segment, be the ticket's only answer, come through the same channel and answer the
+request asked. "at" is the first divergence {"node", "step", "segment", "position"}; "kind" is "integrity" (records
+disagree), "recompute" (a decision does not recompute, or the spec changed) or "missing_part" (a node without its
+system or store). A pending run replays up to its question: {"ok": True, "pending": ticket}. `p.replay_all()` replays
+every run and verify()s every store it reads. What the records do not keep is listed in "unchecked" (a guard's tool
+result is stored as its hash).
 """
 from __future__ import annotations
 
@@ -367,19 +383,23 @@ class DecisionNode(NodeRunner):
     kind = "decision"
 
     def run(self, facts):
-        from ..core.runtime import trace_hash
-        d = self.system.ask(facts)
-        r1 = d.s1.results.get(d.question) if d.s1 is not None else None
-        if d.by == "human":
-            status, conf = "human", None
-        elif d.by == "s1":
-            status, conf = (r1.status if r1 is not None else "ok"), (r1.confidence if r1 is not None else None)
-        else:
-            status, conf = "ok", None
-        return NodeResult(d.answer, {d.question: d.answer}, d.by, status, conf, d.stored_id,
-                          trace_hash(d.s1) if d.s1 is not None else None,
-                          {k: v.to_dict() for k, v in (d.cost or {}).items()} or None,
-                          bool(d.drift), bool(d.over_budget), d, self.store)
+        return _decision_result(self.system.ask(facts), self.store)
+
+
+def _decision_result(d, store):
+    """A Dispatched → the NodeResult of a decision node (a run and its replay read it the same way)."""
+    from ..core.runtime import trace_hash
+    r1 = d.s1.results.get(d.question) if d.s1 is not None else None
+    if d.by == "human":
+        status, conf = "human", None
+    elif d.by == "s1":
+        status, conf = (r1.status if r1 is not None else "ok"), (r1.confidence if r1 is not None else None)
+    else:
+        status, conf = "ok", None
+    return NodeResult(d.answer, {d.question: d.answer}, d.by, status, conf, d.stored_id,
+                      trace_hash(d.s1) if d.s1 is not None else None,
+                      {k: v.to_dict() for k, v in (d.cost or {}).items()} or None,
+                      bool(d.drift), bool(d.over_budget), d, store)
 
 
 class SystemNode(NodeRunner):
@@ -388,21 +408,25 @@ class SystemNode(NodeRunner):
     kind = "system"
 
     def run(self, facts):
-        from ..core.runtime import trace_hash
-        resp = self.system.ask(facts)
-        q = self.spec.get("question")
-        if q is None and len(resp.results) == 1:
-            q = next(iter(resp.results))
-        answers = {k: r.answer for k, r in resp.results.items()}
-        if q is not None:
-            if q not in resp.results:
-                raise ProcessRunError(f"the system answered no question {q!r} (it answered {sorted(resp.results)})")
-            r = resp.results[q]
-            answer, status, conf = r.answer, r.status, r.confidence
-        else:
-            answer, status, conf = answers, ("ok" if resp.complete else "abstain"), resp.confidence
-        return NodeResult(answer, answers, "s1", status, conf, resp.stored_id, trace_hash(resp), None, False, False,
-                          resp, self.store)
+        return _system_result(self.system.ask(facts), self.spec, self.store)
+
+
+def _system_result(resp, spec, store):
+    """A Response → the NodeResult of a system node (a run and its replay read it the same way)."""
+    from ..core.runtime import trace_hash
+    q = spec.get("question")
+    if q is None and len(resp.results) == 1:
+        q = next(iter(resp.results))
+    answers = {k: r.answer for k, r in resp.results.items()}
+    if q is not None:
+        if q not in resp.results:
+            raise ProcessRunError(f"the system answered no question {q!r} (it answered {sorted(resp.results)})")
+        r = resp.results[q]
+        answer, status, conf = r.answer, r.status, r.confidence
+    else:
+        answer, status, conf = answers, ("ok" if resp.complete else "abstain"), resp.confidence
+    return NodeResult(answer, answers, "s1", status, conf, resp.stored_id, trace_hash(resp), None, False, False,
+                      resp, store)
 
 
 class GuardNode(NodeRunner):
@@ -960,37 +984,8 @@ class Process:
         node, status, answer, why = w["node"], None, None, None
 
         def step(node, ns, res, state, kind):
-            declined = res.by == "human" and res.status == "abstain"
-            out = {} if declined else {f: res.value(what) for f, what in ns["writes"].items()}
-            label = {"from": node, "decision": res.stored_id, "by": res.by, "confidence": res.confidence,
-                     "trace_hash": res.trace_hash}
-            if res.by == "human" and isinstance(res.raw, HumanAnswer):
-                label["reviewer"] = res.raw.reviewer
-            facts.update(out)
-            prov.update({f: dict(label) for f in out})
+            st, edge = self._step(node, ns, res, state, kind, facts, prov, taken)
             results[node] = res
-            outcome = {"facts": facts, "status": res.status, "by": res.by, "confidence": res.confidence,
-                       "budget_over": res.budget_over, "drift": res.drift}
-            edge = None
-            if not declined:                          # a person who declined: the run stops
-                for i, e in enumerate(self.edges):
-                    if e["from"] != node or (e.get("loop") and taken[i] >= e["max_iter"]):
-                        continue
-                    if holds(e.get("when"), outcome):
-                        edge, taken[i] = e, taken[i] + 1
-                        break
-            kh = state.get("knowledge")
-            if kh is None and res.raw is not None and getattr(res.raw, "s1", None) is not None:
-                kh = res.raw.s1.trace.init.get("knowledge")
-            st = {"node": node, "kind": kind, "store": ns.get("store") if kind != "human" else self._store_name(),
-                  "stored_id": res.stored_id, "trace_hash": res.trace_hash, "by": res.by, "status": res.status,
-                  "answers_hash": _vh(res.answers), "facts_in_hash": _vh(state), "facts_out_hash": _vh(out),
-                  "knowledge": None if kh is None else _vh(kh), "cost": res.cost,
-                  "edge": None if edge is None else {"to": edge["to"], "when": edge.get("when"),
-                                                     "loop": bool(edge.get("loop"))}}
-            if kind == "human":
-                st["ticket"] = res.raw.ticket if isinstance(res.raw, HumanAnswer) else None
-                st["handoff"] = ns["kind"] != "human"
             path.append(st)
             return edge
 
@@ -1045,6 +1040,42 @@ class Process:
             rec_id = self._record(spec, w["input_hash"], path, status, answer, node, continues=w["continues"])
         return ProcessResult(status, answer, path, results, facts, prov, run_id, rec_id, spec["hash"], why,
                              continues=w["continues"])
+
+    def _step(self, node, ns, res, state, kind, facts, prov, taken):
+        """One step of a path: the node's writes and their labels go into facts / prov, the first edge out of the node
+        that holds (counted in taken) is chosen → (the step as recorded, the edge or None). A run and its replay both
+        take a step through here, so the replay recomputes exactly what the run recorded."""
+        declined = res.by == "human" and res.status == "abstain"
+        out = {} if declined else {f: res.value(what) for f, what in ns["writes"].items()}
+        label = {"from": node, "decision": res.stored_id, "by": res.by, "confidence": res.confidence,
+                 "trace_hash": res.trace_hash}
+        if res.by == "human" and isinstance(res.raw, HumanAnswer):
+            label["reviewer"] = res.raw.reviewer
+        facts.update(out)
+        prov.update({f: dict(label) for f in out})
+        outcome = {"facts": facts, "status": res.status, "by": res.by, "confidence": res.confidence,
+                   "budget_over": res.budget_over, "drift": res.drift}
+        edge = None
+        if not declined:                              # a person who declined: the run stops
+            for i, e in enumerate(self.edges):
+                if e["from"] != node or (e.get("loop") and taken[i] >= e["max_iter"]):
+                    continue
+                if holds(e.get("when"), outcome):
+                    edge, taken[i] = e, taken[i] + 1
+                    break
+        kh = state.get("knowledge")
+        if kh is None and res.raw is not None and getattr(res.raw, "s1", None) is not None:
+            kh = res.raw.s1.trace.init.get("knowledge")
+        st = {"node": node, "kind": kind, "store": ns.get("store") if kind != "human" else self._store_name(),
+              "stored_id": res.stored_id, "trace_hash": res.trace_hash, "by": res.by, "status": res.status,
+              "answers_hash": _vh_kept(res.answers), "facts_in_hash": _vh_kept(state),
+              "facts_out_hash": _vh_kept(out), "knowledge": None if kh is None else _vh(kh), "cost": res.cost,
+              "edge": None if edge is None else {"to": edge["to"], "when": edge.get("when"),
+                                                 "loop": bool(edge.get("loop"))}}
+        if kind == "human":
+            st["ticket"] = res.raw.ticket if isinstance(res.raw, HumanAnswer) else None
+            st["handoff"] = ns["kind"] != "human"
+        return st, edge
 
     def _open(self):
         from ..core.store import open_storage
@@ -1267,6 +1298,59 @@ class Process:
             lines.append(f"  {result.status}: {result.why}")
         return "\n".join(lines)
 
+    # --- replay (stage 2)
+
+    def replay(self, run, trust_models=False):
+        """Re-check one run (its id or its ProcessResult) from the records alone, across all its segments → {"ok",
+        "run", "status", "segments", "steps", "at", "kind", "reason", "unchecked"} (+ "pending": the ticket of a run
+        that waits for a person — ok True, replayed up to the question; + "cancelled": the withdrawn ticket). Each step
+        of the recorded path, in order: (1) "record": the node's record is in its store, intact (its hash and id), of
+        this run, after the decision before it, and says what the path says (who, status, answers, knowledge, cost);
+        (2) "trace_hash": the hash at the end of its trace is the recorded one; (3) "replay": the node's decision
+        re-checked by its own means (Dispatcher.replay, Trace.replay, Guard.replay; trust_models as there);
+        (4) "facts": the facts it was given are the ones the recorded answers upstream and the input give, in the path
+        and in its own record; (5) "edge": the first edge that holds on the recorded answers is the recorded one;
+        (6) "promise": the end_to_end decision rule (stage 4: not checked yet). A person's answer is a leaf, recorded
+        and not recomputed ("human"): its "human" record is intact, in this run, after the pending segment that asked
+        (or the decision before it), the ticket's only answer, through the same channel, to the request asked; its
+        value is what the next facts carry. The segments are checked as a chain ("segment": `continues`, the same
+        spec and input, the pending segment's question and the facts it kept). "at": the first divergence {"node",
+        "step", "segment", "position"} (None when ok); "kind": "integrity" (the records disagree: data changed after
+        the run), "recompute" (a decision does not recompute: its system or the spec changed) or "missing_part" (a
+        node without its system or store). "steps": per checked step {"segment", "node", "kind", "stored_id",
+        "checked"} (+ "human": "recorded, not recomputed"). "unchecked": what the records do not let it check (a
+        guard's tool result is kept as a hash; an input fact no node read)."""
+        if self.storage is None:
+            raise ProcessRunError("a process replays from its records: Process(storage=...)")
+        rid = run.run if isinstance(run, ProcessResult) else run
+        segs = [s for s in self._open().iter("process") if s.data.get("process") == self.name and s.run == rid]
+        if not segs:
+            raise ProcessRunError(f"no record of run {rid!r} in this process's store")
+        return _Replay(self, rid, trust_models).walk(segs)
+
+    def replay_all(self, trust_models=False):
+        """Replay every run in this process's store and verify() every store it reads → {"ok", "runs", "failed":
+        [the reports of the runs that do not replay], "pending": [the run ids that wait for a person], "verify":
+        {store: {"ok", "problems"}}} — ok when every run replays and every chain verifies (publish the process store's
+        head() elsewhere to catch a rewrite of the whole store: verify(anchor=))."""
+        if self.storage is None:
+            raise ProcessRunError("a process replays from its records: Process(storage=...)")
+        runs = list(dict.fromkeys(s.run for s in self.records()))
+        reports = [self.replay(r, trust_models=trust_models) for r in runs]
+        stores, seen = {"process": self._open()}, {id(self._open())}
+        for n in self.nodes:
+            st = getattr(self.systems.get(n), "storage", None)
+            if st is not None and id(st) not in seen:
+                seen.add(id(st))
+                stores[n] = st
+        verify = {}
+        for n, st in stores.items():
+            v = st.verify()
+            verify[n] = {"ok": v["ok"], "problems": v["problems"]}
+        failed = [r for r in reports if not r["ok"]]
+        return {"ok": not failed and all(v["ok"] for v in verify.values()), "runs": len(runs), "failed": failed,
+                "pending": [r["run"] for r in reports if r.get("pending")], "verify": verify}
+
     # --- reading it
 
     def diff(self, other):
@@ -1279,6 +1363,539 @@ class Process:
 
     def __repr__(self):
         return f"Process({self.name!r}, {len(self.nodes)} nodes, {len(self.edges)} edges)"
+
+
+# --- replay (stage 2): a run re-checked from its records, segment by segment, node by node
+
+REPLAY_STEPS = ("record", "trace_hash", "replay", "facts", "edge", "promise", "human", "segment", "outcome", "spec",
+                "index")
+_RECORD_FIELDS = ("node", "kind", "store", "stored_id", "by", "status", "answers_hash", "knowledge", "cost")
+_UNKNOWN = object()
+
+
+class _Diverged(Exception):
+    def __init__(self, node, step, kind, reason):
+        super().__init__(reason)
+        self.node, self.step, self.kind, self.reason = node, step, kind, reason
+
+
+def _refs(p, out=None):
+    """The facts a predicate reads (its "answer" leaves)."""
+    out = set() if out is None else out
+    if isinstance(p, dict):
+        if "answer" in p:
+            out.add(p["answer"])
+        for k in ("and", "or"):
+            for q in p.get(k) or []:
+                _refs(q, out)
+        if "not" in p:
+            _refs(p["not"], out)
+    return out
+
+
+def _cj(v):
+    """A value as canonical JSON, to compare a recomputed step with the recorded one."""
+    return canonical(_plain_or_repr(v))
+
+
+def _intact(store, sid):
+    """The record with this id, checked against its own hash and id → (record, None) or (None, why)."""
+    from ..core.store import chained, record_hash
+    if not isinstance(sid, str) or not sid:
+        return None, "the path names no record for this step"
+    d = store._find(sid)
+    if d is None:
+        return None, f"no record {sid} in its store (deleted, or the path was changed)"
+    if not chained(d) or d.get("hash") != record_hash(d):
+        return None, f"record {sid} was changed after it was stored (its hash does not match)"
+    if d.get("id") != d["hash"][:16]:
+        return None, f"record {sid}: its id does not match its hash"
+    if d.get("redacted"):
+        return None, f"record {sid} was redacted: its content is gone"
+    return d, None
+
+
+def _why(rep):
+    ms = rep.get("mismatches") or []
+    return "; ".join(f"{m[-2] if len(m) > 2 else m[0]}: {m[-1]}" for m in ms[:3]) or "it does not replay"
+
+
+class _Replay:
+    """One run replayed from its records (Process.replay): the walk of Process._go over the recorded path, each node's
+    result loaded from its store instead of asked, each recomputed step compared with the recorded one."""
+
+    def __init__(self, p, rid, trust):
+        self.p, self.rid, self.trust = p, rid, trust
+        self.spec = p.spec()
+        self.pst = p._open()
+        self.facts, self.prov, self.inputs, self.absent = {}, {}, {}, set()
+        self.taken = [0] * len(p.edges)
+        self.parent = _UNKNOWN
+        self.input_hash = None
+        self.steps, self.unchecked = [], []
+        self.seg = self.pos = 0
+        self.segs, self._ahead = [], None
+
+    def fail(self, node, step, kind, reason):
+        raise _Diverged(node, step, kind, reason)
+
+    # the run
+
+    def walk(self, segs):
+        out = {"ok": True, "run": self.rid, "status": segs[-1].data.get("outcome", {}).get("status"),
+               "segments": [s.id for s in segs], "steps": self.steps, "at": None, "kind": None, "reason": None,
+               "unchecked": self.unchecked}
+        index_bad = None
+        self.segs = segs
+        for s in segs:
+            d, why = _intact(self.pst, s.id)
+            if d is None and index_bad is None:
+                index_bad = why
+        try:
+            first, prev = None, None
+            for k, s in enumerate(segs):
+                self.seg, self.pos = k, 0
+                d = s.data
+                self.check_segment(k, s, prev, first)
+                if d.get("outcome", {}).get("status") == "cancelled":
+                    out["cancelled"] = self.cancelled(s, prev, first, k == len(segs) - 1)
+                    break
+                res = self.segment(s, first)
+                first = None
+                if res[0] == "end":
+                    self.ended(s, res, k == len(segs) - 1)
+                else:
+                    first = self.asked(s, res)
+                    if k == len(segs) - 1:
+                        out["pending"] = d.get("ticket")
+                prev = s
+            if index_bad is not None:
+                self.fail(None, "index", "integrity", f"a process record of this run: {index_bad}")
+        except _Diverged as e:
+            out.update(ok=False, kind=e.kind, reason=e.reason,
+                       at={"node": e.node, "step": e.step, "segment": self.seg, "position": self.pos})
+        return out
+
+    def check_segment(self, k, s, prev, first):
+        d, sp = s.data, self.spec
+        node = first["node"] if first else sp["start"]
+        if d.get("spec_hash") != sp["hash"]:
+            self.fail(None, "spec", "recompute", f"segment {s.id} was run by process spec {str(d.get('spec_hash'))[:12]}"
+                                                 f", this process is {sp['hash'][:12]}")
+        pr = sp.get("promise")
+        if d.get("mode") != (pr["mode"] if pr else None) or _cj(d.get("promise")) != _cj(pr):
+            self.fail(None, "spec", "integrity", f"segment {s.id} records another promise than the spec's")
+        if k == 0:
+            if d.get("continues") is not None:
+                self.fail(node, "segment", "integrity", "the first segment of the run continues another")
+            self.input_hash = d.get("input_hash")
+            return
+        if prev is None or prev.data.get("outcome", {}).get("status") != "pending":
+            self.fail(node, "segment", "integrity", "a segment after one that did not stop for a person")
+        if d.get("continues") != prev.id:
+            self.fail(node, "segment", "integrity", f"segment {s.id} continues {d.get('continues')}, not the pending "
+                                                    f"segment {prev.id}")
+        if d.get("input_hash") != self.input_hash:
+            self.fail(node, "segment", "integrity", f"segment {s.id} records another input than the run's")
+
+    def segment(self, s, first):
+        """Walk one segment's path as Process._go walks it → ("end", status, answer, node) or ("ask", node, reason,
+        state, known, nodes so far)."""
+        path = s.data.get("path") or []
+        node = first["node"] if first else self.spec["start"]
+        i, seen = 0, []
+        while True:
+            ns = self.p.nodes.get(node)
+            if ns is None:
+                self.fail(node, "record", "missing_part", f"the run reaches node {node!r}, not in this process")
+            self.pos = i
+            if first is not None:
+                state, known = first["state"], first["known"]
+                res = self.human(path, i, node, ns, first["reason"], first["pending"], state, known, seen)
+                kind, first = "human", None
+                init = rep = None
+            elif ns["kind"] == "human":
+                state, known = self.given(ns)
+                if i >= len(path):
+                    return ("ask", node, "node", state, known, seen)
+                res = self.human(path, i, node, ns, "node", None, state, known, seen)
+                kind, init, rep = "human", None, None
+            else:
+                if i >= len(path):
+                    self.fail(node, "record", "integrity", "the recorded path stops before this node's step")
+                res, init, rep = self.load(path[i], node, ns)
+                self.learn(ns, init)
+                state, known = self.given(ns)
+                kind = ns["kind"]
+            edge = self.check(path[i], node, ns, res, state, known, kind, init, rep)
+            seen.append(node)
+            i += 1
+            if res.stored_id is not None:
+                self.parent = res.stored_id
+            if edge is None and res.status in ("human", "abstain") and res.by != "human":
+                on = self.p.on_human if res.status == "human" else self.p.on_abstain
+                if on == "handoff":
+                    self.pos = i
+                    if i >= len(path):
+                        return ("ask", node, res.status, state, known, seen)
+                    res = self.human(path, i, node, ns, res.status, None, state, known, seen)
+                    edge = self.check(path[i], node, ns, res, state, known, "human", None, None)
+                    seen.append(node)
+                    i += 1
+                    if res.stored_id is not None:
+                        self.parent = res.stored_id
+            if edge is not None:
+                node = edge["to"]
+                continue
+            if res.by == "human" and res.status == "abstain":
+                status, answer = "abstain", None
+            elif res.status in ("human", "abstain"):
+                status, answer = "abstain", None
+            elif ns.get("end"):
+                status, answer = "decided", res.answer
+            else:
+                status, answer = "abstain", None
+            if i != len(path):
+                self.fail(node, "edge", "integrity", f"the run ends at {node}, the recorded path goes on to "
+                                                     f"{path[i].get('node')!r}")
+            return ("end", status, answer, node)
+
+    def ended(self, s, res, last):
+        _, status, answer, node = res
+        oc = s.data.get("outcome") or {}
+        if oc.get("status") != status or oc.get("at") != node or oc.get("answer_hash") != _vh(answer):
+            self.fail(node, "outcome", "integrity", f"the run ends {status} at {node}, the record says "
+                                                    f"{oc.get('status')} at {oc.get('at')} (or another answer)")
+        if self.parent is not _UNKNOWN and s.parent != self.parent:
+            self.fail(node, "segment", "integrity", "the process record does not follow from the run's last decision")
+        if not last:
+            self.fail(node, "segment", "integrity", "a segment after the run ended")
+
+    def asked(self, s, res):
+        """A segment that stops for a person: its record keeps the question and what the run goes on with."""
+        _, node, reason, state, known, seen = res
+        d, ns = s.data, self.p.nodes[node]
+        r = d.get("resume") or {}
+        if not known:                                 # the input facts no node read so far: the facts the run kept
+            for k, v in (r.get("facts") or {}).items():
+                if k not in self.facts:
+                    self.facts[k] = self.inputs[k] = v
+            state, known = self.given(ns)
+        oc = d.get("outcome") or {}
+        if oc.get("status") != "pending" or oc.get("at") != node:
+            self.fail(node, "outcome", "integrity", f"the run asks a person at {node} here, the record says "
+                                                    f"{oc.get('status')} at {oc.get('at')}")
+        q = ns.get("question") or node
+        a = d.get("asking") or {}
+        if (a.get("process"), a.get("run"), a.get("node"), a.get("question"), a.get("reason"), a.get("path")) != \
+                (self.p.name, self.rid, node, q, reason, list(seen)) or (r.get("node"), r.get("reason")) != (node, reason):
+            self.fail(node, "human", "integrity", "the recorded question is not the one the run asks here")
+        if not d.get("ticket"):
+            self.fail(node, "human", "integrity", "a pending segment without its ticket")
+        if known:
+            plain_state = {k: v for k, v in state.items() if k != "provenance"}
+            if _vh(a.get("facts")) != _vh(_plain(plain_state)) or _vh(r.get("state")) != _vh(_plain(state)) or \
+                    _vh(a.get("provenance")) != _vh(_plain({k: self.prov[k] for k in state if k in self.prov})):
+                self.fail(node, "facts", "integrity", "the person is asked on other facts than the recorded path gives")
+        else:
+            self.unchecked.append(f"{node}: the facts of the question (an input no node read, or a value not kept)")
+        rf = r.get("facts") or {}
+        for k, v in self.facts.items():
+            if isinstance(v, _NotKept):
+                continue
+            if k not in rf or _vh(rf[k]) != _vh(_plain_or_repr(v)):
+                self.fail(node, "facts", "integrity", f"the fact {k!r} kept for the rest of the run is not the one "
+                                                      "the recorded path gives")
+        if _vh(r.get("provenance")) != _vh(_plain(self.prov)):
+            self.fail(node, "facts", "integrity", "the labels kept for the rest of the run are not the recorded ones")
+        if list(r.get("taken") or []) != self.taken:
+            self.fail(node, "segment", "integrity", "the loop counts kept for the rest of the run are not the path's")
+        if self.parent is not _UNKNOWN and s.parent != self.parent:
+            self.fail(node, "segment", "integrity", "the pending segment does not follow from the decision before it")
+        return {"node": node, "reason": reason, "pending": s, "state": dict(r.get("state") or {}),
+                "known": known}
+
+    def cancelled(self, s, prev, first, last):
+        node = first["node"] if first else None
+        d, t = s.data, prev.data.get("ticket")
+        hum = [x for x in self.pst.iter("human") if x.data.get("ticket") == t and x.data.get("process") == self.p.name]
+        if len(hum) != 1 or not hum[0].data.get("cancelled"):
+            self.fail(node, "human", "integrity", f"ticket {t}: a cancelled run with {len(hum)} records for it")
+        h, why = _intact(self.pst, hum[0].id)
+        if h is None:
+            self.fail(node, "human", "integrity", why)
+        if (h.get("run") or {}).get("parent") != prev.id or h.get("node") != node:
+            self.fail(node, "human", "integrity", "the withdrawal does not follow from the pending segment")
+        oc = d.get("outcome") or {}
+        if d.get("path") or oc.get("status") != "cancelled" or oc.get("at") != node or s.parent != h["id"]:
+            self.fail(node, "segment", "integrity", "the cancelled segment does not record the withdrawal")
+        if not last:
+            self.fail(node, "segment", "integrity", "a segment after the run was cancelled")
+        self.steps.append({"segment": self.seg, "node": node, "kind": "human", "stored_id": h["id"],
+                           "checked": ["human"], "human": "cancelled, recorded"})
+        return t
+
+    # the facts
+
+    def learn(self, ns, init):
+        """The input facts a node read that no node read before: what its own record says it was given."""
+        for r in ns["reads"]:
+            if r == "provenance" or r in self.facts:
+                continue
+            if init is None:
+                continue
+            if r in init:
+                self.facts[r] = self.inputs[r] = init[r]
+            else:
+                self.absent.add(r)
+
+    def complete(self):
+        return self.input_hash is not None and _vh(self.inputs) == self.input_hash
+
+    def lookahead(self):
+        """The input facts no node has read yet, from the records further on: taken only when, with them, the input is
+        exactly the recorded one (its hash) — so a node that reads an input before any decision does is checked too."""
+        if self._ahead is not None or self.input_hash is None:
+            return
+        self._ahead = {}
+        written = {f for ns in self.p.nodes.values() for f in ns["writes"]}
+        for s in self.segs:
+            for k, v in ((s.data.get("resume") or {}).get("facts") or {}).items():
+                self._ahead.setdefault(k, v)
+            for e in s.data.get("path") or []:
+                init = self._peek(e)
+                for k, v in (init or {}).items():
+                    self._ahead.setdefault(k, v)
+        cand = dict(self.inputs)
+        for k, v in self._ahead.items():
+            if k not in cand and k not in written and k != "knowledge":
+                cand[k] = v
+        if _vh(cand) == self.input_hash:
+            for k, v in cand.items():
+                if k not in self.facts:
+                    self.facts[k] = v
+            self.inputs = cand
+
+    def _peek(self, e):
+        """The facts a recorded node decision says it was given, or None (no checks: the walk checks it in its turn)."""
+        ns, sysm = self.p.nodes.get(e.get("node")), self.p.systems.get(e.get("node"))
+        if ns is None or sysm is None or e.get("kind") not in ("decision", "system") or isinstance(sysm, NodeRunner):
+            return None
+        try:
+            store = sysm.storage
+            if e["kind"] == "decision":
+                from ..core.dispatch import Dispatched
+                disp = sysm.dispatcher
+                return Dispatched.from_dict(store.record(e["stored_id"]), disp.system).s1.trace.init
+            return store.rederive(e["stored_id"], sysm, trust_models=True).trace.init
+        except Exception:  # noqa: BLE001 — a record that does not load gives nothing here
+            return None
+
+    def given(self, ns):
+        if not self.complete() and any(r not in self.facts and r != "provenance" for r in ns["reads"] or [None]):
+            self.lookahead()
+        state = self.p._given(ns, self.facts, self.prov)
+        if not ns["reads"] and ns["kind"] == "human":
+            known = self.complete()
+        else:
+            known = all(r == "provenance" or r in self.facts or r in self.absent for r in ns["reads"]) or \
+                self.complete()
+        known = known and not any(isinstance(v, _NotKept) for v in state.values())
+        return state, known
+
+    # a node's step
+
+    def check_run(self, node, rec, step):
+        r = rec.get("run") if isinstance(rec.get("run"), dict) else {}
+        if r.get("id") != self.rid:
+            self.fail(node, step, "integrity", f"record {rec.get('id')} belongs to run {r.get('id')!r}, not to this one")
+        if self.parent is not _UNKNOWN and r.get("parent") != self.parent:
+            self.fail(node, step, "integrity", f"record {rec.get('id')} follows from {r.get('parent')}, not from the "
+                                               f"decision before it ({self.parent})")
+
+    def load(self, entry, node, ns):
+        """A node's decision loaded from its store → (NodeResult, the facts its record says it was given or None,
+        a function that replays it by its own means)."""
+        if entry.get("node") != node or entry.get("kind") != ns["kind"]:
+            self.fail(node, "record", "integrity", f"the recorded path has {entry.get('node')!r} "
+                                                   f"({entry.get('kind')}) where the run reaches {node!r}")
+        sysm = self.p.systems.get(node)
+        if sysm is None:
+            self.fail(node, "record", "missing_part", "no system is bound to this node (Process.from_spec(systems=))")
+        if isinstance(sysm, NodeRunner):
+            self.fail(node, "replay", "missing_part", "a node runner of one's own: the replay does not know its records")
+        store = getattr(sysm, "storage", None)
+        if store is None:
+            self.fail(node, "record", "missing_part", "the node's system keeps no store: nothing to replay")
+        sid = entry.get("stored_id")
+        rec, why = _intact(store, sid)
+        if rec is None:
+            self.fail(node, "record", "integrity", why)
+        self.check_run(node, rec, "record")
+        from ..core.runtime import trace_hash
+        try:
+            if ns["kind"] == "decision":
+                from ..core.dispatch import Dispatched
+                if rec.get("kind") != "dispatch":
+                    self.fail(node, "record", "integrity", f"record {sid} is not a decision of a dispatcher")
+                disp = sysm.dispatcher
+                dd = Dispatched.from_dict(rec, disp.system, disp.slow.system if disp.slow is not None else None)
+                dd.stored_id = sid
+                res, init = _decision_result(dd, store), (dd.s1.trace.init if dd.s1 is not None else None)
+
+                def rep():
+                    return disp.replay(dd, trust_models=self.trust)
+            elif ns["kind"] == "system":
+                if rec.get("kind", "ask") != "ask":
+                    self.fail(node, "record", "integrity", f"record {sid} is not a decision of a System")
+                resp = store.rederive(sid, sysm, trust_models=self.trust)
+                resp.stored_id = sid
+                res, init = _system_result(resp, ns, store), resp.trace.init
+
+                def rep():
+                    return resp.trace.replay(sysm, resp.flow, trust_models=self.trust)
+            else:
+                meta = (rec.get("meta") or {}).get("guard") or {}
+                if rec.get("kind", "ask") != "ask" or not meta:
+                    self.fail(node, "record", "integrity", f"record {sid} is not a decision of a guard")
+                tool = meta.get("tool")
+                resp = store.get(sid, sysm.system(tool) if tool is not None else sysm._unknown_system())
+                v = resp.results.get("verdict")
+                out = meta.get("outcome")
+                result = _NotKept(meta.get("result_hash")) if meta.get("executed") and not meta.get("error") else None
+                res = NodeResult(out, {"verdict": out, "result": result}, "s1", "human" if out == "escalate" else "ok",
+                                 v.confidence if v is not None else None, sid, trace_hash(resp), None, False, False,
+                                 None, store)
+                init = None
+                if result is not None:
+                    self.unchecked.append(f"{node}: the tool's result (its store keeps its hash only)")
+
+                def rep():
+                    return sysm.replay(sid)
+        except _Diverged:
+            raise
+        except Exception as e:  # noqa: BLE001 — a record that does not load is damaged data
+            self.fail(node, "record", "integrity", f"record {sid} does not load: {type(e).__name__}: {e}")
+        return res, init, rep
+
+    def human(self, path, i, node, ns, reason, pending, state, known, seen):
+        """A person's answer: a leaf, recorded and not recomputed — its "human" record checked against the run."""
+        if i >= len(path):
+            self.fail(node, "human", "integrity", "the recorded path stops before the person's answer")
+        entry = path[i]
+        if entry.get("node") != node or entry.get("kind") != "human":
+            self.fail(node, "record", "integrity", f"the recorded path has {entry.get('node')!r} "
+                                                   f"({entry.get('kind')}) where the run has a person's answer")
+        sid = entry.get("stored_id")
+        rec, why = _intact(self.pst, sid)
+        if rec is None:
+            self.fail(node, "record", "integrity", why)
+        if rec.get("kind") != "human" or rec.get("process") != self.p.name or rec.get("node") != node or \
+                rec.get("cancelled"):
+            self.fail(node, "record", "integrity", f"record {sid} is not a person's answer at this node")
+        if pending is not None:
+            self.parent = pending.id                  # the answer follows from the pending segment
+        self.check_run(node, rec, "human")
+        t, q = rec.get("ticket"), ns.get("question") or node
+        n = sum(1 for x in self.pst.iter("human") if x.data.get("ticket") == t and x.data.get("process") == self.p.name)
+        if n != 1:
+            self.fail(node, "human", "integrity", f"ticket {t} has {n} records: one ticket, one answer")
+        if rec.get("question") != q or rec.get("reason") != reason:
+            self.fail(node, "human", "integrity", f"the answer is to {rec.get('question')!r} ({rec.get('reason')}), "
+                                                  f"the run asks {q!r} ({reason})")
+        if not isinstance(rec.get("reviewer"), str) or not rec.get("reviewer"):
+            self.fail(node, "human", "integrity", "the answer names no reviewer")
+        if pending is not None:
+            pd = pending.data
+            if t != pd.get("ticket"):
+                self.fail(node, "human", "integrity", f"the answer is to ticket {t}, the run asked {pd.get('ticket')}")
+            if _cj(rec.get("channel")) != _cj(pd.get("channel")):
+                self.fail(node, "human", "integrity", "the answer came through another channel than the question")
+            if rec.get("request_hash") != _vh(pd.get("asking")):
+                self.fail(node, "human", "integrity", "the answer is to another request than the one asked")
+        else:
+            if self.p.human is not None and _cj(rec.get("channel")) != _cj(_channel(self.p.human)):
+                self.fail(node, "human", "integrity", "the answer came through another channel than the process's")
+            if known:
+                req = HumanRequest(process=self.p.name, run=self.rid, node=node, question=q, reason=reason,
+                                   facts=_plain({k: v for k, v in state.items() if k != "provenance"}),
+                                   provenance=_plain({k: self.prov[k] for k in state if k in self.prov}),
+                                   path=list(seen), answer=_answer_type(self.p.systems.get(node), q),
+                                   asked_at=rec.get("asked_at"))
+                if rec.get("request_hash") != _vh(req.to_dict()):
+                    self.fail(node, "facts", "integrity", "the person was asked on other facts than the recorded path "
+                                                          "gives")
+        ans = HumanAnswer(rec.get("value"), rec.get("reviewer"), rec.get("note"), rec.get("answered_at"),
+                          declined=bool(rec.get("declined")), ticket=t)
+        if ans.declined:
+            return NodeResult(None, {}, "human", "abstain", None, sid, None, raw=ans, store=self.pst)
+        return NodeResult(ans.value, {q: ans.value}, "human", "ok", None, sid, None, raw=ans, store=self.pst)
+
+    def check(self, entry, node, ns, res, state, known, kind, init, rep):
+        """Steps 1–5 of one recorded step: the recomputed step (Process._step) against the recorded one."""
+        before = list(self.taken)
+        st, edge = self.p._step(node, ns, res, state, kind, self.facts, self.prov, self.taken)
+        checked = ["record"]
+        for f in _RECORD_FIELDS:
+            if f == "answers_hash" and st[f] is None:
+                continue
+            if _cj(st.get(f)) != _cj(entry.get(f)):
+                self.fail(node, "record", "integrity", f"the path records {f} {entry.get(f)!r}, the node's record "
+                                                       f"gives {st.get(f)!r}")
+        if kind != "human":
+            if st["trace_hash"] != entry.get("trace_hash"):
+                self.fail(node, "trace_hash", "integrity", "the hash at the end of the node's trace is not the "
+                                                           "recorded one")
+            r = rep()
+            if not r["ok"]:
+                self.fail(node, "replay", "recompute", f"the node's decision does not replay: {_why(r)}")
+            checked += ["trace_hash", "replay"]
+        if known:
+            if st["facts_in_hash"] != entry.get("facts_in_hash"):
+                self.fail(node, "facts", "integrity", "the facts the node was given are not the ones the recorded "
+                                                      "answers upstream and the input give")
+            for k, v in (state.items() if init is not None else ()):
+                if k not in init or _vh(init[k]) != _vh(v):
+                    self.fail(node, "facts", "integrity", f"the node's record was given {k!r} other than the recorded "
+                                                          "path passes it")
+        else:
+            self.unchecked.append(f"{node}: the facts it was given (an input no node read, or a value not kept)")
+        if st["facts_out_hash"] is not None and st["facts_out_hash"] != entry.get("facts_out_hash"):
+            self.fail(node, "facts", "integrity", "the facts the node wrote are not its recorded answers")
+        checked.append("facts")
+        refs = set()
+        for e in self.p.edges:
+            if e["from"] == node:
+                _refs(e.get("when"), refs)
+        blind = [f for f in refs if isinstance(self.facts.get(f), _NotKept) or
+                 (f not in self.facts and f not in self.absent and not self.complete())]
+        if blind:                                     # the predicate reads what the records do not keep
+            self.taken[:] = before
+            rec_e = entry.get("edge")
+            edge = None
+            if rec_e is not None:
+                for j, e in enumerate(self.p.edges):
+                    if e["from"] == node and e["to"] == rec_e.get("to") and _cj(e.get("when")) == _cj(rec_e.get("when")) \
+                            and not (e.get("loop") and before[j] >= e["max_iter"]):
+                        edge, self.taken[j] = e, before[j] + 1
+                        break
+                if edge is None:
+                    self.fail(node, "edge", "integrity", f"the recorded edge to {rec_e.get('to')!r} is not an edge "
+                                                         "of the process here")
+            self.unchecked.append(f"{node}: the edge's predicate (it reads {sorted(blind)})")
+        elif _cj(st["edge"]) != _cj(entry.get("edge")):
+            got = st["edge"]["to"] if st["edge"] else None
+            rec_to = (entry.get("edge") or {}).get("to")
+            self.fail(node, "edge", "integrity", f"the recorded answers lead to {got!r}, the path records {rec_to!r}")
+        checked.append("edge")
+        step = {"segment": self.seg, "node": node, "kind": kind, "stored_id": res.stored_id, "checked": checked}
+        if kind == "human":
+            if (st.get("ticket"), st.get("handoff")) != (entry.get("ticket"), entry.get("handoff")):
+                self.fail(node, "human", "integrity", "the path records another ticket or hand-off for this answer")
+            step["checked"].append("human")
+            step["human"] = "recorded, not recomputed"
+        self.steps.append(step)
+        return edge
 
 
 def _last_index(path, node):
@@ -1299,6 +1916,23 @@ def _vh(v):
         return vhash(v)
     except Exception:  # noqa: BLE001 — any value a tool may return
         return vhash(repr(v))
+
+
+class _NotKept:
+    """A value its node's store does not keep (a guard's tool result: the store keeps its hash only)."""
+
+    def __init__(self, h=None):
+        self.hash = h
+
+    def __repr__(self):
+        return "<not kept>"
+
+
+def _vh_kept(v):
+    """_vh, or None when the value holds something its store does not keep (a replay then cannot check that hash)."""
+    if isinstance(v, _NotKept) or (isinstance(v, dict) and any(isinstance(x, _NotKept) for x in v.values())):
+        return None
+    return _vh(v)
 
 
 def _short(fp):

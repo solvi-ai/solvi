@@ -357,9 +357,9 @@ Some ideas were measured and did not make it into solvi, experimental or not; th
 
 ## `process`
 
-A process of several solvi systems: stages 0 and 1 of `solvi.Process` — the process described as data, running it
-as one trace across the systems, and questions put to a person through a queue; the later stages (replay across the
-systems, the path promise, retraction) use the same format (`solvi.experimental.process.Process`). Since 1.4.
+A process of several solvi systems: stages 0 to 2 of `solvi.Process` — the process described as data, running it
+as one trace across the systems, questions put to a person through a queue, and replaying a run from its records; the
+later stages (the path promise, retraction) use the same format (`solvi.experimental.process.Process`). Since 1.4.
 
 A node is a `solvi.build` result, a System, a Guard or a question to a person; an edge carries a predicate written as
 data (`{"answer": "kind", "in": ["auto", "property"]}`, `{"status": "abstain"}`, `{"by": "s2"}`,
@@ -405,6 +405,20 @@ the value, its outcome is status `"ok"` by `"human"`, and the facts it writes ca
 On ten units exchanging facts over three rounds, 30 runs with 2% of the decisions asking a person (a test, not the
 stand), every ticket was answered once and every run decided.
 
-- **Missing:** the process replay (with pending segments and the human leaf), the path promise and the retraction across nodes with cancelled and re-asked tickets (later stages); a run follows one path (merge "all" is not run yet); the pre-registered stand (E1 promise, E2 scale at N=300, E3 retraction) is not run — E2 at N=10 (with 2% of the decisions asking a person) is a test, not the stand
+`p.replay(run)` re-checks a run from the records alone, segment by segment and node by node: each node's record is
+in its store, intact and chained to the decision before it; its trace hash is the recorded one; its decision replays
+by its own means (`Dispatcher.replay`, `Trace.replay`, `Guard.replay`); the facts it was given are those the recorded
+answers upstream and the input give; and the edge taken is the first whose predicate holds on the recorded answers.
+A person's answer is a leaf, recorded and not recomputed: its record must be intact, follow from the pending segment,
+be the ticket's only answer, come through the same channel and answer the request asked. The report names the first
+divergence (`at`: node, step, segment, position; `kind`: integrity, recompute or missing_part) and lists what the
+records cannot show (`unchecked`: a guard's tool result is kept as a hash). A pending run replays up to its question
+(`{"ok": True, "pending": ticket}`). `p.replay_all()` replays every run and verifies every store it reads. One tamper
+of a node's record, an edge, a passed fact or a person's record (answer, reviewer, parent) named exactly that node in
+100 of 100 seeded tampers on 18 runs (plain, paused and resumed, answered at once); the record format is written down in
+[trace_spec](trace_spec.md#process-runs-kinds-process-and-human-the-run-record-candidate-for-freezing) as the
+candidate to freeze.
+
+- **Missing:** the path promise and the retraction across nodes with cancelled and re-asked tickets (later stages); a run follows one path (merge "all" is not run yet); the pre-registered stand (E1 promise, E2 scale at N=300, E3 retraction) is not run — E2 at N=10 (with 2% of the decisions asking a person) is a test, not the stand
 - **Script:** none yet. **Deadline:** 1.2.
 - API: [solvi.experimental.process](api/process.md).
