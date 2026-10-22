@@ -422,3 +422,39 @@ candidate to freeze.
 - **Missing:** the path promise and the retraction across nodes with cancelled and re-asked tickets (later stages); a run follows one path (merge "all" is not run yet); the pre-registered stand (E1 promise, E2 scale at N=300, E3 retraction) is not run — E2 at N=10 (with 2% of the decisions asking a person) is a test, not the stand
 - **Script:** none yet. **Deadline:** 1.2.
 - API: [solvi.experimental.process](api/process.md).
+
+## `stream`
+
+A promise earned on the stream instead of on a fixed calibration set: `StreamPromise` starts at +inf (nothing
+answered alone) and loosens its threshold as labelled samples arrive, with a statement that holds at every point in
+time, not only at the end of a calibration. Stage 1 of 4: the certificate alone. Since 1.4.
+
+```python
+from solvi.experimental.stream import StreamPromise
+
+sp = StreamPromise(max_risk=0.05, delta=0.05)          # or max_error= (the error among the answers given alone)
+system.guarantee("intent", promise=sp, signal="act")    # installed as OpenSetGate is
+sp.learn(score, would_be_answer, label)                 # one labelled sample; label None: missing, counted as a loss
+sp.restart("alarm")                                     # uncertified again, the next δ_v from the budget
+```
+
+One e-process per grid point against "the risk at this threshold is above α": by default a mixture of constant bets
+(fractions 0.9 / 0.5 / 0.25 / 0.1, weights 0.6 / 0.25 / 0.1 / 0.05), or `bets="agrapa"` (the predictable bet of
+`MeanBound`, mirrored). A point is certified once its wealth reaches 1/δ_v (Ville's inequality) and the threshold in
+force is the loosest point with every stricter one certified (fixed-sequence over a grid fixed before any label: by
+default the scores of the first 200 decisions it gates). The threshold only loosens. `max_risk=` (joint) promises
+P(answered alone and wrong) ≤ α over all inputs; `max_error=` (selective) the error among the answers given alone.
+`DeltaBudget` spends δ over restarts, δ_v = 6δ/(π²v²) (`experimental.skills.Certificate.delta_at`), so every threshold
+ever in force holds together with probability ≥ 1 − δ. The statement assumes the risk given the past is constant
+(i.i.d. between change points) and that the labelled samples are drawn by a coin independent of the input; a model
+that degrades is never un-certified by the certificate itself (a change detector and its `restart` are a later
+stage). Every gated decision records the state (`v_index`, `delta_v`, `threshold`, `n`, an evidence fingerprint and
+the grid's); the same samples in the same order rebuild it exactly.
+
+The price of being valid at every time: at α = δ = 5 % a fresh certificate needs 85 clean samples (v = 1), 116 after
+one restart and 134 after two; 74 for the mixture at the full δ, against 59 for a one-shot binomial test. These are
+arithmetic, not measurements: no stand has run.
+
+- **Missing:** unmeasured: the stand against offline calibration (stage 4) has not run; the sampling coin, the change detector, the Dispatcher wiring and the store records are later stages
+- **Script:** none yet. **Deadline:** 1.2.
+- API: [solvi.experimental.stream](api/stream.md).

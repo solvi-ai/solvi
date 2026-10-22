@@ -279,6 +279,14 @@ STATUS: dict[str, dict] = {
                 "retraction) is not run — E2 at N=10 (with 2% of the decisions asking a person) is a test, not the "
                 "stand",
                 "script": None},
+    "stream": {"since": "1.4",
+               "what": "StreamPromise: an anytime-valid learn-then-test certificate on a threshold grid, earned on "
+               "the stream (an e-process per grid point — a mixture of constant bets or the aGRAPA bet — "
+               "fixed-sequence from strict to loose, the threshold only loosens, a missing label counted as a loss, "
+               "δ spent over restarts by DeltaBudget), installed with System.guarantee(promise=) (stage 1 of 4)",
+               "missing": "unmeasured: the stand against offline calibration (stage 4) has not run; the sampling "
+               "coin, the change detector, the Dispatcher wiring and the store records are later stages",
+               "script": None},
 }
 for _s in STATUS.values():
     _s["deadline"] = DEADLINE

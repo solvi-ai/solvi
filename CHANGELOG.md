@@ -52,6 +52,20 @@
 - **`Guard.fingerprint()`**: what decides a guard's calls as one hash, read from its declarations (tools with their
   schemas and functions, policies, functions, firewalls, the authorizer, settings); building nothing. The process
   records it per guard node instead of reading the guard's private attributes.
+- **Stream certificate (experimental), stage 1: `StreamPromise`** (`solvi.experimental.stream`). A promise earned on
+  the stream: an anytime-valid learn-then-test certificate on a threshold grid. One e-process per grid point against
+  "the risk at this threshold is above α" — a mixture of constant bets (fractions 0.9 / 0.5 / 0.25 / 0.1, weights
+  0.6 / 0.25 / 0.1 / 0.05) or `bets="agrapa"` (`MeanBound` mirrored) — certified at 1/δ_v; the threshold in force is
+  the loosest grid point with every stricter one certified (fixed-sequence over a grid fixed before any label: the
+  scores of the first `grid_from` = 200 decisions, `"fixed"` or a list), +inf until the first, and it only loosens.
+  `max_risk=` (joint: P(answered alone and wrong)) or `max_error=` (selective: the error among the answers given
+  alone). A missing label (`learn(..., label=None)`) is a loss wherever it would have been answered alone.
+  `restart(why)` takes the next (v, δ_v) from `DeltaBudget` (δ_v = `skills.Certificate.delta_at(v)`, 6δ/(π²v²)).
+  Installed with `System.guarantee(question, promise=sp)` like `OpenSetGate`: every gated decision records its state
+  (v_index, delta_v, threshold, n, evidence and grid fingerprints), a replay takes the recorded threshold, and the
+  same samples rebuild the same state. Clean samples to certify at α = δ = 5 %: 85 (v = 1), 116 (v = 2), 134 (v = 3);
+  74 for the mixture at the full δ (93 with aGRAPA), against 59 for a one-shot binomial test. Unmeasured: the stand,
+  the sampling coin, the change detector and the Dispatcher wiring are later stages.
 - **A secret for the supervision and audit draws: `Dispatcher(secret=)`** (`solvi.core.dispatch`; security). The
   draws were `sha256(f"{seed}|{input hash}|{n}")` with the public default `seed=0`, so whoever could vary the inputs
   could compute which decisions would be supervised or audited and avoid them. With `secret=` (bytes or str; None reads
