@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.4.0 — unreleased
 
 ### Added
 - **Process (experimental): a process of several solvi systems as data** (`solvi.experimental.process`, stage 0 of
