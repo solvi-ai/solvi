@@ -45,6 +45,8 @@ VALUES = [
     ("U+2028 and U+2029 are not escaped", '{"\\u2028":"a\\u2028b\\u2029c"}', None),
     ("escapes: quote, backslash, controls; / and DEL are not escaped",
      '{"s":"\\"\\\\/\\u0000\\u0001\\b\\t\\n\\u000b\\f\\r\\u001f\\u007f"}', None),
+    ("keys that look like numbers sort as strings (a Python int key is turned into its string first)",
+     '{"2":"a","10":"b","-1":"c","1.5":"d"}', None),
     ("legacy (records before 0.7): NaN and Infinity tokens", '{"a":NaN,"b":Infinity,"c":-Infinity}', None),
 ]
 

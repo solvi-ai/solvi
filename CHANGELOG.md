@@ -58,12 +58,22 @@
   positional from 1e-4 up to 1e16), integers of any size kept apart from floats, which characters are escaped (U+2028
   and U+2029 are not), `NaN` / `Infinity` only in records written before 0.7 (the writer refuses them) — and where it
   differs from RFC 8785. `tests/fixtures/canonical_json/vectors.json`: 21 values, a format 1 and a format 2 record and
-  a chain link, each with its canonical text and SHA-256, recomputed by `tests/test_canonical_json_vectors.py`. Nothing
-  written changes: the format and every hash are as before. Documented as a known issue, not fixed: a body appended
-  with non-string dict keys (`{2: …, 10: …}`) is hashed with the keys in number order, and its stored text does not
-  recompute that hash.
+  a chain link (22 values since the fix under Fixed), each with its canonical text and SHA-256, recomputed by `tests/test_canonical_json_vectors.py`. Nothing
+  written changes: the format and every hash are as before.
 
 ### Fixed
+- **A record with non-string dict keys now verifies.** The canonical JSON a record hash is taken over sorted a dict's
+  keys before turning them into strings, so a body appended with `{2: …, 10: …}` was hashed in number order while its
+  stored text reads back as `{"10": …, "2": …}`: `verify()` reported it as edited. Keys are now turned into their JSON
+  strings first (int and float by their JSON form, `True` / `False` / `None` as `true` / `false` / `null`), recursively,
+  and two keys that become one string (`{1: …, "1": …}`) are refused with `ValueError` (json would have written both).
+  Applies to the record hash and to the trace signature's item digests. Every record with string keys only hashes the
+  same bytes as before (every fixture store verifies as it did; the golden fingerprints are unchanged), so no valid
+  stored record changes its hash; records written before the fix with such keys still fail `verify()`. Decisions,
+  corrections and specialist runs convert their data to JSON first and were not affected; writers that pass a body to
+  the store as it is could be (not confirmed for any of them): the knowledge store, `refine`'s stored runs,
+  `solvi.testing.history`, `solvi.experimental.process`, the dispatcher's policy record and the eval access log of
+  `solvi.experimental.changes`. Canonicalizing a 10 KB record takes about 90 µs more (one walk over its dicts).
 - **A code fingerprint no longer depends on whether the code has run yet.** A module global set on first use
   (`_X = None`, filled by the first call) was hashed as None before that call and left out after it, so a Guard tool's
   `System.fingerprint()` taken before the first `guard.call` gave `argument_errors` another fingerprint than one taken
