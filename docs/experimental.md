@@ -357,9 +357,9 @@ Some ideas were measured and did not make it into solvi, experimental or not; th
 
 ## `process`
 
-A process of several solvi systems described as data: stage 0 of `solvi.Process`, the format the later stages (running,
-one trace and replay across the systems, the path promise, the channel to a person) will use
-(`solvi.experimental.process.Process`). Since 1.4.
+A process of several solvi systems: stages 0 and 1a of `solvi.Process` — the process described as data, and running it
+as one trace across the systems; the later stages (the channel to a person, replay across the systems, the path
+promise, retraction) use the same format (`solvi.experimental.process.Process`). Since 1.4.
 
 A node is a `solvi.build` result, a System, a Guard or a question to a person; an edge carries a predicate written as
 data (`{"answer": "kind", "in": ["auto", "property"]}`, `{"status": "abstain"}`, `{"by": "s2"}`,
@@ -372,8 +372,20 @@ for byte and refuses a system whose fingerprint is not the recorded one (`strict
 `mismatched`), `p.diff(other)` names every change by node and edge (down to the part whose fingerprint changed), and
 `p.render("mermaid")` draws it.
 
-- **Missing:** running the process, its replay, the path promise and the channel to a person (later
-  stages); the pre-registered stand (a synthetic multi-expert claims process: E1 promise, E2 scale,
-  E3 retraction) is not run
+`r = p.run(facts)` follows one path from the start node: a node is given the facts it reads as plain values, its own
+system decides and stores the decision (a `solvi.build` result through `ask`, a System through `ask`, a Guard through
+`call` with the fact `call`), and the first edge whose predicate holds leads on (a loop edge until its `max_iter`).
+The decisions are the ones calling the systems by hand in the same order makes. Each run opens
+`run_context(run=...)` and each node runs inside `run_context(parent=` the previous node's decision `)`, so
+`chronology(stores, run=r.run)` puts the run in order from the stores alone; with `Process(storage=...)` one record of
+kind `"process"` indexes the path (ids and hashes only: spec, input, each node's answers and the facts it read and
+wrote, the knowledge snapshot it was given, the edge taken). Every written fact carries a provenance label
+(`r.provenance[fact]`: the node, its decision, by, confidence, trace hash); a node that reads the fact `"provenance"`
+is given those labels. Shared facts go through a `solvi.Knowledge` the systems were built with; the process puts
+nothing in it. `p.explain(r)` says the path in words. A node of kind `"human"`, and an abstention or a person's
+decision with `on_abstain` / `on_human="handoff"`, raise `NotImplementedError` until the channel to a person (the next
+stage); `"abstain"` stops the run there.
+
+- **Missing:** the channel to a person (stage S1b: HumanChannel, pending / resume), the process replay, the path promise and the retraction across nodes (later stages); a run follows one path (merge "all" is not run yet); the pre-registered stand (E1 promise, E2 scale at N=300, E3 retraction) is not run — E2 at N=10 is a test, not the stand
 - **Script:** none yet. **Deadline:** 1.2.
 - API: [solvi.experimental.process](api/process.md).

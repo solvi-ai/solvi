@@ -86,3 +86,21 @@ def test_a_redacted_record_with_content_left_is_rejected():
     assert validate(r, SCHEMA) == []
     r["response"] = {}
     assert validate(r, SCHEMA) != []
+
+
+def test_a_process_record_is_checked_for_the_envelope(tmp_path):
+    """solvi.experimental.process writes one record of kind "process" per run (the index of its path): the schema lists
+    the kind among those checked for the envelope only."""
+    import warnings
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        from solvi.experimental.process import Process
+    s = system()
+    p = Process("one", storage=JSONLStorage(tmp_path / "process.jsonl"), on_abstain="abstain", on_human="abstain")
+    p.node("a", s, reads=["amount", "limit"], writes={"size": "answer:size"}, end=True)
+    r = p.run({"amount": 3, "limit": 100})
+    rec = next(x for x in read_lines(tmp_path / "process.jsonl") if x["kind"] == "process")
+    assert rec["id"] == r.stored_id and validate(rec, SCHEMA) == []
+    assert "process" in SCHEMA["description"]
+    bad = dict(rec, seq=-1)
+    assert validate(bad, SCHEMA) != []

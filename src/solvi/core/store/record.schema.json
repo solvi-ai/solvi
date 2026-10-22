@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "urn:solvi:store:record:2",
   "title": "solvi stored record, format 2",
-  "description": "One line of a JSONLStorage file (one row body of an SQL store) as solvi writes it with record format 2 (\"v\": 2). The specification is docs/trace_spec.md; tests/semantics/test_record_schema.py validates real records against this file. Records of kinds ask, teach, redaction and segment are described field by field and closed: a new field is a new schema version. Other kinds (knowledge, dispatch, policy, refine, update) are checked for the common envelope only.",
+  "description": "One line of a JSONLStorage file (one row body of an SQL store) as solvi writes it with record format 2 (\"v\": 2). The specification is docs/trace_spec.md; tests/semantics/test_record_schema.py validates real records against this file. Records of kinds ask, teach, redaction and segment are described field by field and closed: a new field is a new schema version. Other kinds (knowledge, dispatch, policy, refine, update, process) are checked for the common envelope only.",
   "x-solvi-format": 2,
   "x-schema-version": "2.2.0",
   "x-schema-changes": {"2.2.0": "optional \"run\": {\"id\", \"parent\"} on ask and teach records (written inside solvi.core.store.run_context: the run that wrote the record and the decision it follows from); a minor version: records without it are as before, a reader of 2.1.0 may ignore it",
