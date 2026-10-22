@@ -1,12 +1,13 @@
-"""A process of several solvi systems (experimental, stages 0 and 1a): the nodes, the edges with predicates written as
+"""A process of several solvi systems (experimental, stages 0 and 1): the nodes, the edges with predicates written as
 data, merges, loops with a mandatory iteration limit and the declared promise — a JSON specification with a hash, a
 structural diff and a drawing (stage 0) — and running it: each node's decision in its own store, chained into one run,
-with an index record of the path (stage 1a). Replay, the process guarantee and the channel to a person come in later
-stages.
+with an index record of the path (stage 1a), and questions put to a person through a queue, a run waiting for the
+answer and going on when it comes (stage 1b). Replay, the process guarantee and retraction come in later stages.
 
-    from solvi.experimental.process import Process
+    from solvi.experimental.process import Process, MemoryQueue
 
-    p = Process("claim")
+    queue = MemoryQueue()                                  # or your own: class MyChannel(HumanChannel): ...
+    p = Process("claim", storage="st/process.jsonl", human=queue)
     p.node("triage", triage, reads=["claim"], writes={"kind": "answer"})          # triage = solvi.build(...)
     p.node("fraud", fraud, reads=["claim", "kind"], writes={"fraud_risk": "answer"})
     p.node("payout", payout, reads=["claim", "kind", "fraud_risk"], writes={"payout": "answer"}, end=True)
@@ -24,11 +25,13 @@ stages.
     p.diff(q)                           # [] — or one entry per change: {"path", "change", "before", "after", "say"}
     p.render("mermaid")                 # or "text"
 
-    p = Process("claim", storage="st/process.jsonl", on_abstain="abstain", on_human="abstain")   # ... nodes, edges
-    r = p.run({"claim": claim})         # ProcessResult: status ("decided" | "abstain"), answer, path, nodes, facts,
-                                        #   provenance, run, stored_id (the "process" record)
-    print(p.explain(r))                 # the path in words: who answered at each node, which edge was taken
-    chronology(stores, run=r.run)       # solvi.core.store.chronology: the node decisions and the record, in order
+    r = p.run({"claim": claim})         # ProcessResult: status ("decided" | "abstain" | "pending" | "cancelled"),
+                                        #   answer, path, nodes, facts, provenance, run, stored_id, ticket (pending)
+    queue.answer(r.ticket, "low", reviewer="anna")      # the built-in queue; your channel answers its own way
+    p.pending()                         # the waiting questions: [{run, node, ticket, question, asked_at, stored_id}]
+    r2 = p.resume(r.run)                # polls the channel: an answer → the run goes on (a new segment), else pending
+    print(p.explain(r2))                # the path in words: who answered at each node, which edge was taken
+    chronology(stores, run=r.run)       # solvi.core.store.chronology: the node decisions and the records, in order
 
 The format (`"solvi_process": "1.0"`). A node has a `kind` ∈ {decision, system, guard, human}: a `solvi.build` result,
 a bare System, a Guard, or a question put to a person; `reads` (the facts it reads), `writes` ({fact: what of the
@@ -74,16 +77,40 @@ stored_id, trace_hash, by, status, answers_hash, facts_in_hash, facts_out_hash, 
 loop}}], "outcome": {status, at, answer_hash}} — an index of hashes and ids; the decisions are in the node stores.
 The run ends "decided" at an end node that answered, or "abstain" where it stopped (`why`). A node that abstains, or
 whose decision goes to a person, with no edge for it: on_abstain / on_human = "abstain" stops the run there;
-"handoff" (the default) and a node of kind "human" go to the channel to a person — stage S1b; this stage raises
-NotImplementedError there. A node that merges "all" of several inputs raises NotImplementedError too (this stage
-follows one path). Not yet: `replay`, `retract`, `pending`/`resume` and the `HumanChannel` classes; `human=` takes any
-object with a `fingerprint()` for now and only records it.
+"handoff" (the default) puts the node's question to a person. A node that merges "all" of several inputs raises
+NotImplementedError (this stage follows one path). Not yet: `replay`, `retract`.
+
+The channel to a person (stage 1b) is a queue: the process does not know when the person answers. `HumanChannel` is an
+abstract class — submit(HumanRequest) → ticket, poll(ticket) → HumanAnswer | None, cancel(ticket, why),
+fingerprint() — that you subclass with your own way to ask (check it with
+solvi.testing.conformance.check_human_channel); built in: `MemoryQueue` (queue.answer(ticket, value, reviewer=),
+queue.open()) and `CallbackChannel(fn)` (fn(request) → HumanAnswer or None, called at submit and at each poll). A
+question is put by a node of kind "human" (an edge to it is an explicit hand-over; it is given the facts it reads, or
+every fact when it reads none) or by the hand-off of a node. The process submits it and polls once: an answer is
+recorded and the run goes on; none → the run ends "pending" with its ticket, as a "process" record (a segment) with
+status "pending", the ticket, the channel's fingerprint, the request, and what the run needs to go on (the facts, their
+labels, the loop counts — the one record that holds fact values). `p.pending()` lists the waiting questions;
+`p.resume(run)` polls again: no answer → "pending" (nothing written); an answer → a record of kind "human" in the
+process store ({ticket, node, question, reason, value, declined, reviewer, note, verified, asked_at, answered_at,
+request_hash, channel}, run parent: the pending segment) and the run goes on from the node that asked as a new segment
+("continues": the pending segment's id); a process loaded afresh from the same spec and stores resumes it. The person's
+answer is the node's answer: its writes take the value, its outcome is status "ok", by "human" (so an edge for "ok"
+holds, `{"by": "human"}` tells it apart), and the facts carry the label {"from", "decision": the human record,
+"by": "human", "reviewer"}. One ticket, one answer: an answer already recorded stands (a run that broke after
+recording it resumes from it). HumanAnswer(declined=True) — the person or the channel's own deadline gives no
+answer — stops the run "abstain"; `p.cancel(run, why)` withdraws the question (the channel's cancel, a "human" record
+{cancelled, why}, a segment "cancelled"). Process(user_verifier=fn(answer, request) → identity) binds an answer to
+who gave it (answer.token is checked, not recorded). A run that asks a person needs storage=.
 """
 from __future__ import annotations
 
+import abc
+import dataclasses
 import hashlib
 import json
 import re
+import threading
+import uuid
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -397,12 +424,12 @@ class GuardNode(NodeRunner):
 
 
 class HumanNode(NodeRunner):
-    """A question put to a person through the process's channel (stage S1b: HumanChannel, pending / resume)."""
+    """A question put to a person: the process asks it through its HumanChannel (Process(human=)), so a human node
+    has no runner of its own to call; run() says so."""
     kind = "human"
 
     def run(self, facts):
-        raise NotImplementedError("a human node asks a person through the process's channel: that comes in the next "
-                                  "stage (S1b, HumanChannel with pending / resume)")
+        raise ProcessRunError("a human node is asked through the process's channel (Process(human=...)), not run")
 
 
 RUNNERS = {"decision": DecisionNode, "system": SystemNode, "guard": GuardNode, "human": HumanNode}
@@ -417,13 +444,15 @@ def runner_for(kind, system, spec):
 
 @dataclass
 class ProcessResult:
-    """One run of a process. status: "decided" (an end node answered), "abstain" (it stopped before an end node
-    answered: `why` says where); answer: the end node's answer (None unless decided); path: the steps as recorded
+    """One run of a process (one segment of it). status: "decided" (an end node answered), "abstain" (it stopped
+    before an end node answered: `why` says where), "pending" (a question waits for a person: `ticket`; resume(run)
+    goes on), "cancelled" (the question was withdrawn: cancel(run, why)); answer: the end node's answer (None unless decided); path: the steps as recorded
     ([{node, kind, store, stored_id, trace_hash, by, status, answers_hash, facts_in_hash, facts_out_hash, knowledge,
-    cost, edge}]); nodes: {node: NodeResult} (the last result of each node); facts: every fact at the end; provenance:
+    cost, edge}]; a person's answer is a step of kind "human" with its "ticket" and "handoff"); nodes: {node: NodeResult} (the last result of each node); facts: every fact at the end; provenance:
     {fact: {"from", "decision", "by", "confidence", "trace_hash"}} for the facts nodes wrote; run: the run id;
     stored_id: the "process" record (None without storage=); spec_hash; why: why it stopped (abstain);
-    pending, ticket: for the channel to a person (stage S1b)."""
+    ticket: the question waiting for a person (status "pending"); continues: the pending segment this run goes on
+    from (a resumed run)."""
     status: str
     answer: Any
     path: list
@@ -435,6 +464,210 @@ class ProcessResult:
     spec_hash: str | None = None
     why: str | None = None
     ticket: str | None = None
+    continues: str | None = None
+
+
+# --- the channel to a person (stage 1b): a queue — the process does not know when the person answers
+
+@dataclass
+class HumanRequest:
+    """A question put to a person. process, run, node: who asks; question: what (a human node's question, or the
+    question of the node that handed its decision over); reason: "node" (a human node), "abstain" or "human" (a node
+    that abstained or sent its decision to a person, on_abstain / on_human="handoff"); facts: what the node was given
+    (plain values); provenance: the labels of those facts written upstream ({fact: {"from", "decision", "by", ...}});
+    path: the nodes run so far in this segment; answer: the answer type ({"kind", "options"}) when the node's system
+    names one, else None; deadline: a hint for the channel (the library has no timeouts: a channel that gives up
+    answers HumanAnswer(declined=True)); asked_at: seconds since the epoch."""
+    process: str
+    run: str
+    node: str
+    question: str
+    reason: str
+    facts: dict
+    provenance: dict = field(default_factory=dict)
+    path: list = field(default_factory=list)
+    answer: dict | None = None
+    deadline: float | None = None
+    asked_at: float | None = None
+
+    def to_dict(self):
+        return _plain(dataclasses.asdict(self))
+
+    @classmethod
+    def from_dict(cls, d):
+        return cls(**{f.name: d.get(f.name) for f in dataclasses.fields(cls) if f.name in d})
+
+
+@dataclass
+class HumanAnswer:
+    """A person's answer to one ticket: value (JSON data: what the node writes as its answer), reviewer (who answered:
+    required), note, at (seconds since the epoch; default: when the process records it), token (a proof of who
+    answered, checked by Process(user_verifier=); not recorded), declined=True: the person (or the channel, on its
+    own deadline) gives no answer — the run stops "abstain" there. ticket: filled in by the process."""
+    value: Any
+    reviewer: str
+    note: str | None = None
+    at: float | None = None
+    token: Any = field(default=None, repr=False)
+    declined: bool = False
+    ticket: str | None = None
+
+
+class HumanChannel(abc.ABC):
+    """How a process asks a person — a queue: submit a question, get a ticket, poll the ticket later. Subclass it with
+    your own way to ask (a ticket system, a review UI, a chat) and check it with
+    solvi.testing.conformance.check_human_channel. The protocol:
+
+    submit(request: HumanRequest) → ticket (a non-empty string, new for every question)
+    poll(ticket) → HumanAnswer, or None while there is no answer (KeyError for a ticket it never gave); once a ticket
+                   has an answer, every later poll gives the same answer (one ticket, one answer)
+    cancel(ticket, why) → None: withdraw the question; a later poll gives None
+    fingerprint() → str: the class and its configuration (recorded in the spec and in every record of a question;
+                   the same for two channels that ask the same way)
+    """
+
+    @abc.abstractmethod
+    def submit(self, request):
+        raise NotImplementedError
+
+    @abc.abstractmethod
+    def poll(self, ticket):
+        raise NotImplementedError
+
+    @abc.abstractmethod
+    def cancel(self, ticket, why):
+        raise NotImplementedError
+
+    @abc.abstractmethod
+    def fingerprint(self):
+        raise NotImplementedError
+
+
+def _new_ticket(prefix):
+    return f"{prefix}-{uuid.uuid4().hex[:20]}"
+
+
+class MemoryQueue(HumanChannel):
+    """A queue in memory: questions wait until `answer(ticket, value, reviewer=)` (or `decline(ticket, why)`);
+    `open()` lists the waiting requests. For tests, a CLI, a stand. Thread-safe; lost with the process that holds it
+    (the process store keeps every question and answer)."""
+
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._q = {}                                  # ticket → {"request", "answer", "cancelled"}
+
+    def submit(self, request):
+        t = _new_ticket("mq")
+        with self._lock:
+            self._q[t] = {"request": request, "answer": None, "cancelled": None}
+        return t
+
+    def poll(self, ticket):
+        with self._lock:
+            e = self._q[ticket]
+            return None if e["cancelled"] is not None else e["answer"]
+
+    def cancel(self, ticket, why):
+        with self._lock:
+            self._q[ticket]["cancelled"] = str(why)
+
+    def fingerprint(self):
+        return "MemoryQueue/1"
+
+    def answer(self, ticket, value, reviewer, note=None, token=None):
+        """A person answers a waiting question. A ticket is answered once (ValueError again, KeyError unknown)."""
+        return self._set(ticket, HumanAnswer(value, reviewer, note, token=token))
+
+    def decline(self, ticket, why=None, reviewer="queue"):
+        """No answer will come (a deadline passed, the person refused): the run stops "abstain" at that node."""
+        return self._set(ticket, HumanAnswer(None, reviewer, why, declined=True))
+
+    def _set(self, ticket, ans):
+        import time
+        ans = dataclasses.replace(ans, at=time.time())
+        with self._lock:
+            e = self._q[ticket]
+            if e["cancelled"] is not None:
+                raise ValueError(f"ticket {ticket} was cancelled ({e['cancelled']})")
+            if e["answer"] is not None:
+                raise ValueError(f"ticket {ticket} is already answered (by {e['answer'].reviewer})")
+            e["answer"] = ans
+        return ans
+
+    def open(self):
+        """The waiting questions → [(ticket, HumanRequest)] in the order asked."""
+        with self._lock:
+            return [(t, e["request"]) for t, e in self._q.items() if e["answer"] is None and e["cancelled"] is None]
+
+    def __len__(self):
+        return len(self.open())
+
+
+class CallbackChannel(HumanChannel):
+    """A function asks the person: fn(request) → a HumanAnswer, or None (no answer yet). submit calls it, and so does
+    every poll until it answers (a wrapper for manual input, a web hook, a synchronous review service). A plain value
+    instead of a HumanAnswer is an answer by `reviewer` (required then). The fingerprint is the function's code."""
+
+    def __init__(self, fn, reviewer=None):
+        if not callable(fn):
+            raise TypeError("CallbackChannel(fn): fn(request) → HumanAnswer or None")
+        self.fn, self.reviewer = fn, reviewer
+        self._lock = threading.Lock()
+        self._q = {}
+
+    def _call(self, request):
+        a = self.fn(request)
+        if a is None or isinstance(a, HumanAnswer):
+            return a
+        if self.reviewer is None:
+            raise TypeError("the callback returned a plain value: return HumanAnswer(value, reviewer=...) or give "
+                            "CallbackChannel(fn, reviewer=...)")
+        return HumanAnswer(a, self.reviewer)
+
+    def submit(self, request):
+        t = _new_ticket("cb")
+        with self._lock:
+            self._q[t] = {"request": request, "answer": None, "cancelled": False}
+        a = self._call(request)
+        with self._lock:
+            if self._q[t]["answer"] is None:
+                self._q[t]["answer"] = a
+        return t
+
+    def poll(self, ticket):
+        with self._lock:
+            e = self._q[ticket]
+            if e["cancelled"]:
+                return None
+            if e["answer"] is not None:
+                return e["answer"]
+            req = e["request"]
+        a = self._call(req)
+        with self._lock:
+            if e["answer"] is None and not e["cancelled"]:
+                e["answer"] = a
+            return None if e["cancelled"] else e["answer"]
+
+    def cancel(self, ticket, why):
+        with self._lock:
+            self._q[ticket]["cancelled"] = True
+
+    def fingerprint(self):
+        from ..core.provenance import code_fingerprint
+        return f"CallbackChannel/1:{code_fingerprint(self.fn)}" + (f":{self.reviewer}" if self.reviewer else "")
+
+
+def _answer_type(system, question):
+    """The answer type of a node's question when its system names one → {"kind", "options"} or None."""
+    if system is None:
+        return None
+    try:
+        sysm = getattr(system, "system", None) or system
+        qs = getattr(sysm, "questions", None)
+        at = getattr(qs.get(question), "answer", None) if isinstance(qs, dict) else None
+        return None if at is None else _plain({"kind": at.kind, "options": list(at.options or [])})
+    except Exception:  # noqa: BLE001 — a hint for the person only
+        return None
 
 
 # --- the process
@@ -442,11 +675,14 @@ class ProcessResult:
 class Process:
     """A process of solvi systems (see the module docs). name: the process's name; storage: a path or a TraceStorage
     where each run's "process" record is appended (not part of the spec; None: no record, the node stores still hold
-    every decision); human: the channel to a person (recorded by fingerprint only, for
-    now); start: the start node (default: the one node without an incoming edge); on_abstain, on_human: "handoff" (to
-    the channel) or "abstain"."""
+    every decision; a run that asks a person needs it); human: the channel to a person (a HumanChannel: MemoryQueue,
+    CallbackChannel or your own; recorded in the spec by its fingerprint); start: the start node (default: the one
+    node without an incoming edge); on_abstain, on_human: "handoff" (to the channel) or "abstain"; user_verifier:
+    fn(answer: HumanAnswer, request: HumanRequest) → the verified identity of who answered (from answer.token), or
+    None to refuse it (PermissionError; the identity must be the answer's reviewer), as Guard(user_verifier=)."""
 
-    def __init__(self, name, storage=None, human=None, start=None, on_abstain="handoff", on_human="handoff"):
+    def __init__(self, name, storage=None, human=None, start=None, on_abstain="handoff", on_human="handoff",
+                 user_verifier=None):
         if not isinstance(name, str) or not name:
             raise ProcessSpecError(f"a process name is a non-empty string, not {name!r}")
         for k, v in (("on_abstain", on_abstain), ("on_human", on_human)):
@@ -454,6 +690,9 @@ class Process:
                 raise ProcessSpecError(f"{k} is one of {', '.join(ON)}, not {v!r}")
         self.name, self.storage, self.human, self._start = name, storage, human, start
         self.on_abstain, self.on_human = on_abstain, on_human
+        if user_verifier is not None and not callable(user_verifier):
+            raise TypeError("user_verifier is a function (answer, request) → the verified identity, or None")
+        self.user_verifier = user_verifier
         self.nodes: dict[str, dict] = {}              # name → the node's spec (without systems)
         self.systems: dict[str, object] = {}          # name → the bound system
         self.edges: list[dict] = []
@@ -615,9 +854,10 @@ class Process:
         return pr
 
     @classmethod
-    def from_spec(cls, spec, systems=None, human=None, storage=None, strict=True):
+    def from_spec(cls, spec, systems=None, human=None, storage=None, strict=True, user_verifier=None):
         """A process from its spec (a dict or JSON text). systems: {node: system} to bind (each checked against its
-        recorded fingerprint); human: the channel (checked likewise). strict=False loads a mismatch and lists it in
+        recorded fingerprint); human: the channel (checked likewise); storage, user_verifier: as Process() — a process
+        loaded with the store of the one that asked resumes its pending runs. strict=False loads a mismatch and lists it in
         `mismatched` instead of raising. A node given no system is listed in `unbound`."""
         if isinstance(spec, (str, bytes)):
             spec = json.loads(spec)
@@ -634,7 +874,7 @@ class Process:
         if unknown:
             raise ProcessSpecError(f"systems for nodes the spec does not have: {unknown}")
         p = cls(spec["name"], storage=storage, start=spec.get("start"), on_abstain=spec.get("on_abstain", "handoff"),
-                on_human=spec.get("on_human", "handoff"))
+                on_human=spec.get("on_human", "handoff"), user_verifier=user_verifier)
         for name, ns in (spec.get("nodes") or {}).items():
             if name in systems:
                 sysm = systems[name]
@@ -678,110 +918,328 @@ class Process:
         _check_graph(p.nodes, p.edges, p.merges, p._start)
         return p
 
-    # --- running (stage 1a)
+    # --- running (stage 1a; the channel to a person and pending / resume: stage 1b)
 
     def run(self, facts, run=None):
         """Run the process once on the given facts ({name: value}) → ProcessResult (see the module docs). run: the run
         id (default: the enclosing run_context's, else a new one). Every node's decision is written to its own store
         inside run_context(run=..., parent=the previous node's stored id); with storage= the process writes one record
         of kind "process" (the index of the path: hashes, ids, the edges taken) whose parent is the last node's
-        decision."""
+        decision. A question put to a person that is not answered at once ends the run "pending" with its ticket:
+        `resume(run)` goes on when the person has answered."""
         from ..core.store import current_run, run_context
         spec = self.spec()
+        self._check_bound()
+        outer = current_run()
+        facts = dict(facts)
+        w = {"node": spec["start"], "facts": facts, "prov": {}, "taken": [0] * len(self.edges),
+             "parent": outer["parent"] if outer else None, "input_hash": _vh(facts), "continues": None}
+        with run_context(run=run) as rc:
+            return self._go(spec, rc.id, w)
+
+    def _check_bound(self):
         lack = [n for n, ns in self.nodes.items() if ns["kind"] != "human" and n not in self.systems]
         if lack:
             raise ProcessRunError(f"nodes without a system: {lack} (Process.from_spec(spec, systems=...))")
-        outer = current_run()
-        facts = dict(facts)
-        given = dict(facts)
-        prov, path, results = {}, [], {}
-        taken = [0] * len(self.edges)
-        node, status, answer, why = spec["start"], None, None, None
-        with run_context(run=run) as rc:
-            parent = outer["parent"] if outer else None
-            while True:
-                ns = self.nodes[node]
-                if self.merges.get(node) == "all" and sum(1 for e in self.edges if e["to"] == node
-                                                          and not e.get("loop")) > 1:
-                    raise NotImplementedError(f"node {node!r} merges 'all' of several inputs: this stage follows one "
-                                              "path (the first edge that holds); waiting for several branches comes "
-                                              "later")
-                if ns["kind"] == "human":
-                    return self._human(node, ns, facts, prov, path)
-                runner = runner_for(ns["kind"], self.systems[node], ns)
-                state = {r: facts[r] for r in ns["reads"] if r in facts and r != "provenance"}
-                if "provenance" in ns["reads"]:
-                    state["provenance"] = {r: prov[r] for r in ns["reads"] if r in prov}
-                with run_context(parent=parent):
-                    res = runner.run(state)
-                out = {f: res.value(what) for f, what in ns["writes"].items()}
-                label = {"from": node, "decision": res.stored_id, "by": res.by, "confidence": res.confidence,
-                         "trace_hash": res.trace_hash}
-                facts.update(out)
-                prov.update({f: dict(label) for f in out})
-                results[node] = res
-                outcome = {"facts": facts, "status": res.status, "by": res.by, "confidence": res.confidence,
-                           "budget_over": res.budget_over, "drift": res.drift}
-                edge = None
+
+    def _given(self, ns, facts, prov):
+        """The facts a node is given: the ones it reads (a human node that reads nothing: every fact), plain values,
+        with the labels as the fact "provenance" when it reads it."""
+        reads = ns["reads"] or (list(facts) if ns["kind"] == "human" else [])
+        state = {r: facts[r] for r in reads if r in facts and r != "provenance"}
+        if "provenance" in reads:
+            state["provenance"] = {r: prov[r] for r in reads if r in prov}
+        return state
+
+    def _go(self, spec, run_id, w, first=None):
+        """Follow the path from w["node"] (inside run_context(run=run_id)) until an end, a stop or a question left
+        pending. first: (NodeResult, state) of a person's answer that the first node takes (a resumed run)."""
+        from ..core.store import run_context
+        facts, prov, taken, parent = w["facts"], w["prov"], w["taken"], w["parent"]
+        path, results = [], {}
+        node, status, answer, why = w["node"], None, None, None
+
+        def step(node, ns, res, state, kind):
+            declined = res.by == "human" and res.status == "abstain"
+            out = {} if declined else {f: res.value(what) for f, what in ns["writes"].items()}
+            label = {"from": node, "decision": res.stored_id, "by": res.by, "confidence": res.confidence,
+                     "trace_hash": res.trace_hash}
+            if res.by == "human" and isinstance(res.raw, HumanAnswer):
+                label["reviewer"] = res.raw.reviewer
+            facts.update(out)
+            prov.update({f: dict(label) for f in out})
+            results[node] = res
+            outcome = {"facts": facts, "status": res.status, "by": res.by, "confidence": res.confidence,
+                       "budget_over": res.budget_over, "drift": res.drift}
+            edge = None
+            if not declined:                          # a person who declined: the run stops
                 for i, e in enumerate(self.edges):
                     if e["from"] != node or (e.get("loop") and taken[i] >= e["max_iter"]):
                         continue
                     if holds(e.get("when"), outcome):
                         edge, taken[i] = e, taken[i] + 1
                         break
-                kh = state.get("knowledge")
-                if kh is None and res.raw is not None and getattr(res.raw, "s1", None) is not None:
-                    kh = res.raw.s1.trace.init.get("knowledge")
-                path.append({"node": node, "kind": ns["kind"], "store": ns.get("store"), "stored_id": res.stored_id,
-                             "trace_hash": res.trace_hash, "by": res.by, "status": res.status,
-                             "answers_hash": _vh(res.answers), "facts_in_hash": _vh(state),
-                             "facts_out_hash": _vh(out), "knowledge": None if kh is None else _vh(kh),
-                             "cost": res.cost,
-                             "edge": None if edge is None else {"to": edge["to"], "when": edge.get("when"),
-                                                                "loop": bool(edge.get("loop"))}})
-                if res.stored_id is not None:
-                    parent = res.stored_id
-                if edge is not None:
-                    node = edge["to"]
-                    continue
-                if res.status == "human" or (res.status == "abstain"):
-                    on = self.on_human if res.status == "human" else self.on_abstain
-                    if on == "handoff":
-                        return self._handoff(node, res, facts, prov, path)
-                    status, why = "abstain", f"{node}: {'a person has to decide' if res.status == 'human' else 'abstained'}"
-                elif ns.get("end"):
-                    status, answer = "decided", res.answer
-                else:
-                    status, why = "abstain", f"{node}: no edge holds and it is not an end node"
-                break
-            with run_context(parent=parent):          # the record follows from the last node's decision
-                rec_id = self._record(spec, given, path, status, answer, node)
-        return ProcessResult(status, answer, path, results, facts, prov, rc.id, rec_id, spec["hash"], why)
+            kh = state.get("knowledge")
+            if kh is None and res.raw is not None and getattr(res.raw, "s1", None) is not None:
+                kh = res.raw.s1.trace.init.get("knowledge")
+            st = {"node": node, "kind": kind, "store": ns.get("store") if kind != "human" else self._store_name(),
+                  "stored_id": res.stored_id, "trace_hash": res.trace_hash, "by": res.by, "status": res.status,
+                  "answers_hash": _vh(res.answers), "facts_in_hash": _vh(state), "facts_out_hash": _vh(out),
+                  "knowledge": None if kh is None else _vh(kh), "cost": res.cost,
+                  "edge": None if edge is None else {"to": edge["to"], "when": edge.get("when"),
+                                                     "loop": bool(edge.get("loop"))}}
+            if kind == "human":
+                st["ticket"] = res.raw.ticket if isinstance(res.raw, HumanAnswer) else None
+                st["handoff"] = ns["kind"] != "human"
+            path.append(st)
+            return edge
 
-    def _record(self, spec, given, path, status, answer, at):
-        """The "process" record (an index: the node stores hold the decisions) → its id, or None without storage."""
-        if self.storage is None:
-            return None
-        from ..core.store import FORMAT as RECORD_FORMAT
+        while True:
+            ns = self.nodes[node]
+            if self.merges.get(node) == "all" and sum(1 for e in self.edges if e["to"] == node
+                                                      and not e.get("loop")) > 1:
+                raise NotImplementedError(f"node {node!r} merges 'all' of several inputs: this stage follows one "
+                                          "path (the first edge that holds); waiting for several branches comes "
+                                          "later")
+            if first is not None:
+                (res, state), first = first, None
+                kind = "human"
+            elif ns["kind"] == "human":
+                state = self._given(ns, facts, prov)
+                res = self._ask(spec, run_id, node, ns["question"], "node", state, w, path, parent)
+                if isinstance(res, ProcessResult):
+                    return res
+                kind = "human"
+            else:
+                runner = runner_for(ns["kind"], self.systems[node], ns)
+                state = self._given(ns, facts, prov)
+                with run_context(parent=parent):
+                    res = runner.run(state)
+                kind = ns["kind"]
+            edge = step(node, ns, res, state, kind)
+            if res.stored_id is not None:
+                parent = res.stored_id
+            if edge is None and res.status in ("human", "abstain") and res.by != "human":
+                on = self.on_human if res.status == "human" else self.on_abstain
+                if on == "handoff":                   # the node's decision goes to a person
+                    q = ns.get("question") or node
+                    res = self._ask(spec, run_id, node, q, res.status, state, w, path, parent)
+                    if isinstance(res, ProcessResult):
+                        return res
+                    edge = step(node, ns, res, state, "human")
+                    if res.stored_id is not None:
+                        parent = res.stored_id
+            if edge is not None:
+                node = edge["to"]
+                continue
+            if res.by == "human" and res.status == "abstain":
+                status, why = "abstain", f"{node}: the person did not answer ({res.raw.note or 'declined'})"
+            elif res.status in ("human", "abstain"):
+                status, why = "abstain", f"{node}: {'a person has to decide' if res.status == 'human' else 'abstained'}"
+            elif ns.get("end"):
+                status, answer = "decided", res.answer
+            else:
+                status, why = "abstain", f"{node}: no edge holds and it is not an end node"
+            break
+        with run_context(parent=parent):              # the record follows from the last node's decision
+            rec_id = self._record(spec, w["input_hash"], path, status, answer, node, continues=w["continues"])
+        return ProcessResult(status, answer, path, results, facts, prov, run_id, rec_id, spec["hash"], why,
+                             continues=w["continues"])
+
+    def _open(self):
         from ..core.store import open_storage
         if self._store is None:
             self._store = open_storage(self.storage)
+        return self._store
+
+    def _store_name(self):
+        path = getattr(self._open(), "path", None) if self.storage is not None else None
+        return None if path is None else str(path)
+
+    def _record(self, spec, input_hash, path, status, answer, at, continues=None, extra=None):
+        """A "process" record (an index: the node stores hold the decisions) → its id, or None without storage."""
+        if self.storage is None:
+            return None
+        from ..core.store import FORMAT as RECORD_FORMAT
         pr = spec.get("promise")
-        rec = self._store._append({"v": RECORD_FORMAT, "kind": "process", "process": spec["name"],
-                                   "spec_hash": spec["hash"], "input_hash": _vh(given),
-                                   "mode": pr["mode"] if pr else None, "promise": pr, "path": _plain(path),
-                                   "outcome": {"status": status, "at": at, "answer_hash": _vh(answer)}})
-        return rec["id"]
+        body = {"v": RECORD_FORMAT, "kind": "process", "process": spec["name"], "spec_hash": spec["hash"],
+                "input_hash": input_hash, "mode": pr["mode"] if pr else None, "promise": pr, "path": _plain(path),
+                "outcome": {"status": status, "at": at, "answer_hash": _vh(answer)}, "continues": continues}
+        body.update(extra or {})
+        return self._open()._append(body)["id"]
 
-    def _human(self, node, ns, facts, prov, path):
-        """A human node: the question goes to the channel (stage S1b)."""
-        return runner_for("human", None, ns).run(facts)
+    # --- the channel to a person (stage 1b)
 
-    def _handoff(self, node, res, facts, prov, path):
-        """on_abstain / on_human = "handoff": the decision goes to the channel (stage S1b)."""
-        raise NotImplementedError(f"node {node!r} hands its decision to a person ({res.status}): the channel to a "
-                                  "person comes in the next stage (S1b); Process(on_abstain='abstain', "
-                                  "on_human='abstain') stops the run there instead")
+    def _channel_obj(self):
+        ch = self.human
+        if ch is None:
+            raise ProcessRunError("a question for a person, and the process has no channel to one: Process(human="
+                                  "MemoryQueue() or your HumanChannel), or on_abstain / on_human='abstain'")
+        if not isinstance(ch, HumanChannel):
+            raise ProcessRunError(f"the channel {type(ch).__name__} is not a HumanChannel (subclass it: submit, poll, "
+                                  "cancel, fingerprint)")
+        return ch
+
+    def _ask(self, spec, run_id, node, question, reason, state, w, path, parent):
+        """Put a question to a person: submit it; an answer at once is recorded and returned as the node's
+        NodeResult; otherwise the run ends with a "pending" segment → ProcessResult."""
+        ch = self._channel_obj()
+        if self.storage is None:
+            raise ProcessRunError("a question for a person is recorded with its answer: Process(storage=...) is needed")
+        import time
+        resume = {"node": node, "reason": reason, "facts": _plain(w["facts"]), "provenance": _plain(w["prov"]),
+                  "taken": list(w["taken"]), "state": _plain(state)}   # raises before submitting if not JSON data
+        req = HumanRequest(process=self.name, run=run_id, node=node, question=question, reason=reason,
+                           facts=_plain({k: v for k, v in state.items() if k != "provenance"}),
+                           provenance=_plain({k: w["prov"][k] for k in state if k in w["prov"]}),
+                           path=[st["node"] for st in path], answer=_answer_type(self.systems.get(node), question),
+                           asked_at=time.time())
+        ticket = ch.submit(req)
+        if not isinstance(ticket, str) or not ticket:
+            raise ProcessRunError(f"{type(ch).__name__}.submit returned {ticket!r}: a ticket is a non-empty string")
+        if self._ticket_seen(ticket):
+            raise ProcessRunError(f"{type(ch).__name__} gave ticket {ticket!r} again: a ticket names one question")
+        ans = ch.poll(ticket)
+        if ans is None:
+            from ..core.store import run_context
+            with run_context(parent=parent):
+                rec_id = self._record(spec, w["input_hash"], path, "pending", None, node, continues=w["continues"],
+                                      extra={"ticket": ticket, "channel": _channel(ch), "asking": req.to_dict(),
+                                             "resume": resume})
+            return ProcessResult("pending", None, path, {}, w["facts"], w["prov"], run_id, rec_id, spec["hash"],
+                                 f"{node}: waiting for a person (ticket {ticket})", ticket, continues=w["continues"])
+        return self._answered(ans, req, ticket, parent, ch)
+
+    def _ticket_seen(self, ticket):
+        st = self._open()
+        return any(s.data.get("ticket") == ticket for k in ("process", "human") for s in st.iter(k))
+
+    def _human_record(self, ticket):
+        for s in self._open().iter("human"):
+            if s.data.get("ticket") == ticket and s.data.get("process") == self.name:
+                return s
+        return None
+
+    def _answered(self, ans, req, ticket, parent, ch):
+        """A person's answer → the "human" record (once per ticket) and the NodeResult the node takes."""
+        from ..core.store import FORMAT as RECORD_FORMAT
+        from ..core.store import run_context
+        import time
+        old = self._human_record(ticket)
+        if old is None and not isinstance(ans, HumanAnswer):
+            raise ProcessRunError(f"{type(ch).__name__}.poll returned {type(ans).__name__}: a HumanAnswer or None")
+        if old is None and (not isinstance(ans.reviewer, str) or not ans.reviewer):
+            raise ProcessRunError(f"the answer to ticket {ticket} names no reviewer: HumanAnswer(value, reviewer=...)")
+        if old is not None:                           # one ticket, one answer: the recorded one stands
+            d = old.data
+            ans = HumanAnswer(d.get("value"), d.get("reviewer"), d.get("note"), d.get("answered_at"),
+                              declined=bool(d.get("declined")), ticket=ticket)
+            rec_id = old.id
+        else:
+            verified = None
+            if self.user_verifier is not None and not ans.declined:
+                who = self.user_verifier(ans, req)
+                if not who:
+                    raise PermissionError(f"the answer to ticket {ticket} by {ans.reviewer!r} did not verify")
+                if str(who) != ans.reviewer:
+                    raise PermissionError(f"the answer was given by {who!r}, not by the reviewer {ans.reviewer!r}")
+                verified = str(who)
+            try:
+                value = _plain(ans.value)
+            except (TypeError, ValueError) as e:
+                raise ProcessRunError(f"the answer to ticket {ticket} is not JSON data: {e}") from None
+            body = {"v": RECORD_FORMAT, "kind": "human", "process": self.name, "ticket": ticket, "node": req.node,
+                    "question": req.question, "reason": req.reason, "value": None if ans.declined else value,
+                    "declined": bool(ans.declined), "reviewer": ans.reviewer, "note": ans.note,
+                    "verified": verified, "asked_at": req.asked_at,
+                    "answered_at": ans.at if ans.at is not None else time.time(),
+                    "request_hash": _vh(req.to_dict()), "channel": _channel(ch)}
+            with run_context(run=req.run, parent=parent):
+                rec_id = self._open()._append(body)["id"]
+            ans = dataclasses.replace(ans, ticket=ticket)
+        if ans.declined:
+            return NodeResult(None, {}, "human", "abstain", None, rec_id, None, raw=ans, store=self._store)
+        return NodeResult(ans.value, {req.question: ans.value}, "human", "ok", None, rec_id, None, raw=ans,
+                          store=self._store)
+
+    def _segments(self):
+        return [s for s in self._open().iter("process") if s.data.get("process") == self.name] \
+            if self.storage is not None else []
+
+    def _tip(self, run):
+        rid = run.run if isinstance(run, ProcessResult) else run
+        segs = [s for s in self._segments() if s.run == rid]
+        if not segs:
+            raise ProcessRunError(f"no record of run {rid!r} in this process's store")
+        return rid, segs[-1]
+
+    def pending(self):
+        """The questions waiting for a person: the pending segments with no continuation → [{"run", "node", "ticket",
+        "question", "asked_at", "stored_id"}] in the order they were asked."""
+        segs = self._segments()
+        cont = {s.data.get("continues") for s in segs}
+        return [{"run": s.run, "node": s.data["outcome"]["at"], "ticket": s.data["ticket"],
+                 "question": s.data["asking"]["question"], "asked_at": s.data["asking"]["asked_at"],
+                 "stored_id": s.id}
+                for s in segs if s.data["outcome"]["status"] == "pending" and s.id not in cont]
+
+    def _resumable(self, run):
+        rid, tip = self._tip(run)
+        d = tip.data
+        if d["outcome"]["status"] != "pending":
+            raise ProcessRunError(f"run {rid} is not pending (its last segment is {d['outcome']['status']!r})")
+        ch = self._channel_obj()
+        if canonical(_channel(ch)) != canonical(d.get("channel")):
+            raise ProcessRunError(f"run {rid} asked through {d['channel']}, not through this channel ({_channel(ch)})")
+        spec = self.spec()
+        if spec["hash"] != d["spec_hash"]:
+            raise ProcessRunError(f"run {rid} was run by process spec {d['spec_hash'][:12]}, this one is "
+                                  f"{spec['hash'][:12]}: resume it with the process that asked")
+        return rid, tip, ch, spec
+
+    def resume(self, run):
+        """Go on with a pending run (its id or its ProcessResult): poll the channel for the ticket; no answer yet → a
+        ProcessResult "pending" again (nothing is written); an answer → it is recorded (kind "human", parent: the
+        pending segment) and the run goes on from the node that asked, as a new segment ("continues": the pending
+        segment's id) → its ProcessResult. A process loaded afresh from the same spec and stores resumes it."""
+        from ..core.store import run_context
+        self._check_bound()
+        rid, tip, ch, spec = self._resumable(run)
+        d = tip.data
+        ticket, req = d["ticket"], HumanRequest.from_dict(d["asking"])
+        old = self._human_record(ticket)
+        ans = None if old is not None else ch.poll(ticket)
+        if old is None and ans is None:
+            return ProcessResult("pending", None, [], {}, dict(d["resume"]["facts"]), dict(d["resume"]["provenance"]),
+                                 rid, tip.id, spec["hash"], f"{req.node}: waiting for a person (ticket {ticket})",
+                                 ticket, continues=d.get("continues"))
+        r = d["resume"]
+        with run_context(run=rid):
+            res = self._answered(ans, req, ticket, tip.id, ch)
+            w = {"node": r["node"], "facts": dict(r["facts"]), "prov": dict(r["provenance"]),
+                 "taken": list(r["taken"]), "parent": res.stored_id, "input_hash": d["input_hash"],
+                 "continues": tip.id}
+            return self._go(spec, rid, w, first=(res, dict(r["state"])))
+
+    def cancel(self, run, why):
+        """Withdraw a pending run's question (a retracted fact, the case closed): the channel's cancel, a "human"
+        record {"cancelled": true, "why"} and a "process" segment with status "cancelled" → its ProcessResult."""
+        from ..core.store import FORMAT as RECORD_FORMAT
+        from ..core.store import run_context
+        rid, tip, ch, spec = self._resumable(run)
+        d = tip.data
+        ticket, req = d["ticket"], HumanRequest.from_dict(d["asking"])
+        if self._human_record(ticket) is not None:
+            raise ProcessRunError(f"ticket {ticket} is already answered: resume the run, a recorded answer stands")
+        ch.cancel(ticket, why)
+        with run_context(run=rid, parent=tip.id):
+            hid = self._open()._append({"v": RECORD_FORMAT, "kind": "human", "process": self.name, "ticket": ticket,
+                                        "node": req.node, "question": req.question, "reason": req.reason,
+                                        "cancelled": True, "why": str(why), "channel": _channel(ch)})["id"]
+        with run_context(run=rid, parent=hid):
+            rec = self._record(spec, d["input_hash"], [], "cancelled", None, req.node, continues=tip.id)
+        return ProcessResult("cancelled", None, [], {}, dict(d["resume"]["facts"]), dict(d["resume"]["provenance"]),
+                             rid, rec, spec["hash"], f"{req.node}: cancelled ({why})", ticket, continues=tip.id)
 
     def records(self):
         """The "process" records of this process's store → [Stored] (stage 1: the index of each run)."""
@@ -1132,6 +1590,7 @@ def render(spec, fmt="mermaid"):
     return "\n".join(out)
 
 
-__all__ = ["FORMAT", "DecisionNode", "GuardNode", "HumanNode", "NodeResult", "NodeRunner", "Process", "ProcessResult",
+__all__ = ["FORMAT", "CallbackChannel", "DecisionNode", "GuardNode", "HumanAnswer", "HumanChannel", "HumanNode",
+           "HumanRequest", "MemoryQueue", "NodeResult", "NodeRunner", "Process", "ProcessResult",
            "ProcessRunError", "ProcessSpecError", "RUNNERS", "SystemNode", "canonical", "check_predicate", "describe",
            "diff", "fingerprint_of", "holds", "render", "runner_for", "spec_hash"]

@@ -302,22 +302,22 @@ def test_a_loop_runs_until_its_limit_then_the_next_edge(tmp_path):
     assert [st["edge"]["loop"] for st in r.path[:-1]] == [True, True, True, False]
 
 
-# --- the hooks left for the channel to a person (stage S1b)
+# --- a question for a person without a channel (the channel itself: test_experimental_process_human.py)
 
-def test_a_human_node_and_a_handoff_are_left_for_the_channel(tmp_path):
+def test_a_human_node_and_a_handoff_need_a_channel(tmp_path):
     ps = claim_systems(tmp_path, "p", clock())
     p = Process("h")
     p.node("triage", ps["triage"], reads=["item"], writes={"kind": "answer"})
     p.node("review", kind="human", question="kind", writes={"kind": "answer"}, end=True)
     p.edge("triage", "review")
-    with pytest.raises(NotImplementedError, match="S1b"):
+    with pytest.raises(ProcessRunError, match="no channel"):
         p.run({"item": "car"})
 
     class Abstains(Echo):
         def run(self, facts):
             return NodeResult(None, {}, "s1", "abstain", None)
     q = Process("a").node("x", Abstains(), kind="system", end=True)
-    with pytest.raises(NotImplementedError, match="S1b"):
+    with pytest.raises(ProcessRunError, match="no channel"):
         q.run({})                                      # on_abstain="handoff" (the default) needs the channel
     q.on_abstain = "abstain"
     r = q.run({})

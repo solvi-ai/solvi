@@ -25,7 +25,8 @@ machine-readable schema of a record is `src/solvi/core/store/record.schema.json`
   them, and the hash body does not change; `x-schema-changes` lists each version). Records of kinds `ask`, `teach`,
   `redaction` and `segment` are closed: a new field is a new schema version (minor when readers may ignore it, major
   when the hash body changes). Other kinds (`knowledge`, `dispatch`, `policy`, `refine`, `update`, `change`, `specialist`,
-  `process` — the index of one run of `solvi.experimental.process`) are checked for the envelope only.
+  `process` — the index of one run, or one segment of a run, of `solvi.experimental.process`; `human` — a person's
+  answer to one of its questions) are checked for the envelope only.
   [test_sem_record_schema]
 - Formats only go up along a chain: a record of format 1 after a record of format 2 is a verify problem. [test_sem_chain]
 
