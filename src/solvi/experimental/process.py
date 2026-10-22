@@ -1,9 +1,10 @@
-"""A process of several solvi systems (experimental, stages 0 to 2): the nodes, the edges with predicates written as
+"""A process of several solvi systems (experimental, stages 0 to 3): the nodes, the edges with predicates written as
 data, merges, loops with a mandatory iteration limit and the declared promise — a JSON specification with a hash, a
 structural diff and a drawing (stage 0) — and running it: each node's decision in its own store, chained into one run,
 with an index record of the path (stage 1a), and questions put to a person through a queue, a run waiting for the
-answer and going on when it comes (stage 1b) — and replaying a run from its records (stage 2). The process guarantee
-and retraction come in later stages.
+answer and going on when it comes (stage 1b) — replaying a run from its records (stage 2) — and the path promise in
+the modes union and per_node, with a watch on the mix of paths (stage 3). The end_to_end promise (stage 4) and
+retraction come in later stages.
 
     from solvi.experimental.process import Process, MemoryQueue
 
@@ -117,6 +118,33 @@ disagree), "recompute" (a decision does not recompute, or the spec changed) or "
 system or store). A pending run replays up to its question: {"ok": True, "pending": ticket}. `p.replay_all()` replays
 every run and verify()s every store it reads. What the records do not keep is listed in "unchecked" (a guard's tool
 result is stored as its hash).
+
+The path promise (stage 3). `p.guarantee()` says what the declared promise gives → {"mode", "risk", "in_force",
+"bound", "statement", "assumptions", "nodes", "problems", "warnings", "delta"}; each run that ends carries
+`automatic` (decided with no person's answer on its path) and `risk` (the process risk while the union promise is in
+force, else None), and `explain` ends with the promise. A run ends automatically when an end node answered and no
+person answered on its path; E is "it ends automatically and its end answer is wrong". mode "union" (the default):
+P(E) ≤ Σ_i r_i·m_i ≤ risk, summed over every automatic node of the graph (not over the path a run took), m_i an upper
+bound on the times node i can run in one process run (1 plus the max_iter of each loop edge that can bring a run back
+to it). split="equal" gives r_i = risk / K_auto; {node: r_i} or callable(spec) → {node: r_i} gives your own (e.g. by
+the cost of a node's error), with Σ r_i ≤ risk checked when the spec is made. Why it holds: if the end is wrong, the
+first wrong node of the path was given right inputs, so it is wrong on its own question, and it answered alone (else
+the end is not automatic); E lies in the union of "node i answered alone and was wrong", each of probability ≤ r_i·m_i.
+No independence between nodes is assumed (correlated errors make the bound looser, not wrong). It is in force when
+every automatic node keeps a promise at its share — its own CRC risk ≤ r_i (node(promise=), else the dispatcher's
+calibrated policy, else System 1's guarantee: build(max_risk=r_i)); an LTT node counts at its error level and the
+promise then holds with probability ≥ 1 − Σ δ_i (Bonferroni, a warning) —, Σ r_i·m_i ≤ risk (a loop can push an equal
+split over), no node was loaded against another fingerprint (strict=False), and the path watch has not flagged. It
+assumes (A2) that each node was calibrated on what reaches it in the process — in place, on upstream's answers with
+their errors and the routing of the edges; a node calibrated on clean inputs breaks it. mode "per_node": each node
+keeps its own promise, and the statement says the end error is not bounded. mode "end_to_end" is stage 4
+(guarantee() raises NotImplementedError; a run runs and carries no risk).
+
+`PathWatch` watches the mix of paths: `p.monitor(PathWatch(alpha=, horizon=), reference=runs of the calibration
+stream)`; every run that ends is observed (result.path_drift: {"drift", "why", "edge", "S", "h", "seen"}). Each
+edge's share of runs is followed by two Bernoulli CUSUMs (its odds up and down by `odds`), h simulated by resampling
+the reference runs with the reference's own error, so an unchanged mix is flagged within `horizon` runs with chance
+at most alpha. A flag is latched until watch.reset() and puts the union promise out of force.
 """
 from __future__ import annotations
 
@@ -129,6 +157,8 @@ import threading
 import uuid
 from dataclasses import dataclass, field
 from typing import Any
+
+import numpy as np
 
 from . import warn_on_import
 
@@ -476,7 +506,10 @@ class ProcessResult:
     {fact: {"from", "decision", "by", "confidence", "trace_hash"}} for the facts nodes wrote; run: the run id;
     stored_id: the "process" record (None without storage=); spec_hash; why: why it stopped (abstain);
     ticket: the question waiting for a person (status "pending"); continues: the pending segment this run goes on
-    from (a resumed run)."""
+    from (a resumed run); automatic: decided with no person's answer on this segment's path (a resumed run starts
+    with the person's answer, so it is never automatic), None while pending; risk: the process risk the promise puts
+    on an automatic end when it is in force (Process.guarantee()), else None; path_drift: the path watch's report
+    (Process.monitor) when one watches the process."""
     status: str
     answer: Any
     path: list
@@ -489,6 +522,9 @@ class ProcessResult:
     why: str | None = None
     ticket: str | None = None
     continues: str | None = None
+    automatic: bool | None = None
+    risk: float | None = None
+    path_drift: dict | None = None
 
 
 # --- the channel to a person (stage 1b): a queue — the process does not know when the person answers
@@ -727,6 +763,8 @@ class Process:
         self.mismatched: dict[str, dict] = {}
         self.unbound: list[str] = []
         self._store = None                            # the opened storage= (on the first run)
+        self.path_watch = None                        # a PathWatch on the mix of paths (monitor())
+        self._edges_of: dict[str, set] = {}           # run → the edges its pending segments took (for the watch)
 
     # --- building
 
@@ -1014,7 +1052,7 @@ class Process:
             edge = step(node, ns, res, state, kind)
             if res.stored_id is not None:
                 parent = res.stored_id
-            if edge is None and res.status in ("human", "abstain") and res.by != "human":
+            if edge is None and res.status in ("human", "abstain") and kind != "human":   # not a person's answer
                 on = self.on_human if res.status == "human" else self.on_abstain
                 if on == "handoff":                   # the node's decision goes to a person
                     q = ns.get("question") or node
@@ -1038,8 +1076,22 @@ class Process:
             break
         with run_context(parent=parent):              # the record follows from the last node's decision
             rec_id = self._record(spec, w["input_hash"], path, status, answer, node, continues=w["continues"])
-        return ProcessResult(status, answer, path, results, facts, prov, run_id, rec_id, spec["hash"], why,
-                             continues=w["continues"])
+        res = ProcessResult(status, answer, path, results, facts, prov, run_id, rec_id, spec["hash"], why,
+                            continues=w["continues"])
+        return self._finish(spec, res)
+
+    def _finish(self, spec, res):
+        """A run that ended (not pending): automatic or not, the risk in force, the path watch's look at it."""
+        res.automatic = res.status == "decided" and not any(st["kind"] == "human" or st["by"] == "human"
+                                                            for st in res.path)
+        edges = self._edges_of.pop(res.run, set()) | _taken(self.edges, res.path)
+        if self.path_watch is not None:
+            res.path_drift = self.path_watch.observe(sorted(edges), names=_edge_names(self.edges))
+        pr = spec.get("promise")
+        if pr is not None and pr["mode"] == "union":           # end_to_end: stage 4; per_node bounds no end risk
+            g = self.guarantee(spec)
+            res.risk = g["risk"] if g["in_force"] else None
+        return res
 
     def _step(self, node, ns, res, state, kind, facts, prov, taken):
         """One step of a path: the node's writes and their labels go into facts / prov, the first edge out of the node
@@ -1137,6 +1189,7 @@ class Process:
                 rec_id = self._record(spec, w["input_hash"], path, "pending", None, node, continues=w["continues"],
                                       extra={"ticket": ticket, "channel": _channel(ch), "asking": req.to_dict(),
                                              "resume": resume})
+            self._edges_of.setdefault(run_id, set()).update(_taken(self.edges, path))
             return ProcessResult("pending", None, path, {}, w["facts"], w["prov"], run_id, rec_id, spec["hash"],
                                  f"{node}: waiting for a person (ticket {ticket})", ticket, continues=w["continues"])
         return self._answered(ans, req, ticket, parent, ch)
@@ -1269,8 +1322,120 @@ class Process:
                                         "cancelled": True, "why": str(why), "channel": _channel(ch)})["id"]
         with run_context(run=rid, parent=hid):
             rec = self._record(spec, d["input_hash"], [], "cancelled", None, req.node, continues=tip.id)
-        return ProcessResult("cancelled", None, [], {}, dict(d["resume"]["facts"]), dict(d["resume"]["provenance"]),
-                             rid, rec, spec["hash"], f"{req.node}: cancelled ({why})", ticket, continues=tip.id)
+        return self._finish(spec, ProcessResult("cancelled", None, [], {}, dict(d["resume"]["facts"]),
+                                                dict(d["resume"]["provenance"]), rid, rec, spec["hash"],
+                                                f"{req.node}: cancelled ({why})", ticket, continues=tip.id))
+
+    # --- the path promise (stage 3: union and per_node; end_to_end is stage 4)
+
+    def guarantee(self, spec=None):
+        """What the declared promise says about this process now (stage 3) → {"mode", "risk", "in_force", "bound",
+        "statement", "assumptions", "nodes", "problems", "warnings", "delta"}.
+
+        union: P(a run ends automatically and its end answer is wrong) ≤ Σ_i r_i·m_i ≤ risk — a union bound over every
+        automatic node of the graph (not over the path a run took), m_i the most runs node i can make in one process
+        run (1, plus each loop's max_iter that can bring the run back to it). It is in force when every automatic node
+        keeps a promise at its share (a CRC risk ≤ r_i; an LTT node's error level ≤ r_i, with the process promise then
+        holding with probability ≥ 1 − Σ δ_i, Bonferroni, and a warning), Σ r_i·m_i ≤ risk, no system was loaded
+        against another fingerprint, and the path watch (monitor()) has not flagged. per_node: every node keeps its
+        own promise, and the end error is not bounded. nodes: {node: {"r_i", "visits", "promise", "ok", "why"}}."""
+        spec = spec if spec is not None else self.spec()
+        pr = spec.get("promise")
+        out = {"mode": None if pr is None else pr["mode"], "risk": None if pr is None else pr.get("risk"),
+               "in_force": False, "bound": None, "statement": None, "assumptions": [], "nodes": {}, "problems": [],
+               "warnings": [], "delta": None}
+        if pr is None:
+            out["statement"] = "no process promise is declared (p.promise(mode=...))"
+            out["problems"].append(out["statement"])
+            return out
+        if pr["mode"] == "end_to_end":
+            raise NotImplementedError("the end_to_end promise (a threshold family calibrated on end-labelled runs) is "
+                                      "stage 4 of the process; this stage computes union and per_node")
+        auto = [n for n, s in spec["nodes"].items() if s["kind"] != "human"]
+        visits = _visits(spec["nodes"], spec["edges"])
+        for n in auto:
+            npr = _node_promise(spec["nodes"][n], self.systems.get(n))
+            out["nodes"][n] = {"r_i": None, "visits": visits[n], "promise": npr, "ok": npr is not None,
+                               "why": None if npr is not None else "keeps no promise of its own"}
+        for n, m in self.mismatched.items():
+            out["problems"].append(f"{n}: loaded against another fingerprint than the recorded one (strict=False)")
+        if pr["mode"] == "per_node":
+            kept = [f"{n} ({_say_promise(v['promise'])})" for n, v in out["nodes"].items() if v["promise"] is not None]
+            bare = [n for n, v in out["nodes"].items() if v["promise"] is None]
+            out["statement"] = ("per node: each node keeps its own promise — " + (", ".join(kept) or "none does")
+                                + (f"; {', '.join(bare)} keep none" if bare else "")
+                                + ". The end error is not bounded: a node's promise is about its own answers, and an "
+                                "error upstream reaches the end through nodes that answer right on what they are given")
+            out["assumptions"] = ["A2: each node's calibration examples are exchangeable with what reaches it in the "
+                                  "process"]
+            out["in_force"] = not out["problems"]
+            return out
+        risk, per = pr["risk"], (pr.get("split") or {}).get("per_node") or {}
+        deltas = []
+        for n, v in out["nodes"].items():
+            r_i = float(per.get(n, 0.0))
+            v["r_i"] = r_i
+            npr = v["promise"]
+            if npr is None:
+                out["problems"].append(f"{n}: keeps no promise of its own (a union bound needs one at r_i = {r_i:g})")
+                continue
+            method = npr.get("method")
+            level = npr.get("risk") if method == "crc" else npr.get("error")
+            if level is None:
+                v["ok"], v["why"] = False, f"its promise ({method}) has no risk or error level"
+            elif method != "crc":
+                deltas.append(float(npr.get("delta") or 0.0))
+                out["warnings"].append(f"{n}: an {method} promise (error ≤ {level:g} among its own answers, with "
+                                       f"probability ≥ {1 - float(npr.get('delta') or 0.0):g}); it is counted at its "
+                                       "error level and the union holds with probability ≥ 1 − Σ δ_i (Bonferroni): "
+                                       "honest, and weak — calibrate it with max_risk= (CRC) instead")
+                if float(level) > r_i * (1 + 1e-9):
+                    v["ok"], v["why"] = False, f"its error level {level:g} is over its share r_i = {r_i:g}"
+            elif float(level) > r_i * (1 + 1e-9):
+                v["ok"], v["why"] = False, (f"calibrated at risk {level:g}, over its share r_i = {r_i:g}: rebuild it "
+                                            f"with max_risk={r_i:g}")
+            if not v["ok"]:
+                out["problems"].append(f"{n}: {v['why']}")
+        bound = sum(v["r_i"] * v["visits"] for v in out["nodes"].values())
+        out["bound"] = bound
+        loops = {n: v["visits"] for n, v in out["nodes"].items() if v["visits"] > 1}
+        if bound > risk * (1 + 1e-9):
+            out["problems"].append(f"Σ r_i·m_i = {bound:.6g} is over the process risk {risk:g}: a node a loop can run "
+                                   f"m_i times counts m_i times ({', '.join(f'{n} ×{m}' for n, m in loops.items())}); "
+                                   "give a split that leaves room for it")
+        if self.path_watch is not None and self.path_watch.flagged:
+            out["problems"].append(f"the mix of paths drifted ({'; '.join(self.path_watch.why)}): the stream that "
+                                   "reaches the nodes is not the one they were calibrated on (A2)")
+        if deltas:
+            out["delta"] = sum(deltas)
+        kind = (pr.get("split") or {}).get("kind")
+        shares = ", ".join(f"{n} {v['r_i']:.4g}" + (f" ×{v['visits']}" if v["visits"] > 1 else "")
+                           for n, v in out["nodes"].items())
+        out["statement"] = (f"P(a run ends automatically and its end answer is wrong) ≤ {risk:g}"
+                            + (f" with probability ≥ {1 - out['delta']:g}" if deltas else "")
+                            + f": a union bound over the {len(auto)} automatic nodes of the graph, not over the path "
+                            f"a run took; each node keeps its share r_i ({kind} split: {shares}). A run ends "
+                            "automatically when an end node answered and no person answered on its path")
+        out["assumptions"] = [
+            "A1: none on the errors — no independence; correlated errors only make the bound looser",
+            "A2: each node's calibration examples are exchangeable with what reaches it in the process — calibrate a "
+            "node in place, on what upstream gives it; a node calibrated on clean inputs, a node changed after its "
+            "calibration, or a stream that drifted breaks the bound",
+        ]
+        out["in_force"] = not out["problems"]
+        return out
+
+    def monitor(self, watch, reference=None):
+        """Watch the mix of paths: watch is a PathWatch; reference: runs (ProcessResults, or lists of the edges each
+        took) from the stream the nodes were calibrated on, to set its reference (else set it yourself). Every run
+        that ends is then observed (result.path_drift); a flag puts the union promise out of force until
+        watch.reset(). → self."""
+        if not isinstance(watch, PathWatch):
+            raise TypeError("monitor(watch): a PathWatch")
+        if reference is not None:
+            watch.set_reference([_edge_list(self.edges, r) for r in reference], names=_edge_names(self.edges))
+        self.path_watch = watch
+        return self
 
     def records(self):
         """The "process" records of this process's store → [Stored] (stage 1: the index of each run)."""
@@ -1293,9 +1458,18 @@ class Process:
             where = f" [{st['stored_id']}]" if st["stored_id"] else ""
             lines.append(f"  {i}. {st['node']} ({st['kind']}): by {st['by']}, {st['status']}{ans}{conf}{where}{nxt}")
         if result.status == "decided":
-            lines.append(f"  decided: {json.dumps(_plain_or_repr(result.answer), ensure_ascii=False)}")
+            lines.append(f"  decided: {json.dumps(_plain_or_repr(result.answer), ensure_ascii=False)}"
+                         + ("" if result.automatic is None else
+                            " (automatically)" if result.automatic else " (with a person on the path)"))
         else:
             lines.append(f"  {result.status}: {result.why}")
+        if self._promise is not None and self._promise["mode"] != "end_to_end":
+            g = self.guarantee()
+            lines.append(f"  promise ({g['mode']}): {g['statement']}"
+                         + ("" if g["mode"] == "per_node" else
+                            "; in force" if g["in_force"] else f"; NOT in force: {'; '.join(g['problems'])}"))
+        if result.path_drift is not None and result.path_drift.get("drift"):
+            lines.append(f"  paths: the mix drifted ({'; '.join(result.path_drift['why'])})")
         return "\n".join(lines)
 
     # --- replay (stage 2)
@@ -1532,7 +1706,7 @@ class _Replay:
             i += 1
             if res.stored_id is not None:
                 self.parent = res.stored_id
-            if edge is None and res.status in ("human", "abstain") and res.by != "human":
+            if edge is None and res.status in ("human", "abstain") and kind != "human":   # as run() does
                 on = self.p.on_human if res.status == "human" else self.p.on_abstain
                 if on == "handoff":
                     self.pos = i
@@ -2224,7 +2398,212 @@ def render(spec, fmt="mermaid"):
     return "\n".join(out)
 
 
+# --- the path promise (stage 3): helpers and the watch on the mix of paths
+
+def _visits(nodes, edges):
+    """An upper bound on the times each node can run in one process run: 1, plus the max_iter of every loop edge that
+    can come between two of its runs — taken after it (its source reachable from the node) and leading back to it
+    without another loop edge (the node reachable from its target over edges that are not loops). A return to a node
+    takes a loop edge, and a loop edge is taken at most max_iter times in a run."""
+    adj = {n: set() for n in nodes}
+    fwd = {n: set() for n in nodes}
+    for e in edges:
+        adj[e["from"]].add(e["to"])
+        if not e.get("loop"):
+            fwd[e["from"]].add(e["to"])
+
+    def reach(a, g):
+        seen, todo = {a}, [a]
+        while todo:
+            for b in g[todo.pop()]:
+                if b not in seen:
+                    seen.add(b)
+                    todo.append(b)
+        return seen
+    r = {n: reach(n, adj) for n in nodes}
+    out = {n: 1 for n in nodes}
+    for e in edges:
+        if e.get("loop"):
+            back = reach(e["to"], fwd)
+            for n in back:
+                if e["from"] in r[n]:
+                    out[n] += int(e["max_iter"])
+    return out
+
+
+def _node_promise(ns, system):
+    """A node's own promise as a Promise.record()-like dict: the one given to node(promise=), else its system's (the
+    dispatcher's calibrated policy, else System 1's guarantee on the node's question) → dict or None."""
+    if ns.get("promise") is not None:
+        return dict(ns["promise"])
+    if system is None or ns.get("kind") == "guard":
+        return None
+    pol = getattr(getattr(system, "dispatcher", None), "policy", None)
+    if isinstance(pol, dict) and pol.get("method") in ("crc", "ltt", "empirical") and pol.get("level") is not None:
+        out = {"method": pol["method"], "n": pol.get("n"), "by": "dispatcher"}
+        out["risk" if pol["method"] == "crc" else "error"] = pol["level"]
+        if pol.get("delta") is not None:
+            out["delta"] = pol["delta"]
+        return out
+    guards = getattr(getattr(system, "system", system), "guards", None)
+    if not isinstance(guards, dict) or not guards:
+        return None
+    q = ns.get("question")
+    g = guards.get(q) if q in guards else (next(iter(guards.values())) if len(guards) == 1 else None)
+    rec = getattr(g, "record", None) or getattr(getattr(g, "promise", None), "record", None)   # a QuestionGuard's
+    return dict(rec()) if callable(rec) else None
+
+
+def _say_promise(pr):
+    if pr is None:
+        return "none"
+    if pr.get("method") == "crc":
+        return f"risk ≤ {pr.get('risk'):g}"
+    return f"{pr.get('method')} error ≤ {pr.get('error')}" + (f", δ {pr['delta']:g}" if pr.get("delta") else "")
+
+
+def _edge_names(edges):
+    names, seen = [], {}
+    for e in edges:
+        k = f"{e['from']} -> {e['to']}"
+        seen[k] = seen.get(k, 0) + 1
+        names.append(k if seen[k] == 1 else f"{k} #{seen[k]}")
+    return names
+
+
+def _taken(edges, path):
+    """The edges (their indices) a recorded path took."""
+    out = set()
+    for st in path:
+        e = st.get("edge")
+        if e is None:
+            continue
+        for i, x in enumerate(edges):
+            if x["from"] == st["node"] and x["to"] == e["to"] and _cj(x.get("when")) == _cj(e.get("when")) \
+                    and bool(x.get("loop")) == bool(e.get("loop")):
+                out.add(i)
+                break
+    return out
+
+
+def _edge_list(edges, r):
+    if isinstance(r, ProcessResult):
+        return sorted(_taken(edges, r.path))
+    names = _edge_names(edges)
+    return sorted(names.index(x) if isinstance(x, str) else int(x) for x in r)
+
+
+class PathWatch:
+    """A watch on the mix of paths of a process (stage 3): which edges the runs take. The union promise assumes each
+    node is calibrated on the stream that reaches it (A2); a shift in the share of runs that take an edge is a shift in
+    that stream. Each edge's share is followed by two Bernoulli CUSUMs (a rise and a fall of its odds by `odds`), the
+    reference shares from runs of the calibration stream, the threshold h simulated by resampling those runs (their
+    dependence kept: the edges out of a node exclude each other) with the reference's own sampling error, so that an
+    unchanged mix is flagged within `horizon` runs with chance at most alpha. A flag is latched until reset(); it puts
+    the union promise out of force (Process.guarantee()). What it reports is "the paths changed", not why.
+
+        watch = PathWatch(alpha=0.01, horizon=1000)
+        p.monitor(watch, reference=calibration_runs)      # ProcessResults (or lists of edges) of the calibration stream
+        r = p.run(facts); r.path_drift                    # {"drift", "why", "edge", "S", "h", "seen"}
+
+    The same CUSUM as AuditWatch and DriftMonitor (solvi.core.guarantees.drift.Cusum)."""
+
+    def __init__(self, *, alpha=0.01, horizon=1000, odds=2.0, sims=None, seed=0):
+        if not float(odds) > 1.0:
+            raise ValueError("odds: the rise (and fall) of an edge's odds to detect, above 1")
+        if not 1e-4 <= float(alpha) < 1:
+            raise ValueError("alpha between 1e-4 and 1")
+        self.alpha, self.horizon, self.odds, self.sims, self.seed = float(alpha), int(horizon), float(odds), sims, seed
+        self.names = self.p0 = self.cusum = self.h = None
+        self.n_ref = None
+        self.seen, self._flagged, self.why, self.edge = 0, False, [], None
+
+    @property
+    def flagged(self):
+        return self._flagged
+
+    @staticmethod
+    def _inc(p0, odds):
+        o = p0 / (1 - p0)
+        up, dn = o * odds / (1 + o * odds), (o / odds) / (1 + o / odds)
+        return (np.log(up / p0), np.log((1 - up) / (1 - p0)), np.log(dn / p0), np.log((1 - dn) / (1 - p0)))
+
+    def set_reference(self, runs, names=None):
+        """runs: one list of edge indices per run of the calibration stream (at least 20); names: the edges' names
+        (default "e0", "e1", ...). → self (h simulated here)."""
+        import warnings
+        rows = [sorted({int(i) for i in r}) for r in runs]
+        if len(rows) < 20:
+            raise ValueError(f"a reference of {len(rows)} runs: at least 20 runs of the calibration stream")
+        n_e = len(names) if names else max([max(r) + 1 for r in rows if r] or [1])
+        if any(r and (r[0] < 0 or r[-1] >= n_e) for r in rows):
+            raise ValueError(f"an edge index outside the {n_e} edges")
+        self.names = list(names) if names else [f"e{i}" for i in range(n_e)]
+        R = np.zeros((len(rows), len(self.names)))
+        for j, r in enumerate(rows):
+            R[j, r] = 1.0
+        n = len(rows)
+        self.n_ref, self._R = n, R
+        self.p0 = (R.sum(0) + 0.5) / (n + 1.0)
+        odds = self.odds
+        inc = self._inc
+
+        def make_null(rng, sims):
+            counts = rng.multinomial(n, np.full(n, 1.0 / n), size=sims)        # the reference, redrawn (its own error)
+            q0 = (counts @ R + 0.5) / (n + 1.0)
+            u1, u0, d1, d0 = inc(q0, odds)
+
+            def nxt():
+                x = R[rng.integers(n, size=sims)]                              # runs drawn as they came, edges together
+                return np.concatenate([np.where(x > 0, u1, u0), np.where(x > 0, d1, d0)], axis=1)
+            return nxt
+        from ..core.guarantees.drift import Cusum
+        chans = [f"{k} up" for k in self.names] + [f"{k} down" for k in self.names]
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            self.cusum = Cusum.calibrate(chans, make_null, alpha=self.alpha, horizon=self.horizon, sims=self.sims,
+                                         seed=self.seed)
+        self.h = self.cusum.h
+        self._u1, self._u0, self._d1, self._d0 = inc(self.p0, odds)
+        self.reset()
+        return self
+
+    def reset(self):
+        """The stream starts again: the CUSUMs and the flag cleared; the reference kept."""
+        if self.cusum is not None:
+            self.cusum.reset()
+        self.seen, self._flagged, self.why, self.edge = 0, False, [], None
+
+    def observe(self, taken, names=None):
+        """One run's edges (indices) → {"drift", "why", "edge", "S", "h", "seen"}."""
+        if self.cusum is None:
+            raise RuntimeError("set_reference() first (or Process.monitor(watch, reference=runs))")
+        if names is not None and list(names) != self.names:
+            raise ValueError("the process's edges are not the ones the reference was taken on")
+        self.seen += 1
+        x = np.zeros(len(self.names))
+        x[[int(i) for i in taken]] = 1.0
+        if not self._flagged:
+            self.cusum.step(np.concatenate([np.where(x > 0, self._u1, self._u0), np.where(x > 0, self._d1, self._d0)]))
+            ch, S, since = self.cusum.top()
+            if S >= self.h:
+                k = len(self.names)
+                j = int(np.argmax(self.cusum.S))
+                e, way = self.names[j % k], ("more" if j < k else "fewer")
+                self._flagged, self.edge = True, e
+                self.why = [f"{way} runs take {e} than in the reference ({self.p0[j % k]:.3g} of {self.n_ref}), "
+                            f"since about run {self.seen - since} (S {S:.3g} ≥ h {self.h:.3g})"]
+        _, S, _ = self.cusum.top()
+        return {"drift": self._flagged, "why": list(self.why), "edge": self.edge, "S": S, "h": self.h,
+                "seen": self.seen}
+
+    def fingerprint(self):
+        from ..core.provenance import digest
+        return digest("PathWatch", self.alpha, self.horizon, self.odds, self.seed,
+                      None if self.p0 is None else [round(float(v), 12) for v in self.p0], self.n_ref)
+
+
 __all__ = ["FORMAT", "CallbackChannel", "DecisionNode", "GuardNode", "HumanAnswer", "HumanChannel", "HumanNode",
-           "HumanRequest", "MemoryQueue", "NodeResult", "NodeRunner", "Process", "ProcessResult",
+           "HumanRequest", "MemoryQueue", "NodeResult", "NodeRunner", "PathWatch", "Process", "ProcessResult",
            "ProcessRunError", "ProcessSpecError", "RUNNERS", "SystemNode", "canonical", "check_predicate", "describe",
            "diff", "fingerprint_of", "holds", "render", "runner_for", "spec_hash"]
