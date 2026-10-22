@@ -1,7 +1,8 @@
-"""A process of several solvi systems as data (experimental, stage 0): the nodes, the edges with predicates written as
+"""A process of several solvi systems (experimental, stages 0 and 1a): the nodes, the edges with predicates written as
 data, merges, loops with a mandatory iteration limit and the declared promise — a JSON specification with a hash, a
-structural diff and a drawing. Running, replay, the process guarantee and the channel to a person come in later stages;
-this stage fixes the format they will use.
+structural diff and a drawing (stage 0) — and running it: each node's decision in its own store, chained into one run,
+with an index record of the path (stage 1a). Replay, the process guarantee and the channel to a person come in later
+stages.
 
     from solvi.experimental.process import Process
 
@@ -22,6 +23,12 @@ this stage fixes the format they will use.
     q = Process.from_spec(spec, systems={"triage": triage, "fraud": fraud, "payout": payout})
     p.diff(q)                           # [] — or one entry per change: {"path", "change", "before", "after", "say"}
     p.render("mermaid")                 # or "text"
+
+    p = Process("claim", storage="st/process.jsonl", on_abstain="abstain", on_human="abstain")   # ... nodes, edges
+    r = p.run({"claim": claim})         # ProcessResult: status ("decided" | "abstain"), answer, path, nodes, facts,
+                                        #   provenance, run, stored_id (the "process" record)
+    print(p.explain(r))                 # the path in words: who answered at each node, which edge was taken
+    chronology(stores, run=r.run)       # solvi.core.store.chronology: the node decisions and the record, in order
 
 The format (`"solvi_process": "1.0"`). A node has a `kind` ∈ {decision, system, guard, human}: a `solvi.build` result,
 a bare System, a Guard, or a question put to a person; `reads` (the facts it reads), `writes` ({fact: what of the
@@ -46,14 +53,39 @@ the recorded one: a different system is an error (`ProcessSpecError`), or with s
 stays unbound (`p.unbound`): its spec is kept as recorded, so a process can be diffed and drawn without its systems.
 A system's fingerprint: `System.fingerprint()` for a System; that and `Dispatcher.config()` for a `solvi.build` result;
 the tools and the code of the policies for a Guard (stage 0: the adapters of stage 1 may refine it); an object with its
-own `fingerprint()` otherwise. Not yet: `run`, `explain`, `replay`, `retract`, `pending`/`resume` and the
-`HumanChannel` classes; `human=` takes any object with a `fingerprint()` for now and only records it.
+own `fingerprint()` otherwise (a Guard's is `Guard.fingerprint()`).
+
+Running (stage 1a). `run(facts)` starts at the start node and follows one path: a node is given the facts it reads
+(plain values: what the caller gave and what upstream nodes wrote — a fact not yet written is left out), its decision
+is made by its own system and stored in its own store, and the first edge out of it whose predicate holds on its outcome
+(in the order the edges were added; a loop edge until it has been taken max_iter times) leads to the next node. A node
+is run through a NodeRunner — DecisionNode (a solvi.build result: ask → Dispatched, a "dispatch" record), SystemNode
+(a System: ask → Response, an "ask" record), GuardNode (a Guard: call(facts["call"], context=facts["context"],
+facts=the rest) → GuardDecision; an escalation has status "human") — so the decisions are exactly the ones calling the
+systems by hand in the same order makes. Every fact a node writes carries a provenance label {"from": node, "decision":
+stored_id, "by", "confidence", "trace_hash"} (result.provenance); a node that reads the fact "provenance" is given the
+labels of the facts it reads as that given fact, and is otherwise given plain values only. Shared facts go through a
+solvi.Knowledge the systems were built with (build(knowledge=)); the process passes nothing through it, and records the
+hash of the snapshot a node was given. The run opens run_context(run=id) and each node runs inside
+run_context(parent=the previous node's stored id), so its record carries the run and the decision it follows from, and
+chronology(stores, run=id) puts the run in order without the process. With storage= the process appends one record of
+kind "process" to its own store: {"process", "spec_hash", "input_hash", "mode", "promise", "path": [{node, kind, store,
+stored_id, trace_hash, by, status, answers_hash, facts_in_hash, facts_out_hash, knowledge, cost, edge: {to, when,
+loop}}], "outcome": {status, at, answer_hash}} — an index of hashes and ids; the decisions are in the node stores.
+The run ends "decided" at an end node that answered, or "abstain" where it stopped (`why`). A node that abstains, or
+whose decision goes to a person, with no edge for it: on_abstain / on_human = "abstain" stops the run there;
+"handoff" (the default) and a node of kind "human" go to the channel to a person — stage S1b; this stage raises
+NotImplementedError there. A node that merges "all" of several inputs raises NotImplementedError too (this stage
+follows one path). Not yet: `replay`, `retract`, `pending`/`resume` and the `HumanChannel` classes; `human=` takes any
+object with a `fingerprint()` for now and only records it.
 """
 from __future__ import annotations
 
 import hashlib
 import json
 import re
+from dataclasses import dataclass, field
+from typing import Any
 
 from . import warn_on_import
 
@@ -204,11 +236,8 @@ def describe(p):
 
 def fingerprint_of(system, kind=None):
     """What a node's system is, as JSON-ready data (see the module docs). kind: the node's kind when known."""
-    from ..core.provenance import code_fingerprint, digest
-    if kind == "guard" or (kind is None and type(system).__name__ == "Guard" and hasattr(system, "_policies")):
-        return {"guard": digest("Guard", sorted(system.tools),
-                                [(code_fingerprint(f), sorted(t) if t else None) for f, t, *_ in system._policies],
-                                [(code_fingerprint(f), sorted(t) if t else None) for f, t in system._fns])}
+    if kind == "guard" or (kind is None and _is_guard(system)):
+        return {"guard": system.fingerprint()}
     disp = getattr(system, "dispatcher", None)
     if disp is not None and callable(getattr(disp, "config", None)):
         return {"system": system.system.fingerprint(), "dispatcher": disp.config()}
@@ -220,8 +249,14 @@ def fingerprint_of(system, kind=None):
                            "object with fingerprint())")
 
 
+def _is_guard(system):
+    """A solvi Guard, by its public surface (the guard lives in the agent layer, which this module does not import)."""
+    return (type(system).__name__ == "Guard" and isinstance(getattr(system, "tools", None), dict)
+            and all(callable(getattr(system, m, None)) for m in ("call", "fingerprint", "replay")))
+
+
 def _kind_of(system):
-    if type(system).__name__ == "Guard" and hasattr(system, "_policies"):
+    if _is_guard(system):
         return "guard"
     if callable(getattr(getattr(system, "dispatcher", None), "config", None)):
         return "decision"
@@ -240,11 +275,174 @@ def _plain(v):
     return json.loads(json.dumps(v, ensure_ascii=False))
 
 
+# --- running a node (stage 1): one protocol over the three kinds of system
+
+@dataclass
+class NodeResult:
+    """What one node decided. answer: its main answer (the node's question's; for a System without one question, the
+    dict of its answers; for a Guard, the outcome allow / deny / escalate); answers: {question: answer} ("answer:<q>"
+    writes read them; a Guard's are "verdict" and "result", the tool's return value); by: "s1" | "s2" | "human";
+    status: "ok" | "forced" | "abstain" | "human" (a person has to decide: a solvi.build result that sent it to a
+    person, a Guard that escalated); confidence: the answer's (None when the slow path or nobody answered);
+    stored_id / trace_hash: where the decision is in its store and the hash at the end of its trace; cost: {"s1",
+    "s2", "total"} as dicts (a solvi.build result) or None; drift, budget_over: the dispatcher's flags; raw: the
+    system's own result (a Dispatched, a Response or a GuardDecision); store: the TraceStorage it was written to."""
+    answer: Any
+    answers: dict
+    by: str
+    status: str
+    confidence: float | None = None
+    stored_id: str | None = None
+    trace_hash: str | None = None
+    cost: dict | None = None
+    drift: bool = False
+    budget_over: bool = False
+    raw: Any = field(default=None, repr=False)
+    store: Any = field(default=None, repr=False)
+
+    def value(self, what):
+        """What a `writes` entry takes from this result: "answer", "answer:<question>", "confidence", "by", "status"."""
+        if what == "answer":
+            return self.answer
+        if what.startswith("answer:"):
+            q = what[7:]
+            if q not in self.answers:
+                raise ProcessRunError(f"no answer to {q!r} in this node's result (it has {sorted(self.answers)})")
+            return self.answers[q]
+        return {"confidence": self.confidence, "by": self.by, "status": self.status}[what]
+
+
+class ProcessRunError(RuntimeError):
+    """A process that cannot go on: a node given no system, a node result that lacks what the node writes, a guard
+    node without the fact "call"."""
+
+
+class NodeRunner:
+    """The protocol of a node: run(facts) → NodeResult, where facts are the node's given facts ({name: plain value}, the
+    ones it reads); the decision is written to the system's own store (inside the process's run_context, so the record
+    carries the run and the decision it follows from). A runner of your own subclasses it (and sets `kind`);
+    `runner_for` picks the built-in one for a node."""
+    kind = None
+
+    def __init__(self, system, spec):
+        self.system, self.spec = system, spec
+
+    def run(self, facts):
+        raise NotImplementedError
+
+    @property
+    def store(self):
+        return getattr(self.system, "storage", None)
+
+
+class DecisionNode(NodeRunner):
+    """A solvi.build result (a DecisionSystem): ask(facts) → Dispatched; stored as a "dispatch" record."""
+    kind = "decision"
+
+    def run(self, facts):
+        from ..core.runtime import trace_hash
+        d = self.system.ask(facts)
+        r1 = d.s1.results.get(d.question) if d.s1 is not None else None
+        if d.by == "human":
+            status, conf = "human", None
+        elif d.by == "s1":
+            status, conf = (r1.status if r1 is not None else "ok"), (r1.confidence if r1 is not None else None)
+        else:
+            status, conf = "ok", None
+        return NodeResult(d.answer, {d.question: d.answer}, d.by, status, conf, d.stored_id,
+                          trace_hash(d.s1) if d.s1 is not None else None,
+                          {k: v.to_dict() for k, v in (d.cost or {}).items()} or None,
+                          bool(d.drift), bool(d.over_budget), d, self.store)
+
+
+class SystemNode(NodeRunner):
+    """A bare System: ask(facts) → Response; stored as an "ask" record when the System has storage. The main answer is
+    the node's question's (question=, or the System's one question); without one, the dict of every answer."""
+    kind = "system"
+
+    def run(self, facts):
+        from ..core.runtime import trace_hash
+        resp = self.system.ask(facts)
+        q = self.spec.get("question")
+        if q is None and len(resp.results) == 1:
+            q = next(iter(resp.results))
+        answers = {k: r.answer for k, r in resp.results.items()}
+        if q is not None:
+            if q not in resp.results:
+                raise ProcessRunError(f"the system answered no question {q!r} (it answered {sorted(resp.results)})")
+            r = resp.results[q]
+            answer, status, conf = r.answer, r.status, r.confidence
+        else:
+            answer, status, conf = answers, ("ok" if resp.complete else "abstain"), resp.confidence
+        return NodeResult(answer, answers, "s1", status, conf, resp.stored_id, trace_hash(resp), None, False, False,
+                          resp, self.store)
+
+
+class GuardNode(NodeRunner):
+    """A Guard: call(facts["call"], context=facts["context"], facts=the other facts) → GuardDecision (the tool runs when
+    allowed, as Guard.call does); the answer is the outcome, status "human" for an escalation; answers "verdict" and
+    "result" (the tool's return value)."""
+    kind = "guard"
+
+    def run(self, facts):
+        if "call" not in facts:
+            raise ProcessRunError("a guard node reads the proposed call as the fact 'call' (reads=['call', ...])")
+        rest = {k: v for k, v in facts.items() if k not in ("call", "context")}
+        d = self.system.call(facts["call"], context=facts.get("context"), facts=rest or None)
+        r = d.response.results.get("verdict") if d.response is not None else None
+        return NodeResult(d.outcome, {"verdict": d.outcome, "result": d.result}, "s1",
+                          "human" if d.outcome == "escalate" else "ok", r.confidence if r is not None else None,
+                          d.stored_id, d.trace_hash if d.response is not None else None, None, False, False, d,
+                          self.store)
+
+
+class HumanNode(NodeRunner):
+    """A question put to a person through the process's channel (stage S1b: HumanChannel, pending / resume)."""
+    kind = "human"
+
+    def run(self, facts):
+        raise NotImplementedError("a human node asks a person through the process's channel: that comes in the next "
+                                  "stage (S1b, HumanChannel with pending / resume)")
+
+
+RUNNERS = {"decision": DecisionNode, "system": SystemNode, "guard": GuardNode, "human": HumanNode}
+
+
+def runner_for(kind, system, spec):
+    """The built-in NodeRunner of a node kind for its system (a NodeRunner given as the system is used as is)."""
+    if isinstance(system, NodeRunner):
+        return system
+    return RUNNERS[kind](system, spec)
+
+
+@dataclass
+class ProcessResult:
+    """One run of a process. status: "decided" (an end node answered), "abstain" (it stopped before an end node
+    answered: `why` says where); answer: the end node's answer (None unless decided); path: the steps as recorded
+    ([{node, kind, store, stored_id, trace_hash, by, status, answers_hash, facts_in_hash, facts_out_hash, knowledge,
+    cost, edge}]); nodes: {node: NodeResult} (the last result of each node); facts: every fact at the end; provenance:
+    {fact: {"from", "decision", "by", "confidence", "trace_hash"}} for the facts nodes wrote; run: the run id;
+    stored_id: the "process" record (None without storage=); spec_hash; why: why it stopped (abstain);
+    pending, ticket: for the channel to a person (stage S1b)."""
+    status: str
+    answer: Any
+    path: list
+    nodes: dict
+    facts: dict
+    provenance: dict
+    run: str
+    stored_id: str | None = None
+    spec_hash: str | None = None
+    why: str | None = None
+    ticket: str | None = None
+
+
 # --- the process
 
 class Process:
-    """A process of solvi systems (see the module docs). name: the process's name; storage: where its runs will be
-    stored (a later stage; not part of the spec); human: the channel to a person (recorded by fingerprint only, for
+    """A process of solvi systems (see the module docs). name: the process's name; storage: a path or a TraceStorage
+    where each run's "process" record is appended (not part of the spec; None: no record, the node stores still hold
+    every decision); human: the channel to a person (recorded by fingerprint only, for
     now); start: the start node (default: the one node without an incoming edge); on_abstain, on_human: "handoff" (to
     the channel) or "abstain"."""
 
@@ -265,6 +463,7 @@ class Process:
         self.examples = None                          # end_to_end calibration examples (used by a later stage)
         self.mismatched: dict[str, dict] = {}
         self.unbound: list[str] = []
+        self._store = None                            # the opened storage= (on the first run)
 
     # --- building
 
@@ -479,6 +678,137 @@ class Process:
         _check_graph(p.nodes, p.edges, p.merges, p._start)
         return p
 
+    # --- running (stage 1a)
+
+    def run(self, facts, run=None):
+        """Run the process once on the given facts ({name: value}) → ProcessResult (see the module docs). run: the run
+        id (default: the enclosing run_context's, else a new one). Every node's decision is written to its own store
+        inside run_context(run=..., parent=the previous node's stored id); with storage= the process writes one record
+        of kind "process" (the index of the path: hashes, ids, the edges taken) whose parent is the last node's
+        decision."""
+        from ..core.store import current_run, run_context
+        spec = self.spec()
+        lack = [n for n, ns in self.nodes.items() if ns["kind"] != "human" and n not in self.systems]
+        if lack:
+            raise ProcessRunError(f"nodes without a system: {lack} (Process.from_spec(spec, systems=...))")
+        outer = current_run()
+        facts = dict(facts)
+        given = dict(facts)
+        prov, path, results = {}, [], {}
+        taken = [0] * len(self.edges)
+        node, status, answer, why = spec["start"], None, None, None
+        with run_context(run=run) as rc:
+            parent = outer["parent"] if outer else None
+            while True:
+                ns = self.nodes[node]
+                if self.merges.get(node) == "all" and sum(1 for e in self.edges if e["to"] == node
+                                                          and not e.get("loop")) > 1:
+                    raise NotImplementedError(f"node {node!r} merges 'all' of several inputs: this stage follows one "
+                                              "path (the first edge that holds); waiting for several branches comes "
+                                              "later")
+                if ns["kind"] == "human":
+                    return self._human(node, ns, facts, prov, path)
+                runner = runner_for(ns["kind"], self.systems[node], ns)
+                state = {r: facts[r] for r in ns["reads"] if r in facts and r != "provenance"}
+                if "provenance" in ns["reads"]:
+                    state["provenance"] = {r: prov[r] for r in ns["reads"] if r in prov}
+                with run_context(parent=parent):
+                    res = runner.run(state)
+                out = {f: res.value(what) for f, what in ns["writes"].items()}
+                label = {"from": node, "decision": res.stored_id, "by": res.by, "confidence": res.confidence,
+                         "trace_hash": res.trace_hash}
+                facts.update(out)
+                prov.update({f: dict(label) for f in out})
+                results[node] = res
+                outcome = {"facts": facts, "status": res.status, "by": res.by, "confidence": res.confidence,
+                           "budget_over": res.budget_over, "drift": res.drift}
+                edge = None
+                for i, e in enumerate(self.edges):
+                    if e["from"] != node or (e.get("loop") and taken[i] >= e["max_iter"]):
+                        continue
+                    if holds(e.get("when"), outcome):
+                        edge, taken[i] = e, taken[i] + 1
+                        break
+                kh = state.get("knowledge")
+                if kh is None and res.raw is not None and getattr(res.raw, "s1", None) is not None:
+                    kh = res.raw.s1.trace.init.get("knowledge")
+                path.append({"node": node, "kind": ns["kind"], "store": ns.get("store"), "stored_id": res.stored_id,
+                             "trace_hash": res.trace_hash, "by": res.by, "status": res.status,
+                             "answers_hash": _vh(res.answers), "facts_in_hash": _vh(state),
+                             "facts_out_hash": _vh(out), "knowledge": None if kh is None else _vh(kh),
+                             "cost": res.cost,
+                             "edge": None if edge is None else {"to": edge["to"], "when": edge.get("when"),
+                                                                "loop": bool(edge.get("loop"))}})
+                if res.stored_id is not None:
+                    parent = res.stored_id
+                if edge is not None:
+                    node = edge["to"]
+                    continue
+                if res.status == "human" or (res.status == "abstain"):
+                    on = self.on_human if res.status == "human" else self.on_abstain
+                    if on == "handoff":
+                        return self._handoff(node, res, facts, prov, path)
+                    status, why = "abstain", f"{node}: {'a person has to decide' if res.status == 'human' else 'abstained'}"
+                elif ns.get("end"):
+                    status, answer = "decided", res.answer
+                else:
+                    status, why = "abstain", f"{node}: no edge holds and it is not an end node"
+                break
+            with run_context(parent=parent):          # the record follows from the last node's decision
+                rec_id = self._record(spec, given, path, status, answer, node)
+        return ProcessResult(status, answer, path, results, facts, prov, rc.id, rec_id, spec["hash"], why)
+
+    def _record(self, spec, given, path, status, answer, at):
+        """The "process" record (an index: the node stores hold the decisions) → its id, or None without storage."""
+        if self.storage is None:
+            return None
+        from ..core.store import FORMAT as RECORD_FORMAT
+        from ..core.store import open_storage
+        if self._store is None:
+            self._store = open_storage(self.storage)
+        pr = spec.get("promise")
+        rec = self._store._append({"v": RECORD_FORMAT, "kind": "process", "process": spec["name"],
+                                   "spec_hash": spec["hash"], "input_hash": _vh(given),
+                                   "mode": pr["mode"] if pr else None, "promise": pr, "path": _plain(path),
+                                   "outcome": {"status": status, "at": at, "answer_hash": _vh(answer)}})
+        return rec["id"]
+
+    def _human(self, node, ns, facts, prov, path):
+        """A human node: the question goes to the channel (stage S1b)."""
+        return runner_for("human", None, ns).run(facts)
+
+    def _handoff(self, node, res, facts, prov, path):
+        """on_abstain / on_human = "handoff": the decision goes to the channel (stage S1b)."""
+        raise NotImplementedError(f"node {node!r} hands its decision to a person ({res.status}): the channel to a "
+                                  "person comes in the next stage (S1b); Process(on_abstain='abstain', "
+                                  "on_human='abstain') stops the run there instead")
+
+    def records(self):
+        """The "process" records of this process's store → [Stored] (stage 1: the index of each run)."""
+        if self.storage is None:
+            return []
+        from ..core.store import open_storage
+        if self._store is None:
+            self._store = open_storage(self.storage)
+        return [s for s in self._store.iter("process") if s.data.get("process") == self.name]
+
+    def explain(self, result):
+        """A run in words: each node, who answered and how, the edge taken; then how the run ended."""
+        lines = [f"process {self.name}, run {result.run}" + (f" (record {result.stored_id})" if result.stored_id else "")]
+        for i, st in enumerate(result.path, 1):
+            r = result.nodes.get(st["node"]) if i == _last_index(result.path, st["node"]) else None
+            ans = f" answered {json.dumps(_plain_or_repr(r.answer), ensure_ascii=False)}" if r is not None else ""
+            conf = f" (confidence {st_conf:.3g})" if r is not None and (st_conf := r.confidence) is not None else ""
+            e = st["edge"]
+            nxt = (f"; → {e['to']} because {describe(e['when'])}" + (" (loop)" if e["loop"] else "")) if e else "; stop"
+            where = f" [{st['stored_id']}]" if st["stored_id"] else ""
+            lines.append(f"  {i}. {st['node']} ({st['kind']}): by {st['by']}, {st['status']}{ans}{conf}{where}{nxt}")
+        if result.status == "decided":
+            lines.append(f"  decided: {json.dumps(_plain_or_repr(result.answer), ensure_ascii=False)}")
+        else:
+            lines.append(f"  {result.status}: {result.why}")
+        return "\n".join(lines)
+
     # --- reading it
 
     def diff(self, other):
@@ -491,6 +821,26 @@ class Process:
 
     def __repr__(self):
         return f"Process({self.name!r}, {len(self.nodes)} nodes, {len(self.edges)} edges)"
+
+
+def _last_index(path, node):
+    return max(i for i, st in enumerate(path, 1) if st["node"] == node)
+
+
+def _plain_or_repr(v):
+    try:
+        return _plain(v)
+    except (TypeError, ValueError):
+        return repr(v)
+
+
+def _vh(v):
+    """vhash of a value, or of its repr when it is not data (a tool's return value)."""
+    from ..core.runtime import vhash
+    try:
+        return vhash(v)
+    except Exception:  # noqa: BLE001 — any value a tool may return
+        return vhash(repr(v))
 
 
 def _short(fp):
@@ -782,5 +1132,6 @@ def render(spec, fmt="mermaid"):
     return "\n".join(out)
 
 
-__all__ = ["FORMAT", "Process", "ProcessSpecError", "canonical", "check_predicate", "describe", "diff",
-           "fingerprint_of", "holds", "render", "spec_hash"]
+__all__ = ["FORMAT", "DecisionNode", "GuardNode", "HumanNode", "NodeResult", "NodeRunner", "Process", "ProcessResult",
+           "ProcessRunError", "ProcessSpecError", "RUNNERS", "SystemNode", "canonical", "check_predicate", "describe",
+           "diff", "fingerprint_of", "holds", "render", "runner_for", "spec_hash"]

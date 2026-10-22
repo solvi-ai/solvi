@@ -12,6 +12,20 @@
   byte and refuses a system or channel whose fingerprint is not the recorded one (`strict=False` marks it); `diff`
   names every change by node and edge; `render` draws Mermaid or text. Running, replay, the path promise and the
   channel to a person come in later stages.
+- **Process (experimental), stage 1a: running a process.** `Process.run(facts)` follows one path through the nodes —
+  each node's own system decides on the facts it reads (plain values; a provenance label per written fact, given to a
+  node only when it reads `"provenance"`), the first edge whose predicate holds leads on — and `explain(result)` says
+  it in words. Node runners behind one protocol (`NodeRunner.run(facts) → NodeResult`): `DecisionNode` (a
+  `solvi.build` result), `SystemNode` (a System), `GuardNode` (a Guard: the fact `call`; an escalation is a person's
+  decision). The node decisions are those of calling the systems by hand in the same order (tested record for record).
+  Each node runs inside `run_context(parent=` the previous node's decision `)`, so `chronology(stores, run=)` gives the
+  path; `Process(storage=)` appends one record of kind `"process"` per run (ids and hashes of the path; the record
+  schema lists the kind among those checked for the envelope). A node of kind `"human"` and a hand-off to a person
+  raise `NotImplementedError` until the channel to a person (stage 1b); `on_abstain` / `on_human="abstain"` stops the
+  run there instead. A merge of `"all"` inputs is not run yet (one path).
+- **`Guard.fingerprint()`**: what decides a guard's calls as one hash, read from its declarations (tools with their
+  schemas and functions, policies, functions, firewalls, the authorizer, settings); building nothing. The process
+  records it per guard node instead of reading the guard's private attributes.
 
 ## 1.3.0 — 2026-10-19 — laws for rule-governed worlds: rivals, negations, a factored model
 

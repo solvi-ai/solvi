@@ -1872,6 +1872,40 @@ class Guard:
         """The solvi Catalog of one tool's checks."""
         return self.system(name).catalog
 
+    def fingerprint(self):
+        """What decides this guard's calls, as one hash (16 hex digits), read from its declarations: every tool (its
+        function-calling definition — name, description, argument schema —, the code of its function, ground, match,
+        locale, injections, authorize, once, scan_user, tool_values, ground_last, its confirmation and firewall
+        declarations), the code of every policy and function with the tools it names and its on_fail, the firewall
+        declarations, the authorizer's fingerprint, and the guard's settings (tool_values, scan_user, the facts it is
+        given). Two guards with the same fingerprint check every call the same way; a changed policy, schema or
+        declaration changes it. Computing it builds nothing (the tools' Systems are built on the first call, as
+        before). A process records it per guard node (solvi.experimental.process)."""
+        from ...core.provenance import code_fingerprint, digest
+        from ...core.provenance import fingerprint as model_fingerprint
+
+        def fp(v):                                     # callables by their code, containers through, values as is
+            if callable(v) and not isinstance(v, type):
+                return ["code", code_fingerprint(v)]
+            if isinstance(v, dict):
+                return [[k, fp(x)] for k, x in sorted(v.items(), key=lambda kv: repr(kv[0]))]
+            if isinstance(v, (list, tuple, set, frozenset)):
+                return [fp(x) for x in (sorted(v, key=repr) if isinstance(v, (set, frozenset)) else v)]
+            return v
+
+        tools = []
+        for name in sorted(self.tools):
+            t = self.tools[name]
+            tools.append([name, t.definition() if t.model is not None else None, fp(t.func), fp(t.ground),
+                          t.injections, t.authorize, fp(t.match), t.schema_error, t.locale, t.scan_user, t.tool_values,
+                          t.ground_last, t.once, fp(t.confirm), fp(t.firewall)])
+        policies = [[fp(f), sorted(ts) if ts else None, on_fail] for f, ts, on_fail, *_ in self._policies]
+        fns = [[fp(f), sorted(ts) if ts else None] for f, ts in self._fns]
+        firewalls = [[sorted(ts) if ts else None, fp(spec)] for ts, spec in self._firewalls]
+        auth = None if self._authorizer is None else model_fingerprint(self._authorizer)
+        return digest("Guard", tools, policies, fns, firewalls, auth, self.tool_values, self.scan_user,
+                      sorted(self.facts))
+
     def _build(self, t):
         from ...core.provenance import code_fingerprint
         from ...core.system import System
