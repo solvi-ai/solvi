@@ -107,20 +107,22 @@ def _logit(p, floor=EPS):
 
 
 def _grid_floor(answers):
-    """The probability floor of one reply under prob_floor="auto": half the step of the grid every probability of the
-    reply lies on (all of them multiples of 10^-d within 1e-9, the coarsest such d of 1..4: a service that rounds to
-    0.01 gets 0.005), else EPS — the floor a reply that is not on a grid always had. Values that are not probabilities
-    are left out here (they escalate when the answer is read)."""
+    """The probability floor of one reply under prob_floor="auto": half the step of the grid the reply's interior
+    probabilities (0 < p < 1) lie on — all of them multiples of 10^-d within 1e-9, the coarsest such d of 2..4: a
+    service that rounds to 0.01 gets 0.005, and so does one that rounds to 0.1 — else EPS, the floor a reply that is
+    not on a grid always had. Exact 0s and 1s say nothing about a grid: a reply with no interior probability (all 0 /
+    1) keeps EPS, so a service's confident 0 / 1 answer reads as before. Values that are not probabilities are left
+    out here (they escalate when the answer is read)."""
     ps = []
     for a in answers.values() if isinstance(answers, dict) else ():
         if not isinstance(a, dict):
             continue
         vs = [a.get("noul")] + (list(a["probabilities"].values()) if isinstance(a.get("probabilities"), dict) else [])
         ps += [float(v) for v in vs if isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v)
-               and 0 <= v <= 1]
+               and 0 < v < 1]
     if not ps:
         return EPS
-    for d in range(1, 5):
+    for d in range(2, 5):
         step = 10.0 ** -d
         if all(abs(v - round(v / step) * step) <= 1e-9 for v in ps):
             return step / 2
@@ -418,8 +420,10 @@ def systemone(base_url, model, api_key=None, *, timeout=30.0, opener=None, extra
     punctuation × 1.3, the question included; default None: 512, as for a local decider) — as llm(max_len=...).
 
     prob_floor: the smallest probability taken from a reply before its log (a 0 has no log). "auto" (default): half the
-    step of the grid the reply's probabilities lie on — all of them multiples of 0.01 (a service that rounds, as Jev
-    does) → 0.005; multiples of 0.1 → 0.05; on no grid of 10^-1 … 10^-4 → 1e-6, as before 1.4, bit for bit. A float
+    step of the grid the reply's probabilities strictly between 0 and 1 lie on — all of them multiples of 0.01 (a
+    service that rounds, as Jev does; or of 0.1) → 0.005; on no grid of 10^-2 … 10^-4 → 1e-6, as before 1.4, bit for
+    bit. A reply whose probabilities are all exactly 0 or 1 shows no grid and keeps 1e-6 (a rounding service's exact 0
+    on the right answer in such a reply is still read at 1e-6: set a float floor for that service). A float
     sets it for every reply; None keeps 1e-6 everywhere. Why: with a 1e-6 floor one rounded-to-0 probability on the
     right answer weighs log(1e-6) ≈ −13.8 and drags fit / teach / calibration — a third-party measurement on Jev
     (https://github.com/scienthoon/jev-ood-calibration, their numbers) refit the choice temperature to 3.29 with a 1e-6
