@@ -54,6 +54,22 @@
   records it per guard node instead of reading the guard's private attributes.
 
 ### Fixed
+- **A skill certificate spends δ over its restarts** (`solvi.experimental.skills.Certificate`). After an alarm or a
+  widened skill condition the process restarted and certified again at the full δ, so after k restarts the chance that
+  some certificate it issued was wrong was bounded only by k·δ, not by the δ the promise states. The v-th
+  certification of a process (v = 1 for a fresh one, one more after each restart) now bets against
+  δ_v = 6δ/(π²v²); Σ_v δ_v = δ, so every certificate a process ever issues holds together with probability ≥ 1 − δ.
+  The process records `v`, `delta_v` and `delta_spent` (Σ δ_u for u ≤ v) in `EProcess.to_dict()` (so in the skill
+  set's report and the evidence written by `to_knowledge`), and `Certificate.to_dict()` records `delta_split`;
+  `Certificate.delta_at(v)` and `need_at(v)` give the numbers. The price: more clean outcomes per certification — at
+  5% and δ 0.1, 61 / 91 / 108 for v = 1 / 2 / 3 against 50 at every restart before; 30 at 10% and 14 at 20% for a
+  fresh process (25 and 12 before). `Certificate(delta_split=False)` keeps the old behaviour number for number (each
+  certificate holds alone, not together). A Certificate or EProcess pickled before this change has no `delta_split`
+  / `v` and keeps the full δ, so it replays as it ran; the old keys of `to_dict()` are unchanged. The skills numbers
+  in docs/best_practices.md and docs/experimental.md (the gridworld toy, Crafter: "fifty clean uses") were measured
+  before this change, with the full δ at each restart; they were not re-measured, and with the split a certificate
+  takes longer to reach, so System 1's shares there may be lower. The toy tests that count outcomes pass
+  `delta_split=False`.
 - **A code fingerprint no longer depends on whether the code has run yet.** A module global set on first use
   (`_X = None`, filled by the first call) was hashed as None before that call and left out after it, so a Guard tool's
   `System.fingerprint()` taken before the first `guard.call` gave `argument_errors` another fingerprint than one taken
