@@ -104,7 +104,7 @@ def _jkeys(v):
     t = type(v)
     if t in _SCALARS:
         return v
-    if t is list or t is tuple:
+    if isinstance(v, (list, tuple)):                 # subclasses too: json.dumps writes any list / tuple as an array
         out = None
         for i, x in enumerate(v):
             if type(x) in _SCALARS:
