@@ -25,8 +25,10 @@ def _state(**kw):
 
 
 def _ready(policy=None, **kw):
-    """A state in which DefaultPolicy wants a training: 300 train labels over version 0, which answers nothing."""
-    kw.setdefault("labels", {"train": 300, "calib": 64, "holdout": 64})
+    """A state in which DefaultPolicy wants a training: 300 train labels over version 0, which answers nothing, and the
+    held-out and calib labels the pre-freeze gates need (100, 100); `labels` given are merged onto those."""
+    kw["labels"] = {"train": 300, "calib": 100, "holdout": 100, **kw.get("labels", {})}
+    kw.setdefault("holdout", ((False, False),) * 100)        # version 0 without a model: every outcome escalated
     return _state(**kw)
 
 
@@ -85,11 +87,36 @@ def test_want_train_waits_for_first_then_for_growth_over_the_served_version():
     assert "299 train label(s) < 300" in p.why_not_train(_ready(labels={"train": 299}))
     assert p.want_train(_ready())
     vs = (VersionInfo(0, "retired"), VersionInfo(1, "served", n_train=400))
-    weak = tuple((True, True) for _ in range(50))            # served errs alone: short
+    weak = tuple((True, True) for _ in range(100))           # served errs alone: short
     assert not p.want_train(_ready(versions=vs, served=1, labels={"train": 599}, holdout=weak))
     assert "growth 1.5 × the largest n_train of any version, 400" in p.why_not_train(
         _ready(versions=vs, served=1, labels={"train": 599}, holdout=weak))
     assert p.want_train(_ready(versions=vs, served=1, labels={"train": 600}, holdout=weak))
+
+
+def test_no_training_before_the_pre_freeze_gates_can_pass():
+    """Stage-2 review S2: with the default shares, 300 train labels come with about 64 held-out and 64 calib labels —
+    a freeze needs 100 and 73 — so the first training would be refused at birth."""
+    p = DefaultPolicy()
+    assert gates.calib_min(0.05) == 73 and gates.calib_min(0.10) < 73
+    st = _ready(labels={"train": 300, "calib": 64, "holdout": 64})
+    assert not p.want_train(st) and p.why_not_train(st) == "64 held-out label(s) < 100: a freeze cannot pass yet"
+    st = _ready(labels={"train": 300, "calib": 72, "holdout": 100})
+    assert not p.want_train(st) and p.why_not_train(st).startswith("72 calib label(s) < 73")
+    assert p.want_train(_ready(labels={"train": 300, "calib": 73, "holdout": 100}))
+    assert DefaultPolicy(min_calib=0).want_train(_ready(labels={"calib": 0}))          # a learner with its threshold
+    no_gates = _ready(labels={"calib": 0, "holdout": 0})
+    assert DefaultPolicy(pre_freeze=False).want_train(no_gates)                        # no gates, no floor
+    # after a promotion: 700 train labels (≥ 1.5 × 450), the window empty → no training (the old rule trained against a strong
+    # incumbent it had not measured); 100 outcomes of a strong incumbent → none; of a weak one → train
+    vs = (VersionInfo(0, "retired"), VersionInfo(1, "retired", n_train=300), VersionInfo(2, "served", n_train=450))
+    after = dict(versions=vs, served=2, labels={"train": 700, "calib": 150, "holdout": 150})
+    assert not p.want_train(_ready(**after, holdout=()))
+    assert p.why_not_train(_ready(**after, holdout=())).startswith("no improvement signal yet")
+    assert not p.want_train(_ready(**after, holdout=((True, False),) * 100))
+    assert p.want_train(_ready(**after, holdout=((True, True),) * 10 + ((True, False),) * 90))
+    with pytest.raises(ValueError):
+        DefaultPolicy(min_calib=-1)
 
 
 def test_a_discarded_candidate_raises_the_retrain_floor():
@@ -120,18 +147,21 @@ def test_want_train_needs_the_improvement_signal():
     assert p.want_train(_ready(versions=vs, served=1, labels=labels, holdout=erring))
     # only the last `window` held-out labels count: old errors scroll out
     assert not p.want_train(_ready(versions=vs, served=1, labels=labels, holdout=erring + strong))
-    # a served version answering nothing alone is short; so is one with no held-out label yet
+    # a served version answering nothing alone is short; one with no held-out outcome yet has no signal (stage-2 S2)
     assert p.want_train(_ready(versions=vs, served=1, labels=labels, holdout=((False, False),) * 200))
-    assert p.want_train(_ready(versions=vs, served=1, labels=labels, holdout=()))
+    assert not p.want_train(_ready(versions=vs, served=1, labels=labels, holdout=()))
     # target_share: a strong but timid incumbent is short of it
     timid = tuple([(True, False)] * 40 + [(False, False)] * 160)
     assert not p.want_train(_ready(versions=vs, served=1, labels=labels, holdout=timid))
     assert DefaultPolicy(target_share=0.5).want_train(_ready(versions=vs, served=1, labels=labels, holdout=timid))
     # the promised level is the state's
     assert not p.want_train(_ready(versions=vs, served=1, labels=labels, holdout=erring, alpha=0.10))
-    # fewer than min_holdout (100) held-out labels: not shown strong, so short — one right alone answer is no evidence
-    assert p.want_train(_ready(versions=vs, served=1, labels=labels, holdout=((True, False),)))
-    assert p.want_train(_ready(versions=vs, served=1, labels=labels, holdout=strong[:99]))
+    # fewer than min(min_holdout, window) (100) outcomes: no signal yet, no training — the served version is measured
+    # before it is retrained (the window restarts at a promotion)
+    st1 = _ready(versions=vs, served=1, labels=labels, holdout=((True, False),))
+    assert not p.want_train(st1) and p.why_not_train(st1).startswith("no improvement signal yet: 1 held-out outcome")
+    assert not p.want_train(_ready(versions=vs, served=1, labels=labels, holdout=erring[:99]))
+    assert p.want_train(_ready(versions=vs, served=1, labels=labels, holdout=erring[:100]))
     assert not p.want_train(_ready(versions=vs, served=1, labels=labels, holdout=strong[:100]))
     one = gates.incumbent_short([(True, False)], 0.05, min_n=100)
     assert one["short"] and "< 100" in one["why"]
@@ -290,17 +320,22 @@ def test_promote_needs_all_four_conditions_and_the_probe():
     assert not p.promote(_state(), GOOD)                                              # no candidate
 
 
-def test_promotion_needs_the_candidates_error_on_novel_samples_within_alpha():
-    """Author's decision 5 (2026-10-23): wrong_novel / n_novel ≤ α on top of the probe and probe_min."""
+def test_promotion_needs_the_wilson_bound_of_the_novel_error_within_alpha():
+    """Author's decisions 5 and 6 (2026-10-23): the Wilson 95 % upper bound of wrong_novel / n_novel ≤ α, on top of
+    the probe and probe_min — not the point estimate."""
+    from solvi.core.store.sysreport import wilson
     p, st = DefaultPolicy(), _cand()
-    over = Paired(n_novel=200, alone_novel=60, wrong_novel=11, alone_served=20, n_seen=100, alone_seen=40,
-                  wrong_seen=4)                                     # 11 / 200 = 0.055 > 0.05; the probe passes
-    checks = p.promote_checks(st, over)
+    at = Paired(n_novel=200, alone_novel=60, wrong_novel=10, alone_served=20, n_seen=100, alone_seen=40,
+                wrong_seen=4)                                       # point 10 / 200 = 0.050, bound ≈ 0.090
+    checks = p.promote_checks(st, at)
+    assert checks["novel_risk"]["risk"] == 0.05 and checks["novel_risk"]["ub"] == wilson(10, 200, 0.95)[1]
+    assert 0.085 < checks["novel_risk"]["ub"] < 0.095
     assert not checks["novel_risk"]["ok"] and all(g["ok"] for k, g in checks.items() if k != "novel_risk")
-    assert not p.promote(st, over)
-    at = Paired(n_novel=200, alone_novel=60, wrong_novel=10, alone_served=20, n_seen=100, alone_seen=40, wrong_seen=4)
-    assert p.promote(st, at)                                        # 10 / 200 = 0.05: at α passes
-    assert DefaultPolicy(novel_risk=False).promote(st, over)
+    assert not p.promote(st, at)                                    # the point estimate at α would have passed
+    many = Paired(n_novel=500, alone_novel=150, wrong_novel=10, alone_served=50, n_seen=100, alone_seen=40,
+                  wrong_seen=4)                                     # point 0.020, bound ≈ 0.037
+    assert p.promote_checks(st, many)["novel_risk"]["ub"] < 0.05 and p.promote(st, many)
+    assert DefaultPolicy(novel_risk=False).promote(st, at)
     assert not p.promote_checks(st, Paired(0, 0, 0, 0))["novel_risk"]["ok"]
 
 

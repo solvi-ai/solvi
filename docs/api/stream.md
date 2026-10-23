@@ -55,8 +55,10 @@ a hook reads; `Budget`; `DefaultPolicy`. Unmeasured.
 ## `solvi.experimental.stream.loop`
 
 The adapter loop (stage 2): `AdapterLoop`, the lane's loop driven by a `LoopPolicy` — labels split by content key,
-online or batch learners, promotion on samples whose key the candidate never trained on with the memorisation probe,
-the RiskDetector OR-ed with a score monitor, controls. No LoRA learner, runner, checkpoint or attach yet. Unmeasured.
+online or batch learners, promotion on samples whose key the candidate never trained on with the memorisation probe
+and a Wilson bound on the error there, the RiskDetector OR-ed with a score monitor, controls; a hook that raises after
+the state changed stops the loop (status "error") with the decision recorded. No LoRA learner, runner, checkpoint or
+attach yet. Unmeasured.
 
 ::: solvi.experimental.stream.loop
 
@@ -70,6 +72,6 @@ How a frozen version is put in front of a System: the `Served` protocol, `HeadVe
 
 The content-key split and the gate arithmetic the default policy uses: the held-out gate, the honesty gate, label
 mode's paired Wilson sign test (safe only together with the held-out gate), the memorisation probe, the improvement
-signal.
+signal, the fewest calib labels a calib threshold needs.
 
 ::: solvi.experimental.stream.gates

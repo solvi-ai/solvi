@@ -243,9 +243,23 @@
   installed through `Served.install` (`HeadVersion` over a frozen model's head, `BaseVersion` for version 0).
   `LearningLoop` is now `AdapterLoop` with `DefaultPolicy` at the lane's constants (`lane_policy`; its records gain
   the content key, the split, the wall clock and a "train" event per freeze). `DefaultPolicy` gains `refreeze`,
-  `probe`, `pre_freeze` and `novel_risk` switches, and a promotion bar (author's decision): the candidate's error on
-  novel samples, wrong alone over all novel samples, ≤ α. Not built yet: the LoRA learner and swap, runners, the
-  checkpoint, label mode and attach. Unmeasured.
+  `probe`, `pre_freeze`, `novel_risk` and `min_calib` switches, and a promotion bar (author's decision): the
+  candidate's error on novel samples, wrong alone over all novel samples, ≤ α, read as its Wilson 95 % upper bound
+  (`core.store.sysreport.wilson`), not the point estimate — looked at on every decision, the point estimate passed a
+  candidate with a true novel error of 6.4 % in 56 % of simulated 1 000-sample trials, the bound in 1.4 %; at 3 % the
+  bound leaves about 6 % of candidates unpromoted within such a trial. `want_train` waits for the labels the pre-freeze
+  gates need (`min_holdout` held-out labels and `gates.calib_min(α)` calib labels, 73 at α = 0.05), so the first
+  training is not refused at birth, and reads the improvement signal only once the held-out window holds
+  min(`min_holdout`, `window`) outcomes, so no training follows a promotion before the new served version was
+  measured. A hook that raises after a decision or a control began to change the state stops the loop: the decision is
+  recorded with an "error" event (the hook, its place, the exception), `status()["state"]` is "error", `step` and the
+  controls refuse, and `replay()` raises the recorded error at the same place, so it stays exact. `status()` takes no
+  lock (it answers from another thread during an in-process training and shows the job); `versions()` and `replay()`'s
+  snapshot take it. A learner's `keys()` is united with the rows it was handed into the version's training keys (a
+  warm-started or stateful learner does not leak keys into "novel"). The learner's `update` is called with `key=` /
+  `source=` only when its signature takes them, a `TypeError` inside it is no longer retried. A refused `train_now`
+  writes its "train" event. Not built yet: the LoRA learner and swap, runners, the checkpoint, label mode and attach.
+  Unmeasured.
 - **A secret for the supervision and audit draws: `Dispatcher(secret=)`** (`solvi.core.dispatch`; security). The
   draws were `sha256(f"{seed}|{input hash}|{n}")` with the public default `seed=0`, so whoever could vary the inputs
   could compute which decisions would be supervised or audited and avoid them. With `secret=` (bytes or str; None reads

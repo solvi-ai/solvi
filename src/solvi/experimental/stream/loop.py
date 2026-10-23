@@ -62,16 +62,30 @@ Controls (each writes a "stream" event marked `control`, which `replay()` re-app
 Records: as the lane's, plus per decision its content key, its split, and the wall clock `t` (the budget reads the
 clock; replay reads the recorded one), and per training a "train" event (job, trigger, rows, settings, fingerprint, the
 TrainReport, whether it froze). Replay re-runs the protocol from the records with a fresh copy of the policy as it was
-built (pickled at construction) and the recorded training results.
+built (pickled at construction) and the recorded training results. A `train_now` refused writes its "train" event too
+(state "refused").
+
+A hook that raises after a decision (or a control) began to change the state — the policy's, the learner's update,
+keys or scoring of the held-out labels, the monitor, `Served` — stops the loop (design §1.2): the decision is recorded
+with the fields known so far and an "error" event (where: the hook; call: its place in the decision; why), `status()`
+says "error", the loop is paused and `step` and every control refuse from then on; the served version stays installed
+(the Dispatcher's path is not the loop's). Events of the failing step after the error are not written. Replay raises
+the recorded error again at the same place, so a transient fault and a deterministic one both replay exactly. A
+refused label source or a failing `policy.accept` / `split` raises before anything changed and does not stop the
+loop. A failed training (the learner's `train` raising) is not an error: it is recorded and the served version keeps
+serving.
 
 Not built here (stages 3–5): the LoRA learner and the atomic swap, runners (thread / subprocess), the checkpoint, label
-mode and `attach`. Labels are kept in memory. Unmeasured: no stand has run on this loop."""
+mode and `attach`. Labels are kept in memory, inputs included (`LabelRow.x`): with dict inputs the memory grows with
+the label count until stage 3's label store. A training runs in process, inside `step` (or `train_now`): `step` waits
+for it, `status()` does not (it takes no lock). Unmeasured: no stand has run on this loop."""
 from __future__ import annotations
 
 import copy
 import dataclasses
 import hashlib
 import hmac
+import inspect
 import json
 import math
 import pickle
@@ -142,6 +156,25 @@ def _json(x):
 
 def _alone(score, thr) -> bool:
     return score is not None and math.isfinite(thr) and math.isfinite(float(score)) and score >= thr
+
+
+class _Replayed(Exception):
+    """A recorded error raised again by replay at the place it was recorded."""
+
+    def __init__(self, why):
+        super().__init__(why)
+        self.why = why
+
+
+def _update_keywords(update) -> frozenset:
+    """Which of key= / source= a learner's update takes (read once from its signature)."""
+    try:
+        params = inspect.signature(update).parameters
+    except (TypeError, ValueError):
+        return frozenset()
+    if any(p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values()):
+        return frozenset(("key", "source"))
+    return frozenset(k for k in ("key", "source") if k in params)
 
 
 class _Recorded:
@@ -281,6 +314,11 @@ class AdapterLoop:
         self._replay_trains: list = []
         self._replay_t = 0.0
         self._step_t = None
+        self._upd_kw = _update_keywords(learner.update)
+        self.error = None                                  # {"n", "where", "why"} once a hook raised: the loop stops
+        self._hk, self._where, self._changing = 0, "loop", False
+        self._inject = None                                # replay: {"call", "why"} of a recorded error
+        self._inflight = None                              # the training in flight, for an error record
 
     @staticmethod
     def _row(v, state, model, promise, frozen_at, seen, n_train, keys, fp):
@@ -344,6 +382,7 @@ class AdapterLoop:
         drawn by the coin); source: its source (default the loop's); key: the input's content key (None: the loop's
         key function)."""
         with self._lock:
+            self._refuse_if_stopped()
             s, c = self._vs[self.served], self._vs.get(self.candidate)
             would_s, score_s = s["model"].score(x) if s["model"] is not None else (None, None)
             would_k, score_k = c["model"].score(x) if c is not None else (None, None)
@@ -374,7 +413,7 @@ class AdapterLoop:
             sp = self.policy.split(self._state(), key)
             if sp not in self._split_n:
                 raise ValueError(f"policy.split returned {sp!r}, not 'train', 'calib' or 'holdout'")
-            self._split_of[key] = sp
+            self._split_of[key] = sp                       # the first state change, before the decision's own
         return sp
 
     def _advance(self, x, key, would_s, score_s, would_k, score_k, oracle, src):
@@ -408,60 +447,84 @@ class AdapterLoop:
 
     def _advance_at(self, n, x, key, sv, c, thr_s, prob, rho, sampled, alone, label, lsrc, lof, split, would_s,
                     score_s, would_k, score_k, t):
-        # --- from here the state changes
+        # --- from here the state changes: a hook that raises from here on stops the loop (`_stop`), the decision is
+        # recorded with its "error" event and replay raises the same error at the same place
         self.n = n
-        for v, score in ((sv, score_s), (c, score_k)):
-            if v is not None and self._vs[v]["promise"] is not None:
-                self._vs[v]["promise"].observe(score)
-        if sampled:
-            for v, score, would in ((sv, score_s, would_s), (c, score_k, would_k)):
-                if v is None or self._vs[v]["promise"] is None:
-                    continue
-                ver = self._vs[v]
-                if not n > ver["frozen_at"]:               # cannot happen: a version is frozen at the end of a step
-                    raise RuntimeError(f"decision {n} would calibrate version {v} frozen at {ver['frozen_at']}")
-                ver["promise"].learn(score, would, label)
-                ver["fed"].append(n)
-            if c is not None:
-                self._vs[c]["samples"].append((score_k, score_s, label is None or would_k != label,
-                                               label is None or would_s != label, key in self._vs[c]["keys"]))
-        det_rep, mon_rep, det, ps = None, None, self.detector, self._vs[sv]["promise"]
-        if sampled and det is not None and ps is not None and math.isfinite(thr_s) and not prob:
-            wrong = label is None or would_s != label
-            if ps.kind == "joint":
-                loss, fed = (1.0 if (alone and wrong) else 0.0), True
-            else:                                          # selective: the error among the alone answers
-                loss, fed = (1.0 if wrong else 0.0), alone
-            if fed and det.update(loss):
-                det_rep = det.report()
-        if self.monitor is not None and not prob and score_s is not None and math.isfinite(float(score_s)):
-            rep = self.monitor.observe(float(score_s))
-            if isinstance(rep, dict) and rep.get("drift"):
-                mon_rep = rep
-        if prob:
-            self.left -= 1
-        if label is not None:
-            self._rows.append(LabelRow(key, x, label, lsrc, n))
-            self._split_n[split] += 1
-            if split == "train":
-                self._feed(x, label, key, lsrc)
-            elif split == "holdout":
-                self._holdout.append((_alone(score_s, thr_s), would_s != label))
-        self.rate.push(alone)
-        if alone and not sampled:
-            answer, by = would_s, "local"
-        elif label is not None:
-            answer, by = label, "oracle"
-        else:
-            answer, by = None, "person"
-        events = []
-        if n == 1 and self._vs[0]["model"] is not None:
-            events.append(self._event("start", 0, n, fingerprint=self._vs[0]["fingerprint"], why=None))
-        events += self._promise_events()
-        if det_rep is not None or mon_rep is not None:
-            events += self._on_alarm(n, sv, c, det_rep, mon_rep)
-        events += self._protocol(n)
-        events += self._promise_events()
+        self._hk, self._where = 0, "loop"
+        det = self.detector
+        events, answer, by = [], None, None
+        try:
+            if self._inject is not None and self._inject["call"] == 0:
+                raise _Replayed(self._inject["why"])
+            for v, score in ((sv, score_s), (c, score_k)):
+                if v is not None and self._vs[v]["promise"] is not None:
+                    self._vs[v]["promise"].observe(score)
+            if sampled:
+                for v, score, would in ((sv, score_s, would_s), (c, score_k, would_k)):
+                    if v is None or self._vs[v]["promise"] is None:
+                        continue
+                    ver = self._vs[v]
+                    if not n > ver["frozen_at"]:           # cannot happen: a version is frozen at the end of a step
+                        raise RuntimeError(f"decision {n} would calibrate version {v} frozen at {ver['frozen_at']}")
+                    ver["promise"].learn(score, would, label)
+                    ver["fed"].append(n)
+                if c is not None:
+                    self._vs[c]["samples"].append((score_k, score_s, label is None or would_k != label,
+                                                   label is None or would_s != label, key in self._vs[c]["keys"]))
+            det_rep, mon_rep, ps = None, None, self._vs[sv]["promise"]
+            if sampled and det is not None and ps is not None and math.isfinite(thr_s) and not prob:
+                wrong = label is None or would_s != label
+                if ps.kind == "joint":
+                    loss, fed = (1.0 if (alone and wrong) else 0.0), True
+                else:                                      # selective: the error among the alone answers
+                    loss, fed = (1.0 if wrong else 0.0), alone
+                if fed and det.update(loss):
+                    det_rep = det.report()
+            if self.monitor is not None and not prob and score_s is not None and math.isfinite(float(score_s)):
+                self._at("monitor")
+                rep = self.monitor.observe(float(score_s))
+                if isinstance(rep, dict) and rep.get("drift"):
+                    mon_rep = rep
+            if prob:
+                self.left -= 1
+            if label is not None:
+                self._rows.append(LabelRow(key, x, label, lsrc, n))
+                self._split_n[split] += 1
+                if split == "train":
+                    self._feed(x, label, key, lsrc)
+                elif split == "holdout":
+                    self._holdout.append((_alone(score_s, thr_s), would_s != label))
+            self.rate.push(alone)
+            if alone and not sampled:
+                answer, by = would_s, "local"
+            elif label is not None:
+                answer, by = label, "oracle"
+            else:
+                answer, by = None, "person"
+            if n == 1 and self._vs[0]["model"] is not None:
+                events.append(self._event("start", 0, n, fingerprint=self._vs[0]["fingerprint"], why=None))
+            events += self._promise_events()
+            if det_rep is not None or mon_rep is not None:
+                events += self._on_alarm(n, sv, c, det_rep, mon_rep)
+            events += self._protocol(n)
+            events += self._promise_events()
+        except Exception as e:  # noqa: BLE001 — recorded, then raised again
+            err = self._stop(n, e)
+            events += self._promise_events() + [err]
+            self._write(self._record(n, sv, c, rho, sampled, alone, by, lsrc, lof, label, prob, score_s, thr_s,
+                                     score_k, det, key, split, t, error={k: err[k] for k in ("where", "call", "why")}),
+                        {"input": x, "would": would_s, "shadow_would": would_k, "label": label, "answer": answer},
+                        events)
+            raise
+        rec = self._record(n, sv, c, rho, sampled, alone, by, lsrc, lof, label, prob, score_s, thr_s, score_k, det,
+                           key, split, t)
+        payload = {"input": x, "would": would_s, "shadow_would": would_k, "label": label, "answer": answer}
+        self._write(rec, payload, events)
+        return {"n": n, "answer": answer, "by": by, "served": sv, "candidate": c, "sampled": sampled, "label": label,
+                "label_source": lsrc, "events": [e["event"] for e in events]}
+
+    def _record(self, n, sv, c, rho, sampled, alone, by, lsrc, lof, label, prob, score_s, thr_s, score_k, det, key,
+                split, t, error=None):
         st = lambda v: None if v is None or self._vs[v]["promise"] is None else self._vs[v]["promise"].state()  # noqa: E731
         rec = {"n": n, "served": sv, "candidate": c, "rho": rho, "sampled": sampled, "alone": alone, "by": by,
                "label_source": lsrc, "label_of": lof, "missing": (sampled or not alone) and label is None,
@@ -469,23 +532,63 @@ class AdapterLoop:
                "threshold": None if math.isinf(thr_s) else thr_s, "shadow": _num(score_k), "served_state": st(sv),
                "candidate_state": st(c), "detector": None if det is None else det.state(), "seen": self.live.seen(),
                "key": key, "split": split, "t": t}
-        payload = {"input": x, "would": would_s, "shadow_would": would_k, "label": label, "answer": answer}
-        self._write(rec, payload, events)
-        return {"n": n, "answer": answer, "by": by, "served": sv, "candidate": c, "sampled": sampled, "label": label,
-                "label_source": lsrc, "events": [e["event"] for e in events]}
+        if error is not None:
+            rec["error"] = error
+        return rec
+
+    # --- errors
+    def _at(self, where):
+        """A hook is about to run: its name and its place (the count of hooks so far in this decision or control),
+        for the error record; a replay of a recorded error raises it again here."""
+        self._hk += 1
+        self._where = where
+        inj = self._inject
+        if inj is not None and inj["call"] == self._hk:
+            raise _Replayed(inj["why"])
+
+    def _stop(self, n, e, **extra) -> dict:
+        """A hook raised after the state changed: the loop stops (status "error", paused; `step` and the controls
+        refuse from here on); the served version stays installed. → the "error" event."""
+        why = e.why if isinstance(e, _Replayed) else f"{type(e).__name__}: {e}"
+        self.error = {"n": n, "where": self._where, "why": why}
+        self.paused = True
+        inflight, self._inflight, self._job = self._inflight, None, None
+        return self._event("error", self.served, n, where=self._where, call=self._hk, why=why,
+                           candidate=self.candidate, train=inflight, **extra)
+
+    def _refuse_if_stopped(self):
+        if self.error is not None:
+            e = self.error
+            raise RuntimeError(f"the loop stopped on an error at decision {e['n']} ({e['where']}: {e['why']}); the "
+                               "served version keeps serving")
+
+    def _guarded(self, of, args, fn):
+        """A control that may change the state: an exception after the change stops the loop like a decision's."""
+        self._hk, self._where, self._changing = 0, of, False
+        try:
+            return fn()
+        except Exception as e:
+            if not self._changing:
+                raise
+            err = self._stop(self.n, e, control=True, of=of, args=args, t=self._now())
+            self._write(None, None, self._promise_events() + [err])
+            raise
+        finally:
+            self._changing = False
 
     def _feed(self, x, y, key, source):
-        """A train label to the learner (key= and source= when its update takes them)."""
-        try:
-            self.live.update(x, y, key=key, source=source)
-        except TypeError:
-            self.live.update(x, y)
+        """A train label to the learner (key= and source= when its update takes them, read once from its signature;
+        a TypeError raised inside update is the learner's own and is not retried)."""
+        kw = {k: v for k, v in (("key", key), ("source", source)) if k in self._upd_kw}
+        self._at("learner.update")
+        self.live.update(x, y, **kw)
         self._fed_keys.add(key)
 
     # --- alarms
     def _on_alarm(self, n, sv, c, det_rep, mon_rep) -> list:
         who = "+".join(w for w, r in (("detector", det_rep), ("monitor", mon_rep)) if r is not None)
         report = {"detector": det_rep, "monitor": mon_rep}
+        self._at("policy.alarm")
         action = self.policy.alarm(self._state(), who, _json(report))
         target = None
         if isinstance(action, str) and action.startswith("rollback:"):
@@ -519,6 +622,7 @@ class AdapterLoop:
             self.detector.reset()
         m = self.monitor
         if m is not None:
+            self._at("monitor.reset")
             (m.adapted if callable(getattr(m, "adapted", None)) else m.reset)()
 
     # --- the version protocol
@@ -535,6 +639,8 @@ class AdapterLoop:
         if c is not None:
             paired = self._paired(c)
             st = self._state()
+            if not self.paused:
+                self._at("policy.promote")
             if not self.paused and self.policy.promote(st, paired):
                 ev.append(self._event("promote", c, n, **{"from": self.served, "to": c, "l_k": paired.share_k,
                                                          "l_s": paired.share_s, "samples": len(self._vs[c]["samples"]),
@@ -542,11 +648,14 @@ class AdapterLoop:
                                                          "why": None}))
                 ev[-1]["install"] = self._serve(c, n)
             else:
+                self._at("policy.discard")
                 why = self.policy.discard(st, paired)
                 if why:
                     ev.append(self._discard(c, n, str(why)))
-        if self.candidate is None and not self.paused and self._job is None and self.policy.want_train(self._state()):
-            ev += self._train("schedule", n)[1]
+        if self.candidate is None and not self.paused and self._job is None:
+            self._at("policy.want_train")
+            if self.policy.want_train(self._state()):
+                ev += self._train("schedule", n)[1]
         return ev
 
     def _restart(self, v, n, why="alarm") -> list:
@@ -578,6 +687,7 @@ class AdapterLoop:
         self._served_since = n
         self._holdout.clear()                              # the new served version's own held-out outcomes
         self._rereference()                                # a new served version: its deployed risk from scratch
+        self._at("install")
         if self.system is None:
             return None
         srv = self._base if v == 0 else self._vs[v].get("served_as")
@@ -623,17 +733,23 @@ class AdapterLoop:
         job = TrainJob(id=f"{k}.-", version=k, trigger=trigger, started=self._now())
         if self._batch:
             train = [r for r in self._rows if self._split_of[r.key] == "train"]
+            self._at("policy.select")
             job.rows = tuple(self.policy.select(st, train))
+            self._at("policy.hyper")
             job.hyper = dict(self.policy.hyper(st))
+        self._at("budget")
         refused = self.policy.budget.refuse(self._trainings, job.started)
         if refused:
             job.state, job.why = "refused", refused
             return job, []
+        self._changing = True                              # from here a control's state changes
         self._attempt += 1                                 # only trainings that start get an id
         job.id = f"{k}.{self._attempt}"
         self._trainings.append(job.started)
         self._job = {"id": job.id, "version": k, "trigger": trigger, "started": job.started, "eta": None}
-        rec = self._replay_trains.pop(0) if self._fps is not None else None
+        rec = None
+        if self._fps is not None:                          # replay: the recorded result (a training cut by an
+            rec = self._replay_trains.pop(0) if self._replay_trains else {}   # error: what its error event kept)
         t0 = time.perf_counter()
         frozen, error = None, None
         try:
@@ -657,18 +773,35 @@ class AdapterLoop:
             job.state, job.why = "failed", error
             return job, [self._event("train", self.served, n, state="failed", why=error, fingerprint=None,
                                      report=None, frozen=False, **base)]
+        self._at("report")
         if rec is not None:
             r = dict(rec["report"])
             r["items"] = tuple(tuple(i) for i in r.get("items") or ())
             report = TrainReport(**r)
         else:
             report = dataclasses.replace(self._report(frozen), seconds=seconds, n_train=n_train)
+        self._inflight = {"job": job.id, "state": "done", "fingerprint": None, "report": dataclasses.asdict(report),
+                          "extra_keys": []}                # what an error record keeps of this training
+        self._at("learner.keys")                           # a learner with state names every key it trained on
+        if rec is not None:
+            extra = frozenset(rec.get("extra_keys") or ())
+        elif callable(getattr(self.live, "keys", None)):
+            extra = frozenset(self.live.keys())
+        else:
+            extra = frozenset()
         keys = frozenset(r.key for r in job.rows) if self._batch else frozenset(self._fed_keys)
+        extra = extra - keys
+        keys = keys | extra
+        base["extra_keys"] = self._inflight["extra_keys"] = sorted(extra)
+        self._at("policy.freeze")
         ok = bool(self.policy.freeze(self._state(), report))
+        self._at("fingerprint")
         fp = frozen.fingerprint()
+        self._inflight["fingerprint"] = fp
         job.state, job.fingerprint, job.seconds, job.frozen = "done", fp, report.seconds, ok
         why = None
         if not ok and hasattr(self.policy, "freeze_gates"):
+            self._at("policy.freeze_gates")
             why = "; ".join(g["why"] for g in self.policy.freeze_gates(self._state(), report).values() if not g["ok"])
         ev = [self._event("train", self.served, n, state="done", why=why, fingerprint=fp,
                           report=dataclasses.asdict(report), frozen=ok, **base)]
@@ -680,21 +813,24 @@ class AdapterLoop:
             self._vs[k] = row
             self._ev_seen[k] = 0
             ev.append(self._event("discard", k, n, samples=0, why=f"freeze refused: {why or 'the policy said no'}"))
+        self._inflight = None
         return job, ev
 
     def _freeze(self, k, n, model, keys, n_train):
         if self._fps is not None:
             model = _Recorded(self._fps.get(k))
+        fp = model.fingerprint()
+        self._at("served")
+        srv = self._served_of(model) if self._fps is None else None
+        self._at("save")
+        if self.versions_dir is not None and srv is not None:
+            srv.save(self.versions_dir, k)
         p = StreamPromise(**self._pkw, budget=self.budget)
         self._ev_seen[k] = 0
-        fp = model.fingerprint()
         row = self._row(k, "candidate", model, p, n, self.live.seen(), n_train, keys, fp)
-        srv = self._served_of(model) if self._fps is None else None
         row["served_as"], row["served_cls"] = srv, None if srv is None else type(srv)
         self._vs[k] = row
         self.candidate = k
-        if self.versions_dir is not None and srv is not None:
-            srv.save(self.versions_dir, k)
         return self._event("freeze", k, n, frozen_at=n, seen=self.live.seen(), n_train=n_train,
                            train_keys=len(keys), fingerprint=fp, why=None)
 
@@ -717,8 +853,10 @@ class AdapterLoop:
 
     def pause(self, *, by=None, why=None) -> dict | None:
         """No training, freezing or promotion until resume(); serving, labels and promises go on. → the event (None
-        when already paused)."""
+        when already paused). The candidate's trial clock runs while paused: a discard by `stale` / `trial` still
+        happens (its δ_v stays spent), as do alarms and rollbacks."""
         with self._lock:
+            self._refuse_if_stopped()
             if self.paused:
                 return None
             self.paused = True
@@ -726,6 +864,7 @@ class AdapterLoop:
 
     def resume(self, *, by=None, why=None) -> dict | None:
         with self._lock:
+            self._refuse_if_stopped()
             if not self.paused:
                 return None
             self.paused = False
@@ -736,47 +875,61 @@ class AdapterLoop:
         trial. → the TrainJob (state "done", "failed" or "refused" with why). Stage 2 trains in process: `wait` is
         accepted and the call returns when the training is over."""
         with self._lock:
+            self._refuse_if_stopped()
             k = max(self._vs) + 1
             why = ("paused" if self.paused else f"version {self.candidate} is in trial" if self.candidate is not None
                    else "a training is in flight" if self._job is not None else None)
             if why:
-                return TrainJob(id=f"{k}.-", version=k, trigger="train_now", started=self._now(), state="refused",
-                                why=why)
-            job, ev = self._train("train_now", self.n)
-            ev += self._promise_events()
-            if ev:
-                self._write(None, None, ev)
+                job = TrainJob(id=f"{k}.-", version=k, trigger="train_now", started=self._now(), state="refused",
+                               why=why)
+            else:
+                job, ev = self._guarded("train_now", {}, lambda: self._train("train_now", self.n))
+                ev += self._promise_events()
+                if ev:
+                    self._write(None, None, ev)
+            if job.state == "refused":                     # every control writes an event, a refused one too
+                self._control("train", state="refused", why=job.why)
             return job
 
     def promote(self, v=None, *, force=False, by=None, why=None) -> dict:
         """Serve the candidate now: it must be certified; without force the policy's promote must agree (force skips
         the promotion rule, never the certificate); refused while paused. → the "promote" event."""
         with self._lock:
-            c = self.candidate
-            if self.paused:
-                raise ValueError("the loop is paused: resume() before a promotion")
-            if c is None or (v is not None and v != c):
-                raise ValueError(f"version {v} is not the candidate in trial (candidate: {c})")
-            if not math.isfinite(self._threshold(c)):
-                raise ValueError(f"version {c} is not certified: a promotion never skips the certificate")
-            paired = self._paired(c)
-            if not force and not self.policy.promote(self._state(), paired):
-                raise ValueError(f"the policy does not promote version {c} now (force=True skips its rule)")
-            e = self._event("promote", c, self.n, **{"from": self.served, "to": c, "l_k": paired.share_k,
-                                                    "l_s": paired.share_s, "samples": len(self._vs[c]["samples"]),
-                                                    "n_novel": paired.n_novel, "n_seen": paired.n_seen, "why": why,
-                                                    "by": None if by is None else str(by), "forced": bool(force),
-                                                    "control": True, "t": self._now()})
-            e["install"] = self._serve(c, self.n)
-            self._write(None, None, [e] + self._promise_events())
-            return e
+            self._refuse_if_stopped()
+            return self._guarded("promote", {"version": v, "forced": bool(force), "by": by, "why": why},
+                                 lambda: self._promote(v, force, by, why))
+
+    def _promote(self, v, force, by, why):
+        c = self.candidate
+        if self.paused:
+            raise ValueError("the loop is paused: resume() before a promotion")
+        if c is None or (v is not None and v != c):
+            raise ValueError(f"version {v} is not the candidate in trial (candidate: {c})")
+        if not math.isfinite(self._threshold(c)):
+            raise ValueError(f"version {c} is not certified: a promotion never skips the certificate")
+        paired = self._paired(c)
+        if not force:
+            self._at("policy.promote")
+        if not force and not self.policy.promote(self._state(), paired):
+            raise ValueError(f"the policy does not promote version {c} now (force=True skips its rule)")
+        self._changing = True
+        e = self._event("promote", c, self.n, **{"from": self.served, "to": c, "l_k": paired.share_k,
+                                                "l_s": paired.share_s, "samples": len(self._vs[c]["samples"]),
+                                                "n_novel": paired.n_novel, "n_seen": paired.n_seen, "why": why,
+                                                "by": None if by is None else str(by), "forced": bool(force),
+                                                "control": True, "t": self._now()})
+        e["install"] = self._serve(c, self.n)
+        self._write(None, None, [e] + self._promise_events())
+        return e
 
     def rollback(self, v, *, by=None, why=None) -> dict:
         """Serve an earlier version again (its certificate and threshold as it left them, unless an alarm came after it
         retired: then its promise restarts → "restart"; version 0 without a model: nothing alone). A candidate in trial
         is discarded (its δ_v stays spent) → the "rollback" event."""
         with self._lock:
-            rb, ev = self._rollback(v, by=by, why=why, control=True)
+            self._refuse_if_stopped()
+            rb, ev = self._guarded("rollback", {"to": v, "by": by, "why": why},
+                                   lambda: self._rollback(v, by=by, why=why, control=True))
             self._write(None, None, ev)
             return rb
 
@@ -785,6 +938,7 @@ class AdapterLoop:
             raise ValueError(f"version {v} is not a retired version (served: {self.served}; "
                              f"{[x for x, ver in self._vs.items() if ver['state'] == 'retired']} retired)")
         ev = []
+        self._changing = True
         if self.candidate is not None:
             ev.append(self._discard(self.candidate, self.n, "rollback"))
         frm = self.served
@@ -836,21 +990,38 @@ class AdapterLoop:
         """Re-run the protocol from the records and compare → {"ok", "mismatches": [(n, what, why)], "decisions",
         "versions"}. The policy is the one the loop was built with (a fresh copy), trainings take their recorded
         results, controls are re-applied at their recorded place."""
-        items = self._items()
+        with self._lock:                                   # a snapshot: the replay itself runs outside the lock
+            items = self._items()
         stored_ev = [e for k, e in items if k == "stream"]
         fps = {e["version"]: e.get("fingerprint") for e in stored_ev if e.get("event") == "freeze"}
         fresh = AdapterLoop(_Counting(), **{**self._kw, "secret": self._secret}, policy=pickle.loads(self._policy0),
                             detector=_fresh_detector(self.detector), monitor=copy.deepcopy(self._monitor0),
                             _detector_alone=True, _batch=self._batch)
         fresh._fps = fps
-        fresh._replay_trains = [e for e in stored_ev if e.get("event") == "train"]
+        fresh._replay_trains = [e for e in stored_ev if e.get("event") == "train" and e.get("state") != "refused"]
+        fresh._replay_trains += [e["train"] for e in stored_ev if e.get("event") == "error" and e.get("train")]
         bad, k = [], 0
+
+        def again(d):                                      # a control that stopped the loop: the same error again
+            fresh._inject = {"call": d["call"], "why": d["why"]}
+            a = d.get("args") or {}
+            try:
+                if d.get("of") == "train_now":
+                    fresh.train_now()
+                elif d.get("of") == "promote":
+                    fresh.promote(a.get("version"), force=a.get("forced", False), by=a.get("by"), why=a.get("why"))
+                elif d.get("of") == "rollback":
+                    fresh.rollback(a.get("to"), by=a.get("by"), why=a.get("why"))
+            except _Replayed:
+                pass
+            finally:
+                fresh._inject = None
         controls = {"rollback": lambda d: fresh.rollback(d["to"], by=d.get("by"), why=d.get("why")),
                     "pause": lambda d: fresh.pause(by=d.get("by"), why=d.get("why")),
                     "resume": lambda d: fresh.resume(by=d.get("by"), why=d.get("why")),
                     "promote": lambda d: fresh.promote(d["version"], force=d.get("forced", False), by=d.get("by"),
                                                        why=d.get("why")),
-                    "train": lambda d: fresh.train_now()}
+                    "train": lambda d: fresh.train_now(), "error": again}
         for kind, d in items:
             if kind == "stream":
                 if d.get("control") and d.get("event") in controls:
@@ -870,10 +1041,20 @@ class AdapterLoop:
                                                 f"{st.get('candidate')}, rebuilt {fresh.served} / {fresh.candidate}"))
             label = lp.get("label")
             fresh._replay_t = st.get("t") or 0.0
-            fresh._advance(lp.get("input"), st.get("key"), lp.get("would"), st.get("score"), lp.get("shadow_would"),
-                           st.get("shadow"),
-                           lambda: Verdict(label, st.get("label_source") or fresh.source, st.get("label_of")),
-                           fresh.source)
+            err = st.get("error")
+            fresh._inject = None if err is None else {"call": err["call"], "why": err["why"]}
+            try:
+                fresh._advance(lp.get("input"), st.get("key"), lp.get("would"), st.get("score"),
+                               lp.get("shadow_would"), st.get("shadow"),
+                               lambda: Verdict(label, st.get("label_source") or fresh.source, st.get("label_of")),
+                               fresh.source)
+            except _Replayed:
+                pass
+            except Exception as e:  # noqa: BLE001 — an error the records do not hold
+                bad.append((st["n"], "error", f"the replay raised {type(e).__name__}: {e}"))
+                break
+            finally:
+                fresh._inject = None
             got = next(r for kk, r in reversed(fresh.log) if kk == "loop")["stream"]
             for f in sorted(set(st) | set(got)):
                 if st.get(f) != got.get(f):
@@ -914,6 +1095,10 @@ class AdapterLoop:
 
     # --- what it says
     def versions(self) -> list:
+        with self._lock:
+            return self._versions()
+
+    def _versions(self) -> list:
         out = []
         for v, ver in sorted(self._vs.items()):
             p = ver["promise"]
@@ -928,18 +1113,24 @@ class AdapterLoop:
         return out
 
     def status(self) -> dict:
-        """{"served", "candidate", "n", "labels": {"train", "calib", "holdout"}, "trainings", "budget": {...}, "job",
-        "paused", "alarms", "mode", "guarantee", "delta_spent"}."""
-        with self._lock:
-            b = self.policy.budget
-            return {"served": self.served, "candidate": self.candidate, "n": self.n, "labels": dict(self._split_n),
-                    "trainings": len(self._trainings),
-                    "budget": {"max_trainings": b.max_trainings, "per_day": b.per_day,
-                               "refuse": b.refuse(self._trainings, self._now())},
-                    "job": None if self._job is None else dict(self._job), "paused": self.paused,
-                    "alarms": len(self._alarms), "mode": "stream",
-                    "guarantee": "anytime stream certificate per version (StreamPromise on post-freeze coin samples)",
-                    "delta_spent": self.budget.spent}
+        """{"state", "error", "served", "candidate", "n", "labels": {"train", "calib", "holdout"}, "trainings",
+        "budget": {...}, "job", "paused", "alarms", "mode", "guarantee", "delta_spent"}. state: "error" (a hook
+        raised: the loop stopped; error: {"n", "where", "why"}), "training", "paused" or "running".
+
+        Takes no lock: it answers while a step (and the in-process training inside it) runs on another thread, and
+        `job` shows that training. Its fields are read one by one, so two of them may straddle a decision."""
+        b, job, err = self.policy.budget, self._job, self.error
+        state = ("error" if err is not None else "training" if job is not None else "paused" if self.paused
+                 else "running")
+        return {"state": state, "error": None if err is None else dict(err), "served": self.served,
+                "candidate": self.candidate, "n": self.n, "labels": dict(self._split_n),
+                "trainings": len(self._trainings),
+                "budget": {"max_trainings": b.max_trainings, "per_day": b.per_day,
+                           "refuse": b.refuse(list(self._trainings), self._now())},
+                "job": None if job is None else dict(job), "paused": self.paused,
+                "alarms": len(self._alarms), "mode": "stream",
+                "guarantee": "anytime stream certificate per version (StreamPromise on post-freeze coin samples)",
+                "delta_spent": self.budget.spent}
 
     def fed(self, v) -> list:
         """The decisions whose samples reached version v's promise, in order."""

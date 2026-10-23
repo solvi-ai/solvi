@@ -632,7 +632,16 @@ Stage 2 wires the policy into a loop: `AdapterLoop` (`stream.loop`) is `Learning
 `LoopPolicy` hook, and `LearningLoop` is now `AdapterLoop` with `DefaultPolicy` at its old constants. Only train
 labels reach the learner; batch learners get the rows the policy selects (`HashedTextTrainer` stands in for the LoRA
 learner); promotion counts only samples whose key the candidate never trained on, and also needs its error alone on
-those samples, over all of them, to be at most α. The RiskDetector is never the only alarm: a score monitor on the
+those samples, over all of them, to be at most α — read as the Wilson 95 % upper bound, not the point estimate: looked
+at on every decision, a point estimate let a candidate with a true error of 6.4 % on those samples through in more than
+half of simulated trials, the bound in about 1 % (the cost: some candidates just under α wait longer or are not
+promoted). A training waits until the held-out and calib labels can pass the pre-freeze gates (with the default
+70 / 15 / 15 split, about 470 train labels for the first), and a newly served version is measured on 100 held-out
+labels before it is retrained. A learner that trained on more than the rows it was handed (a warm start, its own label
+store) names those keys with `keys()`, and samples on them count as seen. A hook that raises after a decision began to
+change the state stops the loop: the decision is recorded with an "error" event, `status()` says "error", `step` and
+the controls refuse, and the replay is exact; the served version stays installed. `status()` answers from another
+thread while a training runs in process. The RiskDetector is never the only alarm: a score monitor on the
 served version's scores (`NumericDrift` by default) is OR-ed with it. `pause`, `resume`, `train_now`, `promote`,
 `rollback`, `versions` and `status` control it in code. Unmeasured: no stand has run on the loop; the LoRA learner,
 the training runners, the checkpoint and attaching to a Dispatcher or System are later stages.

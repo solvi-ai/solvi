@@ -19,8 +19,11 @@ guard signal) and has a fingerprint; `LearningLoop` (stream.versions) freezes, c
 
 A batch learner has `train(job: TrainJob) → Frozen` (one training on `job.rows`, the rows the policy selected); the
 adapter loop (`stream.loop.AdapterLoop`) calls it when the policy asks for a training and calls `snapshot()` on an
-online learner (one without `train`). Its `update` may take `key=` and `source=` keywords; `keys()` is optional and not
-read: the loop records the keys of the rows it handed over (a set snapshotted at the freeze).
+online learner (one without `train`). Its `update` may take `key=` and `source=` keywords (read once from its
+signature). The contract: `train(job)` trains on `job.rows` only, or the learner exposes `keys()` — every content key
+it has trained on (a learner that keeps the labels `update` gave it, or warm-starts from an earlier version). The loop
+records as the version's training keys the keys of the rows it handed over (or, online, of every label it fed) united
+with `keys()` when the learner has it; a sample on any of them is "seen", never "novel".
 
 `Frozen.as_head(feature)` wraps a frozen model as an answer head (`solvi.core.Head`: options, features, predict,
 contributions, fingerprint; fit and teach refused), which `solvi.core.versions.serve_head` installs on a System."""
@@ -55,7 +58,7 @@ class Learner(Protocol):
 class BatchLearner(Protocol):
     def update(self, x, y) -> None: ...               # one train label (may also take key=, source=)
 
-    def train(self, job: "TrainJob") -> Frozen: ...   # one training on job.rows
+    def train(self, job: "TrainJob") -> Frozen: ...   # one training on job.rows only (else expose keys())
 
     def seen(self) -> int: ...
 
