@@ -3032,8 +3032,11 @@ tried by brute force over the answers' finite domains (yes/no, choice, ordinal, 
 a question (it never applies); a rule with a `return <literal>` that is not one of its question's options
 (`rule_returns_non_option`: `return "aprove"` — on that path the question abstains); a hard check without `-> bool`
 with a `return` that is plainly not `True` or `False` (`hard_check_untyped`: `return 0`, `return None`, a bare
-`return` — on that path the check is rejected and the questions it governs abstain). Both read the function's source:
-only literals in `return` statements (also in `a if c else b`) are judged, a returned variable or call is not.
+`return` — on that path the check is rejected and the questions it governs abstain); a hard check with no `then=` that
+no question requires and no part reads (`hard_check_never_runs`: no flow reaches it, so it never stops an answer —
+`System(...)` warns about it too). Both `return` checks read the function's source: only literals in `return`
+statements (also in `a if c else b`, and a lambda's body) are judged, a returned variable or call is not; a rule whose
+source cannot be read (made by `exec`, a callable object) is the warning `rule_unchecked`.
 **Warnings**: a rule registered for a question the system does not ask (`unused_rule`); with `System(input_model=Model)`, an
 argument that no part computes and the model does not declare (`input_not_declared`: `amout` for `amount` — it could
 only arrive as an extra key, and never when the model forbids extra keys), and a `uses` hint naming neither a part nor
