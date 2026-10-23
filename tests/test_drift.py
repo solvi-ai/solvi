@@ -184,3 +184,24 @@ def test_a_cusum_level_is_set_by_simulation_and_its_simulated_rate_kept():
     assert c.top() == ("a", 3.0, 1) and c.S[1] == 0.0
     with pytest.raises(ValueError, match="1e-4"):
         Cusum.calibrate(["a"], null, alpha=1e-6)
+
+
+def test_a_window_missing_the_tail_of_a_skewed_confidence_is_not_a_rise():
+    """Confidence near 1 with a few low values (a left-skewed signal): a window that by chance holds none of the low
+    values has a higher mean and a much smaller spread. The z test used the window's own spread, so such a window
+    (about 1 in 40,000 here, far above the test's level) was flagged as "mean confidence 0.89 → 0.95"; on stationary
+    streams like solvi.build's default monitor sees, 10 of 200 streams of 5,000 decisions were flagged so."""
+    rng = np.random.default_rng(0)
+
+    def conf(n, low):
+        c = np.where(rng.random(n) < low, rng.uniform(0.2, 0.5, n), rng.normal(0.95, 0.02, n))
+        return [{"answer": "a", "confidence": float(min(c_, 1.0)), "alone": True} for c_ in c]
+    mon = DriftMonitor().set_reference(conf(2000, 0.1))
+    reps = [mon.observe(d) for d in conf(100, 0.0)]
+    t = reps[-1]["tests"]["confidence"]
+    assert t["window"] - t["reference"] > 0.05 and t["p"] > t["level"]
+    assert not any("confidence" in r["flags"] for r in reps)
+    for d in conf(100, 0.0):                         # a real rise (every value up by 0.04 and no tail) is still seen
+        d["confidence"] = 0.99
+        mon.observe(d)
+    assert "confidence" in mon.report()["flags"]
