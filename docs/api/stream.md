@@ -59,8 +59,15 @@ online or batch learners, promotion on samples whose key the candidate never tra
 and a Wilson bound on the error there, the RiskDetector OR-ed with a score monitor, controls; a hook that raises after
 the state changed stops the loop (status "error") with the decision recorded. Stage 3: a batch learner's job also
 carries the calib labels, the budget, α and the live job status; a training refused by its time estimate is recorded
-as "refused", a runner that dies stops the loop (status "error", replay exact). No checkpoint or attach yet.
-Unmeasured.
+as "refused", a runner that dies stops the loop (status "error", replay exact). Stage 3b: deferred apply — a
+batch learner's training runs in a thread of its own (its runner beside it) and `step` / `train_now` return at once;
+the loop goes on deciding on the served version, and the result is applied on the first decision after it is in
+(gates, then freeze or discard, a failure, a refusal or a stop), recorded there (`started_at`, `applied` in the
+"train" event) so that `replay()` applies it at the same place without reading a clock. `wait=True` (the constructor's,
+or `train_now(wait=True)`) keeps the blocking form; `close()` cancels a training in flight; `wait_training(timeout)`
+waits for a result. Lock order: the part's version lock, then the loop's (no deadlock with a decision of the part that
+reaches the loop). `Budget.max_versions_kept` evicts the oldest retired versions ("evict" events, `release()` called),
+never the served one, the rollback target or version 0. No checkpoint or attach yet. Unmeasured.
 
 ::: solvi.experimental.stream.loop
 
@@ -78,8 +85,8 @@ as `<v>.lora.safetensors` and `<v>.calib.json`. Needs `solvi[lora]`. Unmeasured.
 
 Where a training runs (stage 3): `SubprocessRunner` (the default — nice 10, threads capped at `Budget.cpu_threads`, the
 device picked by `pick_device` with a CPU fallback, the time estimate refused above `Budget.max_train_s`, a heartbeat
-log, the result file) and `ThreadRunner` (tests, tiny data); `TrainingRefused`, `TrainingFailed` and `RunnerError`.
-Unmeasured.
+log, the result file) and `ThreadRunner` (tests, tiny data); `TrainingRefused`, `TrainingFailed`, `RunnerError` and
+`TrainingCancelled` (`run(..., cancel=event)`: a subprocess is killed, a thread runner stops waiting). Unmeasured.
 
 ::: solvi.experimental.stream.runner
 

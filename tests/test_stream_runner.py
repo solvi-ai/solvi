@@ -257,7 +257,7 @@ def test_a_subprocess_training_writes_a_file_the_loop_installs(helper, tmp_path)
     import types
     sink, system = [], types.SimpleNamespace(heads={}, fp=None)
     learner = _ProcTrainer(list("ab"), _sub(helper), tmp_path)
-    loop = AdapterLoop(learner, question="q", max_risk=0.05, secret=KEY, policy=_plain(first=100), system=system,
+    loop = AdapterLoop(learner, question="q", wait=True, max_risk=0.05, secret=KEY, policy=_plain(first=100), system=system,
                        served=lambda f: _Slot(f, sink))
     for x, y in _data(1, 1500):
         loop.step(x, lambda y=y: y)
@@ -286,7 +286,7 @@ class _Crash(HashedTextTrainer):
 
 
 def test_a_runner_crash_stops_the_loop_with_status_error_and_the_replay_stays_exact(helper, tmp_path):
-    loop = AdapterLoop(_Crash(_sub(helper), tmp_path, "lt_runner_helper:die"), question="q", max_risk=0.05, secret=KEY,
+    loop = AdapterLoop(_Crash(_sub(helper), tmp_path, "lt_runner_helper:die"), question="q", wait=True, max_risk=0.05, secret=KEY,
                        policy=_plain(first=50))
     with pytest.raises(RunnerError):
         for x, y in _data(2, 400):
@@ -301,7 +301,7 @@ def test_a_runner_crash_stops_the_loop_with_status_error_and_the_replay_stays_ex
     r = loop.replay()
     assert r["ok"], r["mismatches"][:5]
     # the same through a control
-    loop2 = AdapterLoop(_Crash(_sub(helper), tmp_path, "lt_runner_helper:killed"), question="q", max_risk=0.05,
+    loop2 = AdapterLoop(_Crash(_sub(helper), tmp_path, "lt_runner_helper:killed"), question="q", wait=True, max_risk=0.05,
                         secret=KEY, policy=_plain(first=10 ** 6))
     for x, y in _data(3, 60):
         loop2.step(x, lambda y=y: y)
@@ -314,7 +314,7 @@ def test_a_runner_crash_stops_the_loop_with_status_error_and_the_replay_stays_ex
 
 def test_a_training_refused_by_its_estimate_is_recorded_and_replays(helper, tmp_path):
     clock = [1000.0]
-    loop = AdapterLoop(_Crash(_sub(helper), tmp_path, "lt_runner_helper:echo"), question="q", max_risk=0.05, secret=KEY,
+    loop = AdapterLoop(_Crash(_sub(helper), tmp_path, "lt_runner_helper:echo"), question="q", wait=True, max_risk=0.05, secret=KEY,
                        policy=DefaultPolicy(_budget(max_train_s=10.0, min_interval_s=600.0), calib=0.0, holdout=0.0,
                                             pre_freeze=False, probe=False, first=50), clock=lambda: clock[0])
     for x, y in _data(4, 120):
@@ -327,6 +327,7 @@ def test_a_training_refused_by_its_estimate_is_recorded_and_replays(helper, tmp_
     clock[0] += 601
     job = loop.train_now()                                 # a control refused by the estimate: one "train" event
     assert job.state == "refused" and "max_train_s" in job.why
-    assert sum(1 for e in _events(loop, "train") if e.get("control")) == 1
+    assert sum(1 for e in _events(loop, "train") if e.get("applied") == "train_now") == 1   # applied in the control
+    assert sum(1 for e in _events(loop, "train_start") if e.get("control")) == 1
     r = loop.replay()
     assert r["ok"], r["mismatches"][:5]

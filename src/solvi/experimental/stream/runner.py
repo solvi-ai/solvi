@@ -29,7 +29,8 @@ loop records the first three in its "train" event (the served version keeps serv
 
 While a run goes on, `status` (a dict the caller passes; the loop's `status()["job"]`) is updated in place: "runner",
 "pid", "log", "device", "eta" (the wall clock the training should end at, once estimated), "last" (the log's last
-line) and "last_t" (when it was written). Unmeasured."""
+line) and "last_t" (when it was written). `cancel=` (a threading.Event): once set, a subprocess is killed and
+`TrainingCancelled` raised; a thread runner stops waiting and raises it (the thread ends on its own). Unmeasured."""
 from __future__ import annotations
 
 import importlib
@@ -51,6 +52,11 @@ class TrainingRefused(RuntimeError):
 
 class TrainingFailed(RuntimeError):
     """The training ran and failed (the target raised, or it ran past its time and was stopped)."""
+
+
+class TrainingCancelled(RuntimeError):
+    """The caller cancelled the training (its `cancel` event was set): a subprocess is killed; a thread cannot be
+    stopped and is left to end on its own."""
 
 
 class RunnerError(RuntimeError):
@@ -245,7 +251,7 @@ class ThreadRunner:
     def __init__(self, *, heartbeat_s=30.0, grace_s=120.0):
         self.heartbeat_s, self.grace_s = float(heartbeat_s), float(grace_s)
 
-    def run(self, target, payload, *, name, workdir, budget, status=None) -> dict:
+    def run(self, target, payload, *, name, workdir, budget, status=None, cancel=None) -> dict:
         workdir = Path(workdir)
         workdir.mkdir(parents=True, exist_ok=True)
         log = workdir / f"{name}.log"
@@ -259,7 +265,10 @@ class ThreadRunner:
         th = threading.Thread(target=lambda: box.update(out=_call(target, payload, ctx)), daemon=True,
                               name=f"solvi-train-{name}")
         th.start()
-        th.join()
+        while th.is_alive():
+            th.join(0.05)
+            if cancel is not None and cancel.is_set():
+                raise TrainingCancelled(f"{name}: cancelled (the training thread cannot be stopped; it ends on its own)")
         out = box.get("out") or {"state": "failed", "why": "the training thread ended without a result"}
         if ctx.estimate_s is not None:             # the same deadline as the subprocess runner's
             over = time.monotonic() - ctx.estimate_t - ctx.estimate_s - self.grace_s
@@ -298,7 +307,7 @@ class SubprocessRunner:
         env["PYTHONPATH"] = os.pathsep.join(dict.fromkeys(paths))
         return env
 
-    def run(self, target, payload, *, name, workdir, budget, status=None) -> dict:
+    def run(self, target, payload, *, name, workdir, budget, status=None, cancel=None) -> dict:
         workdir = Path(workdir)
         workdir.mkdir(parents=True, exist_ok=True)
         log, job, res, err = (workdir / f"{name}{x}" for x in (".log", ".job.pkl", ".result.json", ".err"))
@@ -341,7 +350,9 @@ class SubprocessRunner:
                     status["device"] = _device(log)
             except FileNotFoundError:
                 age = now - t0
-            if now > deadline_at:
+            if cancel is not None and cancel.is_set():
+                why = ("cancel", "cancelled: stopped")
+            elif now > deadline_at:
                 why = ("over", (f"ran past its estimate + grace {self.grace_s:g} s: stopped" if n_est else
                                 f"ran past max_train_s {budget.max_train_s:g} + grace {self.grace_s:g} s with no "
                                 "estimate: stopped"))
@@ -354,6 +365,8 @@ class SubprocessRunner:
         if why is not None:
             if why[0] == "over":
                 raise TrainingFailed(why[1])
+            if why[0] == "cancel":
+                raise TrainingCancelled(f"the training process {p.pid}: {why[1]}")
             raise RunnerError(f"the training process {p.pid}: {why[1]}; log {log}")
         if not res.exists():
             tail = _tail(err)
@@ -427,8 +440,8 @@ def _tail(path, n=3):
 
 
 def make_runner(runner):
-    """"subprocess" / "thread" / a runner object (with run(target, payload, *, name, workdir, budget, status)) → a
-    runner."""
+    """"subprocess" / "thread" / a runner object (with run(target, payload, *, name, workdir, budget, status), and
+    optionally cancel=) → a runner."""
     if runner == "subprocess":
         return SubprocessRunner()
     if runner == "thread":
@@ -461,5 +474,6 @@ if __name__ == "__main__":                     # run as the module solvi imports
     _run(sys.argv[1])
 
 
-__all__ = ["RunContext", "RunnerError", "SubprocessRunner", "ThreadRunner", "TrainingFailed", "TrainingRefused",
+__all__ = ["RunContext", "RunnerError", "SubprocessRunner", "ThreadRunner", "TrainingCancelled", "TrainingFailed",
+           "TrainingRefused",
            "gpu_free_mb", "make_runner", "pick_device"]

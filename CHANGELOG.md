@@ -295,8 +295,32 @@
   adapter) is called on a discarded candidate and on the version copies a replay loads to check the files, so staged
   adapters do not pile up; retired versions stay staged (they are rollback targets). `LoraVersion.save` / `load`
   round-trip version 0 with an adaptation (its parameters; the kept examples are not saved) or thresholds per group (by
-  fact names; by a function: `load(..., groups=fn)`). `train_now` lost its unused `wait=` parameter. The loop still
-  waits for a training inside `step`. Unmeasured: tests on a tiny random checkpoint only, no stand.
+  fact names; by a function: `load(..., groups=fn)`). Unmeasured: tests on a tiny random checkpoint only, no stand.
+- **The adapter loop: deferred apply (experimental), stage 3b** (`solvi.experimental.stream.loop`, `.runner`,
+  `.learner`, `.policy`). A batch learner's training now runs in a thread of its own (its runner beside it; the
+  subprocess runner by default for `LoraLearner`) and `step` / `train_now()` return at once: the loop goes on deciding
+  on the served version, and no decision waits (tested with a training held for 300 decisions: each decision under
+  0.5 s). The pre-freeze report is computed in that thread, on the labels and the served version of the moment the
+  training started. The result is applied on the first decision after it is in (not while paused) through the stage-3
+  paths — gates, then freeze or discard; failed; refused by its estimate; a `RunnerError` (a crash or a silent process
+  found while the loop decides) stops the loop at that decision — and recorded there: a "train_start" event where it
+  began, and the "train" event with `started_at` and `applied` ("decision" or "train_now"). `replay()` applies each
+  recorded result at the decision or control its record names, with no clock read (tested exact across done, failed,
+  refused, discard, eviction, a runner error and close). One training at a time, counted against the budget when it
+  starts. `AdapterLoop(wait=True)` and `train_now(wait=True)` keep the blocking form (the existing tests use it; a
+  `train_now(wait=True)` result is applied inside the control). New: `close()` (also a context manager) cancels a
+  training in flight — `TrainJob.cancel`, a `threading.Event`; `runner.run(..., cancel=)` kills a subprocess and raises
+  `TrainingCancelled`, a thread runner stops waiting — and `step` and the controls refuse after it; an error stop
+  cancels it too; `wait_training(timeout)`; `status()` "closed", `job` with `state` ("running" / "ready") and
+  `started_at`, `versions_kept`. `Budget.max_versions_kept` is enforced: after each change of the served version the
+  oldest retired versions past the limit (version 0 counted) are evicted — "evict" event, `Served.release()`, state
+  "evicted", no longer a rollback target, files kept for replay — never the served version, the rollback target or
+  version 0; a candidate refused at the freeze is released at once. Lock order: `step` and every control take the
+  part's version lock (`part=`, else the learner's or `initial`'s `part`) before the loop's, so a decision of the part
+  that reaches the loop under its own lock cannot deadlock with the loop's shadow scoring (tested with a timeout: the
+  old order deadlocks); the cost is that the part's own decisions wait while a step runs (the whole training with
+  `wait=True`). Unmeasured: fake learners and a tiny random checkpoint only, no stand; the background training's cost
+  to live decisions is not measured.
 - **A secret for the supervision and audit draws: `Dispatcher(secret=)`** (`solvi.core.dispatch`; security). The
   draws were `sha256(f"{seed}|{input hash}|{n}")` with the public default `seed=0`, so whoever could vary the inputs
   could compute which decisions would be supervised or audited and avoid them. With `secret=` (bytes or str; None reads

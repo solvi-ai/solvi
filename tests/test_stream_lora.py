@@ -332,7 +332,7 @@ def test_the_loop_installs_a_version_trained_in_a_subprocess_and_rolls_back(ckpt
         data = _toy(1200, 21)
         for x, y in data[:200]:
             loop.step(x, lambda y=y: y)
-        job = loop.train_now()
+        job = loop.train_now(wait=True)
         assert job.state == "done" and job.frozen, job
         k = loop.candidate
         assert (tmp_path / "loop" / f"train_{job.id}.lora.safetensors").exists()
@@ -351,3 +351,54 @@ def test_the_loop_installs_a_version_trained_in_a_subprocess_and_rolls_back(ckpt
         assert part.fingerprint() == fp0 and part.lora is None
         r = loop.replay(rescore=True)
         assert r["ok"], r["mismatches"][:5]
+
+
+def test_deferred_apply_end_to_end_with_the_subprocess_runner(ckpt, tmp_path):
+    """Stage 3b: the training runs in a subprocess while the loop goes on deciding on version 0 (no decision waits for
+    it); its result is applied on a later decision, recorded there, served, and the replay (rescored) is exact."""
+    import time
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        m, part = _part(ckpt)
+        fp0 = part.fingerprint()
+        learner = LoraLearner(part, tmp_path / "loop", runner=SubprocessRunner(heartbeat_s=1.0))
+        policy = DefaultPolicy(_budget(), calib=0.3, holdout=0.0, pre_freeze=False, probe=False, novel_risk=False,
+                               first=10 ** 6, lr=1e-2, min_updates=60, max_updates=60)
+        loop = AdapterLoop(learner, question="team", max_risk=0.2, secret=KEY, policy=policy,
+                           initial=learner.version0(), system=part, versions_dir=tmp_path / "versions")
+        assert loop._part_lock is lora.version_lock(part)
+        data = iter(_toy(4000, 31))
+        for _ in range(200):
+            x, y = next(data)
+            loop.step(x, lambda y=y: y)
+        job = loop.train_now()
+        assert job.state == "running" and loop.candidate is None
+        out = {"events": []}
+        during, worst, info = 0, 0.0, {}
+        while "train" not in out["events"]:
+            info = loop.status()["job"] or info
+            x, y = next(data)
+            t0 = time.monotonic()
+            out = loop.step(x, lambda y=y: y)
+            worst = max(worst, time.monotonic() - t0)
+            assert out["served"] == 0 and out["candidate"] is None
+            during += 1
+        assert during > 1 and worst < 5.0, (during, worst)      # decisions went on while it trained
+        assert info["pid"] and info["runner"] == "subprocess" and info["started_at"] == 200
+        tr = [e for k, e in loop._items() if k == "stream" and e["event"] == "train"]
+        assert len(tr) == 1 and tr[0]["state"] == "done" and tr[0]["decision"] == out["n"] > 201
+        assert tr[0]["applied"] == "decision" and tr[0]["started_at"] == 200 and loop.candidate == 1
+        for x, y in data:
+            loop.step(x, lambda y=y: y)
+            if loop.served == 1:
+                break
+        if loop.served != 1:
+            assert loop.versions()[1]["certified"], loop.versions()
+            loop.promote(1, force=True)
+        assert loop.served == 1 and part.lora is not None and part.fingerprint() != fp0
+        loop.rollback(0)
+        assert part.fingerprint() == fp0
+        r = loop.replay(rescore=True)
+        assert r["ok"], r["mismatches"][:5]
+        loop.close()
+        assert loop.status()["state"] == "closed"

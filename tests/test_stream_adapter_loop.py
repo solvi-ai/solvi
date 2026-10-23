@@ -108,7 +108,7 @@ def test_learning_loop_is_the_adapter_loop_with_the_default_policy_at_the_lanes_
     got = []
     for k, d in a.log:
         if k == "stream":
-            if d["event"] == "train":
+            if d["event"] in ("train", "train_start"):
                 continue
             got.append([k, {f: v for f, v in d.items() if f not in new_fields["stream"]}])
         else:
@@ -154,7 +154,7 @@ class _MemoLearner:
 
 
 def _memo_run(seed=21, learner=None, n=3000, repeat=0.7, **policy):
-    loop = AdapterLoop(learner or _MemoLearner(), question="q", max_risk=0.05, secret=KEY, key=lambda x: f"k{x[0]}",
+    loop = AdapterLoop(learner or _MemoLearner(), question="q", wait=True, max_risk=0.05, secret=KEY, key=lambda x: f"k{x[0]}",
                        policy=_plain(**policy), promise_options={"grid": [0.95, 0.5]})
     r, fresh = random.Random(seed), seed * 10 ** 6         # independent streams: the novel keys differ per seed
     first = []
@@ -233,7 +233,7 @@ def test_the_novel_risk_bound_promotes_a_candidate_at_3_percent_with_enough_nove
 # ───────────────────────────── controls
 def test_pause_blocks_training_and_promotion_but_not_labels():
     learner = _Hand([_Model("good", 1.0)] + [_Model(f"w{i}", 0.3) for i in range(5)])
-    loop = AdapterLoop(learner, question="q", max_risk=0.05, secret=KEY, policy=_plain(first=100, trial=300))
+    loop = AdapterLoop(learner, question="q", wait=True, max_risk=0.05, secret=KEY, policy=_plain(first=100, trial=300))
     data = _fake(2, 3000)
     assert loop.pause()["event"] == "pause" and loop.pause() is None
     _run(loop, data[:400])
@@ -260,7 +260,7 @@ def test_train_now_ignores_the_schedule_but_not_the_budget():
     clock = [1000.0]
     learner = HashedTextTrainer(list("ab"))
     policy = DefaultPolicy(Budget(min_interval_s=600.0), first=10 ** 6)
-    loop = AdapterLoop(learner, question="q", max_risk=0.05, secret=KEY, policy=policy, clock=lambda: clock[0])
+    loop = AdapterLoop(learner, question="q", wait=True, max_risk=0.05, secret=KEY, policy=policy, clock=lambda: clock[0])
     for x in _fake(3, 50):
         loop.step(f"text {x[0]} {x[1]:.3f}", lambda x=x: x[0])
     assert not policy.want_train(loop._state()) and "train label(s)" in policy.why_not_train(loop._state())
@@ -288,7 +288,7 @@ def test_status_answers_from_another_thread_during_a_training_and_shows_the_job(
             started.set()
             seen["released"] = read.wait(timeout=20)
             return super().train(job)
-    loop = AdapterLoop(_Wait([_Model("m", 0.5)]), question="q", max_risk=0.05, secret=KEY, policy=_plain(first=20))
+    loop = AdapterLoop(_Wait([_Model("m", 0.5)]), question="q", wait=True, max_risk=0.05, secret=KEY, policy=_plain(first=20))
 
     def watcher():
         started.wait(timeout=20)
@@ -308,11 +308,11 @@ def test_status_answers_from_another_thread_during_a_training_and_shows_the_job(
 # ───────────────────────────── two alarm sources, rollback
 def test_the_second_alarm_source_restarts_the_promise():
     with pytest.raises(ValueError):                     # never the detector alone
-        AdapterLoop(_Hand([]), question="q", max_risk=0.05, secret=KEY, detector=RiskDetector(0.05), monitor=None)
-    auto = AdapterLoop(_Hand([]), question="q", max_risk=0.05, secret=KEY, detector=RiskDetector(0.05))
+        AdapterLoop(_Hand([]), question="q", wait=True, max_risk=0.05, secret=KEY, detector=RiskDetector(0.05), monitor=None)
+    auto = AdapterLoop(_Hand([]), question="q", wait=True, max_risk=0.05, secret=KEY, detector=RiskDetector(0.05))
     assert type(auto.monitor).__name__ == "NumericDrift"
     flag = _Flag()
-    loop = AdapterLoop(_Hand([]), question="q", max_risk=0.05, secret=KEY, initial=_Model("s1", 0.9),
+    loop = AdapterLoop(_Hand([]), question="q", wait=True, max_risk=0.05, secret=KEY, initial=_Model("s1", 0.9),
                        detector=RiskDetector(0.05, arl=10 ** 6), monitor=flag, policy=_plain(first=10 ** 6))
     data = _fake(5, 1500)
     _run(loop, data[:1000])
@@ -340,7 +340,7 @@ def test_the_auto_monitor_alarms_on_a_score_shift_of_the_served_version():
         def fingerprint(self):
             return "shift"
     m = _Shift()
-    loop = AdapterLoop(_Hand([]), question="q", max_risk=0.05, secret=KEY, initial=m, detector=RiskDetector(0.05),
+    loop = AdapterLoop(_Hand([]), question="q", wait=True, max_risk=0.05, secret=KEY, initial=m, detector=RiskDetector(0.05),
                        policy=_plain(first=10 ** 6))
     assert type(loop.monitor).__name__ == "NumericDrift"
     xs = _fake(5, 3000)
@@ -356,7 +356,7 @@ def test_the_auto_monitor_alarms_on_a_score_shift_of_the_served_version():
 def test_rollback_follows_rollback_target():
     flag = _Flag()
     models = [_Model("half", 0.5), _Model("good", 1.0)] + [_Model(f"w{i}", 0.3) for i in range(40)]
-    loop = AdapterLoop(_Hand(models), question="q", max_risk=0.05, secret=KEY, monitor=flag, probation=0,
+    loop = AdapterLoop(_Hand(models), question="q", wait=True, max_risk=0.05, secret=KEY, monitor=flag, probation=0,
                        policy=_plain(growth=1.0, trial=300, probation=300))
     data = iter(_fake(6, 20000))
 
@@ -391,7 +391,7 @@ def test_the_stand_in_batch_learner_runs_the_default_policy_end_to_end():
     for _ in range(2500):
         c = r.choice("abcde")
         data.append((" ".join(r.sample(voc[c], 3) + [f"n{r.randrange(40)}"]), c))
-    loop = AdapterLoop(HashedTextTrainer(list("abcde")), question="q", max_risk=0.05, secret=KEY,
+    loop = AdapterLoop(HashedTextTrainer(list("abcde")), question="q", wait=True, max_risk=0.05, secret=KEY,
                        policy=DefaultPolicy(Budget(min_interval_s=0.0)))
     for x, y in data:
         loop.step(x, lambda y=y: y)
@@ -433,7 +433,7 @@ def test_a_hook_that_raises_stops_the_loop_and_the_replay_stays_exact():
     unrecorded and replay broke for good ("order": decision 701 after 699). Now the decision is recorded with an
     "error" event, the loop stops (status "error"; step and controls refuse) and replay is exact."""
     _FIRED[0] = False
-    loop = AdapterLoop(_Hand([_Model("good", 1.0)]), question="q", max_risk=0.05, secret=KEY,
+    loop = AdapterLoop(_Hand([_Model("good", 1.0)]), question="q", wait=True, max_risk=0.05, secret=KEY,
                        policy=_RaisesOnce(Budget(min_interval_s=0.0, per_day=10 ** 6), calib=0.0, holdout=0.0,
                                           pre_freeze=False, probe=False, first=100))
     data = _fake(2, 1200)
@@ -479,7 +479,7 @@ class _KeysFail(_Hand):
 def test_a_learner_failing_after_the_training_stops_the_loop_in_a_step_and_in_a_control():
     """The held-out scoring raising inside a step (the decision is cut at "report"), and the learner's keys() raising
     inside train_now (the control is cut at "learner.keys"): both stop the loop and both replay exactly."""
-    a = AdapterLoop(_Hand([_ScoreFails()]), question="q", max_risk=0.05, secret=KEY,
+    a = AdapterLoop(_Hand([_ScoreFails()]), question="q", wait=True, max_risk=0.05, secret=KEY,
                     policy=DefaultPolicy(Budget(min_interval_s=0.0), pre_freeze=False, first=20, calib=0.0,
                                          holdout=0.5))
     data = _fake(8, 400)
@@ -488,7 +488,7 @@ def test_a_learner_failing_after_the_training_stops_the_loop_in_a_step_and_in_a_
     assert a.status()["state"] == "error" and a.error["where"] == "report" and a.status()["job"] is None
     r = a.replay()
     assert r["ok"], r["mismatches"][:5]
-    b = AdapterLoop(_KeysFail([_Model("m", 0.9)]), question="q", max_risk=0.05, secret=KEY,
+    b = AdapterLoop(_KeysFail([_Model("m", 0.9)]), question="q", wait=True, max_risk=0.05, secret=KEY,
                     policy=_plain(first=10 ** 6))
     _run(b, data[:50])
     with pytest.raises(RuntimeError, match="the label store is gone"):
@@ -501,7 +501,7 @@ def test_a_learner_failing_after_the_training_stops_the_loop_in_a_step_and_in_a_
 
 
 def test_a_refused_control_or_label_does_not_stop_the_loop():
-    loop = AdapterLoop(_Hand([]), question="q", max_risk=0.05, secret=KEY, policy=_plain(first=10 ** 6))
+    loop = AdapterLoop(_Hand([]), question="q", wait=True, max_risk=0.05, secret=KEY, policy=_plain(first=10 ** 6))
     _run(loop, _fake(9, 10))
     with pytest.raises(ValueError):
         loop.rollback(3)                                   # refused before anything changed
@@ -524,7 +524,7 @@ class _Keeps(_Hand):
 
 
 def test_a_learners_own_keys_are_training_keys():
-    loop = AdapterLoop(_Keeps([_Model("m", 1.0)]), question="q", max_risk=0.05, secret=KEY, policy=_plain(first=20))
+    loop = AdapterLoop(_Keeps([_Model("m", 1.0)]), question="q", wait=True, max_risk=0.05, secret=KEY, policy=_plain(first=20))
     data = _fake(11, 400)
     _run(loop, data[:20])
     assert loop.candidate == 1 and "extra-key" in loop._vs[1]["keys"]
@@ -545,7 +545,7 @@ def test_update_is_called_once_by_its_signature_and_its_type_error_is_not_masked
         def update(self, x, y):                            # no key= / source=
             calls.append((x, y))
 
-    loop = AdapterLoop(_Plain([]), question="q", max_risk=0.05, secret=KEY, policy=_plain(first=10 ** 6))
+    loop = AdapterLoop(_Plain([]), question="q", wait=True, max_risk=0.05, secret=KEY, policy=_plain(first=10 ** 6))
     _run(loop, _fake(12, 5))
     assert len(calls) == 5
 
@@ -555,7 +555,7 @@ def test_update_is_called_once_by_its_signature_and_its_type_error_is_not_masked
             raise TypeError("a bad label type")
 
     calls.clear()
-    bad = AdapterLoop(_Bad([]), question="q", max_risk=0.05, secret=KEY, policy=_plain(first=10 ** 6))
+    bad = AdapterLoop(_Bad([]), question="q", wait=True, max_risk=0.05, secret=KEY, policy=_plain(first=10 ** 6))
     with pytest.raises(TypeError, match="a bad label type"):
         bad.step(("a", 0.5), lambda: "a")
     assert len(calls) == 1 and calls[0] is not None      # called once, with key=; no retry without it
@@ -565,7 +565,7 @@ def test_update_is_called_once_by_its_signature_and_its_type_error_is_not_masked
 
 def test_a_refused_train_now_writes_its_event_and_replays():
     clock = [1000.0]
-    loop = AdapterLoop(_Hand([_Model("m", 0.4), _Model("m2", 0.4)]), question="q", max_risk=0.05, secret=KEY,
+    loop = AdapterLoop(_Hand([_Model("m", 0.4), _Model("m2", 0.4)]), question="q", wait=True, max_risk=0.05, secret=KEY,
                        policy=DefaultPolicy(Budget(min_interval_s=600.0), first=10 ** 6, pre_freeze=False),
                        clock=lambda: clock[0])
     _run(loop, _fake(13, 30))
@@ -581,7 +581,7 @@ def test_a_refused_train_now_writes_its_event_and_replays():
 
 def test_versions_and_replay_take_the_lock():
     """Stage-2 review S5: versions() waits for a step in progress (it reads the table under the lock)."""
-    loop = AdapterLoop(_Hand([]), question="q", max_risk=0.05, secret=KEY, policy=_plain(first=10 ** 6))
+    loop = AdapterLoop(_Hand([]), question="q", wait=True, max_risk=0.05, secret=KEY, policy=_plain(first=10 ** 6))
     _run(loop, _fake(14, 10))
     got = []
     with loop._lock:

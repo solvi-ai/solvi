@@ -1,12 +1,13 @@
 """The adapter loop: frozen versions, each with its own stream certificate, promoted under δ-spending, driven by a
-`LoopPolicy` (experimental; the LoRA learning loop, stages 2–3 — no checkpoint or attach yet).
+`LoopPolicy` (experimental; the LoRA learning loop, stages 2–3b — no checkpoint or attach yet).
 
     from solvi.experimental.stream import AdapterLoop, DefaultPolicy, HashedTextTrainer
 
     loop = AdapterLoop(HashedTextTrainer(), question="intent", policy=DefaultPolicy(), max_risk=0.05, secret=key)
     out = loop.step(text, oracle)          # oracle: () → the label (None: missing), called only when one is needed
     loop.pause() / loop.resume()           # no training, freezing or promotion while paused; labels and promises go on
-    loop.train_now()                       # → TrainJob: ignores want_train, not the budget
+    loop.train_now(wait=False)             # → TrainJob: ignores want_train, not the budget; returns at once
+    loop.close()                           # cancels a training in flight; step and the controls refuse after it
     loop.promote(force=False) / loop.rollback(v)
     loop.versions(), loop.status(), loop.replay()
 
@@ -55,13 +56,14 @@ Serving: with `system=`, a promotion or a rollback installs the version through 
 and `replay()` checks each file through `Served.load` (rescore=True: every recorded score recomputed).
 
 Controls (each writes a "stream" event marked `control`, which `replay()` re-applies): `pause()`, `resume()`,
-`train_now()` (it returns when the training is over), `promote(v=None, force=False)`
+`train_now(wait=None)` (its "train_start" event; wait=True returns when the training is over and applied),
+`close()`, `promote(v=None, force=False)`
 (force skips the policy's promotion rule — novel count, min_share, margin, probe — never the certificate), and
 `rollback(v)`. A rollback is allowed while paused; a discard and an alarm go on while paused.
 
 Records: as the lane's, plus per decision its content key, its split, and the wall clock `t` (the budget reads the
 clock; replay reads the recorded one), and per training a "train" event (job, trigger, rows, settings, fingerprint, the
-TrainReport, whether it froze). Replay re-runs the protocol from the records with a fresh copy of the policy as it was
+TrainReport, whether it froze, where it started and where it was applied). Replay re-runs the protocol from the records with a fresh copy of the policy as it was
 built (pickled at construction) and the recorded training results. A `train_now` refused writes its "train" event too
 (state "refused").
 
@@ -76,20 +78,44 @@ loop. A failed training (the learner's `train` raising) is not an error: it is r
 serving.
 
 Stage 3 (the LoRA learner, `stream.lora_learner`; the runners, `stream.runner`): a batch learner's `TrainJob` also
-carries the calib labels (the latest per key), the policy's `Budget`, the loop's α and the live `status()["job"]`
-dict, which a runner fills in (runner, pid, log, device, eta, last line). What a training ends with: a frozen model
-(done), `TrainingRefused` (its time estimate is above `max_train_s`: a "train" event with state "refused", counted
-against the budget), any other exception (state "failed"), or `RunnerError` — the runner itself failed (the process
-died or went silent) — which stops the loop like a hook that raises (status "error", the hook "learner.train"; replay
-exact). `initial=` that has `install` / `uninstall` (a `LoraVersion.of_part`) is version 0's `Served` too, so a
-rollback to 0 puts the part as attached back. Replay takes the recorded install fingerprints (the System is not the
-replay's). A training still runs inside `step` (or `train_now`): the subprocess runner isolates it, but `step` waits
-for it; applying a runner's result on a later decision is not built.
+carries the calib labels (the latest per key), the policy's `Budget`, the loop's α, the live `status()["job"]` dict,
+which a runner fills in (runner, pid, log, device, eta, last line), and `cancel`, an event the loop sets to drop it. What
+a training ends with: a frozen model (done), `TrainingRefused` (its time estimate is above `max_train_s`: a "train" event
+with state "refused", counted against the budget), any other exception (state "failed"), or `RunnerError` — the runner
+itself failed (the process died or went silent) — which stops the loop like a hook that raises (status "error", the
+hook "learner.train"; replay exact). `initial=` that has `install` / `uninstall` (a `LoraVersion.of_part`) is version
+0's `Served` too, so a rollback to 0 puts the part as attached back. Replay takes the recorded install fingerprints
+(the System is not the replay's).
+
+Deferred apply (stage 3b, design §3.2; the author's decision 7): a batch learner's training starts at a decision (or in
+`train_now`) — a "train_start" event there — and runs in a thread of its own, its runner beside it; the loop goes on
+deciding on the served version and no decision waits for it. The pre-freeze report is computed in that thread too, on
+the calib and held-out labels and the served version of the moment the training started. Its result is applied on the
+first decision after it is in (not while paused: it waits for resume): the gates, then freeze or discard, a failure, a
+refusal or a stop on a `RunnerError` — the stage-3 paths — recorded at that decision: the "train" event carries
+`started_at` (the decision it started at) and `applied` ("decision", or "train_now" for `train_now(wait=True)`). Replay
+applies each recorded result at the decision (or in the control) the record names, with no clock: the position is the
+record's. One training at a time; the budget counts it when it starts. `wait=True` (the constructor's, or
+`train_now(wait=True)`) runs the training inside the step or the control, as stage 3 did (scripts, tests); an online
+learner's snapshot is always taken in the step. `close()` (a "close" event) cancels the training in flight — a
+subprocess is killed, a thread runner stops waiting — and so does an error stop; `wait_training(timeout)` waits for a
+result outside every lock.
+
+Lock order: the part's version lock (`part=`, else the learner's or `initial`'s `part`), then the loop's — in `step` and
+every control. A decision of the part that reaches the loop under its own version lock (stage 5's hook) takes them in
+the same order; the loop never waits for the part's lock while it holds its own (shadow scoring, a swap). The cost:
+while a step runs, the part's own decisions wait for it (with `wait=True`, for the whole training).
+
+Eviction: past `policy.budget.max_versions_kept` versions held (served and retired, version 0 counted), the oldest
+retired ones are evicted after each change of the served version — "evict" events, `Served.release()` called, state
+"evicted", no longer a rollback target; their files stay for replay. The served version, the rollback target (the one
+served before it) and version 0 are never evicted, so up to three can stay above a limit below 3.
 
 Not built here (stages 4–5): the checkpoint, label mode and `attach`. Labels are kept in memory, inputs included (`LabelRow.x`): with dict inputs the memory grows with
-the label count (a label store comes with the checkpoint). `status()` takes no lock: it answers while a training runs. Unmeasured: no stand has run on this loop."""
+the label count (a label store comes with the checkpoint). `status()` takes no lock. Unmeasured: no stand has run on this loop."""
 from __future__ import annotations
 
+import contextlib
 import copy
 import dataclasses
 import hashlib
@@ -110,12 +136,13 @@ from .detector import RiskDetector
 from .gates import calib_threshold
 from .learner import TrainJob
 from .policy import DefaultPolicy, LabelRow, LoopPolicy, LoopState, Paired, TrainReport, VersionInfo
-from .runner import RunnerError, TrainingRefused
+from .runner import RunnerError, TrainingCancelled, TrainingRefused
 from .sampling import Rate, coin_message, coin_value
 from .serving import BaseVersion, as_served
 
 S2_SOURCES = ("s2", "verified")
 ACTIONS = ("recertify", "ignore")
+KEPT = ("served", "retired")                       # the states max_versions_kept counts
 _warned = False
 
 
@@ -231,7 +258,7 @@ class AdapterLoop:
     def __init__(self, learner, *, question, policy=None, max_risk=None, max_error=None, delta=0.05, initial=None,
                  detector=None, monitor="auto", probation=300, source="human", secret=None, seed=0, sampling=None,
                  promise_options=None, storage=None, versions_dir=None, system=None, feature="text", key=None,
-                 served=None, clock=None, _detector_alone=False, _batch=None):
+                 served=None, clock=None, wait=False, part=None, _detector_alone=False, _batch=None):
         global _warned
         policy = DefaultPolicy() if policy is None else policy
         if not isinstance(policy, LoopPolicy):
@@ -242,7 +269,7 @@ class AdapterLoop:
             raise TypeError(f"the policy must pickle (the loop's replay and checkpoint keep it): {e}") from e
         self._kw = dict(question=question, max_risk=max_risk, max_error=max_error, delta=delta, initial=initial,
                         probation=probation, source=source, seed=seed, sampling=sampling,
-                        promise_options=promise_options, feature=feature, key=key, served=served)
+                        promise_options=promise_options, feature=feature, key=key, served=served, wait=wait)
         self._pkw = {"max_risk": max_risk, "max_error": max_error, **(promise_options or {})}
         for k in ("delta", "budget"):
             if k in self._pkw:
@@ -330,13 +357,34 @@ class AdapterLoop:
         self.error = None                                  # {"n", "where", "why"} once a hook raised: the loop stops
         self._hk, self._where, self._changing = 0, "loop", False
         self._inject = None                                # replay: {"call", "why"} of a recorded error
-        self._inflight = None                              # the training in flight, for an error record
+        self._inflight = None                              # the training being applied, for an error record
+        self.wait = bool(wait)                             # True: a training runs inside the step / train_now
+        self._run = None                                   # the training in flight: job, thread, result
+        self.closed = False
+        if part is None:
+            part = getattr(learner, "part", None) or getattr(initial, "part", None)
+        self.part = part
+        if part is not None:                               # lock order: the part's version lock, then the loop's
+            from ...core.deciders.part import version_lock
+            self._part_lock = version_lock(part)
+        else:
+            self._part_lock = None
 
     @staticmethod
     def _row(v, state, model, promise, frozen_at, seen, n_train, keys, fp):
         return {"version": v, "state": state, "model": model, "promise": promise, "frozen_at": frozen_at,
                 "seen": seen, "n_train": n_train, "keys": keys, "fingerprint": fp, "samples": [], "fed": [],
                 "discarded_at": None, "served_cls": None}
+
+    @contextlib.contextmanager
+    def _locked(self):
+        """The part's version lock (when the loop has a part), then the loop's: the order a decision of the part that
+        reaches the loop (a hook under the part's lock) takes them too, so no path holds the loop's lock and waits for
+        the part's (shadow scoring, the report, a swap)."""
+        pl = self._part_lock
+        with pl if pl is not None else contextlib.nullcontext():
+            with self._lock:
+                yield
 
     # --- what the hooks read
     def _now(self) -> float:
@@ -393,7 +441,7 @@ class AdapterLoop:
         oracle: () → the label (None: missing), called only when the decision needs one (not answered alone, or
         drawn by the coin); source: its source (default the loop's); key: the input's content key (None: the loop's
         key function)."""
-        with self._lock:
+        with self._locked():
             self._refuse_if_stopped()
             s, c = self._vs[self.served], self._vs.get(self.candidate)
             would_s, score_s = s["model"].score(x) if s["model"] is not None else (None, None)
@@ -564,11 +612,21 @@ class AdapterLoop:
         why = e.why if isinstance(e, _Replayed) else f"{type(e).__name__}: {e}"
         self.error = {"n": n, "where": self._where, "why": why}
         self.paused = True
+        self._cancel()
         inflight, self._inflight, self._job = self._inflight, None, None
         return self._event("error", self.served, n, where=self._where, call=self._hk, why=why,
                            candidate=self.candidate, train=inflight, **extra)
 
+    def _cancel(self):
+        """The training in flight is dropped: its job's cancel event is set (the runner stops it) → its run."""
+        run, self._run, self._job = self._run, None, None
+        if run is not None and run["job"].cancel is not None:
+            run["job"].cancel.set()
+        return run
+
     def _refuse_if_stopped(self):
+        if self.closed:
+            raise RuntimeError("the loop is closed; the served version keeps serving")
         if self.error is not None:
             e = self.error
             raise RuntimeError(f"the loop stopped on an error at decision {e['n']} ({e['where']}: {e['why']}); the "
@@ -659,15 +717,19 @@ class AdapterLoop:
                                                          "n_novel": paired.n_novel, "n_seen": paired.n_seen,
                                                          "why": None}))
                 ev[-1]["install"] = self._serve(c, n)
+                ev += self._evict(n)
             else:
                 self._at("policy.discard")
                 why = self.policy.discard(st, paired)
                 if why:
                     ev.append(self._discard(c, n, str(why)))
-        if self.candidate is None and not self.paused and self._job is None:
-            self._at("policy.want_train")
-            if self.policy.want_train(self._state()):
-                ev += self._train("schedule", n)[1]
+        if self.candidate is None and not self.paused:
+            if self._run is None and self._job is None:
+                self._at("policy.want_train")
+                if self.policy.want_train(self._state()):
+                    ev += self._start("schedule", n, inline=self.wait)[1]
+            if self._run is not None and self._ready(n, "decision"):
+                ev += self._apply(n, "decision")[1]
         return ev
 
     def _restart(self, v, n, why="alarm") -> list:
@@ -721,14 +783,21 @@ class AdapterLoop:
         srv = self._base if v == 0 else self._vs[v].get("served_as")
         return None if srv is None else srv.install(self.system)
 
-    def _report(self, frozen) -> TrainReport:
-        """The trained model and the served one on the held-out labels (latest label per key); its threshold on the
-        calib labels."""
+    def _report_inputs(self):
+        """What the pre-freeze report reads, taken when a training starts: the calib and held-out labels (latest label
+        per key), the served version's model and threshold."""
         latest = {}
         for r in self._rows:
             latest[r.key] = r
         calib = [r for k, r in latest.items() if self._split_of[k] == "calib"]
         hold = [r for k, r in latest.items() if self._split_of[k] == "holdout"]
+        return {"calib": calib, "hold": hold, "served": self._vs[self.served]["model"],
+                "thr_s": self._threshold(self.served)}
+
+    def _report(self, frozen, inp) -> TrainReport:
+        """The trained model and the version served when the training started on the held-out labels of that moment
+        (latest label per key); its threshold on the calib labels."""
+        calib, hold, served, thr_s = inp["calib"], inp["hold"], inp["served"], inp["thr_s"]
         thr = getattr(frozen, "act_threshold", None)
         if thr is None and calib:
             scored = []
@@ -736,7 +805,6 @@ class AdapterLoop:
                 a, s = frozen.score(r.x)
                 scored.append((s, a != r.y))
             thr = calib_threshold(scored, self.alpha)
-        served, thr_s = self._vs[self.served]["model"], self._threshold(self.served)
         right = wrong = s_right = s_wrong = better = worse = 0
         items = []
         for r in hold:
@@ -754,8 +822,12 @@ class AdapterLoop:
         return TrainReport(len(hold), right, wrong, s_right, s_wrong, better=better, worse=worse, threshold=thr,
                            n_train=0, items=tuple(items))
 
-    def _train(self, trigger, n):
-        """One training now (the budget checked) → (TrainJob, events)."""
+    # --- a training: started at one place, applied at a later one (deferred apply, design §3.2)
+    def _start(self, trigger, n, *, inline):
+        """Start one training (the budget checked) → (TrainJob, events). inline: it runs here, to the end (the loop's
+        wait=True, train_now(wait=True), an online learner's snapshot); else in a thread of its own, and the loop goes
+        on — its result is applied by `_apply` on a later decision. Replay starts nothing: the result is the recorded
+        one, applied where the records say."""
         st = self._state()
         k = max(self._vs) + 1
         job = TrainJob(id=f"{k}.-", version=k, trigger=trigger, started=self._now())
@@ -774,8 +846,10 @@ class AdapterLoop:
         self._attempt += 1                                 # only trainings that start get an id
         job.id = f"{k}.{self._attempt}"
         self._trainings.append(job.started)
+        inline = bool(inline) or not self._batch           # a snapshot is a copy: nothing to wait for
         self._job = {"id": job.id, "version": k, "trigger": trigger, "started": job.started, "eta": None,
-                     "runner": None, "pid": None, "log": None, "device": None, "last": None, "last_t": None}
+                     "runner": None, "pid": None, "log": None, "device": None, "last": None, "last_t": None,
+                     "state": "running", "started_at": n, "inline": inline}
         if self._batch:                                    # what a batch learner's runner reads (stage 3)
             latest = {}
             for r in self._rows:
@@ -783,11 +857,78 @@ class AdapterLoop:
                     latest[r.key] = r
             job.calib, job.budget, job.alpha, job.status = (tuple(latest.values()), self.policy.budget, self.alpha,
                                                             self._job)
-        self._at("learner.train")                          # a runner that dies stops the loop here (RunnerError)
-        rec = None
-        if self._fps is not None:                          # replay: the recorded result (a training cut by an
-            rec = self._replay_trains.pop(0) if self._replay_trains else {}   # error: what its error event kept)
+        job.cancel = threading.Event()
+        run = {"job": job, "trigger": trigger, "n": n, "inline": inline, "done": threading.Event(), "out": {},
+               "thread": None, "k": k, "n_train": len(job.rows) if self._batch else None}
+        self._run = run
+        extra = {"control": True, "wait": inline} if trigger == "train_now" else {}
+        ev = [self._event("train_start", self.served, n, job=job.id, trigger=trigger, rows=len(job.rows),
+                          hyper=job.hyper, t=job.started, inline=inline, **extra)]
+        if self._fps is not None:                          # replay: nothing runs
+            run["done"].set()
+            return job, ev
+        inp = self._report_inputs()
+        if inline:
+            self._body(run, inp)
+        else:
+            th = threading.Thread(target=self._body, args=(run, inp), daemon=True, name=f"solvi-loop-train-{job.id}")
+            run["thread"] = th
+            th.start()
+        return job, ev
+
+    def _body(self, run, inp):
+        """The training itself and its pre-freeze report — in the training's thread (or inline); it reads only what
+        `_start` handed it and writes only `run["out"]`."""
+        out, job = run["out"], run["job"]
         t0 = time.perf_counter()
+        try:
+            frozen = self.live.train(job) if self._batch else self.live.snapshot()
+        except Exception as e:  # noqa: BLE001 — applied (recorded, or the loop stopped) on the decision thread
+            out.update(exc=e, where="learner.train")
+        else:
+            out.update(frozen=frozen, seconds=time.perf_counter() - t0)
+            try:
+                out["report"] = self._report(frozen, inp)
+            except Exception as e:  # noqa: BLE001
+                out.update(exc=e, where="report")
+        finally:
+            if job.status is not None:
+                job.status["state"] = "ready"
+            run["done"].set()
+
+    def _ready(self, n, where) -> bool:
+        """Whether the training in flight is applied here. Live: its result is in (a training that runs in a thread is
+        applied at the earliest on the decision after the one it started at). Replay: the records say so — the next
+        recorded result was applied at this decision (where "decision") or in this control; no clock is read."""
+        run = self._run
+        if self._fps is not None:
+            rec = self._replay_trains[0] if self._replay_trains else None
+            return (rec is not None and rec.get("job") == run["job"].id and rec.get("decision") == n
+                    and rec.get("applied") == where)
+        if not run["done"].is_set():
+            return False
+        return run["inline"] or n > run["n"]
+
+    def wait_training(self, timeout=None) -> bool:
+        """Wait (outside every lock) until the training in flight has a result, or timeout seconds → whether it has
+        one (True when none is in flight). It is applied on the next decision."""
+        run = self._run
+        return True if run is None else run["done"].wait(timeout)
+
+    def _apply(self, n, where):
+        """The result of the training in flight, applied here (where: "decision" or "train_now") → (TrainJob,
+        events): a "train" event at this decision — state "done" (then a freeze or a discard), "failed" or "refused"
+        — or the loop stops (a RunnerError: the runner failed; an exception of the report). The paths are stage 3's."""
+        run = self._run
+        job, trigger, k, out = run["job"], run["trigger"], run["k"], run["out"]
+        self._inflight = {"job": job.id, "decision": n, "applied": where, "state": None, "fingerprint": None,
+                          "report": None, "extra_keys": []}   # what an error record keeps of this training
+        self._at("learner.train")                          # a runner that died stops the loop here (RunnerError)
+        rec = None
+        if self._fps is not None:                          # replay: the recorded result
+            rec = self._replay_trains.pop(0) if self._replay_trains else {}
+            if rec.get("job") not in (None, job.id):
+                raise RuntimeError(f"replay: training {job.id} applied here, the records hold {rec.get('job')}")
         frozen, error, refused = None, None, None
         try:
             if rec is not None:
@@ -797,21 +938,21 @@ class AdapterLoop:
                     refused = rec.get("why")
                 else:
                     frozen = _Recorded(rec.get("fingerprint"))
+            elif out.get("where") == "learner.train":
+                e = out["exc"]
+                if isinstance(e, RunnerError):
+                    raise e                                # the runner itself failed: the loop stops (status "error")
+                if isinstance(e, TrainingRefused):         # the time estimate is above max_train_s: not started
+                    refused = str(e)
+                else:                                      # a failed training is recorded; the served one serves on
+                    error = f"{type(e).__name__}: {e}"
             else:
-                frozen = self.live.train(job) if self._batch else self.live.snapshot()
-        except RunnerError:
-            raise                                          # the runner itself failed: the loop stops (status "error")
-        except TrainingRefused as e:                       # the time estimate is above max_train_s: not started
-            refused = str(e)
-        except Exception as e:  # noqa: BLE001 — a failed training is recorded; the served version keeps serving
-            error = f"{type(e).__name__}: {e}"
+                frozen = out["frozen"]
         finally:
-            self._job = None
-        seconds = time.perf_counter() - t0
-        n_train = len(job.rows) if self._batch else self._split_n["train"]
-        base = {"job": job.id, "trigger": trigger, "rows": len(job.rows), "hyper": job.hyper, "t": job.started}
-        if trigger == "train_now":
-            base["control"] = True
+            self._job, self._run = None, None
+        n_train = run["n_train"] if self._batch else self._split_n["train"]
+        base = {"job": job.id, "trigger": trigger, "rows": len(job.rows), "hyper": job.hyper, "t": job.started,
+                "started_at": run["n"], "applied": where}
         if refused is not None:
             job.state, job.why = "refused", refused
             return job, [self._event("train", self.served, n, state="refused", why=refused, fingerprint=None,
@@ -826,9 +967,10 @@ class AdapterLoop:
             r["items"] = tuple(tuple(i) for i in r.get("items") or ())
             report = TrainReport(**r)
         else:
-            report = dataclasses.replace(self._report(frozen), seconds=seconds, n_train=n_train)
-        self._inflight = {"job": job.id, "state": "done", "fingerprint": None, "report": dataclasses.asdict(report),
-                          "extra_keys": []}                # what an error record keeps of this training
+            if out.get("where") == "report":
+                raise out["exc"]
+            report = dataclasses.replace(out["report"], seconds=out["seconds"], n_train=n_train)
+        self._inflight.update(state="done", report=dataclasses.asdict(report))
         self._at("learner.keys")                           # a learner with state names every key it trained on
         if rec is not None:
             extra = frozenset(rec.get("extra_keys") or ())
@@ -855,6 +997,7 @@ class AdapterLoop:
         if ok:
             ev.append(self._freeze(k, n, frozen, keys, n_train))
         else:
+            self._release(frozen)                          # never served: unstaged at once
             row = self._row(k, "discarded", None, None, n, self.live.seen(), n_train, keys, fp)
             row["discarded_at"] = self._split_n["train"]
             self._vs[k] = row
@@ -862,6 +1005,38 @@ class AdapterLoop:
             ev.append(self._event("discard", k, n, samples=0, why=f"freeze refused: {why or 'the policy said no'}"))
         self._inflight = None
         return job, ev
+
+    # --- eviction (Budget.max_versions_kept)
+    def _rollback_target(self):
+        """The version a rollback would most likely return to: the last one served before the served one."""
+        for v in reversed(self._history):
+            if v != self.served:
+                return v
+        return None
+
+    def _evict(self, n) -> list:
+        """Past policy.budget.max_versions_kept served and retired versions (version 0 counted), the oldest retired
+        ones are evicted: released (`Served.release`), no longer a rollback target; their files stay (replay reads
+        them). Never the served version, the rollback target or version 0. → the "evict" events."""
+        keep = self.policy.budget.max_versions_kept
+        held = [v for v, ver in sorted(self._vs.items()) if ver["state"] in KEPT]
+        over = len(held) - int(keep)
+        ev = []
+        if over <= 0:
+            return ev
+        protect = {self.served, self._rollback_target(), 0}
+        for v in held:
+            if over <= 0:
+                break
+            if v in protect:
+                continue
+            ver = self._vs[v]
+            self._at("release")
+            self._release(ver.get("served_as"), ver["model"])
+            ver["state"], ver["model"], ver["served_as"] = "evicted", None, None
+            over -= 1
+            ev.append(self._event("evict", v, n, kept=int(keep), why="max_versions_kept"))
+        return ev
 
     def _freeze(self, k, n, model, keys, n_train):
         if self._fps is not None:
@@ -901,8 +1076,9 @@ class AdapterLoop:
     def pause(self, *, by=None, why=None) -> dict | None:
         """No training, freezing or promotion until resume(); serving, labels and promises go on. → the event (None
         when already paused). The candidate's trial clock runs while paused: a discard by `stale` / `trial` still
-        happens (its δ_v stays spent), as do alarms and rollbacks."""
-        with self._lock:
+        happens (its δ_v stays spent), as do alarms and rollbacks. A training in flight goes on; its result waits for
+        resume() (applied on the first decision after it)."""
+        with self._locked():
             self._refuse_if_stopped()
             if self.paused:
                 return None
@@ -910,38 +1086,74 @@ class AdapterLoop:
             return self._control("pause", by=None if by is None else str(by), why=why)
 
     def resume(self, *, by=None, why=None) -> dict | None:
-        with self._lock:
+        with self._locked():
             self._refuse_if_stopped()
             if not self.paused:
                 return None
             self.paused = False
             return self._control("resume", by=None if by is None else str(by), why=why)
 
-    def train_now(self) -> TrainJob:
-        """One training now, whatever want_train says — within the budget, never while paused or with a candidate in
-        trial. → the TrainJob (state "done", "failed" or "refused" with why). The call returns when the training
-        is over (in the learner's runner); a RunnerError stops the loop."""
-        with self._lock:
+    def train_now(self, *, wait=None) -> TrainJob:
+        """One training now, whatever want_train says — within the budget, never while paused, with a candidate in
+        trial or with a training in flight. → the TrainJob. wait (None: the loop's `wait`): False — the training starts
+        and the call returns at once (state "running"; its result is applied on a later decision, see `step`); True —
+        the call returns when the training is over and its result applied (state "done", "failed" or "refused" with
+        why). A RunnerError stops the loop where the result is applied."""
+        wait = self.wait if wait is None else bool(wait)
+        with self._locked():
             self._refuse_if_stopped()
             k = max(self._vs) + 1
             why = ("paused" if self.paused else f"version {self.candidate} is in trial" if self.candidate is not None
-                   else "a training is in flight" if self._job is not None else None)
+                   else "a training is in flight" if self._run is not None else None)
+            ev = []
             if why:
                 job = TrainJob(id=f"{k}.-", version=k, trigger="train_now", started=self._now(), state="refused",
                                why=why)
             else:
-                job, ev = self._guarded("train_now", {}, lambda: self._train("train_now", self.n))
+                job, ev = self._guarded("train_now", {"wait": wait}, lambda: self._train_now(wait))
                 ev += self._promise_events()
                 if ev:
                     self._write(None, None, ev)
-            if job.state == "refused" and not (why is None and any(e.get("event") == "train" for e in ev)):
+            if job.state == "refused" and not any(e.get("event") == "train" for e in ev):
                 self._control("train", state="refused", why=job.why)   # every control writes an event, a refused one
             return job                                                 # too (refused by the estimate: its own "train")
+
+    def _train_now(self, wait):
+        job, ev = self._start("train_now", self.n, inline=wait)
+        if job.state == "refused" or self._run is None:
+            return job, ev
+        if self._run["inline"]:
+            job, more = self._apply(self.n, "train_now")
+            ev += more
+        return job, ev
+
+    def close(self, *, timeout=30.0) -> dict | None:
+        """Stop the loop: a training in flight is cancelled (its runner stops it: a subprocess is killed, a thread
+        runner stops waiting for its thread), `step` and every control refuse from here on; the served version stays
+        installed. Waits up to timeout seconds for the training's thread, outside every lock. → the "close" event
+        (None when already closed). Also `with AdapterLoop(...) as loop:`."""
+        with self._locked():
+            if self.closed:
+                return None
+            run = self._cancel()
+            self.paused = True
+            e = self._control("close", cancelled=None if run is None else run["job"].id)
+            self.closed = True
+        th = None if run is None else run.get("thread")
+        if th is not None:
+            th.join(timeout)
+        return e
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        self.close()
 
     def promote(self, v=None, *, force=False, by=None, why=None) -> dict:
         """Serve the candidate now: it must be certified; without force the policy's promote must agree (force skips
         the promotion rule, never the certificate); refused while paused. → the "promote" event."""
-        with self._lock:
+        with self._locked():
             self._refuse_if_stopped()
             return self._guarded("promote", {"version": v, "forced": bool(force), "by": by, "why": why},
                                  lambda: self._promote(v, force, by, why))
@@ -966,14 +1178,15 @@ class AdapterLoop:
                                                 "by": None if by is None else str(by), "forced": bool(force),
                                                 "control": True, "t": self._now()})
         e["install"] = self._serve(c, self.n)
-        self._write(None, None, [e] + self._promise_events())
+        ev = self._evict(self.n)
+        self._write(None, None, [e] + ev + self._promise_events())
         return e
 
     def rollback(self, v, *, by=None, why=None) -> dict:
         """Serve an earlier version again (its certificate and threshold as it left them, unless an alarm came after it
         retired: then its promise restarts → "restart"; version 0 without a model: nothing alone). A candidate in trial
         is discarded (its δ_v stays spent) → the "rollback" event."""
-        with self._lock:
+        with self._locked():
             self._refuse_if_stopped()
             rb, ev = self._guarded("rollback", {"to": v, "by": by, "why": why},
                                    lambda: self._rollback(v, by=by, why=why, control=True))
@@ -996,6 +1209,7 @@ class AdapterLoop:
         rb = self._event("rollback", v, self.n, **extra)
         rb["install"] = install
         ev.append(rb)
+        ev += self._evict(self.n)
         if self._vs[v].get("stale"):                       # certified before an alarm: starts over
             ev += self._restart(v, self.n)
         return rb, ev
@@ -1045,6 +1259,7 @@ class AdapterLoop:
                             detector=_fresh_detector(self.detector), monitor=copy.deepcopy(self._monitor0),
                             _detector_alone=True, _batch=self._batch)
         fresh._fps = fps
+        fresh._part_lock = None                            # the replay scores nothing on the part
         fresh._replay_trains = [e for e in stored_ev if e.get("event") == "train"
                                 and (e.get("state") != "refused" or e.get("job") is not None)]
         fresh._replay_trains += [e["train"] for e in stored_ev if e.get("event") == "error" and e.get("train")]
@@ -1056,7 +1271,7 @@ class AdapterLoop:
             a = d.get("args") or {}
             try:
                 if d.get("of") == "train_now":
-                    fresh.train_now()
+                    fresh.train_now(wait=a.get("wait"))
                 elif d.get("of") == "promote":
                     fresh.promote(a.get("version"), force=a.get("forced", False), by=a.get("by"), why=a.get("why"))
                 elif d.get("of") == "rollback":
@@ -1070,7 +1285,8 @@ class AdapterLoop:
                     "resume": lambda d: fresh.resume(by=d.get("by"), why=d.get("why")),
                     "promote": lambda d: fresh.promote(d["version"], force=d.get("forced", False), by=d.get("by"),
                                                        why=d.get("why")),
-                    "train": lambda d: fresh.train_now(), "error": again}
+                    "train": lambda d: fresh.train_now(), "error": again,
+                    "train_start": lambda d: fresh.train_now(wait=d.get("wait")), "close": lambda d: fresh.close()}
         for kind, d in items:
             if kind == "stream":
                 if d.get("control") and d.get("event") in controls:
@@ -1123,7 +1339,8 @@ class AdapterLoop:
                 bad.append((None, "version file", f"version {v}: no Served to load it with"))
                 continue
             srv = (self._vs.get(v) or {}).get("served_as")
-            kw = ({"part": srv.part} if getattr(srv, "part", None) is not None
+            part = getattr(srv, "part", None) or self.part      # an evicted version: the loop's part
+            kw = ({"part": part} if part is not None
                   and "part" in inspect.signature(cls.load).parameters else {})   # a LoRA version scores on its part
             try:
                 models[v] = cls.load(self.versions_dir, v, expect_fp=fp, **kw)
@@ -1171,14 +1388,17 @@ class AdapterLoop:
 
     def status(self) -> dict:
         """{"state", "error", "served", "candidate", "n", "labels": {"train", "calib", "holdout"}, "trainings",
-        "budget": {...}, "job", "paused", "alarms", "mode", "guarantee", "delta_spent"}. state: "error" (a hook
-        raised: the loop stopped; error: {"n", "where", "why"}), "training", "paused" or "running".
+        "budget": {...}, "job", "paused", "alarms", "mode", "guarantee", "delta_spent", "versions_kept"}. state:
+        "closed", "error" (a hook raised: the loop stopped; error: {"n", "where", "why"}), "training", "paused" or
+        "running". job: the training in flight — id, version, trigger, started (wall clock), started_at (its decision),
+        inline, state ("running"; "ready": its result waits for the next decision), and what the runner fills in
+        (runner, pid, log, device, eta, last, last_t: a heartbeat line's age says whether it is alive).
 
-        Takes no lock: it answers while a step (and the in-process training inside it) runs on another thread, and
-        `job` shows that training. Its fields are read one by one, so two of them may straddle a decision."""
+        Takes no lock: it answers while a step (or an inline training inside it) runs on another thread. Its fields
+        are read one by one, so two of them may straddle a decision."""
         b, job, err = self.policy.budget, self._job, self.error
-        state = ("error" if err is not None else "training" if job is not None else "paused" if self.paused
-                 else "running")
+        state = ("closed" if self.closed else "error" if err is not None else "training" if job is not None
+                 else "paused" if self.paused else "running")
         return {"state": state, "error": None if err is None else dict(err), "served": self.served,
                 "candidate": self.candidate, "n": self.n, "labels": dict(self._split_n),
                 "trainings": len(self._trainings),
@@ -1187,7 +1407,8 @@ class AdapterLoop:
                 "job": None if job is None else dict(job), "paused": self.paused,
                 "alarms": len(self._alarms), "mode": "stream",
                 "guarantee": "anytime stream certificate per version (StreamPromise on post-freeze coin samples)",
-                "delta_spent": self.budget.spent}
+                "delta_spent": self.budget.spent,
+                "versions_kept": sum(1 for ver in list(self._vs.values()) if ver["state"] in KEPT)}
 
     def fed(self, v) -> list:
         """The decisions whose samples reached version v's promise, in order."""
