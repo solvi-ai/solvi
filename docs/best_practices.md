@@ -1029,7 +1029,8 @@ every candidate of y = c·x. Values over several orders of magnitude need `rtol=
 `LawSet` itself (`LawSet(..., rtol=)`) so that `step` / `test` / `observe` compare within it too: y = 2.5·x over x from
 1 to 1e5 with relative noise 1e-7 learned no law in 60 steps under exact equality and learned it with rtol=1e-5, with no
 mismatch after; in `admit_by_probes`, tol=1e-4 refuted every candidate where the noise reached 2e-3…0.2 and rtol=1e-4
-admitted the right one.
+admitted the right one. A tolerance is checked row by row: it does not catch a law biased inside it, and it ignores
+the error of fitted constants — check the residuals as a whole with `confirm=` ([api/laws.md](api/laws.md)).
 
 **A copied environment is an oracle only if it is deterministic.** Before using a clone or a replay as the judge
 (`admit_by_probes(ask=...)` on a `deepcopy` of the environment, a simulator that plans on a copy, `boundary(system=...)`
