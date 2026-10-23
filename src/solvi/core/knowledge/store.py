@@ -51,7 +51,13 @@ Re-test. Content written again after it was retracted — the same item id, sinc
 by the new assertion: it is a hypothesis "pending re-test" until `retest(id, ok=True)` (a person or a test confirms
 it; ok=False retracts it again), and so is every item that rested on it when it was retracted, each until its own
 re-test. Items derived after the re-test are fresh; an item a rule only re-infers (`inferred=True`) follows its
-premises. `pending_retest(id)` reads it.
+premises, and so does an inferred item that rested on one: once the premise passes its re-test it is a fact again
+without a re-test of its own. `pending_retest(id)` reads it.
+
+Derived validity. An item with `derived_from` and no `valid` of its own gets the intersection of its premises'
+validity (each premise's span over its live claims); when they never hold together it is refused with the reason in
+the journal. It holds at a time (`usable(id, valid_at=)`, `snapshot(valid_at=)`, `periods(id)`) only where, for one of
+its derivations, every premise holds — a premise closed by a later version no longer carries it.
 
 Staleness. `flag(scope=..., why=...)` (a drift or open-set flag) or `reconfirm(id)` marks items for re-confirmation: an
 item learned before the flag is a hint, not a fact, until a newer observation or person confirms it or the flag ends
@@ -537,6 +543,14 @@ class KnowledgeStore:
 
         A fact or an episode the gates admit is present at once; a rule, skill or action the gates admit is promoted (its
         verdicts recorded); one a later gate holds stays a hypothesis (a "held" entry says why)."""
+        with self._lock:
+            if valid is None and derived_from:              # a derived item holds where all its premises hold
+                valid, why = self._derived_valid(derived_from)
+                if why is not None:
+                    prop = self.proposal(kind, body, scope, source=source, by=by, derived_from=derived_from)
+                    self._write("refused", item=prop["id"], item_kind=kind, source=source, by=prop["by"],
+                                why=f"validity: {why}")
+                    return None
         prop = self.proposal(kind, body, scope, source=source, by=by, evidence=evidence, derived_from=derived_from,
                              supersedes=supersedes, reconfirm_after=reconfirm_after, valid=valid, level=level, of=of,
                              inferred=inferred, consulted=consulted)
@@ -567,6 +581,36 @@ class KnowledgeStore:
                     else:
                         self.promote(prop["id"], measured=[v.to_dict() for v in verdicts])
             return prop["id"]
+
+    def _derived_valid(self, premises):
+        """The validity of an item derived from `premises` that gives none of its own: the intersection of the premises'
+        validity (each premise's span: from its earliest live since to its latest until) → (valid or None, None), or
+        (None, why) when they never hold together. None when no premise carries `valid` (the item is as before)."""
+        ivs = []
+        for p in sorted(set(premises)):
+            it = self.items.get(p)
+            if it is None:
+                continue
+            claims = [_interval(a["valid"]) for a in (_live(it) or it.asserts) if a.get("valid") is not None]
+            if not claims:
+                continue
+            lo, hi = claims[0]
+            for a, b in claims[1:]:
+                lo = a if _lo_lt(a, lo) else lo
+                hi = b if _hi_lt(hi, b) else hi
+            ivs.append([[lo, hi]])
+        if not ivs:
+            return None, None
+        acc = ivs[0]
+        try:
+            for x in ivs[1:]:
+                acc = _ivs_and(acc, x)
+        except TypeError:
+            raise ValueError(f"the premises' validity times do not compare: {ivs}") from None
+        if not acc:
+            return None, "the premises' validity intervals do not intersect: " + ", ".join(
+                f"{p} {self.valid(p)}" for p in sorted(set(premises)) if self.valid(p) is not None)
+        return [acc[0][0], acc[0][1]], None
 
     def promote(self, iid, measured=None):
         """A behaviour-changing item passed its gates (or a person promotes it): it becomes a fact (measurements kept)."""
@@ -1227,8 +1271,10 @@ def _taint(items, iid, memo):
     cut = None if cut < 0 else cut
     live = _live(it)
     via, whole, seen = [], bool(live), []
-    for a in live:
-        ta = max((tp for p in a["just"] if (tp := _taint(items, p, memo)) is not None and tp > a["t"]), default=None)
+    for a in live:                                      # an inferred assertion follows its premises: a premise's cut
+        ta = max((tp for p in a["just"] if (tp := _taint(items, p, memo)) is not None and tp > a["t"]   # that its own
+                  and not (a.get("inferred") and any(q > tp for q in items[p].promoted))), default=None)  # re-test cleared
+        #                                                                                          does not hold it back
         if ta is None:
             whole = False
         else:

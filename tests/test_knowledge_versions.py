@@ -146,3 +146,66 @@ def test_a_rollback_re_opens_the_version_the_rolled_back_one_closed():
     ks.end_flag(f)
     assert ks.status(base) == "active" and ks.usable(base, valid_at=60)
     assert ks.verify()
+
+
+# --- derived validity
+def test_a_derived_fact_holds_only_where_its_premises_hold():
+    # before: the derived item had no validity and stayed usable at 90 after its premise's interval ended
+    km = solvi.Knowledge()
+    st = km.store
+    p = km.tell({"s": "A", "r": "price", "o": 80}, source="outcome", by="pricing", valid=(50, 80))
+    d = km.tell({"s": "A", "r": "max_refund", "o": 64}, source="outcome", by="rule", derived_from=[p], inferred=True)
+    assert st.valid(d) == [50, 80] and st.items[d].asserts[-1]["inferred"]
+    assert st.usable(d, valid_at=60) and not st.usable(d, valid_at=90)
+    assert [f["body"]["o"] for f in st.snapshot(about="A", relation="max_refund", valid_at=90)["facts"]] == []
+
+
+def test_a_derived_fact_follows_its_premise_when_a_later_version_closes_it():
+    ks = KnowledgeStore()
+    base = ks.add("fact", {"s": "A", "r": "price", "o": 100}, source="outcome", by="w", valid=(0, None))
+    ks.add("fact", {"s": "A", "r": "price", "o": 80}, source="outcome", by="w", valid=(50, 80))
+    d = ks.add("fact", {"s": "A", "r": "refund", "o": 80}, source="spec", by="rule", derived_from=[base], inferred=True)
+    assert ks.valid(d) == [0, None] and ks.periods(d) == [[0, 50], [80, None]]
+    assert ks.usable(d, valid_at=10) and not ks.usable(d, valid_at=60) and ks.usable(d, valid_at=90)
+    snap = ks.snapshot()
+    assert solvi.Knowledge.value(snap, "A", "refund", valid_at=60) is None
+    assert solvi.Knowledge.value(snap, "A", "refund", valid_at=90) == 80
+
+
+def test_premises_that_never_hold_together_refuse_the_derivation_with_the_reason():
+    ks = KnowledgeStore()
+    a = ks.add("fact", {"s": "a", "r": "x", "o": 1}, source="outcome", by="w", valid=(0, 10))
+    b = ks.add("fact", {"s": "b", "r": "x", "o": 1}, source="outcome", by="w", valid=(10, 20))
+    c = ks.add("fact", {"s": "c", "r": "x", "o": 1}, source="outcome", by="w", valid=(5, 15))
+    assert ks.add("fact", {"s": "d", "r": "x", "o": 2}, source="spec", by="rule", derived_from=[a, b]) is None
+    assert ks.journal[-1]["op"] == "refused" and ks.journal[-1]["why"].startswith("validity: ")
+    e = ks.add("fact", {"s": "e", "r": "x", "o": 2}, source="spec", by="rule", derived_from=[a, c])
+    assert ks.valid(e) == [5, 10]
+    f = ks.add("fact", {"s": "f", "r": "x", "o": 2}, source="spec", by="rule", derived_from=[a], valid=(0, 3))
+    assert ks.valid(f) == [0, 3]                             # its own valid is kept
+    g = ks.add("fact", {"s": "g", "r": "x", "o": 1}, source="spec", by="w")
+    h = ks.add("fact", {"s": "h", "r": "x", "o": 2}, source="spec", by="rule", derived_from=[g])
+    assert ks.valid(h) is None and ks.journal[-1].get("valid") is None   # premises without valid: as before
+    assert ks.verify()
+
+
+def test_an_inferred_item_follows_its_premise_after_the_premise_passes_its_retest():
+    # before: after retest(a, ok=True) the inferred item stayed a hypothesis pending its own re-test
+    km = solvi.Knowledge()
+    st = km.store
+    a = km.tell({"s": "A", "r": "p", "o": 1}, source="outcome", by="w")
+    d = st.add("fact", {"s": "D", "r": "x", "o": 1}, None, source="spec", by="sup", derived_from=[a], inferred=True)
+    st.retract(a, by="w")
+    km.tell({"s": "A", "r": "p", "o": 1}, source="outcome", by="sync")
+    assert st.pending_retest(a) and st.pending_retest(d)
+    st.retest(a, ok=True)
+    assert st.status(a) == st.status(d) == "active" and not st.pending_retest(d)
+    # a derivation that is not inferred still waits for its own re-test (unchanged)
+    km2 = solvi.Knowledge()
+    s2 = km2.store
+    a2 = km2.tell({"s": "A", "r": "p", "o": 1}, source="outcome", by="w")
+    d2 = s2.add("fact", {"s": "D", "r": "x", "o": 1}, None, source="spec", by="sup", derived_from=[a2])
+    s2.retract(a2, by="w")
+    km2.tell({"s": "A", "r": "p", "o": 1}, source="outcome", by="sync")
+    s2.retest(a2, ok=True)
+    assert s2.status(d2) == "hypothesis" and s2.pending_retest(d2)
