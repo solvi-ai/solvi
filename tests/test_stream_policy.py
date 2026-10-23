@@ -87,9 +87,25 @@ def test_want_train_waits_for_first_then_for_growth_over_the_served_version():
     vs = (VersionInfo(0, "retired"), VersionInfo(1, "served", n_train=400))
     weak = tuple((True, True) for _ in range(50))            # served errs alone: short
     assert not p.want_train(_ready(versions=vs, served=1, labels={"train": 599}, holdout=weak))
-    assert "growth 1.5 × the served version's 400" in p.why_not_train(
+    assert "growth 1.5 × the largest n_train of any version, 400" in p.why_not_train(
         _ready(versions=vs, served=1, labels={"train": 599}, holdout=weak))
     assert p.want_train(_ready(versions=vs, served=1, labels={"train": 600}, holdout=weak))
+
+
+def test_a_discarded_candidate_raises_the_retrain_floor():
+    p = DefaultPolicy()
+    weak = tuple((True, True) for _ in range(200))
+    vs = (VersionInfo(0, "retired"), VersionInfo(1, "served", n_train=300), VersionInfo(2, "discarded", n_train=450))
+    st = _ready(versions=vs, served=1, labels={"train": 460}, holdout=weak)
+    assert not p.want_train(st) and "460 train label(s) < 675" in p.why_not_train(st)
+    assert p.want_train(_ready(versions=vs, served=1, labels={"train": 675}, holdout=weak))
+
+
+def test_no_training_while_one_is_in_flight():
+    p = DefaultPolicy()
+    st = _ready(job={"id": "t1", "started": 10 * DAY - 60, "eta": 10 * DAY + 600})
+    assert not p.want_train(st) and p.why_not_train(st) == "training in progress"
+    assert p.want_train(_ready(job=None))
 
 
 def test_want_train_needs_the_improvement_signal():
@@ -113,6 +129,13 @@ def test_want_train_needs_the_improvement_signal():
     assert DefaultPolicy(target_share=0.5).want_train(_ready(versions=vs, served=1, labels=labels, holdout=timid))
     # the promised level is the state's
     assert not p.want_train(_ready(versions=vs, served=1, labels=labels, holdout=erring, alpha=0.10))
+    # fewer than min_holdout (100) held-out labels: not shown strong, so short — one right alone answer is no evidence
+    assert p.want_train(_ready(versions=vs, served=1, labels=labels, holdout=((True, False),)))
+    assert p.want_train(_ready(versions=vs, served=1, labels=labels, holdout=strong[:99]))
+    assert not p.want_train(_ready(versions=vs, served=1, labels=labels, holdout=strong[:100]))
+    one = gates.incumbent_short([(True, False)], 0.05, min_n=100)
+    assert one["short"] and "< 100" in one["why"]
+    assert not gates.incumbent_short([(True, False)], 0.05)["short"]          # the gate's own default: min_n 1
 
 
 def test_want_train_is_off_while_paused_or_with_a_candidate_in_trial():
@@ -131,6 +154,9 @@ def test_budget_refusals():
     assert "last 24 h" in b.refuse([now - 5000, now - 4000], now)
     assert b.refuse([now - DAY - 1, now - 4000], now) is None                  # one of them is older than a day
     assert "max_trainings 3" in b.refuse([now - 3 * DAY, now - 2 * DAY, now - 1.5 * DAY], now)
+    # a start time after now (a clock set back) blocks neither the window nor the interval, but counts in the life cap
+    assert b.refuse([now + 3600], now) is None
+    assert "max_trainings 3" in b.refuse([now + 1, now + 2, now + 3], now)
     assert "max_train_s" in b.refuse([], now, estimate_s=1801) and b.refuse([], now, estimate_s=1800) is None
     p = DefaultPolicy(budget=Budget(per_day=1))
     st = _ready(trainings=(10 * DAY - 3600,))
@@ -148,6 +174,13 @@ def test_budget_checks_its_fields():
     with pytest.raises(TypeError):
         DefaultPolicy(budget={"per_day": 3})
 
+    class NoSuper(DefaultPolicy):                    # a subclass whose __init__ skips super().__init__
+        def __init__(self):
+            self.first, self.growth, self.window, self.target_share = 10, 1.5, 200, None
+            self.min_holdout = 100
+
+    assert isinstance(NoSuper().budget, Budget) and NoSuper().budget == Budget()
+
 
 # ───────────────────────────────────────────────────────────── select / hyper
 def _rows(n, labels="abc", start=0):
@@ -164,6 +197,14 @@ def test_select_keeps_everything_under_the_cap_and_balances_above_it():
     assert len(got) == 60 and sum(r.y == "b" for r in got) == 30           # 100 "b" of 1000 → half the selection
     assert got == p.select(st, skewed)                                    # deterministic
     assert [r.t for r in got] == sorted(r.t for r in got)
+
+
+def test_select_keeps_only_the_latest_label_of_a_key():
+    p = DefaultPolicy()
+    rows = [LabelRow("k1", "x1", "a", "human", 1), LabelRow("k1", "x1", "b", "human", 2),
+            LabelRow("k2", "x2", "a", "human", 3)]
+    got = p.select(_ready(), list(reversed(rows)))
+    assert [(r.key, r.y) for r in got] == [("k1", "b"), ("k2", "a")]
 
 
 def test_select_takes_half_from_the_recent_rows():
@@ -227,7 +268,7 @@ def test_label_mode_freezes_only_with_a_paired_gain_whose_wilson_bound_is_positi
 
 
 # ───────────────────────────────────────────────────────────── promote / discard
-GOOD = Paired(n_novel=200, alone_k=60, wrong_k=2, alone_s=20, n_seen=100, alone_seen=40, wrong_seen=1)
+GOOD = Paired(n_novel=200, alone_novel=60, wrong_novel=2, alone_served=20, n_seen=100, alone_seen=40, wrong_seen=1)
 
 
 def test_promote_needs_all_four_conditions_and_the_probe():
@@ -236,11 +277,12 @@ def test_promote_needs_all_four_conditions_and_the_probe():
     assert p.promote(st, GOOD)
     assert not p.promote(_cand(certified=False), GOOD)                               # 1 certified
     assert not p.promote(st, Paired(99, 30, 1, 5, 100, 40, 1))                       # 2 n_novel ≥ 100
-    assert not p.promote(st, Paired(200, 9, 0, 0, 100, 40, 0))                       # 3 share_k 0.045 < 0.05
-    assert p.promote(st, Paired(200, 10, 0, 0, 100, 40, 0))                          #   0.05 passes
+    assert not p.promote(st, Paired(1000, 49, 0, 0, 100, 40, 0))                     # 3 share_k 0.049 < 0.05
+    assert p.promote(st, Paired(1000, 50, 0, 0, 100, 40, 0))                         #   0.05 passes
     assert not p.promote(st, Paired(200, 60, 2, 59, 100, 40, 1))                     # 4 0.30 < 0.295 + 0.01
     assert p.promote(st, Paired(200, 60, 2, 58, 100, 40, 1))                         #   0.30 ≥ 0.29 + 0.01
-    memoriser = Paired(n_novel=200, alone_k=60, wrong_k=30, alone_s=20, n_seen=100, alone_seen=80, wrong_seen=0)
+    memoriser = Paired(n_novel=200, alone_novel=60, wrong_novel=30, alone_served=20, n_seen=100, alone_seen=80,
+                       wrong_seen=0)
     assert not p.promote(st, memoriser)                                              # 5 the probe
     assert not p.promote_checks(st, memoriser)["probe"]["ok"]
     assert DefaultPolicy(gap=1.0).promote(st, memoriser)                              # probe off: promoted
@@ -250,9 +292,39 @@ def test_promote_needs_all_four_conditions_and_the_probe():
 def test_the_probe_is_measured_only_with_enough_alone_answers_on_both_sides():
     assert gates.probe(80, 0, 60, 30)["ok"] is False
     few = gates.probe(29, 0, 60, 30)
-    assert few["ok"] and not few["measured"]
+    assert few["ok"] and not few["measured"] and not few["shown"]
     assert not gates.probe(80, 2, 60, 9)["ok"]                # 0.15 − 0.025 = 0.125 > 0.10
     assert gates.probe(80, 4, 60, 6)["ok"]                    # 0.10 − 0.05 = 0.05
+    # an unmeasured probe does not promote when the novel side is thin; a thin seen side is not memorising
+    p, st = DefaultPolicy(), _cand()
+    thin_novel = Paired(1000, 29, 0, 0, 100, 80, 0)
+    assert not p.promote(st, thin_novel) and not p.promote_checks(st, thin_novel)["probe"]["ok"]
+    assert p.discard(st, thin_novel) is None
+    thin_seen = Paired(1000, 60, 1, 0, 100, 10, 0)
+    assert p.promote(st, thin_seen) and not p.promote_checks(st, thin_seen)["probe"]["measured"]
+
+
+def test_a_memoriser_is_not_promoted_while_its_novel_side_is_thin():
+    """F8's memoriser: answers the items it trained on, abstains on the rest; certified on the pool (8 / 400 = 2 %)."""
+    p = DefaultPolicy()
+    st = _cand()
+    m = Paired(n_novel=100, alone_novel=8, wrong_novel=8, alone_served=0, n_seen=300, alone_seen=200, wrong_seen=0)
+    assert not p.promote(st, m) and p.discard(st, m) is None
+    assert not p.promote_checks(st, m)["probe"]["ok"]
+    for c in ("certified", "novel", "min_share", "margin"):
+        assert p.promote_checks(st, m)[c]["ok"]                     # every other condition passes
+    m500 = Paired(n_novel=500, alone_novel=25, wrong_novel=25, alone_served=0, n_seen=300, alone_seen=200,
+                  wrong_seen=0)
+    assert not p.promote(st, m500)
+
+
+def test_the_probe_discards_only_on_a_gap_shown_beyond_noise():
+    p, st = DefaultPolicy(), _cand(samples=10)
+    noisy = Paired(1000, 30, 4, 0, 100, 30, 0)                      # 0.133 − 0 > 0.10 on points, not shown
+    g = gates.probe(30, 0, 30, 4)
+    assert not g["ok"] and g["measured"] and not g["shown"] and g["low_gap"] < 0.10
+    assert p.discard(st, noisy) is None and not p.promote(st, noisy)
+    assert gates.probe(80, 0, 60, 30)["shown"]                      # a clear memoriser is shown
 
 
 def test_label_mode_promotes_on_the_pre_freeze_gates():
@@ -272,6 +344,8 @@ def test_discard_reasons():
     assert p.discard(_cand(samples=1500), GOOD) is None        # promotable: the loop promotes, not discards
     memoriser = Paired(200, 60, 30, 20, 100, 80, 0)
     assert p.discard(_cand(samples=10), memoriser).startswith("memorisation probe")
+    # stream mode with no sample yet (paired None) still goes stale
+    assert p.discard(_cand(certified=False, samples=1500), None) == "not certified after 1500 samples"
 
 
 # ───────────────────────────────────────────────────────────── alarm
@@ -290,6 +364,29 @@ def test_alarm_recertifies_and_rolls_back_on_a_second_alarm_within_probation():
                    "monitor", {}) == "recertify"                                     # an alarm on another version
     assert p.alarm(_state(n=200, alarms=({"n": 100, "who": "detector", "version": 0},)), "detector",
                    {}) == "recertify"                                                # nothing to roll back to
+
+
+def test_alarm_after_a_rollback_never_rolls_back_to_the_version_rolled_back_from():
+    p = DefaultPolicy()
+    # history (0, 1, 2, 1): 2 alarmed twice and was rolled back to 1 at n = 1000; now 1 alarms twice
+    vs = (VersionInfo(0, "retired"), VersionInfo(1, "served", n_train=300), VersionInfo(2, "retired", n_train=450))
+    alarms = ({"n": 900, "who": "detector", "version": 2}, {"n": 950, "who": "monitor", "version": 2},
+              {"n": 1100, "who": "detector", "version": 1})
+    st = _state(n=1200, versions=vs, served=1, served_history=(0, 1, 2, 1), served_since=1000, alarms=alarms)
+    assert p.alarm(st, "detector", {}) == "rollback:0"
+    # version 0 alarmed too: nothing left to roll back to
+    st0 = _state(n=1200, versions=vs, served=1, served_history=(0, 1, 2, 1), served_since=1000,
+                 alarms=({"n": 50, "who": "detector", "version": 0},) + alarms)
+    assert p.alarm(st0, "detector", {}) == "recertify"
+
+
+def test_alarm_counts_only_alarms_from_the_current_serving():
+    p = DefaultPolicy()
+    # history (0, 1, 0): an alarm on 0 at n = 100 in its first serving; rolled back to 0 at n = 140; one alarm at 150
+    vs = (VersionInfo(0, "served"), VersionInfo(1, "retired", n_train=300))
+    st = _state(n=150, versions=vs, served=0, served_history=(0, 1, 0), served_since=140,
+                alarms=({"n": 100, "who": "detector", "version": 0},))
+    assert p.alarm(st, "detector", {}) == "recertify"
 
 
 # ───────────────────────────────────────────────────────────── the abstract class, pickling, the state
@@ -331,6 +428,22 @@ def test_policies_and_states_pickle():
     assert pickle.loads(pickle.dumps(GOOD)) == GOOD and pickle.loads(pickle.dumps(_report())) == _report()
     for hook in ("want_train", "hyper"):
         assert getattr(q, hook)(_ready()) == getattr(p, hook)(_ready())
+
+
+def test_the_split_nests_in_the_change_pipelines_split():
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        from solvi.experimental.changes._updates import split_of
+    keys = [f"intent|{i:06d}" for i in range(20_000)]
+    assert all(gates.split(k) != "train" for k in keys if split_of(k) == "holdout")
+    assert sum(split_of(k) == "holdout" for k in keys) > 5000
+
+
+def test_train_keys_are_a_set_snapshot():
+    v = VersionInfo(1, "candidate", n_train=3, train_keys=["k1", "k2", "k1"])
+    assert v.train_keys == frozenset({"k1", "k2"}) and "k1" in v.train_keys and "k9" not in v.train_keys
+    assert VersionInfo(0, "served").train_keys == frozenset()
+    assert pickle.loads(pickle.dumps(v)) == v
 
 
 def test_the_state_is_read_only_and_finds_its_versions():
