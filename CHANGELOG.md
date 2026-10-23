@@ -66,7 +66,6 @@
 - **`Guard.fingerprint()`**: what decides a guard's calls as one hash, read from its declarations (tools with their
   schemas and functions, policies, functions, firewalls, the authorizer, settings); building nothing. The process
   records it per guard node instead of reading the guard's private attributes.
-<<<<<<< HEAD
 - **`systemone`: a probability floor for services that round** (`prob_floor="auto"`, opt-in). Hosted decision
   models round probabilities (Jev to 0.01), and an exact 0 on the right option becomes log(1e-6) ≈ −13.8, which drags
   fit, teach and calibration (a third-party measurement on Jev, https://github.com/scienthoon/jev-ood-calibration:
@@ -105,7 +104,6 @@
   differs from RFC 8785. `tests/fixtures/canonical_json/vectors.json`: 21 values, a format 1 and a format 2 record and
   a chain link (22 values since the fix under Fixed), each with its canonical text and SHA-256, recomputed by `tests/test_canonical_json_vectors.py`. Nothing
   written changes: the format and every hash are as before.
-=======
 - **A stop button for Guard: `guard.pause(reason, by=)` / `guard.resume(by=)`.** While paused, every check and call
   (sync, async, through a session) is denied before any other check (`guard_not_paused`; deny, not escalate, so no
   approval can be queued while stopped), the reason names who paused and why, no tool runs, and
@@ -123,7 +121,6 @@
   or named as its `signal=` counts as read). Each names the question or field and the fix in one line; none is an
   error, so `solvi check` without `--strict` exits as before, and the examples raise no new warning under `--strict`.
   `solvi init --with-model`'s refunds and minimal templates get an `"other"` option.
->>>>>>> lane-qguard
 
 ### Fixed
 - **A skill certificate spends δ over its restarts** (`solvi.experimental.skills.Certificate`). After an alarm, or a
