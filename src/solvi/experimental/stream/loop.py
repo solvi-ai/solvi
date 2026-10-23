@@ -1,5 +1,5 @@
 """The adapter loop: frozen versions, each with its own stream certificate, promoted under δ-spending, driven by a
-`LoopPolicy` (experimental; the LoRA learning loop, stages 2–3b — no checkpoint or attach yet).
+`LoopPolicy` (experimental; the LoRA learning loop, stages 2–4 — no attach yet).
 
     from solvi.experimental.stream import AdapterLoop, DefaultPolicy, HashedTextTrainer
 
@@ -10,6 +10,7 @@
     loop.close()                           # cancels a training in flight; step and the controls refuse after it
     loop.promote(force=False) / loop.rollback(v)
     loop.versions(), loop.status(), loop.replay()
+    loop.save(dir) / AdapterLoop.load(dir, learner, ...)   # the checkpoint (stream.checkpoint)
 
 This is the lane's `LearningLoop` (`stream.versions`) with its constants turned into `LoopPolicy` hooks
 (`stream.policy`); `LearningLoop` is now this class with `DefaultPolicy` set to the lane's constants. The protocol
@@ -115,8 +116,16 @@ retired ones are evicted after each change of the served version — "evict" eve
 "evicted", no longer a rollback target; their files stay for replay. The served version, the rollback target (the one
 served before it) and version 0 are never evicted, so up to three can stay above a limit below 3.
 
-Not built here (stages 4–5): the checkpoint, label mode and `attach`. Labels are kept in memory, inputs included (`LabelRow.x`): with dict inputs the memory grows with
-the label count (a label store comes with the checkpoint). `status()` takes no lock. Unmeasured: no stand has run on this loop."""
+Checkpoint (stage 4, `stream.checkpoint`): `save(dir, cancel=False)` writes the whole state — versions and their
+files, promises and the detector (`dump`), policy, budget, rate, the label store `labels.jsonl`, the records — into a
+new folder, then switches `dir/CURRENT` to it atomically; `AdapterLoop.load(dir, learner, ...)` checks the signed
+manifest and every file's hash, rebuilds the loop, installs the served version and feeds the fresh learner its train
+labels again. A training in flight refuses the save unless `cancel=True` (`cancel_training()`, a "cancel" control
+event). A loaded loop continues with the same decisions and records as the loop it was saved from, and replays exactly.
+
+Not built here (stage 5): label mode and `attach`. Labels are kept in memory, inputs included (`LabelRow.x`): with dict
+inputs the memory grows with the label count (the checkpoint writes them to `labels.jsonl`). `status()` takes no lock.
+Unmeasured: no stand has run on this loop."""
 from __future__ import annotations
 
 import contextlib
@@ -370,6 +379,7 @@ class AdapterLoop:
         self._replay_t = 0.0
         self._step_t = None
         self._upd_kw = _update_keywords(learner.update)
+        self._seen0 = learner.seen()                       # the learner as given (a checkpoint feeds it from here)
         self.error = None                                  # {"n", "where", "why"} once a hook raised: the loop stops
         self._hk, self._where, self._changing = 0, "loop", False
         self._inject = None                                # replay: {"call", "why"} of a recorded error
@@ -1205,6 +1215,33 @@ class AdapterLoop:
             th.join(timeout)
         return e
 
+    def cancel_training(self, *, by=None, why=None) -> dict | None:
+        """Drop the training in flight (running, or its result waiting to be applied): its runner stops it, nothing is
+        applied, nothing restarts it here; it stays counted against the budget. → the "cancel" event (None when no
+        training is in flight). The policy may start another one on a later decision."""
+        with self._locked():
+            self._refuse_if_stopped()
+            if self._run is None:
+                return None
+            run = self._cancel()
+            return self._control("cancel", cancelled=run["job"].id, by=None if by is None else str(by), why=why)
+
+    # --- the checkpoint (stage 4; stream.checkpoint)
+    def save(self, dir, *, cancel=False) -> dict:
+        """Save the loop's whole state to `dir` (see `stream.checkpoint`): written to a temporary folder, then switched
+        in atomically, so a crash in the middle leaves the previous checkpoint usable. A training in flight refuses the
+        save (RuntimeError) unless cancel=True, which cancels it first (`cancel_training`, a "cancel" event). → {"path",
+        "manifest", "n", "files"}. Writes no record otherwise."""
+        from .checkpoint import save_loop
+        return save_loop(self, dir, cancel=cancel)
+
+    @classmethod
+    def load(cls, dir, learner, **kw) -> "AdapterLoop":
+        """The loop saved in `dir`, continuing where it was saved (see `stream.checkpoint.load_loop` for the keywords:
+        system, storage, versions_dir, part, initial, key, served, clock, secret, groups)."""
+        from .checkpoint import load_loop
+        return load_loop(cls, dir, learner, **kw)
+
     def __enter__(self):
         return self
 
@@ -1347,7 +1384,8 @@ class AdapterLoop:
                     "promote": lambda d: fresh.promote(d["version"], force=d.get("forced", False), by=d.get("by"),
                                                        why=d.get("why")),
                     "train": lambda d: fresh.train_now(), "error": again,
-                    "train_start": lambda d: fresh.train_now(wait=d.get("wait")), "close": lambda d: fresh.close()}
+                    "train_start": lambda d: fresh.train_now(wait=d.get("wait")), "close": lambda d: fresh.close(),
+                    "cancel": lambda d: fresh.cancel_training(by=d.get("by"), why=d.get("why"))}
         for kind, d in items:
             if kind == "stream":
                 if d.get("control") and d.get("event") in controls:

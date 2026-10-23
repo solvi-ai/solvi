@@ -402,3 +402,87 @@ def test_deferred_apply_end_to_end_with_the_subprocess_runner(ckpt, tmp_path):
         assert r["ok"], r["mismatches"][:5]
         loop.close()
         assert loop.status()["state"] == "closed"
+
+
+CHILD = r'''
+import json, sys, warnings
+warnings.simplefilter("ignore")
+import torch
+a = json.loads(open(sys.argv[1]).read())
+torch.set_num_threads(a["threads"])
+from solvi.core.deciders import DecideModel
+from solvi.experimental.stream import AdapterLoop
+from solvi.experimental.stream.lora_learner import LoraLearner
+from solvi.experimental.stream.runner import SubprocessRunner
+m = DecideModel.load(a["ckpt"], backend="torch", device="cpu")
+part = m.decision("team", "Which team?", "email", a["teams"])
+fp0 = part.fingerprint()
+learner = LoraLearner(part, a["loopdir"], runner=SubprocessRunner(heartbeat_s=1.0))
+loop = AdapterLoop.load(a["ck"], learner, system=part, secret=a["key"].encode(), versions_dir=a["vdir"],
+                        clock=lambda: 1000.0)
+loaded_fp = part.fingerprint()
+outs = [loop.step(x, lambda y=y: y) for x, y in a["data"]]
+r = loop.replay(rescore=True)
+json.dump({"outs": outs, "log": loop.log, "ok": r["ok"], "mm": [list(map(str, x)) for x in r["mismatches"][:5]],
+           "decisions": r["decisions"], "fp0": fp0, "loaded_fp": loaded_fp, "served": loop.served},
+          open(a["out"], "w"))
+'''
+
+
+def test_checkpoint_end_to_end_train_promote_save_load_in_a_new_process_continue_replay(ckpt, tmp_path):
+    """Stage 4 on the tiny checkpoint: a version trained in a subprocess is promoted, the loop is saved, a new process
+    loads the model and the checkpoint (the served adapter is installed), continues on the same inputs as the loop it
+    was saved from, with the same decisions and records, and its rescored replay is exact."""
+    import json
+    import os
+    import subprocess
+    import sys
+
+    import torch
+
+    import solvi
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        m, part = _part(ckpt)
+        fp0 = part.fingerprint()
+        learner = LoraLearner(part, tmp_path / "loop", runner=SubprocessRunner(heartbeat_s=1.0))
+        policy = DefaultPolicy(_budget(), calib=0.3, holdout=0.0, pre_freeze=False, probe=False, novel_risk=False,
+                               first=10 ** 6, lr=1e-2, min_updates=60, max_updates=60)
+        loop = AdapterLoop(learner, question="team", max_risk=0.2, secret=KEY, policy=policy,
+                           initial=learner.version0(), system=part, versions_dir=tmp_path / "versions",
+                           clock=lambda: 1000.0)
+        data = _toy(1700, 41)
+        for x, y in data[:200]:
+            loop.step(x, lambda y=y: y)
+        job = loop.train_now(wait=True)
+        assert job.state == "done" and job.frozen, job
+        k = loop.candidate
+        for x, y in data[200:1300]:
+            loop.step(x, lambda y=y: y)
+            if loop.served == k:
+                break
+        if loop.served != k:
+            assert loop.versions()[k]["certified"], loop.versions()
+            loop.promote(k, force=True)
+        assert loop.served == k and part.fingerprint() != fp0
+        info = loop.save(tmp_path / "ck")
+        saved_fp, n = part.fingerprint(), loop.n
+        rest = data[n:n + 300]
+        outs = [loop.step(x, lambda y=y: y) for x, y in rest]
+        r = loop.replay(rescore=True)
+        assert r["ok"], r["mismatches"][:5]
+        assert any(f.startswith(f"versions/{k}.lora") for f in info["files"])
+    args = {"threads": torch.get_num_threads(), "ckpt": str(ckpt), "teams": TEAMS, "loopdir": str(tmp_path / "loop2"),
+            "ck": str(tmp_path / "ck"), "key": KEY.decode(), "vdir": str(tmp_path / "versions2"),
+            "data": [list(d) for d in rest], "out": str(tmp_path / "child.json")}
+    (tmp_path / "args.json").write_text(json.dumps(args))
+    (tmp_path / "child.py").write_text(CHILD)
+    env = dict(os.environ, PYTHONPATH=os.path.dirname(os.path.dirname(solvi.__file__)))
+    p = subprocess.run([sys.executable, str(tmp_path / "child.py"), str(tmp_path / "args.json")], env=env,
+                       capture_output=True, text=True, timeout=300)
+    assert p.returncode == 0, p.stderr[-3000:]
+    got = json.loads((tmp_path / "child.json").read_text())
+    assert got["fp0"] == fp0 and got["loaded_fp"] == saved_fp and got["served"] == k
+    assert got["outs"] == json.loads(json.dumps(outs))
+    assert got["log"] == json.loads(json.dumps(loop.log))
+    assert got["ok"] and got["decisions"] == n + 300, got["mm"]

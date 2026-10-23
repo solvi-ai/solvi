@@ -239,6 +239,47 @@ class StreamPromise:
                 "evidence_fp": _sha([ev, self._cert])[:16],
                 "grid_fp": None if self.grid is None else _sha(self.grid)[:16]}
 
+    def dump(self) -> dict:
+        """Everything a restore needs (JSON data): the configuration's fingerprint, (v, δ_v), the grid (or the scores
+        buffered for the auto grid), the counters, the threshold, each grid point's e-process and certified flag, the
+        event list, and the state's evidence_fp, which restore checks. The budget is not in it: it is the caller's
+        (one DeltaBudget over every version of a loop)."""
+        return {"format": "solvi stream promise v1", "config": self.fingerprint(), "v": self.v, "delta_v": self.delta_v,
+                "grid": None if self.grid is None else list(self.grid), "buffer": list(self._buffer), "seen": self.seen,
+                "n": self.n, "missing": self.missing, "dropped": self.dropped,
+                "threshold": None if math.isinf(self.threshold) else self.threshold,
+                "cert": None if self._cert is None else list(self._cert),
+                "procs": None if self._proc is None else [p.dump() for p in self._proc],
+                "events": [dict(e) for e in self.events], "evidence_fp": self.state()["evidence_fp"]}
+
+    def restore(self, d) -> "StreamPromise":
+        """The state of `dump()` on this promise (built with the same configuration; its budget is left as it is) →
+        self. A dump of another configuration, or one whose evidence does not give back its evidence_fp, is refused
+        (ValueError)."""
+        if d.get("format") != "solvi stream promise v1":
+            raise ValueError(f"not a StreamPromise dump ({d.get('format')!r})")
+        if d.get("config") != self.fingerprint():
+            raise ValueError("the dump is of a StreamPromise with another configuration")
+        self.v, self.delta_v = int(d["v"]), float(d["delta_v"])
+        if abs(self.budget.delta_at(self.v) - self.delta_v) > 1e-15:
+            raise ValueError(f"the dump's delta_v {self.delta_v} is not the budget's for v={self.v}")
+        self.grid = None if d["grid"] is None else [float(x) for x in d["grid"]]
+        self._buffer = [float(x) for x in d["buffer"]]
+        self.seen, self.n = int(d["seen"]), int(d["n"])
+        self.missing, self.dropped = int(d["missing"]), int(d["dropped"])
+        self.threshold = math.inf if d["threshold"] is None else float(d["threshold"])
+        if self.grid is None:
+            self._proc = self._cert = None
+        else:
+            if len(d["procs"]) != len(self.grid) or len(d["cert"]) != len(self.grid):
+                raise ValueError("the dump's e-processes do not match its grid")
+            self._proc = [self._new_bet().restore(p) for p in d["procs"]]
+            self._cert = [bool(c) for c in d["cert"]]
+        self.events = [dict(e) for e in d["events"]]
+        if self.state()["evidence_fp"] != d.get("evidence_fp"):
+            raise ValueError("the restored evidence is not the dumped one (evidence_fp differs)")
+        return self
+
     def record(self) -> dict:
         out = {"method": self.method, "kind": self.kind, "promise": self.promise, "n": self.n,
                "delta": self.delta, "delta_v": self.delta_v, "v_index": self.v, "bets": self.bets}

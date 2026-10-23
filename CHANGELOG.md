@@ -331,6 +331,36 @@
   not an `Exception` in the training's thread is a failed training. The `BatchLearner` contract says `train(job)` runs
   on another thread than `update`, `seen` and `keys`. Records written by the stage-3 code (a "train" event marked
   `control` with a `job` and no "train_start") do not replay with this code; nothing was released with them.
+- **The adapter loop: the checkpoint (experimental), stage 4** (`solvi.experimental.stream.checkpoint`, `.loop`,
+  `.certificate`, `.detector`). `AdapterLoop.save(dir, cancel=False)` writes the loop's whole state: every version
+  (state, fingerprint, frozen_at, the keys it trained on, its paired samples, its `StreamPromise`) and the files of the
+  versions that still have a model (`Served.save`; version 0 too, a model without `save` as a `HeadVersion`; the files
+  of discarded and evicted versions copied from `versions_dir`), the served version and the rollback history, the δ
+  budget's index, the training budget's counters, the policy (now and as built), the `RiskDetector`, the score monitor,
+  the rate's window, alarms, probation, the held-out window, pause / close / error, the label store `labels.jsonl` (an
+  input or label that does not round-trip through JSON is pickled in its line) and the records `records.jsonl` (with a
+  `TraceStorage`: its chain head and this loop's record count). Layout: `dir/CURRENT` names `dir/ckpt-<n>-<id>/`; the
+  folder is written under a temporary name, synced, renamed, then `CURRENT` is replaced with `os.replace` — a crash
+  leaves the previous checkpoint usable (tested by failing the save after every file was written and while the version
+  files were written). `manifest.json` holds every file's SHA-256, the learner's class, the model's weights fingerprint
+  and the configuration; `manifest.sig` is HMAC-SHA256 under the loop's secret (SHA-256 without one; the secret is
+  never written). `AdapterLoop.load(dir, learner, system=, storage=, versions_dir=, part=, initial=, key=, served=,
+  clock=, secret=, groups=)` refuses a changed or missing file, a manifest with another signature, a missing or other
+  secret, another learner class, a learner that is not as built, a part whose model has other weights, a version file
+  whose fingerprint is not the recorded one, a store without the checkpoint's chain head or with records of the loop
+  after it, and a missing System when the loop served on one; it installs the served version and feeds the learner the
+  saved train labels again. A training in flight refuses the save unless `cancel=True`, which cancels it with the new
+  control `cancel_training()` (a "cancel" event, replayed; the training stays counted against the budget; nothing
+  restarts it). A save and a load write no record. New: `StreamPromise.dump()` / `restore()` (the e-processes, the
+  certified flags, the grid or its buffer, the events; a restore checks the configuration and the evidence
+  fingerprint), `Mixture` / `MirrorBound.dump()` / `restore()`, `RiskDetector.dump()` / `restore()` / `config()`.
+  Tested: a loop saved at decision 2 500 and loaded continues on 6 500 more decisions with the same outputs, records
+  (except a training's measured wall time) and versions as the loop it was saved from, with a freeze, a promotion and a
+  rollback after the load, and replays all 9 000 decisions; the same with a `TraceStorage`; tampered state, labels,
+  records, policy and version files, an edited manifest and another secret are refused; on the tiny LoRA checkpoint a
+  version trained in a subprocess is promoted, saved, loaded in a new process (the adapter installed), continued with
+  the same decisions and records, and the rescored replay is exact. Unmeasured: no stand; the files are trusted once
+  their hashes match (pickles are loaded), so load only checkpoints you wrote.
 - **A secret for the supervision and audit draws: `Dispatcher(secret=)`** (`solvi.core.dispatch`; security). The
   draws were `sha256(f"{seed}|{input hash}|{n}")` with the public default `seed=0`, so whoever could vary the inputs
   could compute which decisions would be supervised or audited and avoid them. With `secret=` (bytes or str; None reads

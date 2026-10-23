@@ -65,6 +65,17 @@ class Mixture:
     def vector(self) -> list:
         return list(self.lw)
 
+    def dump(self) -> dict:
+        """The process's state (its log wealths and count): restore() on a Mixture of the same alpha, fractions and
+        weights gives it back exactly."""
+        return {"bet": "mixture", "lw": list(self.lw), "n": self.n}
+
+    def restore(self, d) -> "Mixture":
+        if d.get("bet") != "mixture" or len(d["lw"]) != len(self.lw):
+            raise ValueError("not a dump of a Mixture with these bet fractions")
+        self.lw, self.n = [float(x) for x in d["lw"]], int(d["n"])
+        return self
+
 
 class MirrorBound:
     """MeanBound(m = 1 − alpha) fed x = 1 − loss: the aGRAPA bet, certifying "the mean loss is below alpha"."""
@@ -92,6 +103,18 @@ class MirrorBound:
 
     def vector(self) -> list:
         return [self.bound.evidence]
+
+    def dump(self) -> dict:
+        """The aGRAPA bet's state (log evidence, count, its predictable estimates): restore() gives it back exactly."""
+        b = self.bound
+        return {"bet": "agrapa", "evidence": b.evidence, "n": b.n, "s": b._s, "ss": b._ss}
+
+    def restore(self, d) -> "MirrorBound":
+        if d.get("bet") != "agrapa":
+            raise ValueError("not a dump of a MirrorBound")
+        b = self.bound
+        b.evidence, b.n, b._s, b._ss = float(d["evidence"]), int(d["n"]), float(d["s"]), float(d["ss"])
+        return self
 
 
 def _delta_schedule(delta: float):
