@@ -185,7 +185,8 @@ chosen false-flag rate. Since 1.2. Opt-in and shipped without weights: the fixed
 detector. Fit it on labelled outputs your own tools return and set its threshold on your ordinary ones
 (`calibrate(max_flag_rate=)`); its gain held only on the injection family it was fitted on.
 
-- **Missing:** measured once on injected tool outputs of one public benchmark (InjecAgent): on 248 held-out injections
+- **Missing:** measured once (the script is not in the repository) on injected tool outputs of one public benchmark
+  (InjecAgent): on 248 held-out injections
   (attacker instructions and tools not used in fitting) a detector fitted on 279 other cases and 865 ordinary texts
   found 76% against the fixed rules' 23%, flagging fewer ordinary texts (1.8% against 4.2%); but a plain TF-IDF classifier
   did the same, half of the gain was one address repeated across that dataset (without it +0.19, 95% CI +0.06…+0.38),
@@ -312,7 +313,7 @@ plan (Ann. Math. Stat. 1943), a CUSUM on each inspected 0/1 outcome is the Berno
 Farewell and Treasure (Biostatistics 2000). Labels seen only where a policy chose to look are the selective-labels
 problem; a uniformly random slice beside the policy is the standard remedy.
 
-Measured once on an intent-routing stream (100 replays, a check whose failure rate rises from 0.20 to 0.60 at one
+Measured once (the script is not in the repository) on an intent-routing stream (100 replays, a check whose failure rate rises from 0.20 to 0.60 at one
 point, alpha 0.05 per 600 decisions): a 10 % audit flagged the break in 96 of 100 within 300 decisions (median 118; a
 20 % audit 98 of 100, median 75) with 4 of 100 false flags on unchanged streams. The same CUSUM on only the decisions
 the policy bought the check for: 57 of 100 (median 176), 9 false flags. The drift monitor on the system's own answers
@@ -526,7 +527,8 @@ an accepted slow-path answer is a loss. The promise is therefore relative to the
 under a risk ≤ α the expected number of samples to a false alarm is at least `arl` — not a per-horizon probability
 like `DriftMonitor`'s: a model running exactly at α re-certifies about every `arl` samples by design
 (`alternatives=(1.5, 2.0)` moves the null to 1.5α). The bound is the Shiryaev–Roberts e-detector's (Shin, Ramdas and
-Rinaldo 2023, arXiv 2203.03532), and it counts samples, not decisions: a simulation of this code matched it, and at the
+Rinaldo 2023, arXiv 2203.03532), and it counts samples, not decisions: a simulation of this code (not in the
+repository) matched it, and at the
 adaptive rate one sample is many decisions (the simulated run lengths and the conversion are in
 [best practices](best_practices.md#guarantees-and-calibration)). With
 `on_drift="recertify"` an alarm restarts the certificate (the next δ_v, threshold +inf) and System 1 answers nothing
@@ -616,9 +618,11 @@ In the tests, on a synthetic five-intent text stream of 2 000 decisions the loop
 last 500 with no wrong alone answer. Shuffled labels never promote a candidate under either promise (3 seeds each,
 the shuffled-label control). These are smoke checks, not measurements.
 
-Measured once on real streams: three public intent sets with a TF-IDF + logistic-regression answerer, 20 seeds per
-set, a shift to held-out intents, corrupted text and noisy labels; the numbers, the setting and the prior work are in
-[best practices](best_practices.md#guarantees-and-calibration). What held:
+Measured once on real streams (the stand's script is not in the repository): three public intent sets with a TF-IDF +
+logistic-regression answerer, 20 seeds per set, a shift to held-out intents, corrupted text and noisy labels; the
+numbers, the setting and the prior work are in [best practices](best_practices.md#guarantees-and-calibration). The
+score monitor it was compared with is `DriftMonitor` as of solvi 1.4.0.dev, before the change of its window z-test of
+the mean confidence (CHANGELOG 1.4.0). What held:
 
 - **The promise, between change points.** No threshold a stream certificate had in force, and no version the
   learning loop served, had a risk above the promise on the regime it was certified on. That holds under the method's
@@ -638,7 +642,8 @@ set, a shift to held-out intents, corrupted text and noisy labels; the numbers, 
 What the measurement found against these pieces:
 
 - **`RiskDetector` must not be the only alarm.** It reads only the sampled decisions, so on shifts to new intents it
-  alarmed far later than the confidence CUSUM that reads every decision's score, or not at all, and until its alarm
+  alarmed far later than the confidence CUSUM that reads every decision's score (`DriftMonitor` before its 1.4.0
+  window z-test change), or not at all, and until its alarm
   the system kept answering alone on the moved inputs. Use it next to the score monitor (`DriftMonitor`,
   `OpenSetGate`), not instead of it. `alternatives=(1.5, 2.0)` left it silent on most streams and is not a default.
 - **The `LearningLoop` gained nothing with gold labels.** Against the same certificate on the frozen System 1 it
@@ -652,6 +657,6 @@ What the measurement found against these pieces:
 - **The promise is relative to the oracle.** Noisy labels, or a hosted LLM as the oracle, cost coverage, not
   validity against those labels.
 
-- **Missing:** measured once; see the documented limits in docs/experimental.md: the RiskDetector alarmed far later than the confidence CUSUM on shifts to new intents and must not be the only alarm; the LearningLoop gained nothing with gold labels and is kept only as the core of a planned adapter loop; TicketDesk is unmeasured on a stream. The loop is not wired into the Dispatcher (no loop=: it drives its own coin and oracle); the expired-share stop (max_drop) and repeated tickets for the oracle's own noise are not built; a person's audit label does not yet replace the slow path's label
-- **Script:** none yet. **Deadline:** 1.2.
+- **Missing:** measured once (the stand's script is not in the repository); see the documented limits in docs/experimental.md: the RiskDetector alarmed far later than the confidence CUSUM (DriftMonitor before its 1.4.0 window z-test change) on shifts to new intents and must not be the only alarm; the LearningLoop gained nothing with gold labels and is kept only as the core of a planned adapter loop; TicketDesk is unmeasured on a stream. The loop is not wired into the Dispatcher (no loop=: it drives its own coin and oracle); the expired-share stop (max_drop) and repeated tickets for the oracle's own noise are not built; a person's audit label does not yet replace the slow path's label
+- **Script:** none in the repository (the measurement's stand ran outside it). **Deadline:** 1.2.
 - API: [solvi.experimental.stream](api/stream.md).

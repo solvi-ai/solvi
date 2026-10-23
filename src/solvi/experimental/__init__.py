@@ -224,7 +224,8 @@ STATUS: dict[str, dict] = {
     "injection": {"since": "1.2", "what": "a detector of instruction-like text in tool outputs, fitted and thresholded on your own texts: a "
                   "per-sentence logistic score over the fixed detector's rule families and hashed word n-grams, "
                   "fitted on labelled texts, its threshold set on ordinary texts to a chosen false-flag rate",
-                  "missing": "measured once on injected tool outputs of one public benchmark (InjecAgent): on 248 "
+                  "missing": "measured once (the script is not in the repository) on injected tool outputs of one public "
+                  "benchmark (InjecAgent): on 248 "
                   "held-out injections (attacker instructions and tools not used in fitting) a detector fitted on 279 "
                   "other cases and 865 ordinary texts found 76% against the fixed rules' 23%, flagging fewer "
                   "ordinary texts (1.8% against 4.2%); but a plain TF-IDF classifier did the same, half of the gain "
@@ -299,8 +300,9 @@ STATUS: dict[str, dict] = {
                "replayed; version 0 optionally the fitted System 1 with its own promise (initial=), a RiskDetector "
                "and probation on the served version, a resolved ticket's verdict as a label (ticket_verdict) "
                "(stage 3b)",
-               "missing": "measured once; see the documented limits in docs/experimental.md: the "
-               "RiskDetector alarmed far later than the confidence CUSUM on shifts to new intents and must not "
+               "missing": "measured once (the stand's script is not in the repository); see the documented limits "
+               "in docs/experimental.md: the RiskDetector alarmed far later than the confidence CUSUM (DriftMonitor "
+               "before its 1.4.0 window z-test change) on shifts to new intents and must not "
                "be the only alarm; the LearningLoop gained nothing with gold labels and is kept only as the core "
                "of a planned adapter loop; TicketDesk is unmeasured on a stream. The loop is not wired "
                "into the Dispatcher (no loop=: it drives its own coin and oracle); the expired-share stop "

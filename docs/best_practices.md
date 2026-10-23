@@ -150,7 +150,8 @@ the correct answers moved to another option from decision 2,001, inputs and scor
 A loss detector that reads the audit labels can see them, late: on Banking77 streams with 10 % of the oracle's labels
 randomly wrong after decision 2,000 (20 seeds), the stream certificate's `RiskDetector` ([experimental](experimental.md#stream))
 alarmed on 14 of 20 at a median 1,488 decisions after the change with "never" counted as infinite (1,330 over the 14
-that alarmed); the confidence CUSUM on scores, on 0 of 20. One set, one noise level.
+that alarmed); the score monitor (`DriftMonitor` as of solvi 1.4.0.dev, before the change of its window z-test of the
+mean confidence, CHANGELOG 1.4.0), on 0 of 20. One set, one noise level; the stand's script is not in the repository.
 
 **`ShiftWatch.shift` is a batch test at alpha per call, not a running test.** Called every 50 decisions on a sliding
 window of the last 200 answers (alpha 0.01, a reference of 1,393–2,400 answers drawn from the stream's own population),
@@ -160,9 +161,9 @@ or use `DriftMonitor` for a false-alarm level over the stream. This is the known
 windows (Armitage, McPherson and Rowe 1969).
 
 **A stream certificate (`StreamPromise`, [experimental](experimental.md#stream)) held its promise between change
-points; where you have a calibration set, start with the offline certificate.** Checked once on Banking77, CLINC150 and
-HWU64 with a TF-IDF + logistic-regression answerer: 4,000-decision streams drawn from the test split, 40 % of the
-requests from held-out intents after decision 2,000, 20 seeds per set, plus Banking77 streams with 15 % of the
+points; where you have a calibration set, start with the offline certificate.** Checked once (the stand's script is
+not in the repository) on Banking77, CLINC150 and HWU64 with a TF-IDF + logistic-regression answerer: 4,000-decision
+streams drawn from the test split, 40 % of the requests from held-out intents after decision 2,000, 20 seeds per set, plus Banking77 streams with 15 % of the
 characters corrupted after the change or with 10 % of the oracle's labels randomly wrong; the default detector and two
 variants. No threshold a stream certificate had in force had a risk above the promise on the regime it was certified
 on: 0 of 397 versions over 300 runs (two-sided 95 % Clopper–Pearson upper bound 0.9 %; the versions of one run share
@@ -189,15 +190,16 @@ it answered 17 % alone against 55 % with gold labels (one Banking77 stream, one 
 coverage, not validity against its labels.
 
 **`RiskDetector` counts samples, not decisions: keep the score monitor beside it.** Its bound is an expected run
-length in samples (Shin, Ramdas and Rinaldo 2023, arXiv 2203.03532). A simulation of this code at α = 5 % and
-`arl` = 1000 matched it: at the promise the mean time to a false alarm was 1,333 samples (the median 982; the bound is
+length in samples (Shin, Ramdas and Rinaldo 2023, arXiv 2203.03532). A simulation of this code (not in the
+repository) at α = 5 % and `arl` = 1000 matched it: at the promise the mean time to a false alarm was 1,333 samples (the median 982; the bound is
 on the mean); at half the promise 46 of 3,000 streams alarmed within 1,000 samples (an expectation, not a per-horizon
 probability); a doubling of the risk was caught after a mean of 152 samples, a quadrupling after 36. At the adaptive
 rate, once half or more of the decisions are answered alone, one sample is 12–20 decisions. On the intent streams
 above it alarmed a median 1,005 (Banking77) and 1,410 (CLINC150) decisions after the change and never within 2,000 on
 14 of 20 HWU64 streams and on every corrupted-text stream, against 43–68 decisions (12 on corrupted text) for the
-confidence CUSUM, which reads every decision's score. Use it next to `DriftMonitor` / `OpenSetGate`, not instead of
-them.
+score monitor, which reads every decision's score — `DriftMonitor` as of solvi 1.4.0.dev, before the change of its
+window z-test of the mean confidence (CHANGELOG 1.4.0); on the current monitor that test is less eager, so its delays
+can be longer. Use it next to `DriftMonitor` / `OpenSetGate`, not instead of them.
 
 **`fit` and `teach` move the scores, not the reading.** They shift and scale the logits of one question; they help
 calibration and the mix of answers, and level off within a few dozen examples. When a question needs the model to read
@@ -1060,7 +1062,8 @@ and `build(novel=[state, ...])` feeds System 1's signal on them to the gate in p
 detector with an ARL bound. A second measurement, once, on Banking77, CLINC150 and HWU64 with a TF-IDF +
 logistic-regression decider, the change at decision 2,001 and 20 streams per case: a conformal test martingale started
 once (simple-jumper bets on online conformal p-values of the answers' three confidence features) held the same nominal
-1 % per 4,000-decision stream as `DriftMonitor`'s confidence CUSUM (0 of 300 unchanged streams flagged) and caught every
+1 % per 4,000-decision stream as `DriftMonitor`'s confidence CUSUM (the monitor with the 1.4.0 window z-test change;
+0 of 300 unchanged streams flagged) and caught every
 shift of the inputs within 2,000 decisions, but later. The ratio of median delays was 2.4–3.6 on abrupt shifts: 145–192
 decisions against 60–75 when 40 % of the traffic moved to unseen intents, 43–62 against 12–22 when all of it came from
 another dataset, 68 against 23 for corrupted text (Banking77). On a gradual ramp of unseen intents it was 1.3–1.4
