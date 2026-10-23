@@ -26,9 +26,10 @@ Stage 3a: `stream.tickets` — an agent outside the process as the oracle (`Agen
 
 Stage 3b: `stream.versions.LearningLoop` — a live learner (`stream.learner`: `HashedTextLearner`, `FastHeadLearner`)
 takes the oracle's labels; frozen versions, each with its own StreamPromise calibrated only on samples drawn after its
-freeze and δ from one DeltaBudget, are promoted when certified and answering alone at least as often as the served
-version on the same samples; every freeze / promote / discard is in the chain and `replay()` rebuilds which version
-served each decision. The gain is unproven; stage 4's stand measures it.
+freeze and δ from one DeltaBudget, are promoted when certified and answering alone on ≥ min_share (5 %) of the same
+samples and ≥ the served version's share + margin (1 point); version 0 may be the fitted System 1 (initial=), a
+RiskDetector with probation watches the served version, a resolved ticket's verdict is a label (ticket_verdict); every
+freeze / promote / discard / alarm is in the chain and `replay()` rebuilds which version served each decision. The gain is unproven; stage 4's stand measures it.
 
 Unmeasured: no stand has run yet."""
 from __future__ import annotations
@@ -37,13 +38,14 @@ from .. import warn_on_import
 from ._eprocess import DeltaBudget, MirrorBound, Mixture, clean_need
 from .certificate import StreamPromise, fixed_grid
 from .detector import RiskDetector
-from .learner import FastHeadLearner, Frozen, FrozenError, HashedTextLearner, Learner
+from .learner import FastHeadLearner, Frozen, FrozenError, FrozenFast, HashedTextLearner, Learner
 from .sampling import Rate, StreamDriver, coin_message
 from .tickets import AgentOracle, TicketDesk, TicketError
-from .versions import LearningLoop
+from .versions import LearningLoop, Verdict, ticket_verdict
 
 warn_on_import(__name__)
 
-__all__ = ["AgentOracle", "DeltaBudget", "FastHeadLearner", "Frozen", "FrozenError", "HashedTextLearner", "Learner",
-           "LearningLoop", "MirrorBound", "Mixture", "Rate", "RiskDetector", "StreamDriver", "StreamPromise", "TicketDesk",
-           "TicketError", "clean_need", "coin_message", "fixed_grid"]
+__all__ = ["AgentOracle", "DeltaBudget", "FastHeadLearner", "Frozen", "FrozenError", "FrozenFast", "HashedTextLearner",
+           "Learner", "LearningLoop", "MirrorBound", "Mixture", "Rate", "RiskDetector", "StreamDriver",
+           "StreamPromise", "TicketDesk", "TicketError", "Verdict", "clean_need", "coin_message", "fixed_grid",
+           "ticket_verdict"]

@@ -57,7 +57,7 @@ class _Model:
         self.name, self.share = name, share
 
     def score(self, x):
-        y, u = x
+        y, u = x[0], x[1]
         return (y, 0.95) if u < self.share else ("wrong", 0.05)
 
     def probs(self, x):
@@ -118,7 +118,7 @@ def test_a_better_certified_candidate_is_promoted_a_worse_one_discarded():
     assert ev[:4] == [("freeze", 1), ("promote", 1), ("freeze", 2), ("promote", 2)]
     promos = _events(loop, "promote")
     assert promos[0]["from"] == 0 and promos[0]["l_s"] == 0.0 and promos[0]["l_k"] > 0.3
-    assert promos[1]["from"] == 1 and promos[1]["l_k"] >= promos[1]["l_s"] + 0.0 and promos[1]["l_k"] > 0.9
+    assert promos[1]["from"] == 1 and promos[1]["l_k"] >= promos[1]["l_s"] + 0.01 and promos[1]["l_k"] > 0.9
     # version 3 (right on 30 %) certifies but answers alone less often than version 2 on the same samples: discarded
     disc = _events(loop, "discard")
     assert disc and disc[0]["version"] == 3 and disc[0]["why"].startswith("certified, not better")
@@ -211,29 +211,37 @@ def test_replay_rebuilds_every_version_and_decision_from_the_chain(tmp_path):
     assert not bad["ok"] and any(m[1] == "version file" for m in bad["mismatches"])
 
 
-def test_c3_shuffled_labels_never_promote_under_the_selective_promise():
+@pytest.mark.parametrize("kind", ["max_risk", "max_error"])
+def test_c3_shuffled_labels_never_promote_under_either_promise(kind):
+    """Control C3 (design §9.3), both promise kinds, 3 seeds. Under the joint promise a model of noise can certify at a
+    strict threshold that almost nothing passes; the promotion floor (ℓ_k ≥ min_share = 0.05, and ℓ_k ≥ ℓ_s + 0.01)
+    keeps it out (author's rule, 2026-10-23)."""
     for seed in range(3):
-        loop = LearningLoop(HashedTextLearner(), question="q", max_error=0.05, secret=KEY, seed=seed)
-        outs = _run(loop, _stream(seed, 2000, shuffle=True))
-        assert not _events(loop, "promote"), seed
-        assert loop.served == 0 and all(o["by"] != "local" for o in outs)
-        assert _events(loop, "discard")                    # not certified after 1 500 samples
-
-
-def test_c3_under_the_joint_promise_a_shuffled_candidate_can_promote_but_answers_almost_nothing_alone():
-    """The joint promise (P(alone and wrong) ≤ α) can be certified at a strict threshold that almost nothing passes,
-    so a model of noise can be promoted with margin 0 (design §9.3's C3 bar assumed it cannot certify). What it
-    answers alone stays within the promise."""
-    promoted = []
-    for seed in range(2):
-        loop = LearningLoop(HashedTextLearner(), question="q", max_risk=0.05, secret=KEY, seed=seed)
+        loop = LearningLoop(HashedTextLearner(), question="q", secret=KEY, seed=seed, **{kind: 0.05})
         data = _stream(seed, 2000, shuffle=True)
         outs = _run(loop, data)
-        promoted.append(bool(_events(loop, "promote")))
-        alone_wrong = sum(o["by"] == "local" and o["answer"] != y for o, (_, y) in zip(outs, data))
-        assert alone_wrong / len(data) <= 0.05
-        assert sum(o["by"] == "local" for o in outs) <= 0.02 * len(data)
-    assert any(promoted)                                   # the C3 bar as drafted fails for the joint kind
+        assert not _events(loop, "promote"), (kind, seed)
+        assert loop.served == 0 and all(o["by"] != "local" for o in outs)
+        assert _events(loop, "freeze")                     # candidates were frozen and tried
+
+
+def test_min_share_and_margin_are_the_promotion_bar():
+    """A certified candidate that answers alone on ~4 % (< min_share 0.05) is never promoted; with min_share=0 and
+    margin=0 the same stream promotes it (the 3b rule)."""
+    def run(**kw):
+        models = [_Model(f"thin{i}", 0.04) for i in range(10)]
+        loop = LearningLoop(_Fake(models), question="q", max_risk=0.05, secret=KEY, growth=1.0, trial=600, **kw)
+        _run_fake(loop, _fake_data(11, 3000))
+        return loop
+    strict = run()
+    assert strict.min_share == 0.05 and strict.margin == 0.01
+    assert not _events(strict, "promote") and strict.served == 0
+    certified = [e for e in _events(strict, "discard") if e["why"].startswith("certified, not better")]
+    assert certified                                       # it did certify: only the floor kept it out
+    loose = run(min_share=0.0, margin=0.0)
+    assert _events(loose, "promote")
+    with pytest.raises(ValueError):
+        LearningLoop(HashedTextLearner(), question="q", max_risk=0.05, secret=KEY, min_share=1.5)
 
 
 def test_end_to_end_the_local_share_grows_and_the_alone_error_stays_within_the_promise():
@@ -290,3 +298,151 @@ def test_a_fast_head_learner_over_facts_is_frozen_certified_and_promoted():
     wrong = sum(o["by"] == "local" and o["answer"] != y for o, (_, y) in zip(outs, data))
     assert wrong / len(data) <= 0.05
     assert loop.replay()["ok"]
+
+
+# ───────────────────────────── version 0 = an existing model, the detector on the served version, tickets
+def test_version_zero_can_be_the_fitted_system_one_with_its_own_promise():
+    s1 = _Model("s1", 0.5)
+    loop = LearningLoop(_Fake([_Model("good", 1.0)] + [_Model(f"w{i}", 0.3) for i in range(5)]), question="q",
+                        max_risk=0.05, secret=KEY, initial=s1,
+                        growth=1.0)
+    outs = _run_fake(loop, _fake_data(12, 2500))
+    ev = _events(loop)
+    assert ev[0]["event"] == "start" and ev[0]["version"] == 0 and ev[0]["fingerprint"] == s1.fingerprint()
+    v0 = loop.versions()[0]
+    assert v0["v_index"] == 1 and v0["certified"]          # its own certificate, the first δ_v of the budget
+    assert loop.fed(0) and min(loop.fed(0)) == 1           # fed from decision 1
+    first_local = next(i for i, o in enumerate(outs) if o["by"] == "local")
+    assert first_local < 600 and outs[first_local]["served"] == 0   # it answers alone before any freeze
+    promo = _events(loop, "promote")
+    assert promo and promo[0]["from"] == 0 and promo[0]["l_s"] > 0.3 and promo[0]["l_k"] >= promo[0]["l_s"] + 0.01
+    assert loop.served == 1 and loop.versions()[1]["v_index"] == 2
+    assert loop.delta_spent <= 0.05
+    r = loop.replay()
+    assert r["ok"], r["mismatches"][:5]
+
+
+def test_frozen_fast_of_system_starts_the_loop_from_the_fitted_head():
+    from solvi.experimental.stream import FrozenFast
+    r = random.Random(13)
+    rows = []
+    for _ in range(1200):
+        f1, f2 = r.uniform(-1, 1), r.uniform(-1, 1)
+        rows.append(({"f1": f1, "f2": f2}, "hi" if f1 + 0.5 * f2 > 0 else "lo"))
+    system = System(Catalog(), [Question("q", "hi or lo?", Answer.choice(["hi", "lo"]))])
+    system.fit("q", rows[:200], ["f1", "f2"], select=False)
+    v0 = FrozenFast.of_system(system, "q")
+    head0 = system.heads["q"]
+    assert v0.head is not head0                            # a copy: teaching the System never moves version 0
+    loop = LearningLoop(FastHeadLearner(["hi", "lo"], ["f1", "f2"]), question="q", max_risk=0.05, secret=KEY,
+                        initial=v0, system=system, freeze_min=10 ** 6)
+    outs = _run(loop, rows[200:])
+    assert loop.versions()[0]["certified"] and any(o["by"] == "local" for o in outs)
+    assert system.heads["q"] is head0
+    with pytest.raises(ValueError):
+        FrozenFast.of_system(System(Catalog(), [Question("z", "?", Answer.choice(["a", "b"]))]), "z")
+
+
+def test_an_alarm_restarts_the_served_promise_and_opens_probation():
+    from solvi.experimental.stream import RiskDetector
+    det = RiskDetector(0.05, arl=100)
+    loop = LearningLoop(_Fake([]), question="q", max_risk=0.05, secret=KEY, initial=_Model("s1", 0.9),
+                        freeze_min=10 ** 6, detector=det, probation=300)
+    data = _fake_data(14, 3000)
+    outs = []
+    for i, (x, _) in enumerate(data):                      # from decision 1201 the world moves: the label changes
+        outs.append(loop.step(x, (lambda x=x: x[0]) if i < 1200 else (lambda: "moved")))
+    alarms = _events(loop, "alarm")
+    assert alarms and alarms[0]["version"] == 0 and alarms[0]["decision"] > 1200 and alarms[0]["v_index"] == 1
+    a = alarms[0]["decision"]
+    assert not any(o["by"] == "local" for o in outs[a:a + 300])   # probation: nothing alone for 300 decisions
+    rec = [d["stream"] for k, d in loop._items() if k == "loop"]
+    assert rec[a]["probation"] and rec[a]["left"] == 299 and rec[a]["rho"] == 1.0
+    assert not rec[a - 1]["probation"]
+    rest = [e for e in _events(loop, "recertify") if e["decision"] == a]
+    assert rest and rest[0]["v_index"] == 2 and rest[0]["threshold"] is None
+    assert loop.delta_spent <= 0.05
+    assert sum(o["by"] == "local" and o["answer"] != "moved" for o in outs[1200:]) < 100
+    r = loop.replay()
+    assert r["ok"], r["mismatches"][:5]
+    with pytest.raises(ValueError):
+        LearningLoop(HashedTextLearner(), question="q", max_risk=0.05, secret=KEY, detector=RiskDetector(0.1))
+
+
+class _Knows(_Model):
+    """x = (label, u, moved): answers "moved" on a moved input, else the label — right everywhere, score 0.95."""
+
+    def score(self, x):
+        return ("moved" if x[2] else x[0]), 0.95
+
+
+def test_a_promoted_candidate_waits_out_probation():
+    from solvi.experimental.stream import RiskDetector
+    loop = LearningLoop(_Fake([_Knows("knows", 1.0)] + [_Model(f"w{i}", 0.3) for i in range(5)]), question="q", max_risk=0.05, secret=KEY,
+                        initial=_Model("s1", 0.9), freeze_min=320, detector=RiskDetector(0.05, arl=50), probation=300,
+                        promise_options={"grid": [0.9, 0.5]})
+    r = random.Random(15)
+    outs = []
+    for i in range(3000):                                  # from decision 1001 the world moves; version 0 does not
+        x = (r.choice("ab"), r.random(), i >= 1000)
+        outs.append(loop.step(x, lambda x=x: "moved" if x[2] else x[0]))
+    alarm, promo = _events(loop, "alarm"), _events(loop, "promote")
+    assert alarm and promo
+    a, p = alarm[0]["decision"], promo[0]["decision"]
+    assert a < p < a + 300                                 # certified and promoted during probation ...
+    assert promo[0]["l_s"] == 0.0                          # (the served promise restarted: +inf)
+    assert not any(o["by"] == "local" for o in outs[a:a + 300])   # ... but nothing alone until it ends
+    assert any(o["by"] == "local" and o["served"] == 1 for o in outs[a + 300:])
+    assert loop.replay()["ok"]
+
+
+def _ticket_desk(store):
+    from solvi import Decision
+    from solvi.core.dispatch import Dispatcher
+    from solvi.experimental.stream import RiskDetector, StreamPromise
+    from solvi.experimental.stream.tickets import AgentOracle, TicketDesk
+
+    cat = Catalog()
+
+    @cat.rule("intent")
+    def intent(case: int):
+        return Decision("a", {"a": 0.6, "b": 0.4}, confidence=0.6)
+    s1 = System(cat, [Question("intent", "a or b?", Answer.choice(["a", "b"]))])
+    sp = StreamPromise(max_risk=0.05, grid=[0.9, 0.5])
+    s1.guarantee("intent", promise=sp)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        d = Dispatcher(s1, AgentOracle(s1), audit="adaptive", promise=sp, detector=RiskDetector(0.05),
+                       on_drift="recertify", secret="k", storage=store)
+    return TicketDesk(d, ttl=600, clock=lambda: 1000.0)
+
+
+def test_a_resolved_tickets_verdict_is_a_label_of_the_loop(tmp_path):
+    from solvi.experimental.stream import Verdict, ticket_verdict
+    desk = _ticket_desk(JSONLStorage(tmp_path / "desk.jsonl"))
+    t = desk.decide({"case": 1})
+    assert t["status"] == "needs_verdict"
+    res = desk.resolve(t["ticket"], "b")
+    v = ticket_verdict(desk, res)
+    pending_id = next(s.id for s in desk.dispatcher.storage.iter(kind="pending"))
+    assert v == Verdict("b", "s2", pending_id)
+
+    loop = LearningLoop(HashedTextLearner(["a", "b"]), question="intent", max_risk=0.05, secret=KEY)
+    with pytest.raises(UntrustedLabel):                    # the agent's verdict is a slow-path label
+        loop.step("case one", lambda: v)
+    assert loop.n == 0
+    loop = LearningLoop(HashedTextLearner(["a", "b"]), question="intent", max_risk=0.05, secret=KEY, s2_labels=True)
+    out = loop.step("case one", lambda: v)
+    assert out["label"] == "b" and out["label_source"] == "s2"
+    rec = loop.log[0][1]["stream"]
+    assert rec["label_of"] == pending_id and rec["label_source"] == "s2"
+    assert loop.replay()["ok"]
+
+    t2 = desk.decide({"case": 2})                          # a ticket that expires: no label, a person decides
+    gone = desk.expire(t2["ticket"])
+    lost = ticket_verdict(desk.dispatcher.storage, gone.stored_id)
+    assert lost.label is None and lost.label_of is None
+    out = loop.step("case two", lambda: lost)
+    assert out["by"] == "person" and loop.log[-1][1]["stream"]["missing"]
+    with pytest.raises(ValueError):
+        ticket_verdict(desk, desk.dispatcher.storage.iter(kind="pending").__iter__().__next__().id)

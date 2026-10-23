@@ -533,15 +533,19 @@ loop.versions()                               # each version: state, certified, 
 loop.replay(rescore=True)                     # every decision and event rebuilt from the chain
 ```
 
-Version 0 is "no model": it answers nothing alone, has no certificate and spends no δ. The live learner is never
-served. Once it has taken max(300, 2 × the served version's labels at its freeze) labels, a copy is frozen as the
+Version 0 is "no model" by default: it answers nothing alone, has no certificate and spends no δ. With `initial=` it
+is an existing frozen model instead — the fitted System 1, e.g. `FrozenFast.of_system(system, question)` — with its own
+`StreamPromise` (the budget's first δ_v), fed from decision 1, so the loop starts from what is already deployed. The
+live learner is never served. Once it has taken max(300, 2 × the served version's labels at its freeze) labels, a copy is frozen as the
 candidate with its own `StreamPromise`, its (v, δ_v) drawn from the loop's one `DeltaBudget`, so every version ever
 frozen holds together with probability ≥ 1 − δ. Each decision is scored by the served version and, in shadow, by the
 candidate before its label is read. A sampled decision reaches the promises of the served version and the candidate,
 both frozen before it, and only then trains the live learner: a version never reads a sample from before its freeze
 (a test checks this for every version). The coin and the rate are stage 2's. A candidate is promoted once it is
-certified and, on its own samples, answers alone at least as often as the served version at the served threshold
-(ℓ_k ≥ ℓ_s + margin, margin 0, and ℓ_k > 0). A candidate not certified after 1 500 samples, or certified and not better
+certified and, on its own samples, answers alone on at least `min_share` of them (default 0.05) and on at least one
+point more than the served version at the served threshold (ℓ_k ≥ ℓ_s + `margin`, default 0.01). The floor is the
+author's rule after the joint promise certified a model of shuffled labels at a threshold almost nothing passes and
+promoted it over "no model" with margin 0. A candidate not certified after 1 500 samples, or certified and not better
 after `trial` samples (default 1 500), is discarded. Its δ_v stays spent, and the next freeze waits for 1.5 × the
 labels taken. Labels from "human", "outcome", "rule" or "audit" are taken by default. A slow path's answer ("s2" or
 "verified") is refused unless `s2_labels=True`, and with it is recorded as "s2". Each decision is a record of kind
@@ -551,15 +555,22 @@ model's fingerprint. `replay()` re-runs the protocol from the records alone and 
 decision, both certificates' states and every event; with `versions_dir` it also checks each pickled version's
 fingerprint and, with `rescore=True`, recomputes every recorded score. With `system=`, the served version is the
 question's answer head (`solvi.core.versions.serve_head`), so the System's fingerprint and every trace name it.
+With `detector=RiskDetector(alpha=<the promised rate>)` (stage 2's class) the served version is watched: each
+sampled decision under a threshold in force feeds the detector its deployed loss. An alarm restarts the served
+version's promise (a new δ_v from the same budget, threshold +inf) and opens probation: nothing is answered alone for
+the next `probation` decisions (300) and until the served version certifies again. A certified candidate is promoted
+at once (the served share is 0 under +inf) but answers alone only after probation. The oracle may return a
+`Verdict(label, source, label_of)`; `ticket_verdict(desk, resolved)` reads one from a ticket resolved on a stage-3a
+`TicketDesk` (the agent's verdict has source "s2", so it needs `s2_labels=True`; an expired ticket has no label), and
+the decision records `label_of`, the ticket's record id.
 `HashedTextLearner` is hashed word and character n-grams with an online softmax in numpy; `FastHeadLearner` is
 solvi's `FastHead` over facts (`FastHeadLearner.for_system(system, question)`).
 
 In the tests, on a synthetic five-intent text stream of 2 000 decisions the loop answers more than half alone in the
-last 500 with no wrong alone answer. Under `max_error=`, shuffled labels never promote a candidate (3 seeds). Under
-`max_risk=` (joint), a model of noise is promoted at a strict threshold that almost nothing passes: it stays within
-the promise but is churn. These are smoke checks, not measurements: whether the loop gains anything on a real stream is
+last 500 with no wrong alone answer. Shuffled labels never promote a candidate under either promise (3 seeds each,
+control C3). These are smoke checks, not measurements: whether the loop gains anything on a real stream is
 unproven (solvi's earlier evidence is against it), and the stage-4 stand measures it.
 
-- **Missing:** unmeasured: the stand against offline calibration and the loop's stand (stage 4) have not run, so the loop's gain is unproven (solvi's earlier evidence is against it); the loop is not wired into the Dispatcher (no loop=, no detector on the served version, no tickets) and version 0 is always 'no model'; under the joint promise a model of noise can be promoted at a strict threshold (it answers almost nothing alone); the expired-share stop (max_drop) and repeated tickets for the oracle's own noise are not built; a person's audit label does not yet replace the slow path's label
+- **Missing:** unmeasured: the stand against offline calibration and the loop's stand (stage 4) have not run, so the loop's gain is unproven (solvi's earlier evidence is against it); the loop is not wired into the Dispatcher (no loop=: it drives its own coin and oracle); the expired-share stop (max_drop) and repeated tickets for the oracle's own noise are not built; a person's audit label does not yet replace the slow path's label
 - **Script:** none yet. **Deadline:** 1.2.
 - API: [solvi.experimental.stream](api/stream.md).

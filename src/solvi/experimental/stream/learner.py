@@ -205,6 +205,15 @@ class FrozenFast:
     def __init__(self, head, options, facts):
         self.head, self.options, self._facts = head, list(options), facts
 
+    @classmethod
+    def of_system(cls, system, question):
+        """The fitted answer head of a System's question, frozen (a copy) over the facts of its init state: version 0
+        of a LearningLoop that starts from System 1 (`LearningLoop(initial=FrozenFast.of_system(system, q))`)."""
+        head = system.heads.get(question)
+        if head is None:
+            raise ValueError(f"{question!r} has no fitted answer head (System.fit first)")
+        return cls(copy.deepcopy(head), system.questions[question].answer.options, system.facts_for)
+
     def _row(self, x):
         return self._facts(x) if self._facts is not None else x
 
