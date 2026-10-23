@@ -24,7 +24,8 @@ class Certificate:
     0.1, 30 at 10%, 14 at 20% (50, 25 and 12 with delta_split=False).
 
     delta_split (default True): delta is spent over the restarts of one process. Its v-th certification (v = 1 for a
-    fresh process, v + 1 after each restart — an alarm, or a widened skill condition) bets against
+    fresh process, v + 1 after each restart — an alarm, or a skill condition widened by the condition rule; a lattice
+    generalization widens a skill without a restart, so its certificate keeps its wealth and v) bets against
     delta_v = 6·delta / (π²·v²), and Σ_v delta_v = delta, so every certificate the process ever issues holds together
     with probability ≥ 1 − delta (a union bound over the restarts; each delta_v by Ville's inequality). The price is
     a larger need after each restart: at 5% and 0.1, 61 / 91 / 108 clean outcomes for v = 1 / 2 / 3.
