@@ -1,6 +1,7 @@
-"""Stores without overlapping `valid` behave as before the effective-interval change: random journals over every write
-(facts and rules, chains of derived_from, supersedes, inferred, consulted, retract, only_from, retract_source, retest,
-flag / end_flag, resolve, tick, rollback, forget) give the same journal bytes, fingerprint, report, counts and
+"""Stores without overlapping `valid` behave as before the effective-interval change, and the three shapes the change
+admits (A-B-A, a derived item over premises with `valid`, S231 on a plain key) differ exactly as listed. Random
+journals over every write (facts and rules, chains of derived_from, supersedes, inferred, consulted, retract,
+only_from, retract_source, retest, flag / end_flag, resolve, tick, rollback, forget) give the same journal bytes, fingerprint, report, counts and
 snapshots as the store before the change (with `valid`: disjoint intervals, one period per content) (golden values in knowledge_unchanged.json, written by it), and journals it
 wrote load, verify and replay.
 
@@ -121,6 +122,43 @@ def test_journals_written_before_the_change_load_verify_and_replay(tmp_path):
         assert ks.verify() and ks.fingerprint() == golden[name]["fp"]
         assert ks.rebuild().fingerprint() == golden[name]["fp"]
         assert {i: ks.status(i) for i in sorted(ks.items)} == golden[name]["statuses"]
+
+
+def test_the_three_admitted_shapes_differ_from_the_store_before_the_change_exactly_as_listed():
+    """C1 is "identical or explained": the random journals above never produce the three shapes the change admits, so
+    each is written here with the store-before-the-change's values (in the comments) and its one expected difference."""
+    # A-B-A: one value told for two periods. Before: the row carried only the latest `valid` [9, 14] (the value was
+    # not a fact at 2); now the row also carries "periods". Statuses, the fingerprint and the read at 7 are the same.
+    ks = KnowledgeStore()
+    a = ks.add("fact", {"s": "s0", "r": "r0", "o": 12}, source="outcome", by="crm", valid=(0, 5))
+    b = ks.add("fact", {"s": "s0", "r": "r0", "o": 24}, source="outcome", by="crm", valid=(5, 9))
+    ks.add("fact", {"s": "s0", "r": "r0", "o": 12}, source="outcome", by="crm", valid=(9, 14))
+    rows = {r["id"]: r for r in ks.snapshot()["facts"]}
+    assert ks.status(a) == ks.status(b) == "active" and ks.fingerprint().startswith("860b12da2aef")
+    assert rows[a]["valid"] == [9, 14] and rows[a]["periods"] == [[0, 5], [9, 14]]
+    assert rows[b] == {"id": b, "kind": "fact", "body": {"s": "s0", "r": "r0", "o": 24}, "source": "outcome",
+                       "valid": [5, 9]}
+    assert [r["body"]["o"] for r in ks.snapshot(about="s0", valid_at=7)["facts"]] == [24]
+    # A derived item over premises with `valid`. Before: its "assert" entry had valid None and its row no "valid";
+    # now the entry and the row carry the intersection [4, 10]. Its status and the fingerprint are the same.
+    ks = KnowledgeStore()
+    p = ks.add("fact", {"s": "s0", "r": "r0", "o": 1}, source="outcome", by="crm", valid=(0, 10))
+    q = ks.add("fact", {"s": "s1", "r": "r1", "o": 2}, source="outcome", by="lab", valid=(4, 20))
+    d = ks.add("fact", {"s": "s2", "r": "r0", "o": 3}, source="spec", by="rule", derived_from=[p, q])
+    assert [r.get("valid") for r in ks.journal if r.get("item") == d] == [[4, 10]]
+    assert ks.status(d) == "active" and ks.fingerprint().startswith("51b4397b3af2")
+    assert {r["id"]: r.get("valid") for r in ks.snapshot()["facts"]}[d] == [4, 10]
+    # S231 on a plain key: an item a rule only re-infers follows its premise's passed re-test. Before: d stayed a
+    # hypothesis "pending retest" (fingerprint b12854ad1810…); now it is active, and the fingerprint changes.
+    ks = KnowledgeStore()
+    a = ks.add("fact", {"s": "s0", "r": "r0", "o": 1}, source="outcome", by="crm")
+    d = ks.add("fact", {"s": "s1", "r": "r1", "o": 1}, source="spec", by="rule", derived_from=[a], inferred=True)
+    ks.retract(a, by="crm")
+    ks.add("fact", {"s": "s0", "r": "r0", "o": 1}, source="outcome", by="sync")
+    ks.retest(a, ok=True)
+    assert ks.status(d) == "active" and not ks.pending_retest(d)
+    assert ks.fingerprint().startswith("ea8fb3057797") and not ks.fingerprint().startswith("b12854ad1810")
+    assert sorted(r["id"] for r in ks.snapshot()["facts"]) == sorted([a, d]) and ks.snapshot()["hints"] == []
 
 
 def _write_golden():
