@@ -33,8 +33,15 @@ freeze / promote / discard / alarm is in the chain and `replay()` rebuilds which
 
 The adapter (LoRA) loop, stage 1: `stream.policy` — `LoopPolicy` (the abstract class whose hooks decide what the loop
 takes, when it trains, what it freezes, promotes, discards and does on an alarm), `LoopState` (what a hook reads),
-`Budget`, and `DefaultPolicy`; `stream.gates` — the content-key split and the gate arithmetic. Not wired into a loop
-yet.
+`Budget`, and `DefaultPolicy`; `stream.gates` — the content-key split and the gate arithmetic.
+
+Stage 2: `stream.loop.AdapterLoop` — the lane's loop driven by a `LoopPolicy`: train / calib / holdout labels by
+content key, online (snapshot) or batch (`train(job)`, `TrainJob`) learners — `HashedTextTrainer` is the stand-in batch
+learner —, the pre-freeze report on held-out labels, promotion on novel samples only (keys the candidate never trained
+on) with the memorisation probe, two alarm sources (the RiskDetector OR-ed with a score monitor, never the detector
+alone), controls (pause / resume / train_now / promote / rollback / versions / status); `stream.serving` — `Served`,
+`HeadVersion`, `BaseVersion`. `LearningLoop` is `AdapterLoop` with `DefaultPolicy` at the lane's constants
+(`lane_policy`). No LoRA learner, runner, checkpoint or attach yet.
 
 Unmeasured: no stand has run yet."""
 from __future__ import annotations
@@ -44,15 +51,19 @@ from ._eprocess import DeltaBudget, MirrorBound, Mixture, clean_need
 from .certificate import StreamPromise, fixed_grid
 from .detector import RiskDetector
 from .policy import Budget, DefaultPolicy, LabelRow, LoopPolicy, LoopState, Paired, TrainReport, VersionInfo
-from .learner import FastHeadLearner, Frozen, FrozenError, FrozenFast, HashedTextLearner, Learner
+from .learner import (BatchLearner, FastHeadLearner, Frozen, FrozenError, FrozenFast, HashedTextLearner,
+                      HashedTextTrainer, Learner, TrainJob)
+from .loop import AdapterLoop, content_key
+from .serving import BaseVersion, HeadVersion, Served
 from .sampling import Rate, StreamDriver, coin_message
 from .tickets import AgentOracle, TicketDesk, TicketError
-from .versions import LearningLoop, Verdict, ticket_verdict
+from .versions import LearningLoop, Verdict, lane_policy, ticket_verdict
 
 warn_on_import(__name__)
 
-__all__ = ["AgentOracle", "Budget", "DefaultPolicy", "DeltaBudget", "FastHeadLearner", "Frozen", "FrozenError",
-           "FrozenFast", "HashedTextLearner", "LabelRow", "Learner", "LearningLoop", "LoopPolicy", "LoopState",
-           "MirrorBound", "Mixture", "Paired", "Rate", "RiskDetector", "StreamDriver", "StreamPromise", "TicketDesk",
-           "TicketError", "TrainReport", "Verdict", "VersionInfo", "clean_need", "coin_message", "fixed_grid",
-           "ticket_verdict"]
+__all__ = ["AdapterLoop", "AgentOracle", "BaseVersion", "BatchLearner", "Budget", "DefaultPolicy", "DeltaBudget",
+           "FastHeadLearner", "Frozen", "FrozenError", "FrozenFast", "HashedTextLearner", "HashedTextTrainer", "HeadVersion", "LabelRow", "Learner", "LearningLoop",
+           "LoopPolicy", "LoopState", "MirrorBound", "Mixture", "Paired", "Rate", "RiskDetector", "Served",
+           "StreamDriver", "StreamPromise", "TicketDesk",
+           "TicketError", "TrainJob", "TrainReport", "Verdict", "VersionInfo", "clean_need", "coin_message",
+           "content_key", "fixed_grid", "lane_policy", "ticket_verdict"]

@@ -628,6 +628,15 @@ answers only what it trained on is not promoted). `stream.gates` holds the arith
 the design's. A limit: "novel" is exact-key identity, so a paraphrase of a trained item counts as novel; the probe and
 the held-out gate do not see near-duplicates.
 
+Stage 2 wires the policy into a loop: `AdapterLoop` (`stream.loop`) is `LearningLoop`'s protocol with every constant a
+`LoopPolicy` hook, and `LearningLoop` is now `AdapterLoop` with `DefaultPolicy` at its old constants. Only train
+labels reach the learner; batch learners get the rows the policy selects (`HashedTextTrainer` stands in for the LoRA
+learner); promotion counts only samples whose key the candidate never trained on, and also needs its error alone on
+those samples, over all of them, to be at most α. The RiskDetector is never the only alarm: a score monitor on the
+served version's scores (`NumericDrift` by default) is OR-ed with it. `pause`, `resume`, `train_now`, `promote`,
+`rollback`, `versions` and `status` control it in code. Unmeasured: no stand has run on the loop; the LoRA learner,
+the training runners, the checkpoint and attaching to a Dispatcher or System are later stages.
+
 Measured once on real streams: three public intent sets with a TF-IDF + logistic-regression answerer, 20 seeds per
 set, a shift to held-out intents, corrupted text and noisy labels; the numbers, the setting and the prior work are in
 [best practices](best_practices.md#guarantees-and-calibration). What held:

@@ -116,6 +116,30 @@ def probe(alone_seen: int, wrong_seen: int, alone_novel: int, wrong_novel: int, 
                    f"bound of the gap {low_gap:+.3f})"}
 
 
+def calib_threshold(scored, alpha: float, *, confidence: float = 0.95):
+    """A fixed-set threshold on the calib labels, for a frozen model without its own (`act_threshold`): scored is
+    [(score, wrong)], one per calib label (wrong: the would-be answer is not the label). From the strictest score down,
+    a threshold t holds when the Wilson upper bound of the joint risk (score ≥ t and wrong, over all n labels) is ≤
+    alpha; the loosest t reached before the first that fails is returned (fixed sequence), None when none holds — at
+    α = 0.05 and 95 % that needs ≥ 73 calib labels. A stand-in for `act_guard` (stage 3 uses the part's own);
+    no anytime statement."""
+    rows = sorted(((float(s), bool(w)) for s, w in scored if s is not None and s == s and abs(s) != float("inf")),
+                  key=lambda r: -r[0])
+    n = len(scored)
+    if n == 0:
+        return None
+    best, wrong, i = None, 0, 0
+    while i < len(rows):
+        t = rows[i][0]
+        while i < len(rows) and rows[i][0] == t:
+            wrong += rows[i][1]
+            i += 1
+        if _wilson(wrong, n, confidence)[1] > alpha:
+            break
+        best = t
+    return best
+
+
 def incumbent_short(outcomes, alpha: float, target_share=None, *, min_n: int = 1) -> dict:
     """The improvement signal: is the served version measurably short on its latest held-out labels? outcomes: [(alone,
     wrong)] of the served version, one per held-out label. Short when it answers nothing alone on them, or its error
@@ -147,4 +171,4 @@ def incumbent_short(outcomes, alpha: float, target_share=None, *, min_n: int = 1
     return {"short": short, "n": n, "alone": alone, "error": err, "share": share, "why": why}
 
 
-__all__ = ["SALT", "SPLITS", "heldout_gate", "honesty_gate", "incumbent_short", "paired_gain_low", "probe", "split"]
+__all__ = ["SALT", "SPLITS", "calib_threshold", "heldout_gate", "honesty_gate", "incumbent_short", "paired_gain_low", "probe", "split"]

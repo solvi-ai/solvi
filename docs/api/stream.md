@@ -46,11 +46,25 @@ per-decision step the Dispatcher runs.
 
 ## `solvi.experimental.stream.policy`
 
-The adapter loop's policy (stage 1, not wired into a loop yet): `LoopPolicy`, the abstract class whose hooks decide
+The adapter loop's policy (run by `AdapterLoop`, stage 2): `LoopPolicy`, the abstract class whose hooks decide
 what the loop takes, when it trains, what it freezes, promotes and discards and what an alarm does; `LoopState`, what
 a hook reads; `Budget`; `DefaultPolicy`. Unmeasured.
 
 ::: solvi.experimental.stream.policy
+
+## `solvi.experimental.stream.loop`
+
+The adapter loop (stage 2): `AdapterLoop`, the lane's loop driven by a `LoopPolicy` — labels split by content key,
+online or batch learners, promotion on samples whose key the candidate never trained on with the memorisation probe,
+the RiskDetector OR-ed with a score monitor, controls. No LoRA learner, runner, checkpoint or attach yet. Unmeasured.
+
+::: solvi.experimental.stream.loop
+
+## `solvi.experimental.stream.serving`
+
+How a frozen version is put in front of a System: the `Served` protocol, `HeadVersion`, `BaseVersion`.
+
+::: solvi.experimental.stream.serving
 
 ## `solvi.experimental.stream.gates`
 

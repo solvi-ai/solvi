@@ -299,7 +299,10 @@ STATUS: dict[str, dict] = {
                "replayed; version 0 optionally the fitted System 1 with its own promise (initial=), a RiskDetector "
                "and probation on the served version, a resolved ticket's verdict as a label (ticket_verdict) "
                "(stage 3b); the adapter loop's policy (stream.policy: LoopPolicy, LoopState, Budget, DefaultPolicy) "
-               "and gate arithmetic (stream.gates), unmeasured and not wired into a loop yet",
+               "and gate arithmetic (stream.gates); the adapter loop core (stream.loop.AdapterLoop: policy hooks, "
+               "novel-only promotion with the memorisation probe and the novel-risk bar, two alarm sources, "
+               "pause / resume / train_now / promote / rollback; LearningLoop = AdapterLoop + DefaultPolicy at the "
+               "lane's constants; stream.serving), unmeasured; no LoRA learner, runner, checkpoint or attach yet",
                "missing": "measured once; see the documented limits in docs/experimental.md: the "
                "RiskDetector alarmed far later than the confidence CUSUM on shifts to new intents and must not "
                "be the only alarm; the LearningLoop gained nothing with gold labels and is kept only as the core "

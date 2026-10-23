@@ -1,5 +1,6 @@
 """The policy of the adapter loop: the abstract class a developer controls the loop with, the state its hooks read, the
-budget, and the out-of-the-box policy (experimental; the LoRA learning loop, stage 1 — not wired into a loop yet).
+budget, and the out-of-the-box policy (experimental; the LoRA learning loop, stage 1; `stream.loop.AdapterLoop` runs
+it, stage 2).
 
     from solvi.experimental.stream import Budget, DefaultPolicy, LoopPolicy, LoopState
 
@@ -22,7 +23,9 @@ own counters in `self` and must pickle (the loop's checkpoint saves it).
 - split — `stream.gates.split`: sha256 of the content key → 70 / 15 / 15 train / calib / holdout.
 - want_train — no candidate in trial, no training in progress, not paused; train labels ≥ `first` (300) and ≥
   `growth` (1.5) × the largest n_train of any version so far (discarded ones included: a discarded candidate is not
-  retrained on nearly the same labels); the budget allows one now; and the improvement signal
+  retrained on nearly the same labels; with `refreeze` given instead, the lane LearningLoop's rule: ≥ growth × the
+  served version's n_train and ≥ refreeze × the train labels the loop had at the latest discard); the budget allows
+  one now; and the improvement signal
   (`gates.incumbent_short`): on its last `window` (200) held-out labels the served version answers nothing alone, or
   errs alone above the promised α, or (target_share given) answers alone less than that; with fewer than
   `min_holdout` (100) of them it is not shown strong. A strong incumbent is not retrained for nothing.
@@ -34,14 +37,18 @@ own counters in `self` and must pickle (the loop's checkpoint saves it).
 - freeze — on the held-out labels: ≥ min_holdout (100) of them and (alone & right − alone & wrong) / n ≥ the served
   version's + min_gain (0.01); act_guard found a threshold; no honesty number worse by more than tolerance (0.02);
   the training within budget.max_train_s; in label mode also the paired held-out gain's Wilson lower bound > 0.
+  pre_freeze=False freezes every training (the lane LearningLoop's protocol: the stream certificate alone decides).
 - promote — the candidate certified, ≥ min_novel (100) post-freeze samples on keys it never trained on, on those
   share_k ≥ min_share (0.05) and share_k ≥ share_s + margin (0.01), and the memorisation probe passes (error alone on
   novel − on seen ≤ gap, 0.10). The candidate must have ≥ probe_min (30) alone answers on novel samples: a thin
   novel side is the memoriser's signature (it answers the items it trained on and abstains on the rest), so an
   unmeasured probe does not promote. The errors are compared once the seen side has ≥ probe_min alone answers too
-  (fewer alone answers on seen keys is not memorising). Label mode (no paired samples): the pre-freeze gates decided,
-  promote.
-- discard — the probe shows the gap beyond noise (Wilson lower bound of the novel error − Wilson upper bound of the
+  (fewer alone answers on seen keys is not memorising). And the candidate's error on novel samples is within the
+  promise: wrong_novel / n_novel ≤ α (st.alpha; the joint risk on keys it never trained on — a memoriser is valid on
+  the pool because its trained items dilute the risk; author's decision 2026-10-23; novel_risk=False drops it).
+  probe=False drops the probe (promotion and discard). Label
+  mode (no paired samples): the pre-freeze gates decided, promote.
+- discard — (probe on) the probe shows the gap beyond noise (Wilson lower bound of the novel error − Wilson upper bound of the
   seen error > gap, at `wilson` confidence; a point-estimate gap at n = 30 does not discard); not certified after
   `stale` (1500) samples; certified and not promotable after `trial` (1500).
 - alarm — "recertify"; a second alarm on the current serving of the served version (alarms at n ≥ served_since)
@@ -127,7 +134,8 @@ class VersionInfo:
     threshold: its promise now; frozen_at: the decision it was frozen at (None for version 0); train_keys: the content
     keys it trained on, a set snapshotted at the freeze (not a digest: novel / seen is membership, `key in
     train_keys`, for every post-freeze sample; the learner's key list grows after the freeze and must not be read
-    live). A list or set given is stored as a frozenset."""
+    live). A list or set given is stored as a frozenset. discarded_at: the train labels the loop had when this
+    version was discarded (None: not discarded) — the lane LearningLoop's refreeze floor reads it."""
     version: int
     state: str
     n_train: int = 0
@@ -137,6 +145,7 @@ class VersionInfo:
     fingerprint: str | None = None
     frozen_at: int | None = None
     train_keys: frozenset = frozenset()
+    discarded_at: int | None = None
 
     def __post_init__(self):
         if not isinstance(self.train_keys, frozenset):
@@ -155,9 +164,9 @@ class LoopState:
     promise) or "label" (a System alone: the pre-freeze gates only); promises, detector: their state dumps, for a
     policy that reads them.
 
-    For the loop (stage 2): pass copies of the dict fields (a hook could change `labels` through the reference), and
-    reset `holdout` at a promotion or a rollback (else the new served version inherits the old one's errors and the
-    improvement signal fires). The state has dict fields, so `hash(st)` raises: do not use states as keys."""
+    `stream.loop.AdapterLoop` passes copies of the dict fields and resets `holdout` at a promotion or a rollback (the
+    new served version does not inherit the old one's errors). The state has dict fields, so `hash(st)` raises: do not
+    use states as keys."""
     n: int = 0
     served: int = 0
     candidate: int | None = None
@@ -343,14 +352,18 @@ class DefaultPolicy(LoopPolicy):
     the pre-freeze gates; wilson: the confidence of the Wilson bounds (label mode's paired gain, the probe's discard
     test); min_novel, min_share, margin: the
     promotion rule; gap, probe_min: the memorisation probe; stale, trial: when a candidate is discarded; probation:
-    two alarms closer than this roll back; r, lr, min_updates, max_updates: the training's settings."""
+    two alarms closer than this roll back (0: never); r, lr, min_updates, max_updates: the training's settings;
+    refreeze: the lane LearningLoop's retrain floor instead of the largest n_train (None: off); probe: the memorisation
+    probe on (False: off, promotion and discard); pre_freeze: the pre-freeze gates on (False: every training is
+    frozen); novel_risk: promotion needs wrong_novel / n_novel ≤ α (False: off)."""
 
     def __init__(self, budget: Budget | None = None, *, s2_labels: bool = False, calib: float = 0.15,
                  holdout: float = 0.15, first: int = 300, growth: float = 1.5, window: int = 200, target_share=None,
                  min_gain: float = 0.01, min_holdout: int = 100, tolerance: float = 0.02, wilson: float = 0.95,
                  min_novel: int = 100, min_share: float = 0.05, margin: float = 0.01, gap: float = 0.10,
                  probe_min: int = 30, stale: int = 1500, trial: int = 1500, probation: int = 300, r: int = 8,
-                 lr: float = 3e-4, min_updates: int = 200, max_updates: int = 3000):
+                 lr: float = 3e-4, min_updates: int = 200, max_updates: int = 3000, refreeze=None, probe: bool = True,
+                 pre_freeze: bool = True, novel_risk: bool = True):
         super().__init__(budget)
         gates.split("", calib=calib, holdout=holdout)                     # the shares, checked once
         for name, v in (("first", first), ("window", window), ("min_holdout", min_holdout), ("min_novel", min_novel),
@@ -360,8 +373,9 @@ class DefaultPolicy(LoopPolicy):
                 raise ValueError(f"{name} must be an integer ≥ {0 if name == 'probation' else 1}, not {v!r}")
         if min_updates > max_updates:
             raise ValueError(f"min_updates ({min_updates}) > max_updates ({max_updates})")
-        if isinstance(growth, bool) or not isinstance(growth, (int, float)) or growth < 1:
-            raise ValueError(f"growth must be a number ≥ 1, not {growth!r}")
+        for name, v in (("growth", growth), ("refreeze", 1 if refreeze is None else refreeze)):
+            if isinstance(v, bool) or not isinstance(v, (int, float)) or not 1 <= v < math.inf:
+                raise ValueError(f"{name} must be a number ≥ 1, not {v!r}")
         for name, v in (("min_gain", min_gain), ("tolerance", tolerance), ("min_share", min_share),
                         ("margin", margin), ("gap", gap)):
             gates._share(name, v, closed=True)
@@ -378,6 +392,8 @@ class DefaultPolicy(LoopPolicy):
         self.min_novel, self.min_share, self.margin = min_novel, min_share, margin
         self.gap, self.probe_min, self.stale, self.trial, self.probation = gap, probe_min, stale, trial, probation
         self.r, self.lr, self.min_updates, self.max_updates = r, float(lr), min_updates, max_updates
+        self.refreeze = None if refreeze is None else float(refreeze)
+        self.probe, self.pre_freeze, self.novel_risk = bool(probe), bool(pre_freeze), bool(novel_risk)
 
     # --- collecting
     def accept(self, st, x, y, source) -> bool:
@@ -396,11 +412,18 @@ class DefaultPolicy(LoopPolicy):
         if st.candidate is not None:
             return f"version {st.candidate} is in trial"
         have = st.labels.get("train", 0)
-        top = max((r.n_train for r in st.versions), default=0)          # discarded versions too: a retrain floor
-        need = max(self.first, math.ceil(self.growth * top))
+        if self.refreeze is None:
+            top = max((r.n_train for r in st.versions), default=0)      # discarded versions too: a retrain floor
+            need = max(self.first, math.ceil(self.growth * top))
+            why = f"first {self.first}, growth {self.growth:g} × the largest n_train of any version, {top}"
+        else:
+            last = max((r.discarded_at for r in st.versions if r.discarded_at is not None), default=0)
+            n_s = st.served_info.n_train
+            need = max(self.first, math.ceil(self.growth * n_s), math.ceil(self.refreeze * last))
+            why = (f"first {self.first}, growth {self.growth:g} × the served n_train {n_s}, refreeze "
+                   f"{self.refreeze:g} × {last} at the latest discard")
         if have < need:
-            return (f"{have} train label(s) < {need} (first {self.first}, growth {self.growth:g} × the largest "
-                    f"n_train of any version, {top})")
+            return f"{have} train label(s) < {need} ({why})"
         refused = self.budget.refuse(st.trainings, st.now)
         if refused:
             return refused
@@ -463,19 +486,30 @@ class DefaultPolicy(LoopPolicy):
         return out
 
     def freeze(self, st, report) -> bool:
+        if not self.pre_freeze:
+            return True
         return all(g["ok"] for g in self.freeze_gates(st, report).values())
 
     # --- promotion / rollback
     def promote_checks(self, st, paired: Paired) -> dict:
-        """Each promotion condition → {"certified", "novel", "min_share", "margin", "probe"}, each with "ok". The probe
+        """Each promotion condition → {"certified", "novel", "min_share", "margin", "novel_risk", "probe"}, each with
+        "ok" (novel_risk / probe only when on). The probe
         passes only with ≥ probe_min alone answers on novel samples (an unmeasured novel side does not promote)."""
         c = st.candidate_info
-        return {"certified": {"ok": bool(c is not None and c.certified)},
-                "novel": {"ok": paired.n_novel >= self.min_novel, "n_novel": paired.n_novel, "min": self.min_novel},
-                "min_share": {"ok": paired.share_k >= self.min_share, "share_k": paired.share_k},
-                "margin": {"ok": paired.share_k >= paired.share_s + self.margin, "share_k": paired.share_k,
-                           "share_s": paired.share_s},
-                "probe": self._probe_promote(paired)}
+        out = {"certified": {"ok": bool(c is not None and c.certified)},
+               "novel": {"ok": paired.n_novel >= self.min_novel, "n_novel": paired.n_novel, "min": self.min_novel},
+               "min_share": {"ok": paired.share_k >= self.min_share, "share_k": paired.share_k},
+               "margin": {"ok": paired.share_k >= paired.share_s + self.margin, "share_k": paired.share_k,
+                          "share_s": paired.share_s}}
+        if self.novel_risk:
+            risk = paired.wrong_novel / paired.n_novel if paired.n_novel else None
+            out["novel_risk"] = {"ok": risk is not None and risk <= st.alpha, "risk": risk, "alpha": st.alpha,
+                                 "why": "no novel sample yet" if risk is None else
+                                 f"wrong alone on novel samples {paired.wrong_novel} / {paired.n_novel} = {risk:.4f} "
+                                 f"(≤ α {st.alpha:g} needed)"}
+        if self.probe:
+            out["probe"] = self._probe_promote(paired)
+        return out
 
     def _probe(self, paired):
         return gates.probe(paired.alone_seen, paired.wrong_seen, paired.alone_novel, paired.wrong_novel, gap=self.gap,
@@ -502,7 +536,7 @@ class DefaultPolicy(LoopPolicy):
             return None
         if paired is None:                                        # stream mode, no sample yet
             paired = Paired(0, 0, 0, 0)
-        pr = self._probe(paired)
+        pr = self._probe(paired) if self.probe else {"shown": False}
         if pr["shown"]:
             return f"memorisation probe: {pr['why']}"
         if not c.certified and c.samples >= self.stale:

@@ -225,6 +225,27 @@
   current serving within 300 decisions roll back to the highest retired version below it with no alarm on record.
   `LabelRow`, `TrainReport`, `Paired`, `VersionInfo` (with the trained key set) carry what the hooks read. Policies
   pickle (they go into the loop's checkpoint). Unmeasured: the numbers are the design's, not tuned.
+- **Adapter (LoRA) learning loop, stage 2: the loop core** (experimental, `solvi.experimental.stream.loop` and
+  `stream.serving`). `AdapterLoop` is the lane's learning loop with its constants turned into `LoopPolicy` hooks: each
+  label is split by its content key (a key keeps the split it first got) and only train labels reach the learner; an
+  online learner is frozen as a snapshot, a batch learner gets a `TrainJob` (the rows of `select`, the settings of
+  `hyper`) — `HashedTextTrainer` is the stand-in batch learner (no torch); the loop checks the policy's `Budget`
+  before every training; a `TrainReport` scores the trained model and the served one on the held-out labels (its
+  threshold from the calib labels: the model's own `act_threshold`, else a fixed-set Wilson stand-in for act_guard,
+  `gates.calib_threshold`), and a refused freeze is a version discarded at birth with no δ spent. The paired
+  comparison counts only post-freeze samples whose key the candidate never trained on (`train_keys`, a frozenset
+  snapshotted at the freeze); the samples on keys it trained on feed the memorisation probe. Two alarm sources, OR-ed:
+  the `RiskDetector` and a score monitor on the served version's scores (default `NumericDrift`; a detector without
+  a monitor is refused); the policy's `alarm` says recertify, roll back (to `rollback_target`) or ignore. Controls:
+  `pause` / `resume` (no training, freezing or promotion while paused; labels and promises go on), `train_now`
+  (ignores the schedule, not the budget; in process until the runners of stage 3), `promote(force=)` (never without
+  the certificate), `rollback`, `versions`, `status` (with the training in flight, `job`). A served version is
+  installed through `Served.install` (`HeadVersion` over a frozen model's head, `BaseVersion` for version 0).
+  `LearningLoop` is now `AdapterLoop` with `DefaultPolicy` at the lane's constants (`lane_policy`; its records gain
+  the content key, the split, the wall clock and a "train" event per freeze). `DefaultPolicy` gains `refreeze`,
+  `probe`, `pre_freeze` and `novel_risk` switches, and a promotion bar (author's decision): the candidate's error on
+  novel samples, wrong alone over all novel samples, ≤ α. Not built yet: the LoRA learner and swap, runners, the
+  checkpoint, label mode and attach. Unmeasured.
 - **A secret for the supervision and audit draws: `Dispatcher(secret=)`** (`solvi.core.dispatch`; security). The
   draws were `sha256(f"{seed}|{input hash}|{n}")` with the public default `seed=0`, so whoever could vary the inputs
   could compute which decisions would be supervised or audited and avoid them. With `secret=` (bytes or str; None reads
