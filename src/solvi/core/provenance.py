@@ -15,6 +15,8 @@ A part backed by a model (an extractor, a head, a rule list, any object) records
 whether the model that made the decision is still the one in the catalog."""
 from __future__ import annotations
 
+import contextlib
+import contextvars
 import hashlib
 import re
 import sys
@@ -105,6 +107,22 @@ def digest(*parts):
     for p in parts:
         _feed(h, p)
     return h.hexdigest()[:16]
+
+
+_NO_PROBES = contextvars.ContextVar("solvi_no_probes", default=False)
+
+
+@contextlib.contextmanager
+def no_probes():
+    """Within this block no identity canary (solvi.core.guarantees.canary) probes, counts or marks a decision: replay
+    runs under it. Defined here, in the execution layer, so the runtime need not import the guarantees. It is a
+    context variable: it holds in this thread (replay recomputes in the calling thread), but not in thread-pool workers
+    started without copying the context — `system.ask` with workers > 1 inside this block still probes."""
+    tok = _NO_PROBES.set(True)
+    try:
+        yield
+    finally:
+        _NO_PROBES.reset(tok)
 
 
 def fingerprint(model):

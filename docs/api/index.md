@@ -55,6 +55,7 @@ internal and have no page.
 | [`solvi.core.calibfile`](calibfile.md) | calibration files (`save_calibration` / `load_calibration`) and `solvi calibrate` |
 | [`solvi.core.guarantees.guarantee`](guarantee.md) | a calibrated threshold with a stated promise on a question (`System.guarantee`), a computed fact or any scalar |
 | [`solvi.core.guarantees.openset`](openset.md) | inputs from outside the calibration set: a threshold sized for the share of them, estimated as the stream goes, and a change flag |
+| [`solvi.core.guarantees.canary`](canary.md) | an identity canary for a remote decider: a fixed probe set whose answers fingerprint the model behind the name; a change marks the decisions, flags drift or escalates |
 | [`solvi.core.guarantees.drift`](drift.md) | drift: has the stream moved away from the one the thresholds were calibrated on? |
 | [`solvi.core.guarantees.monitor`](monitor.md) | the `Monitor` protocol: a watcher of the decision stream |
 | [`solvi.core.store`](storage.md) | TraceStorage: JSONL, SQLite, PostgreSQL and DuckDB stores, queries, replay |

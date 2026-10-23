@@ -426,8 +426,9 @@ def _number(v, name):
     return v if math.isfinite(v) else f"the signal {name} is {v}"
 
 
-def _calibration_rows(system, question, examples, guard, correct, folds=None, seed=0):
-    """Ask the question on labelled examples with its guard off → (signals, right, groups, read failures)."""
+def _calibration_rows(system, question, examples, guard, correct, folds=None, seed=0, probs_out=None):
+    """Ask the question on labelled examples with its guard off → (signals, right, groups, read failures). probs_out: a
+    list that receives ({answer: probability} or None, the label or None) per example, for the label check."""
     from ..runtime import execute, vhash
     q = system.questions[question]
     examples = list(examples)
@@ -447,6 +448,8 @@ def _calibration_rows(system, question, examples, guard, correct, folds=None, se
             trace, vals = execute(system.catalog, p.flow, p.state, workers=system.workers, order=p.order,
                                   costs=system.cost_book, policy=p.policy, known=p.known)
             r = system._results(p.questions, p.flow, trace, vals)[0][question]
+            if probs_out is not None:
+                probs_out.append(_label_row(q, r, y))
             if r.status == "abstain":
                 sig.append(-math.inf)
                 ok.append(True)                   # never answered alone: right / wrong does not count
@@ -508,7 +511,7 @@ def _fold_heads(system, question, examples, folds, seed):
 
 def guard_question(system, question, examples=None, *, max_error=None, max_risk=None, method=None, delta=0.10, signal=None,
                    answer=None, groups=None, min_group=100, min_support=10, correct=None, folds=None, seed=0,
-                   weak="raise", promise=None, corrections=None, sources=None, procedure="bonferroni"):
+                   weak="raise", promise=None, corrections=None, sources=None, procedure="bonferroni", label_check=False):
     """Put a calibrated threshold with a stated promise on a question of `system` (System.guarantee): every later answer
     is let through alone only when its signal ≥ the threshold, else the question abstains with the reason; the promise,
     the signal and the threshold are recorded with every answer. examples: [(init_state, correct answer)], not used to fit
@@ -532,6 +535,12 @@ def guard_question(system, question, examples=None, *, max_error=None, max_risk=
     The other arguments, the methods and their promises: calibrate() and the module docstring.
     → the calibration report ({"threshold", "n", "answered", "error", "risk", "support", "separation", "promise", ...};
     for an attached promise, its report).
+    label_check (default False, opt-in; it reads the answers already computed, no extra call): the report's "label_issues" —
+    the examples whose label the answer's probabilities confidently contradict (solvi.core.calibration.label_issues;
+    ids are the examples' positions, the appended corrections= included) — and a line in "warnings" when there are any;
+    every label is still used. It needs out-of-sample probabilities: a fast head fitted on these examples has seen the
+    labels it is asked to contradict, so without folds= a FastHead question gets a warning to pass folds=k (each example
+    is then scored by a head fitted without it).
 
     Every call is logged in `system.guard_history`, in order: {"question", "time" (seconds since the epoch), "outcome"
     ("installed", "failed" or "removed"), "replaced" (a guarantee was in force before the call), "method", "n",
@@ -552,7 +561,8 @@ def guard_question(system, question, examples=None, *, max_error=None, max_risk=
         rep = _guard_question(system, question, examples, max_error=max_error, max_risk=max_risk, method=method,
                               delta=delta, signal=signal, answer=answer, groups=groups, min_group=min_group,
                               min_support=min_support, correct=correct, folds=folds, seed=seed, weak=weak,
-                              promise=promise, corrections=corrections, sources=sources, procedure=procedure)
+                              promise=promise, corrections=corrections, sources=sources, procedure=procedure,
+                              label_check=label_check)
     except Exception as e:
         old, added, q = before
         if q is not None:
@@ -575,8 +585,22 @@ def guard_question(system, question, examples=None, *, max_error=None, max_risk=
     return rep
 
 
+def _label_row(q, r, y):
+    """One calibration example for the label check: (the answer's probabilities keyed like normalized answers, the
+    normalized label) — None where it cannot be checked (no probabilities, a forced answer, several right answers)."""
+    from ..catalog import label_options
+    opts = label_options(y)
+    if r.status == "forced" or not getattr(r, "probs", None) or len(opts) != 1:
+        return None, None
+    try:
+        return {q.answer.normalize(k): float(v) for k, v in r.probs.items()}, q.answer.normalize(opts[0])
+    except (ValueError, TypeError):
+        return None, None
+
+
 def _guard_question(system, question, examples, *, max_error, max_risk, method, delta, signal, answer, groups,
-                    min_group, min_support, correct, folds, seed, weak, promise, corrections, sources, procedure="bonferroni"):
+                    min_group, min_support, correct, folds, seed, weak, promise, corrections, sources, procedure="bonferroni",
+                    label_check=False):
     """guard_question without the log."""
     if examples is False:
         old = system.guards.pop(question, None)
@@ -601,7 +625,8 @@ def _guard_question(system, question, examples, *, max_error, max_risk, method, 
         if examples is None:
             raise ValueError("give labelled examples [(init_state, correct answer)] to calibrate on, or promise=")
         try:
-            sig, ok, grp, lost = _calibration_rows(system, question, examples, guard, correct, folds, seed)
+            rows = [] if label_check else None
+            sig, ok, grp, lost = _calibration_rows(system, question, examples, guard, correct, folds, seed, rows)
             with warnings.catch_warnings(record=True) as caught:
                 warnings.simplefilter("always")
                 promise = calibrate(sig, ok, max_error=max_error, max_risk=max_risk, method=method, delta=delta,
@@ -620,6 +645,18 @@ def _guard_question(system, question, examples, *, max_error, max_risk, method, 
                 raise ValueError(msg + " — most of them: check signal=")
             promise.report["warnings"].append(msg)
             warnings.warn(msg, GuaranteeWarning, stacklevel=2)
+        if rows is not None:                       # confident learning on the labels: reported, never applied
+            from ..calibration import label_issues, label_warning
+            issues = label_issues([p for p, _ in rows], [y for _, y in rows])
+            promise.report["label_issues"] = issues
+            lw = label_warning(issues, len(sig))
+            if lw:
+                promise.report["warnings"].append(lw)
+            from ..deciders.heads import FastHead
+            if not folds and isinstance(system.heads.get(question), FastHead):
+                promise.report["warnings"].append(
+                    "the label check ran on in-sample probabilities (a fast head fitted on these examples has seen their "
+                    "labels, so it lists fewer issues): pass folds=k to score each example by a head fitted without it")
         if groups is not None:
             promise.by = "answer" if groups == "answer" else guard._by.label()
         if folds:
