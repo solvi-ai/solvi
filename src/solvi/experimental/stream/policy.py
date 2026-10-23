@@ -73,9 +73,12 @@ own counters in `self` and must pickle (the loop's checkpoint saves it).
 - watch — label mode only, from a promotion until the served version changes again: on each calib or held-out
   label the served version and the version served before it are scored on the same input (+1 alone and right, −1
   alone and wrong, 0 not alone, each at its own threshold); after ≥ `watch_min` (100) such labels the served version
-  is rolled back when the paired sign test's Wilson lower bound (at `wilson`) is above 0 and the margin per label is ≥
-  `min_gain` — the freeze's two gates with the roles swapped (`watch_rollback`; watch=False: off). Looked at on every
-  label, so it is a stand-in for a fixed-sample test; its false-rollback rate is unmeasured.
+  is rolled back when an anytime-valid e-process on the discordant labels (`Mixture(0.5)` fed 1 when the served
+  version wins one, 0 when the target does) reaches wealth 1 / (1 − `wilson`), the target won more of them, and the
+  margin per label is ≥ `min_gain` (`watch_rollback`; watch=False: off). P(a false rollback) ≤ 1 − `wilson` per
+  promotion at any horizon (Ville); simulated, not a stand: 0.8–2.1 % false rollbacks within 3 000 watched labels, a
+  served version truly worse (p = 0.6, d = 0.1) caught in 70 % of runs by then. The base `LoopPolicy.watch` returns
+  False (opt-in).
 
 Unmeasured: no stand has run on this policy; its numbers are the design's, not tuned."""
 from __future__ import annotations
@@ -305,6 +308,10 @@ class Paired:
     def err_s_novel(self) -> float | None:
         return self.wrong_served / self.alone_served if self.alone_served else None
 
+    @property
+    def err_k_seen(self) -> float | None:
+        return self.wrong_seen / self.alone_seen if self.alone_seen else None
+
 
 @dataclass(frozen=True)
 class Watch:
@@ -312,20 +319,20 @@ class Watch:
     rollback target) on the same labels since the promotion — calib and held-out labels only (keys no version trained
     on). Each label scores each version +1 (answered alone and right at its own threshold), −1 (alone and wrong) or 0
     (not alone). n: the labels compared; better: those where the target scored higher; worse: those where the served
-    version scored higher; margin: Σ (target − served) / n (0.0 with n = 0)."""
+    version scored higher; margin: Σ (target − served) / n (0.0 with n = 0). log_e: the log wealth of the watch's
+    e-process (`watch_eprocess()`, a `Mixture(0.5)` fed loss 1 when the served version wins a discordant label and
+    0 when the target wins), 0.0 before the first discordant label."""
     target: int
     n: int = 0
     better: int = 0
     worse: int = 0
     total: int = 0
 
+    log_e: float = 0.0
+
     @property
     def margin(self) -> float:
         return self.total / self.n if self.n else 0.0
-
-    @property
-    def err_k_seen(self) -> float | None:
-        return self.wrong_seen / self.alone_seen if self.alone_seen else None
 
 
 # ───────────────────────────────────────────────────────────── the abstract policy
@@ -390,13 +397,13 @@ class LoopPolicy(abc.ABC):
     def alarm(self, st: LoopState, who: str, report: dict) -> str:
         """An alarm on the served version (who: "detector" or "monitor") → "recertify", "rollback:<v>" or "ignore"."""
 
-    # --- label mode: the watch after a promotion (not abstract: a policy without it gets this rule)
+    # --- label mode: the watch after a promotion (not abstract, opt-in: a policy without it never rolls back)
     def watch(self, st: LoopState, w: Watch) -> bool:
         """Label mode: roll the served version back to `w.target` now? Called on each calib or held-out label while a
-        watch runs (from a promotion to the next change of the served version). This default is `watch_rollback(w)`
-        at its defaults (≥ 100 labels, Wilson 95 %, margin ≥ 0.01); `DefaultPolicy` reads its own keywords; return
-        False to switch the watch off."""
-        return watch_rollback(w)
+        watch runs (from a promotion to the next change of the served version). This default returns False: a custom
+        policy has no automatic rollback unless it defines this hook (e.g. `return watch_rollback(w)`, the
+        `DefaultPolicy` rule). The loop keeps the watch's counts either way (`status()["watch"])."""
+        return False
 
 
 # ───────────────────────────────────────────────────────────── the out-of-the-box policy
@@ -631,8 +638,8 @@ class DefaultPolicy(LoopPolicy):
         return None
 
     def watch(self, st, w) -> bool:
-        """Label mode: `watch_rollback(w, min_n=watch_min, confidence=wilson, min_gain=min_gain)`; never with
-        watch=False."""
+        """Label mode: `watch_rollback(w, min_n=watch_min, confidence=wilson, min_gain=min_gain)` (the e-process at
+        level 1 − wilson); never with watch=False."""
         if not getattr(self, "watch_on", True):          # a policy pickled before the watch existed: on
             return False
         return watch_rollback(w, min_n=getattr(self, "watch_min", 100), confidence=self.wilson,
@@ -656,16 +663,30 @@ class DefaultPolicy(LoopPolicy):
         return "recertify"
 
 
+def watch_eprocess():
+    """The watch's e-process: `Mixture(0.5)` (stream._eprocess), the bet against "the served version wins at least half
+    of the discordant labels". The loop feeds it loss = 1 when the served version scores higher on a calib or held-out
+    label, 0 when the target does (concordant labels are not fed); its wealth is a test supermartingale while the
+    served version is not worse."""
+    from ._eprocess import Mixture
+    return Mixture(0.5)
+
+
 def watch_rollback(w: Watch, *, min_n: int = 100, confidence: float = 0.95, min_gain: float = 0.01) -> bool:
     """The watch's rule: the served version is shown worse than the target on the labels since its promotion — ≥ min_n
-    labels compared, the paired sign test's Wilson lower bound (`gates.paired_gain_low(better, worse)`, at
-    `confidence`) > 0, and the margin (target − served, per label) ≥ min_gain. The freeze's two gates (the held-out
-    margin and the paired gain) with the roles swapped. Looked at on every label: a stand-in for a fixed-sample test,
-    not an anytime guarantee; its false-rollback rate is unmeasured."""
+    labels compared, the e-process's wealth ≥ 1 / (1 − confidence) (`w.log_e`, `watch_eprocess()`: 20 at 0.95),
+    better > worse, and the margin (target − served, per label) ≥ min_gain. Anytime-valid: the e-process is a test
+    supermartingale while the served version wins at least half of the discordant labels, so by Ville's inequality
+    P(a rollback ever, at any horizon) ≤ 1 − confidence per promotion when the served version is not worse on the
+    discordant labels; the other conditions only make a rollback rarer.
+
+    Simulation, not a stand (2 000 runs per cell; a watched label discordant with probability d ∈ {0.1, 0.3, 0.5}, a
+    discordant one won by the target with probability p, steps 1 or 2): false rollbacks with both versions equally good
+    (p = 0.5) 0.4–1.4 % within 300 watched labels, 0.5–1.9 % within 1 000, 0.8–2.1 % within 3 000; a served version
+    truly worse (p = 0.6, d = 0.1) rolled back in 10 / 28 / 70 % of runs by 300 / 1 000 / 3 000 watched labels."""
     if w.n < min_n:
         return False
-    low = gates.paired_gain_low(w.better, w.worse, confidence)
-    return low is not None and low > 0 and w.margin >= min_gain
+    return w.log_e >= math.log(1.0 / (1.0 - confidence)) and w.better > w.worse and w.margin >= min_gain
 
 
 def _balanced(rows, k, rng) -> list:
@@ -688,4 +709,4 @@ def _balanced(rows, k, rng) -> list:
 
 
 __all__ = ["Budget", "DefaultPolicy", "LabelRow", "LoopPolicy", "LoopState", "Paired", "STATES", "SLOW_SOURCES",
-           "TrainReport", "VersionInfo", "Watch", "watch_rollback"]
+           "TrainReport", "VersionInfo", "Watch", "watch_eprocess", "watch_rollback"]

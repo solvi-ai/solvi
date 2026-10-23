@@ -701,8 +701,11 @@ coin draws, and after it the loop takes its step with the slow path's accepted a
 inside the part's call. A stream-mode loop needs a label source: with the default policy the only one is the slow
 path's accepted answer, which `DefaultPolicy` takes only with `s2_labels=True` (tickets are not built with a loop and
 `teach` is only stored), so an attach whose policy refuses the slow path's labels is refused with the options —
-`s2_labels=True`, a trusted oracle as the slow path (a slow path that says `label_source = "human"`), or label mode.
-Without a label source no version could ever be certified and every decision would escalate to the slow path.
+`s2_labels=True`, a trusted oracle as the slow path (a slow path that says `label_source = "human"` and whose Thoughts
+carry `{"oracle": {"label_source": "human"}}`, the labels' source at run time), or label mode. Without a label source no
+version could ever be certified and every decision would escalate to the slow path. The attribute is only a
+declaration, so the loop also counts the labels its policy refuses (`status()["labels"]["refused"]`) and warns once
+after `warn_refused` (200) of them in a row with none accepted.
 
 One Dispatcher with a loop serves one decision at a time, the slow path's call included, under a lock taken before
 the part's and the loop's (order: dispatcher → part → loop on every path): its throughput is at most one decision per
@@ -721,12 +724,19 @@ measured a gain on held-out labels it never trained on (the held-out margin, the
 promoted, automatically or by the `promote()` control. Label mode refuses `DefaultPolicy(pre_freeze=False)`: there the
 gates are the only measurement before a version is served. After a promotion a watch compares the served version with
 the version served before it on the same calib and held-out labels (+1 alone and right, −1 alone and wrong, 0 not
-alone, each at its own threshold); after at least 100 such labels it rolls back when the paired sign test's Wilson
-lower bound is above zero and the margin per label is at least `min_gain` — the freeze's gates with the roles swapped.
-The rollback is a recorded "rollback" event (`by: "policy"`, the counts in `watch`) and replays exactly. It is a
-`LoopPolicy.watch(st, w)` hook (`DefaultPolicy(watch=False)` switches it off, `watch_min=` sets the count); it is looked
-at on every label, so its false-rollback rate is not that of a fixed-sample test, and it was not measured. It costs
-one more scoring per label while it runs.
+alone, each at its own threshold); after at least 100 such labels it rolls back when an anytime-valid e-process on
+the discordant labels (`Mixture(0.5)`, fed 1 when the served version wins one and 0 when the earlier one does) reaches
+wealth 20 (1 / (1 − `wilson`)), the earlier version won more of them, and the margin per label is at least
+`min_gain`. By Ville's inequality P(a false rollback) ≤ 5 % per promotion at any horizon when the served version is
+not worse on the discordant labels. In a simulation (not a stand; 2 000 runs per cell, discordant share 0.1–0.5):
+false rollbacks with both versions equally good 0.4–1.4 % within 300 watched labels,
+0.5–1.9 % within 1 000 and 0.8–2.1 % within 3 000; a served version truly worse (it wins 40 % of the discordant
+labels, 10 % of the labels discordant) rolled back in 10 / 28 / 70 % of runs by those horizons, a truly better one in
+≤ 0.2 %; watched labels are the calib and held-out ones, about 30 % of all labels at the default split. The rollback is a recorded "rollback" event (`by: "policy"`, the counts and the e-process's log wealths in
+`watch`) and replays exactly; the checkpoint saves the e-process. It is a `LoopPolicy.watch(st, w)` hook:
+`DefaultPolicy` has it on (`watch=False` switches it off, `watch_min=` sets the count); the base `LoopPolicy.watch`
+returns False, so a policy of your own rolls back only if it defines the hook. It costs one more scoring per calib or
+held-out label while it runs.
 
 Controls go through the handle (`dispatcher.loop.pause()`, `rollback`, `train_now`, `status`, `save`), `detach()`
 puts version 0 back, and any `LoopPolicy` subclass and any learner attach the same way. A question answered by a

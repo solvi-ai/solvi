@@ -139,8 +139,11 @@ call is a labelled step, a version serves at its own act_guard threshold on the 
 with such a threshold is promoted on the next label when `policy.promote(st, None)` says so (the default: the
 pre-freeze gates decided; `DefaultPolicy(pre_freeze=False)` is refused in label mode; `status()["guarantee"]` names
 the fixed-set guarantee). After a promotion a watch scores the served version and the one served before it on each
-calib or held-out label and rolls back when `policy.watch(st, Watch)` says so (the default: `policy.watch_rollback`,
-the freeze's gates with the roles swapped); the target's scores are recorded, so the watch replays. The automatic
+calib or held-out label and rolls back when `policy.watch(st, Watch)` says so (`DefaultPolicy`:
+`policy.watch_rollback`, an anytime-valid e-process on the discordant labels and the margin; the base `LoopPolicy`
+never rolls back); the target's scores are recorded (a train label's target is not scored), so the watch and its
+e-process replay. Attached to a Dispatcher, labels the policy refuses are counted (`status()["labels"]["refused"]`)
+and `warn_refused` of them in a row with none accepted warn once. The automatic
 promotion, in both modes, needs the candidate certified, as the `promote()` control does. The candidate is scored in
 shadow only while its grid is not fixed and on coin-sampled decisions. The controls take the Dispatcher's
 `_learn_lock` first (`_locked`), so a control waits for the decision in flight. Refused: a question answered by a
@@ -173,7 +176,8 @@ from .certificate import StreamPromise, _sha
 from .detector import RiskDetector
 from .gates import calib_threshold
 from .learner import TrainJob
-from .policy import DefaultPolicy, LabelRow, LoopPolicy, LoopState, Paired, TrainReport, VersionInfo, Watch
+from .policy import (DefaultPolicy, LabelRow, LoopPolicy, LoopState, Paired, TrainReport, VersionInfo, Watch,
+                     watch_eprocess)
 from .runner import RunnerError, TrainingCancelled, TrainingRefused
 from .sampling import Rate, coin_message, coin_value
 from .serving import BaseVersion, as_served
@@ -218,6 +222,21 @@ def content_key(question, x) -> str:
 
 def _fresh_detector(det):
     return None if det is None else RiskDetector(det.alpha, det.arl, det.scales, det.alternatives)
+
+
+def _watch_copy(w):
+    """The watch's counts as a fresh dict (its e-process's log wealths "lw" a list of its own)."""
+    out = dict(w)
+    out["lw"] = list(w["lw"])
+    return out
+
+
+def _watch_of(w) -> Watch:
+    """The Watch the policy reads: the counts and the e-process's log wealth (`watch_eprocess()` restored from
+    "lw")."""
+    mix = watch_eprocess().restore({"bet": "mixture", "lw": w["lw"], "n": w["better"] + w["worse"]})
+    return Watch(target=w["target"], n=w["n"], better=w["better"], worse=w["worse"], total=w["total"],
+                 log_e=mix.log_wealth)
 
 
 def _num(x):
@@ -333,12 +352,16 @@ class AdapterLoop:
     model reads); key: input → content key (None: content_key); served: frozen → Served (None: as_served); clock: the
     wall clock (None: time.time); wait: True runs every training inside the step or the control (stage 3's blocking
     form); part: the part whose version lock the loop takes before its own (None: the learner's or initial's `part`) —
-    from construction on, every decision of that part takes this RLock, whether or not a version is ever swapped."""
+    from construction on, every decision of that part takes this RLock, whether or not a version is ever swapped;
+    warn_refused: attached to a Dispatcher, after this many labelled decisions in a row whose label the policy refused
+    (none accepted in between) a `UserWarning` says the loop learns nothing, once (None: never; the count is
+    `status()["labels"]["refused"]`)."""
 
     def __init__(self, learner, *, question, policy=None, max_risk=None, max_error=None, delta=0.05, initial=None,
                  detector=None, monitor="auto", probation=300, source="human", secret=None, seed=0, sampling=None,
                  promise_options=None, storage=None, versions_dir=None, system=None, feature="text", key=None,
-                 served=None, clock=None, wait=False, part=None, mode="stream", _detector_alone=False, _batch=None):
+                 served=None, clock=None, wait=False, part=None, mode="stream", warn_refused=200,
+                 _detector_alone=False, _batch=None):
         global _warned
         if mode not in MODES:
             raise ValueError(f"mode is 'stream' (decisions through step, a promise per version) or 'label' (labels "
@@ -360,7 +383,10 @@ class AdapterLoop:
         self._kw = dict(question=question, max_risk=max_risk, max_error=max_error, delta=delta, initial=initial,
                         probation=probation, source=source, seed=seed, sampling=sampling,
                         promise_options=promise_options, feature=feature, key=key, served=served, wait=wait,
-                        mode=mode)
+                        mode=mode, warn_refused=warn_refused)
+        if warn_refused is not None and (isinstance(warn_refused, bool) or int(warn_refused) < 1):
+            raise ValueError("warn_refused is a number of labelled decisions ≥ 1, or None (never warn)")
+        self.warn_refused = None if warn_refused is None else int(warn_refused)
         self._pkw = {"max_risk": max_risk, "max_error": max_error, **(promise_options or {})}
         for k in ("delta", "budget"):
             if k in self._pkw:
@@ -434,6 +460,7 @@ class AdapterLoop:
         self._fed_keys: set = set()                        # keys of the train labels the learner took
         self._holdout: deque = deque(maxlen=10_000)        # the served version's (alone, wrong) on held-out labels
         self._watch = None                                 # label mode after a promotion: the Watch counts (a dict)
+        self._refused = {"n": 0, "run": 0, "warned": False}   # labels the policy refused on the attached path
         self._alarms: list = []
         self._history, self._served_since = [0], 0
         self._trainings: list = []
@@ -557,7 +584,7 @@ class AdapterLoop:
                     raise ValueError("this decision needs a label: step(x, oracle)")
             k = self._key(x) if key is None else str(key)
             return self._advance(x, k, would_s, score_s, would_k, score_k, oracle,
-                                 self.source if source is None else source, watch=self._watch_scores(x))
+                                 self.source if source is None else source, watch=self._watch_scores(x, k))
 
     def _shadow(self, x, sampled):
         """The candidate's (would, score) on x when the step reads it: while its promise's grid is not fixed yet (the
@@ -570,10 +597,17 @@ class AdapterLoop:
             return c["model"].score(x)
         return None, None
 
-    def _watch_scores(self, x):
-        """Label mode with a watch running: the rollback target's (would, score) on x (None: no watch)."""
+    def _watch_scores(self, x, key):
+        """Label mode with a watch running: the rollback target's (would, score) on x (None: no watch). Only a calib or
+        held-out key is scored (the watch counts no train label): a train key gets (None, None). The split is read as
+        `_split` reads it, without recording it (the policy's split is a pure function of the key)."""
         if self.mode != "label" or self._watch is None:
             return None
+        sp = self._split_of.get(key)
+        if sp is None:
+            sp = self.policy.split(self._state(), key)
+        if sp not in ("calib", "holdout"):
+            return None, None
         m = self._vs[self._watch["target"]]["model"]
         return m.score(x) if m is not None else (None, None)
 
@@ -701,6 +735,7 @@ class AdapterLoop:
                                      "loop's per-version promises are the certificate — build it without promise=")
                 if getattr(host, "loop", None) is not None:
                     raise ValueError("the dispatcher has a loop attached already")
+                self._refuse_no_label_source(host)         # before any state is set: a refusal leaves nothing attached
             else:
                 if self.mode != "label":
                     raise ValueError("a System alone gives labels, not decisions: a label-mode loop (mode='label'; "
@@ -727,7 +762,6 @@ class AdapterLoop:
                 if isinstance(self._base, BaseVersion) and self.served == 0:
                     self._base = BaseVersion(system, self.question)
             if isinstance(host, Dispatcher):
-                self._refuse_no_label_source(host)
                 host.loop = self
             system.adapter_loop = self                      # System.teach / outcome read it
             self.host = host
@@ -757,7 +791,10 @@ class AdapterLoop:
     def detach(self, *, by=None, why=None, timeout=30.0) -> dict | None:
         """Take the loop off its host: a training in flight is cancelled, version 0 (the part as attached) is put back
         on the System when another version serves, the host's hook is removed and the loop is closed (its records,
-        `replay()`, `versions()`, `status()` and `save` stay). → the "detach" event (None when not attached)."""
+        `replay()`, `versions()`, `status()` and `save` stay). → the "detach" event (None when not attached). Waits up
+        to timeout seconds for the training's thread after releasing every lock; with wait=True a training in progress
+        holds the locks (a Dispatcher's `_learn_lock` included) until it ends, so the detach — and the Dispatcher's
+        decisions — wait for it first."""
         with self._locked():
             host = self.host
             if host is None:
@@ -885,6 +922,9 @@ class AdapterLoop:
                     if not lenient:
                         raise
                     label, lof = None, None                # attached: a label the policy refuses is a missing one
+                    self._label_refused(src)
+                else:
+                    self._refused["run"] = 0
             if label is not None:
                 split = self._split(key)
             else:
@@ -896,6 +936,23 @@ class AdapterLoop:
                                     would_s, score_s, would_k, score_k, t, watch)
         finally:
             self._step_t = None
+
+    def _label_refused(self, src):
+        """Attached to a Dispatcher: one more label the policy refused (counted; status()["labels"]["refused"]). After
+        `warn_refused` of them in a row a UserWarning, once: a loop whose every label is refused learns nothing and
+        escalates every decision for ever (S2's run-time check of a slow path's declared `label_source`)."""
+        r = self._refused
+        r["n"] += 1
+        r["run"] += 1
+        if self.warn_refused is not None and r["run"] >= self.warn_refused and not r["warned"]:
+            r["warned"] = True
+            warnings.warn(
+                f"AdapterLoop {self.question!r}: the policy refused the last {r['run']} labels (source {src!r}) and "
+                "accepted none in between: the loop learns nothing and every decision escalates. The slow path's "
+                "labels carry the source of its Thoughts' {'oracle': {'label_source': ...}} record ('s2' without one), "
+                "not its label_source attribute. Give one of: DefaultPolicy(s2_labels=True); a trusted oracle whose "
+                "Thoughts carry {'oracle': {'label_source': 'human'}}; or label mode (AdapterLoop.attach(system, ...))",
+                UserWarning, stacklevel=2)
 
     def _advance_at(self, n, x, key, sv, c, thr_s, prob, rho, sampled, alone, label, lsrc, lof, split, would_s,
                     score_s, would_k, score_k, t, watch=None):
@@ -1005,15 +1062,19 @@ class AdapterLoop:
         w["better"] += ct > cs
         w["worse"] += ct < cs
         w["total"] += ct - cs
-        rec.update(counted=True, served_value=cs, target_value=ct)
+        if ct != cs:                                       # a discordant label: the e-process bets on it
+            mix = watch_eprocess().restore({"bet": "mixture", "lw": w["lw"], "n": w["better"] + w["worse"] - 1})
+            mix.update(1.0 if cs > ct else 0.0)
+            w["lw"] = mix.vector()
+        cur = _watch_of(w)
+        rec.update(counted=True, served_value=cs, target_value=ct, log_e=cur.log_e)
         self._at("policy.watch")
-        cur = Watch(**w)
         if not self.policy.watch(self._state(), cur):
             return rec, []
         why = (f"watch: version {sv} worse than version {tgt} on {cur.n} calib / held-out label(s) since its "
                f"promotion ({cur.better} better on {tgt}, {cur.worse} better on {sv}, margin {cur.margin:+.3f})")
         _, ev = self._rollback(tgt, by="policy", why=why, control=False)
-        ev[[e["event"] for e in ev].index("rollback")]["watch"] = dict(w)
+        ev[[e["event"] for e in ev].index("rollback")]["watch"] = _watch_copy(w)
         return rec, ev
 
     def _record(self, n, sv, c, rho, sampled, alone, by, lsrc, lof, label, prob, score_s, thr_s, score_k, det, key,
@@ -1212,7 +1273,7 @@ class AdapterLoop:
         """Version v served from decision n (its install on the System → the install record). Label mode: a promotion
         starts the watch against the version served until now; any other change of the served version ends it."""
         old = self.served
-        self._watch = ({"target": old, "n": 0, "better": 0, "worse": 0, "total": 0}
+        self._watch = ({"target": old, "n": 0, "better": 0, "worse": 0, "total": 0, "lw": watch_eprocess().vector()}
                        if promoted and self.mode == "label" and old != v else None)
         if old != v:
             self._vs[old]["state"] = "retired"
@@ -1623,8 +1684,8 @@ class AdapterLoop:
         """Stop the loop: a training in flight is cancelled (its runner stops it: a subprocess is killed, a thread
         runner stops waiting for its thread), `step` and every control refuse from here on; the served version stays
         installed. With `wait=True` a training runs inside a step or a control under the loop's locks, so a training in
-        progress there ends first. Waits up to timeout seconds for the training's thread, outside every lock. → the
-        "close" event
+        progress there ends first (a Dispatcher's decisions wait for it too: it holds `_learn_lock`). Waits up to
+        timeout seconds for the training's thread, outside every lock. → the "close" event
         (None when already closed). Also `with AdapterLoop(...) as loop:`."""
         with self._locked():
             if self.closed:
@@ -1917,10 +1978,12 @@ class AdapterLoop:
         return out
 
     def status(self) -> dict:
-        """{"state", "error", "served", "candidate", "n", "labels": {"train", "calib", "holdout"}, "trainings",
+        """{"state", "error", "served", "candidate", "n", "labels": {"train", "calib", "holdout", "refused"},
+        "trainings",
         "budget": {...}, "job", "paused", "alarms", "mode", "attached", "guarantee", "watch", "delta_spent",
-        "versions_kept"}. watch: label mode after a promotion, the watch's counts {"target", "n", "better", "worse",
-        "total"} (None otherwise).
+        "versions_kept"}. labels: the accepted labels by split and "refused", the labels the policy refused on the
+        attached path (each a missing label). watch: label mode after a promotion, the watch's counts {"target", "n",
+        "better", "worse", "total", "lw"} ("lw": its e-process's log wealths; None otherwise).
         attached: "dispatcher", "system" or None. state: "detached", "closed", "error" (a hook raised: the loop stopped; error: {"n", "where", "why"}), "training", "paused" or
         "running". job: the training in flight — id, version, trigger, started (wall clock), started_at (its decision),
         inline, state ("running"; "ready": its result waits for the next decision), and what the runner fills in
@@ -1934,7 +1997,7 @@ class AdapterLoop:
         host = self.host
         attached = (None if host is None else "dispatcher" if hasattr(host, "slow") else "system")
         return {"state": state, "error": None if err is None else dict(err), "served": self.served,
-                "candidate": self.candidate, "n": self.n, "labels": dict(self._split_n),
+                "candidate": self.candidate, "n": self.n, "labels": {**self._split_n, "refused": self._refused["n"]},
                 "trainings": len(self._trainings),
                 "budget": {"max_trainings": b.max_trainings, "per_day": b.per_day,
                            "refuse": b.refuse(list(self._trainings), self._now())},
@@ -1943,7 +2006,7 @@ class AdapterLoop:
                 "guarantee": ("anytime stream certificate per version (StreamPromise on post-freeze coin samples)"
                               if self.mode == "stream" else
                               "fixed-set (act_guard on calib labels); no anytime certificate"),
-                "watch": None if self._watch is None else dict(self._watch),
+                "watch": None if self._watch is None else _watch_copy(self._watch),
                 "delta_spent": self.budget.spent,
                 "versions_kept": sum(1 for ver in list(self._vs.values()) if ver["state"] in KEPT)}
 

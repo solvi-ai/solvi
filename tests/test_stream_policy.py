@@ -511,3 +511,37 @@ def test_policy_settings_are_checked():
                 {"min_updates": 500, "max_updates": 400}, {"probation": -1}, {"target_share": 2}):
         with pytest.raises(ValueError):
             DefaultPolicy(**bad)
+
+
+def test_paired_has_its_seen_error_and_the_watch_has_no_stray_attribute():
+    from solvi.experimental.stream.policy import Watch
+    assert Paired(200, 60, 2, 20, n_seen=100, alone_seen=40, wrong_seen=1).err_k_seen == pytest.approx(1 / 40)
+    assert Paired(0, 0, 0, 0).err_k_seen is None
+    w = Watch(target=0, n=10, better=3, worse=1, total=2)
+    assert not hasattr(w, "err_k_seen") and not hasattr(Watch, "err_k_seen")
+    assert w.log_e == 0.0 and w.margin == pytest.approx(0.2)
+
+
+def test_the_watch_rule_is_the_e_process_and_the_margin():
+    from solvi.experimental.stream.policy import Watch, watch_eprocess, watch_rollback
+    big = math.log(20.0)
+    # the e-process decides: a wide margin and a lopsided count do not roll back below wealth 1 / (1 − 0.95) = 20
+    assert not watch_rollback(Watch(0, n=500, better=400, worse=0, total=400, log_e=big - 1e-9))
+    assert watch_rollback(Watch(0, n=500, better=400, worse=0, total=400, log_e=big))
+    # and the other three conditions each hold it back
+    assert not watch_rollback(Watch(0, n=99, better=90, worse=0, total=90, log_e=10.0))        # n < min_n
+    assert not watch_rollback(Watch(0, n=500, better=10, worse=10, total=5, log_e=10.0))       # better ≤ worse
+    assert not watch_rollback(Watch(0, n=500, better=11, worse=10, total=4, log_e=10.0))       # margin < 0.01
+    assert watch_rollback(Watch(0, n=500, better=11, worse=10, total=5, log_e=10.0))
+    assert not watch_rollback(Watch(0, n=500, better=400, worse=0, total=400, log_e=math.log(50.0)), confidence=0.99)
+    # the e-process the loop feeds: the target winning every discordant label grows it, the served version shrinks it
+    m = watch_eprocess()
+    up = [m.update(0.0) for _ in range(12)]
+    assert up == sorted(up) and up[-1] >= big
+    m = watch_eprocess()
+    assert all(m.update(1.0) <= 0.0 for _ in range(12))
+    # the base policy never rolls back (opt-in); DefaultPolicy reads its keywords and watch=False switches it off
+    hi = Watch(0, n=10 ** 4, better=10 ** 4, worse=0, total=10 ** 4, log_e=100.0)
+    assert LoopPolicy.watch(DefaultPolicy(), None, hi) is False
+    assert DefaultPolicy().watch(None, hi) is True and DefaultPolicy(watch=False).watch(None, hi) is False
+    assert DefaultPolicy(watch_min=10 ** 5).watch(None, hi) is False

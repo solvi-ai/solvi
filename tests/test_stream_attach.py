@@ -17,12 +17,12 @@ from test_llm import FakeLLM
 from solvi import Answer, Catalog, Decision, Question, System
 from solvi.core.deciders.combine import Cascade
 from solvi.core.deciders.llm import llm
-from solvi.core.dispatch import AskPath, Dispatcher
+from solvi.core.dispatch import AskPath, Dispatcher, SlowPath, Thought
 from solvi.core.store import JSONLStorage
 
 with warnings.catch_warnings():
     warnings.simplefilter("ignore")
-    from solvi.experimental.stream import AdapterLoop, Budget, DefaultPolicy, LoopPolicy, StreamPromise
+    from solvi.experimental.stream import AdapterLoop, Budget, DefaultPolicy, LoopPolicy, StreamPromise, Watch
 
 KEY = b"attach-test-key"
 TEAMS = ("billing", "shipping")
@@ -385,11 +385,67 @@ def test_stream_mode_without_a_label_source_is_refused_with_the_options():
         _attach(_disp(), policy=pol)
     assert "every decision would escalate" in str(e.value)
 
-    class Trusted(AskPath):                          # a slow path that says its labels are a person's
-        label_source = "human"
-    disp = Dispatcher(_s1(), Trusted(_s2()), secret=KEY)
-    assert _attach(disp, policy=DefaultPolicy(Budget(min_interval_s=0.0, per_day=10 ** 6))).host is disp
     assert _attach(_disp(), policy=DefaultPolicy(s2_labels=True)).host is not None
+
+
+class Trusted(SlowPath):
+    """A trusted oracle in the process: says label_source = "human" and its Thoughts carry the oracle record (the
+    labels' source at run time). mark=False: the declaration without the record (a wrong declaration)."""
+    mode = "trusted_attach_test"
+    label_source = "human"
+
+    def __init__(self, system, mark=True, **kw):
+        super().__init__(system, **kw)
+        self.mark = mark
+
+    def think(self, state, question, **kw):
+        rec = {"oracle": {"label_source": "human"}} if self.mark else {"read": _text(state)}
+        return Thought(self.mode, _gold(_text(state)), True, record=rec)
+
+    def fingerprint(self):
+        return f"trusted-attach-test-{self.mark}"
+
+
+def test_a_trusted_oracle_as_the_slow_path_attaches_and_its_labels_flow():
+    disp = Dispatcher(_s1(), Trusted(_s2()), secret=KEY)
+    loop = _attach(disp, policy=DefaultPolicy(Budget(min_interval_s=0.0, per_day=10 ** 6)))
+    assert loop.host is disp
+    with warnings.catch_warnings(record=True) as rec:
+        warnings.simplefilter("always")
+        out = [disp.ask(x) for x in _emails(600)]
+    assert not any("refused the last" in str(w.message) for w in rec)          # labels flow: no warning
+    st = loop.status()
+    assert st["labels"]["refused"] == 0 and sum(st["labels"][k] for k in ("train", "calib", "holdout")) > 100, st
+    assert any(d.learning["label_source"] == "human" for d in out)
+    assert loop.versions()[0]["certified"], loop.versions()[0]      # version 0 certified on the oracle's labels
+    assert loop.replay()["ok"]
+
+
+def test_a_declared_label_source_whose_thoughts_are_not_marked_warns_and_counts_the_refusals():
+    disp = Dispatcher(_s1(), Trusted(_s2(), mark=False), secret=KEY)
+    loop = _attach(disp, policy=DefaultPolicy(Budget(min_interval_s=0.0, per_day=10 ** 6)), warn_refused=50)
+    assert loop.host is disp                         # the declaration passes the attach
+    with pytest.warns(UserWarning, match=r"refused the last 50 labels \(source 's2'\).*learns nothing") as rec:
+        for x in _emails(120):
+            disp.ask(x)
+    assert sum("refused the last" in str(w.message) for w in rec) == 1          # once
+    st = loop.status()
+    assert st["labels"]["refused"] == 120 and st["labels"]["train"] == st["labels"]["calib"] == 0, st
+    assert not loop.versions()[0]["certified"]
+
+
+def test_a_refused_attach_leaves_nothing_attached():
+    s1 = _s1()
+    loop = AdapterLoop(Learner(), question="team", max_risk=0.05, secret=KEY, initial=s1.holder.ver,
+                       policy=DefaultPolicy(Budget(min_interval_s=0.0, per_day=10 ** 6)), wait=True,
+                       clock=lambda: 1000.0)
+    disp = Dispatcher(s1, AskPath(_s2()), secret=KEY)
+    with pytest.raises(ValueError, match="refuses the slow path's labels"):
+        loop.attach_to(disp)
+    assert loop.host is None and loop.system is None and loop.part is None and loop._part_lock is None
+    assert getattr(disp, "loop", None) is None and getattr(s1, "adapter_loop", None) is None
+    other = Dispatcher(_s1(), Trusted(_s2()), secret=KEY)                     # another System: not "serves elsewhere"
+    assert loop.attach_to(other).host is other and other.system.adapter_loop is loop
 
 
 def test_teach_in_stream_mode_without_storage_warns_that_the_correction_is_lost():
@@ -584,6 +640,31 @@ def test_label_mode_checkpoint_continues_as_the_unbroken_run(tmp_path):
     assert la.versions() == lb.versions() and lb.replay()["ok"]
 
 
+def test_label_mode_checkpoint_saves_and_restores_the_watch_e_process(tmp_path):
+    xs = _emails(1000)
+    sa = _s1()
+    la = AdapterLoop.attach(sa, Learner(), question="team", max_risk=0.05, secret=KEY, initial=sa.holder.ver,
+                            policy=_label_policy(), wait=True, clock=lambda: 1000.0)
+    for x in xs[:700]:
+        sa.teach("team", x, _gold(x["email"]))
+    w = la.status()["watch"]
+    assert la.served == 1 and w is not None and w["better"] + w["worse"] > 0, w
+    assert any(lw != 0.0 for lw in w["lw"]), w      # the e-process has bet on discordant labels
+    la.save(tmp_path / "ck")
+    sb = _s1()
+    lb = AdapterLoop.load(tmp_path / "ck", Learner(), system=sb, secret=KEY, clock=lambda: 1000.0)
+    lb.attach_to(sb)
+    assert lb.status()["watch"] == w and lb._watch["lw"] == la._watch["lw"]
+    for x in xs[700:]:
+        sa.teach("team", x, _gold(x["email"]))
+        sb.teach("team", x, _gold(x["email"]))
+    assert lb.status()["watch"] == la.status()["watch"]
+    ra = [e["stream"]["watch"] for k, e in la.log if k == "loop"][-300:]
+    rb = [e["stream"]["watch"] for k, e in lb.log if k == "loop"][-300:]
+    assert ra == rb and any(r.get("counted") and r.get("log_e") not in (None, 0.0) for r in ra)
+    assert lb.replay()["ok"]
+
+
 # ───────────────────────────── a custom policy
 class OnlyHuman(LoopPolicy):
     """A minimal policy: human labels only, a third of the keys held out and a third calib, train at 100 labels,
@@ -624,7 +705,9 @@ def test_a_custom_policy_and_learner_attach():
     for x in _emails(400):
         s1.teach("team", x, _gold(x["email"]))
     assert loop.served == 1 and s1.holder.ver.name == "v1"
-    assert loop.status()["watch"] is not None         # a policy without its own watch hook gets the default rule
+    assert loop.status()["watch"] is not None         # the watch's counts are kept ...
+    hi = Watch(0, n=10 ** 4, better=10 ** 4, worse=0, total=10 ** 4, log_e=100.0)
+    assert OnlyHuman().watch(None, hi) is False       # ... but a policy without its own watch hook never rolls back
     from solvi.core.sources import UntrustedLabel
     with pytest.raises(UntrustedLabel):
         s1.teach("team", _emails(1, 900)[0], "billing", label_source="outcome")

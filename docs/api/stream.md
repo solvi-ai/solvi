@@ -81,11 +81,17 @@ pre_freeze=False)` is refused, since the pre-freeze gates are the only measureme
 `status()["guarantee"]` is "fixed-set (act_guard on calib labels); no anytime certificate"). Label mode's watch: from a
 promotion until the served version changes again, each calib or held-out label scores the served version and the one
 served before it on the same input (+1 alone and right, −1 alone and wrong, 0 not alone); `policy.watch(st, Watch)`
-(`LoopPolicy`'s default and `DefaultPolicy`: `watch_rollback` — ≥ `watch_min` (100) labels, the paired sign test's
-Wilson lower bound > 0 and the margin per label ≥ `min_gain`) returns True to roll back to the earlier version: a
-"rollback" event with `by: "policy"`, why "watch: …" and the counts under `watch`, replayed from the recorded scores;
-`status()["watch"]` shows the counts. Looked at on every label (not a fixed-sample test); its false-rollback rate is
-unmeasured; one more scoring per label while it runs. Without a learner it is a
+(`DefaultPolicy`: `watch_rollback` — ≥ `watch_min` (100) labels, the e-process `policy.watch_eprocess()` (a
+`Mixture(0.5)` fed 1 when the served version wins a discordant label, 0 when the earlier one does) at wealth
+≥ 1 / (1 − `wilson`), better > worse, and the margin per label ≥ `min_gain`; the base `LoopPolicy.watch` returns
+False: opt-in) returns True to roll back to the earlier version: a "rollback" event with `by: "policy"`, why "watch: …"
+and the counts under `watch`, replayed from the recorded scores; `status()["watch"]` shows the counts and the
+e-process's log wealths (`lw`; `Watch.log_e`), saved by the checkpoint. Anytime-valid: P(a false rollback) ≤
+1 − `wilson` per promotion at any horizon (Ville); simulated, not a stand: false rollbacks with both versions equally good 0.4–1.4 % within 300 watched labels,
+0.5–1.9 % within 1 000 and 0.8–2.1 % within 3 000; a served version truly worse (it wins 40 % of the discordant
+labels, 10 % of the labels discordant) rolled back in 10 / 28 / 70 % of runs by those horizons, a truly better one in
+≤ 0.2 %; watched labels are the calib and held-out ones, about 30 % of all labels at the default split. One more scoring per calib or
+held-out label while it runs. Without a learner it is a
 `LoraLearner` on the question's decision part (dir= required). `loop.attach_to(host)` attaches a loop built by hand;
 `Dispatcher(..., loop=loop)` calls it. `detach()` cancels a training in flight, puts version 0 back on the System,
 removes the hooks and closes the loop ("detach" event, replayed). `serving(v)`: version v installed for the duration
@@ -93,7 +99,9 @@ removes the hooks and closes the loop ("detach" event, replayed). `serving(v)`: 
 Dispatcher with its own `promise=`, a second loop on a System or a Dispatcher, `start` / `complete` with a loop (use
 `ask`), a stream-mode attach whose `DefaultPolicy` refuses the slow path's labels (the slow path's `label_source`
 attribute, "s2" when it has none) — the loop would have no label source and every decision would escalate: give
-`s2_labels=True`, a trusted oracle as the slow path, or use label mode — and, while a loop serves a part, a Cascade,
+`s2_labels=True`, a trusted oracle as the slow path (its Thoughts carry `{"oracle": {"label_source": "human"}}`), or use
+label mode; refused before any state is set; at run time the labels the policy refuses are counted
+(`status()["labels"]["refused"]`) and `warn_refused` (200) of them in a row with none accepted warn once — and, while a loop serves a part, a Cascade,
 Vote or Route built over it (refused at construction until `detach()`). In stream mode the decision is split around the dispatch: the loop reads it (scores, coin, whether its rule
 answers alone) before System 1 is asked and takes its step after, with the slow path's accepted answer as the label —
 neither inside the part's call. A Dispatcher's loop decisions run one at a time under its own lock, taken before the
