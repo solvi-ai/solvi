@@ -11,6 +11,7 @@ from __future__ import annotations
 import inspect
 import json
 import math
+import warnings
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Callable
@@ -1001,6 +1002,14 @@ class Catalog:
             src = _quote_source(f, sig, kw.get("source"))
             kw["source"] = None if src == "doc" else src
         kw = {k: v for k, v in kw.items() if v is not None or k in ("then",)}
+        dflt = [x.name for x in sig.parameters.values() if x.default is not x.empty
+                and x.kind in (x.POSITIONAL_OR_KEYWORD, x.KEYWORD_ONLY)]
+        if dflt and kind != "constraint":              # every argument is a fact: a default value is never used
+            has = "has a default value" if len(dflt) == 1 else "have default values"
+            warnings.warn(f"{kind} {f.__name__}: {', '.join(dflt)} {has}, but every argument of a part is a fact it reads — the default is never "
+                          f"used, and while no fact {dflt[0]!r} is given or computed the {kind} cannot run (a hard "
+                          "check that cannot run makes its questions abstain). Bind the value without a default "
+                          "(a closure: def make(lim): def chk(n): return n <= lim), or give the fact", stacklevel=3)
         p = Part(kind=kind, name=f.__name__, inputs=list(sig.parameters), func=f, doc=(f.__doc__ or "").strip(),
                  quotes=getattr(self, "quotes", "normalized"), **kw)
         if p.source is not None:                       # a Quote without its own source points into this text

@@ -132,6 +132,13 @@ class Knowledge:
             out["answer_changes"], out["justification_only"] = changes, same
         return out
 
+    def forget(self, writer, *, by=None, why=None, storage=None, decide=None):
+        """Forget a source in one call: what `writer` told is taken back, and with `storage=` (the decisions'
+        TraceStorage or its path) and `decide=` (a System or a function init → answers) the stored decisions that
+        rested on it are re-decided (KnowledgeStore.forget). → {"source", "retracted", "decisions", "changed", "same",
+        "entry"}."""
+        return self.store.forget(writer, storage, decide, by=by, why=why)
+
     def goal(self, name, done, requires=(), gates=()):
         """An agenda goal: done(state) → bool is its check in code (never a model's claim); requires: goals done first;
         gates: gates (declared with `km.agenda.gate(name, check, blocks=)`) that must pass for it to be open. → self."""

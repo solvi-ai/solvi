@@ -27,8 +27,9 @@ value, by=)` is the person's answer. A disputed item is never a fact.
 Validity. `valid=(since, until)` is when a value holds in the world (half-open, None unbounded, any ordered times). On a
 key where some assertion carries one, values compete only when their intervals overlap (a dose label for 2023 and
 another from mid-2024 are both facts, for their times); of two overlapping values the later `since` wins whatever order
-they were written in; the same `since` from two writers is not an observation of a change — rank decides, equal ranks
-dispute. `usable(id, valid_at=)` and `snapshot(valid_at=)` read an item outside its interval as not a fact. Keys whose
+they were written in; the same `since` from two writers (two unbounded sinces too) is not an observation of a change —
+rank decides, equal ranks dispute; that holds while any other writer still asserts the old value, even when the new
+value's writer had asserted it too. An item pending re-test takes no side on its key (no dispute, no refutation). `usable(id, valid_at=)` and `snapshot(valid_at=)` read an item outside its interval as not a fact. Keys whose
 assertions carry no `valid` resolve as described above.
 
 Statuses: "active" (a fact System 1 may answer on), "hypothesis" (a hint: a behaviour-changing item not yet promoted
@@ -509,7 +510,8 @@ class KnowledgeStore:
 
         then the entry. storage: the decisions' TraceStorage (None: only the retraction and the entry); decide: what
         re-decides an input (a System, or init_state → {question: answer}; needed with storage); fact: the given fact
-        the snapshots were passed as. Nothing is erased: the journal keeps the source's entries (retracted) and the
+        the snapshots were passed as. storage may be a path (opened as `System(storage=)` opens one, before anything is
+        written). Nothing is erased: the journal keeps the source's entries (retracted) and the
         decision records keep their inputs — erasing personal data in a record is `TraceStorage.redact(id)`, kept
         explicit (`where_is` finds the records holding a value). → {"source", "retracted" ({id: (status before, status
         after)}), "decisions" (the ids of the stored decisions whose snapshot changed), "changed" / "same" (as
@@ -517,7 +519,8 @@ class KnowledgeStore:
         if storage is not None and decide is None:
             raise ValueError("forget(writer, storage, decide): give decide= (a System, or init_state → {question: "
                              "answer}) to re-decide the stored decisions, or no storage")
-        writer = str(writer)
+        storage = _storage(storage)                     # a path is opened before anything is written: a storage that
+        writer = str(writer)                            # cannot be opened leaves the journal as it was
         retracted = self.retract_source(writer, by=by, why=why)
         gone = sorted(i for i, (_, now) in retracted.items() if now != "active")
         changed, same = ([], []) if storage is None or not gone else self.redecide(storage, gone, decide, fact=fact,
@@ -960,6 +963,7 @@ class KnowledgeStore:
         if upto not in ("decision", "now"):
             raise ValueError(f'upto is "decision" or "now", not {upto!r}')
         retracted = set(retracted)
+        storage = _storage(storage)
         run = _decider(decide)
         rebuilt, changes, same = {}, [], []
         for s in storage.iter():
@@ -980,6 +984,14 @@ class KnowledgeStore:
 
 def _content(snap):
     return {"facts": snap.get("facts"), "hints": snap.get("hints")}
+
+
+def _storage(where):
+    """The decisions' storage: a TraceStorage (anything with iter()) as it is, a path opened (open_storage)."""
+    if where is None or hasattr(where, "iter"):
+        return where
+    from ..store import open_storage
+    return open_storage(where)
 
 
 def _decider(decide):
@@ -1061,8 +1073,8 @@ def _resolve(items, comp, by_key, resolves, clock, flagged, max_iter=200, taints
                 r = max(r, ra)
             rank[i] = r
         keyed = {}
-        for k in keys:
-            ids = [i for i in by_key[k] if i in live]
+        for k in keys:                                  # an item pending re-test is a hint: it takes no side on its key
+            ids = [i for i in by_key[k] if i in live and i not in retest]
             keyed.update(_walk_key(ids, live, arank, {i: items[i].value for i in ids}, resolves.get(k, ())))
         new = {p: f["status"] for p, f in fixed.items()}
         for i in order:
@@ -1177,7 +1189,9 @@ def _walk_key(ids, live, arank, values, res):
 
 
 def _beats(a, r, iv, by, holder):
-    """+1: assertion `a` (rank r, interval iv, writer by) refutes the holder; -1: the holder refutes it; 0: a dispute."""
+    """+1: assertion `a` (rank r, interval iv, writer by) refutes the holder; -1: the holder refutes it; 0: a dispute.
+    The holder's writers: every writer whose live assertion of it has been seen. Two missing sinces (None: unbounded)
+    are the same since; one missing and one given compare as before (no order)."""
     hiv, hr, hby, hj = holder
     si, sj = iv[0], hiv[0]
     if si is not None and sj is not None:
@@ -1188,7 +1202,7 @@ def _beats(a, r, iv, by, holder):
             pass
     if a.get("supersedes") == hj:
         return 1
-    same_since = si is not None and si == sj and by != hby
+    same_since = si == sj and bool(set(hby) - {by})   # another writer holds it from the same since (both unbounded too)
     if a["source"] == "outcome" and not a.get("inferred") and not same_since:
         return 1
     return 1 if r > hr else 0
@@ -1199,7 +1213,8 @@ def _walk_key_valid(ids, live, arank, values, res):
     docstring) → the same {id: (state, refuted_at, refuted_by, dispute_opened_at)}."""
     ev = [(a["t"], 0, i, a) for i in ids for a in live[i]] + [(t, 1, v, by) for t, v, by in res]
     ev.sort(key=lambda e: (e[0], e[1], str(e[2])))
-    seen = {}                                           # id → (interval, rank, by, id) of its latest assertion
+    seen = {}                                           # id → (interval, rank, writers, id): its latest assertion's
+    writers = defaultdict(set)                          # interval and rank, and every writer seen asserting it
     holders, disputed, refuted, dopen = set(), set(), {}, None
 
     def rival(i, j):
@@ -1214,7 +1229,8 @@ def _walk_key_valid(ids, live, arank, values, res):
             continue
         t, _, i, a = e
         iv, r = _interval(a.get("valid")), arank[(i, t)]
-        seen[i] = (iv, r, a.get("by"), i)
+        writers[i].add(a.get("by"))
+        seen[i] = (iv, r, frozenset(writers[i]), i)
         holders.discard(i)
         disputed.discard(i)
         refuted.pop(i, None)

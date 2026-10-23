@@ -3,7 +3,7 @@ the rest of solvi promises. Their API may change in any release, and each one ei
 deadline.
 
     from solvi.experimental import STATUS
-    STATUS["lora"]       # {"since": "0.7", "missing": "...", "script": None, "deadline": "1.2"}
+    STATUS["lora"]       # {"since": "0.7", "missing": "...", "script": None, "deadline": "a future release"}
 
 What marks them:
 
@@ -16,13 +16,14 @@ What marks them:
 
 Graduating needs a pre-registered bar, a script in `benchmarks/` that measures it, the bar met and reviewed, no import
 of anything experimental, a conformance check and a docs move; the old path is then kept for one release. A piece that
-does not graduate by its deadline (two minor releases after 1.0), or that measures negative, is removed and the negative
-result published.
+does not graduate by its deadline, or that measures negative, is removed and the negative result published. The
+deadline set at 1.0 was 1.2; it passed with the pieces still here, so it now reads "a future release": no release is
+named until one is decided.
 
 This package itself imports none of them: `import solvi.experimental` does not warn."""
 from __future__ import annotations
 
-DEADLINE = "1.2"
+DEADLINE = "a future release"    # was "1.2" (set at 1.0); no release is named until one is decided
 
 STATUS: dict[str, dict] = {
     "lora": {"since": "0.7", "what": "a LoRA adapter on the decider for one question (adapt_lora)", "missing": "a "
