@@ -1,5 +1,6 @@
 """Stores without overlapping `valid` behave as before the effective-interval change, and the three shapes the change
-admits (A-B-A, a derived item over premises with `valid`, S231 on a plain key) differ exactly as listed. Random
+admits (A-B-A, a derived item over premises with `valid`, an item a rule only re-infers following its premise's passed
+re-test on a plain key) differ exactly as listed. Random
 journals over every write (facts and rules, chains of derived_from, supersedes, inferred, consulted, retract,
 only_from, retract_source, retest, flag / end_flag, resolve, tick, rollback, forget) give the same journal bytes, fingerprint, report, counts and
 snapshots as the store before the change (with `valid`: disjoint intervals, one period per content) (golden values in knowledge_unchanged.json, written by it), and journals it
@@ -148,7 +149,7 @@ def test_the_three_admitted_shapes_differ_from_the_store_before_the_change_exact
     assert [r.get("valid") for r in ks.journal if r.get("item") == d] == [[4, 10]]
     assert ks.status(d) == "active" and ks.fingerprint().startswith("51b4397b3af2")
     assert {r["id"]: r.get("valid") for r in ks.snapshot()["facts"]}[d] == [4, 10]
-    # S231 on a plain key: an item a rule only re-infers follows its premise's passed re-test. Before: d stayed a
+    # On a plain key: an item a rule only re-infers follows its premise's passed re-test. Before: d stayed a
     # hypothesis "pending retest" (fingerprint b12854ad1810…); now it is active, and the fingerprint changes.
     ks = KnowledgeStore()
     a = ks.add("fact", {"s": "s0", "r": "r0", "o": 1}, source="outcome", by="crm")
