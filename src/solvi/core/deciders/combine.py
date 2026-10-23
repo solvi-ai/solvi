@@ -33,6 +33,7 @@ import dataclasses
 import inspect
 import math
 import warnings
+import weakref
 from collections.abc import Mapping
 
 import numpy as np
@@ -299,6 +300,19 @@ def _wrap(m):
 
 
 # ------------------------------------------------------------------------------------------------ combinations
+_MEMBER_OF: "weakref.WeakKeyDictionary" = weakref.WeakKeyDictionary()   # part → WeakSet of the combinations over it
+
+
+def combinations_of(part) -> list:
+    """The combinations (Cascade, Vote, Route; nested ones too) built over `part` that are still alive. A combination
+    reads its members' internals without their version lock, so a part that swaps versions (the adapter loop of
+    solvi.experimental.stream) must be in none."""
+    try:
+        return list(_MEMBER_OF.get(part, ()))
+    except TypeError:                                 # a part that cannot be weakly referenced is in no registry
+        return []
+
+
 class Combination:
     """What Cascade, Vote and Route share: a catalog function over the union of the parts' facts that returns a
     Decision; the model recorded in the trace (fingerprint over every part's).
@@ -317,6 +331,11 @@ class Combination:
         self.members = [_wrap(m) for m in members]
         if not self.members:
             raise ValueError(f"a {self.kind_name} needs at least one decision part")
+        for lf in self.leaves():                      # combinations_of(part): the adapter loop refuses such a part
+            try:
+                _MEMBER_OF.setdefault(lf.part, weakref.WeakSet()).add(self)
+            except TypeError:
+                pass
         q0 = self.members[0].same_question()
         for m in self.members[1:]:
             q = m.same_question()

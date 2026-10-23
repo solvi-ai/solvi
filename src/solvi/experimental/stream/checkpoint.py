@@ -204,7 +204,9 @@ def _state(loop) -> dict:
                                for sk, ss, wk, ws, seen in ver["samples"]],
                    "fed": list(ver["fed"]), "discarded_at": ver["discarded_at"], "stale": ver.get("stale"),
                    "served_cls": _cls_path(ver.get("served_cls")), "has_model": ver["model"] is not None,
-                   "promise": None if p is None else p.dump()})
+                   "promise": None if p is None else p.dump(), "fixed": (None if ver.get("fixed") is None
+                                                                        or not math.isfinite(ver["fixed"])
+                                                                        else float(ver["fixed"]))})
     rows_keys = {r.key for r in loop._rows}
     return {"n": loop.n, "served": loop.served, "candidate": loop.candidate, "left": loop.left,
             "paused": loop.paused, "closed": loop.closed, "error": loop.error, "attempt": loop._attempt,
@@ -292,7 +294,7 @@ def save_loop(loop, dir, *, cancel=False) -> dict:
                 "candidate": loop.candidate, "delta_spent": loop.budget.spent, "learner": _cls_path(type(loop.live)),
                 "weights": None if loop.part is None else _weights(loop.part),
                 "config": {k: kw[k] for k in ("max_risk", "max_error", "delta", "probation", "source", "seed",
-                                              "sampling", "promise_options", "feature", "wait")},
+                                              "sampling", "promise_options", "feature", "wait", "mode")},
                 "detector_alone": loop._detector_alone, "batch": loop._batch,
                 "detector": None if loop.detector is None else loop.detector.config(),
                 "system": loop.system is not None, "version0": v0["0"], "keyed": loop._secret is not None,
@@ -557,6 +559,7 @@ def _restore(loop, m, st, data, vdir, groups):
         row["fed"] = list(r["fed"])
         row["discarded_at"] = r["discarded_at"]
         row["served_cls"] = scls
+        row["fixed"] = r.get("fixed")                     # label mode's threshold of the version
         if r["stale"] is not None:
             row["stale"] = r["stale"]
         if v != 0:

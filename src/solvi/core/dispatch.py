@@ -81,6 +81,7 @@ asks (the budget, the drift state and the decision numbers follow the order of t
 from __future__ import annotations
 
 import abc
+import contextlib
 import copy
 import dataclasses
 import hashlib
@@ -632,7 +633,9 @@ class Dispatched:
     as "draw_keyed": true; absent from records made without one); stream: with a stream certificate (promise=), the
     decision's sample, certificate and detector state (stored as "stream"; absent otherwise); pending: the ticket a
     deferred decision completes (`start` / `complete`: an oracle outside the process answered it; stored as "pending",
-    absent otherwise)."""
+    absent otherwise); learning: with an adapter loop attached (`loop=`), the loop's view of the decision — its number,
+    the version served and its fingerprint, the candidate, the coin (rho, sampled), whether the loop's rule answered
+    alone, its events; "stopped" when the loop had stopped (stored as "learning"; absent otherwise)."""
     question: str
     answer: Any
     by: str
@@ -656,6 +659,7 @@ class Dispatched:
     keyed: bool = False
     stream: dict | None = None
     pending: str | None = None
+    learning: dict | None = None
 
     @property
     def supervised(self):
@@ -671,7 +675,8 @@ class Dispatched:
                 "expected": None if self.expected is None else self.expected.to_dict(), "over_budget": self.over_budget,
                 "config": self.config, "slice": self.slice, **({"audit": True} if self.audit else {}),
                 **({"draw_keyed": True} if self.keyed else {}), **({"stream": self.stream} if self.stream is not None else {}),
-                **({"pending": self.pending} if self.pending is not None else {})}
+                **({"pending": self.pending} if self.pending is not None else {}),
+                **({"learning": self.learning} if self.learning is not None else {})}
 
     def to_json(self, indent=None):
         return json.dumps(self.to_dict(), ensure_ascii=False, indent=indent, default=str)
@@ -689,7 +694,8 @@ class Dispatched:
                    Cost.from_dict(d.get("spent_before") or {}), d.get("drift"),
                    Cost.from_dict(d["expected"]) if d.get("expected") is not None else None, d.get("over_budget"),
                    d.get("config"), d.get("slice"), audit=bool(d.get("audit", False)),
-                   keyed=bool(d.get("draw_keyed", False)), stream=d.get("stream"), pending=d.get("pending"))
+                   keyed=bool(d.get("draw_keyed", False)), stream=d.get("stream"), pending=d.get("pending"),
+                   learning=d.get("learning"))
 
     def replay(self, dispatcher, trust_models=False):
         """Re-check this decision against `dispatcher` without calling a model → {"ok", "mismatches": [(what, why)]}:
@@ -796,7 +802,8 @@ class Dispatcher:
     def __init__(self, system, slow=None, *, question=None, budget=None, total=None, price=None, wake=SIGNALS,
                  agreement=None, monitor=None, supervise=0.0, seed=0, think="s2", on_disagree="record", storage=None,
                  store_responses=True, asked=None, same=None, unknown="answer", on_drift="human", audit=0.0,
-                 secret: bytes | str | None = None, promise=None, detector=None, probation=None, sampling=None):
+                 secret: bytes | str | None = None, promise=None, detector=None, probation=None, sampling=None,
+                 loop=None):
         if question is None:
             if len(system.questions) != 1:
                 raise ValueError(f"the System asks {sorted(system.questions)}: say which with question=")
@@ -893,6 +900,10 @@ class Dispatcher:
             self._stream = promise.stream_driver(detector, on_drift=on_drift,
                                                  probation=300 if probation is None else probation, **(sampling or {}))
             self._stream0 = copy.deepcopy(self._stream)          # what replay_stream rebuilds the states from
+        self.loop = None
+        self._learn_lock = threading.RLock()     # a loop's decisions one at a time (outermost: before part and loop)
+        if loop is not None:
+            loop.attach_to(self)                 # sets self.loop (experimental: solvi.experimental.stream)
         global _predictable_warned
         if secret is None and (any(0 < x < 1 for x in (self.supervise, self.audit)) or adaptive) \
                 and not _predictable_warned:
@@ -1000,11 +1011,12 @@ class Dispatcher:
                                   f"{state.get('why')}"))
         return out
 
-    def decide(self, res, draw, spent_before, drift, expected=None, *, probation=False, sampled=False):
+    def decide(self, res, draw, spent_before, drift, expected=None, *, probation=False, sampled=False, hold=None):
         """The dispatch of one System 1 response → (action, reasons). Pure: the same response, draw, spend, drift
         state and expected cost give the same dispatch (replay re-derives it). With a stream certificate: probation
         (System 1 answers nothing alone: a think) and sampled (the calibration coin came up: an answer System 1 gives
-        alone is checked by the slow path, whatever `wake` says)."""
+        alone is checked by the slow path, whatever `wake` says). hold: with an adapter loop, why its rule does not
+        answer alone here (System 1 answers nothing alone: a think, as in probation)."""
         sig = self.signals(res)
         if drift and not any(s == "drift" for s, _ in sig):
             sig.append(("drift", drift))
@@ -1012,6 +1024,8 @@ class Dispatcher:
         think = [(s, w) for s, w in sig if s in THINK]
         if probation and not think and res[self.question].status == "ok":
             think = [("guarantee", PROBATION_REASON)]
+        if hold and not think and res[self.question].status == "ok":
+            think = [("guarantee", hold)]
         check = [(s, w) for s, w in sig if s == "drift"]
         if not think and res[self.question].status == "ok" and draw < self.supervise:
             check.append(("supervise", f"sampled for supervision (draw {draw:.4f} < {self.supervise:g})"))
@@ -1065,6 +1079,8 @@ class Dispatcher:
     # --- asking
     def ask(self, state):
         """One input → a Dispatched (see the class docs)."""
+        if self.loop is not None:
+            return self._ask_loop(state)
         b = self.start(state)
         th = None
         if b.needs_slow:
@@ -1073,9 +1089,48 @@ class Dispatcher:
                                store=self.store_responses)
         return self.complete(b, th)
 
+    def _ask_loop(self, state):
+        """`ask` with an adapter loop: the loop reads the decision before the dispatch (its coin, whether its rule
+        answers alone — outside System 1's call, so no part's lock is held while the loop's is taken) and takes it, with
+        the slow path's label, after. The loop's decisions run one at a time (`_learn_lock`, taken before the part's
+        and the loop's locks and never while either is held)."""
+        loop = self.loop
+        with self._learn_lock:
+            x = pre = None
+            try:
+                x = loop._input(self.system, state)
+                pre = loop._pre(x)
+            except Exception as e:  # noqa: BLE001 — a stopped or failing loop: the dispatch goes on without it
+                pre = {"stopped": f"{type(e).__name__}: {e}"}
+            b = self._start(state, pre)
+            th = None
+            if b.needs_slow:
+                per_round = None if b.expected is None else _per_round(b.expected, self.slow)
+                th = self.slow.run(state, self.question, price=self.price, budget=self.budget,
+                                   expected_round=per_round, store=self.store_responses)
+            return self._complete(b, th, pre=pre, x=x)
+
+    def _hold(self, pre):
+        """(hold reason, sampled) for decide from the loop's view of a decision (None: no loop or a stopped one)."""
+        if not pre or "stopped" in pre:
+            return None, False
+        hold = None
+        if pre.get("probation"):
+            hold = PROBATION_REASON
+        elif not pre.get("alone"):
+            hold = (f"the learning loop's version {pre.get('served')} does not answer alone here (not certified, or "
+                    "its score is below its certified threshold)")
+        return hold, bool(pre.get("sampled"))
+
     def start(self, state):
         """The first half of `ask`: System 1 answers, the decision gets its number, draws and dispatch → a Started
-        (`needs_slow`: the slow path is to run). Provisional (1.4): for an oracle that answers later (tickets)."""
+        (`needs_slow`: the slow path is to run). Provisional (1.4): for an oracle that answers later (tickets). Not
+        with an adapter loop attached (its decisions run whole, through `ask`)."""
+        if self.loop is not None:
+            raise ValueError("start / complete with an adapter loop attached are not built: use ask()")
+        return self._start(state)
+
+    def _start(self, state, pre=None):
         q = self.question
         res = self.system.ask(state, self.asked, store=self.store_responses)
         if self.monitor is not None:
@@ -1098,7 +1153,11 @@ class Dispatcher:
             rho, prob = self._stream.before()
             sampled = self.coin(n) < rho
             self._stream.issue(n, sampled)                 # its sample is read in the order of the numbers
-        action, reasons = self.decide(res, draw, spent, self.drift, expected, probation=prob, sampled=sampled)
+        hold = None
+        if pre is not None:
+            hold, sampled = self._hold(pre)
+        action, reasons = self.decide(res, draw, spent, self.drift, expected, probation=prob, sampled=sampled,
+                                      hold=hold)
         sl = self.slice_of(res) if action == "think" else None
         needs = action == "check" or (action == "think" and self._needs_slow(sl))
         return Started(state, res, n, draw, spent, expected, self.drift, action, reasons, sl, needs, self.keyed, rho,
@@ -1110,6 +1169,11 @@ class Dispatcher:
         with "oracle": {"label_source", "label_of", "lost"} is an oracle's verdict given outside the process: its source
         and the record holding it go to the stream sample; lost (no verdict: an expired ticket) sends the input to a
         person and counts as a missing label. Provisional (1.4)."""
+        if self.loop is not None:
+            raise ValueError("start / complete with an adapter loop attached are not built: use ask()")
+        return self._complete(b, th, pending=pending)
+
+    def _complete(self, b, th=None, *, pending=None, pre=None, x=None):
         q = self.question
         if b.needs_slow and th is None:
             raise ValueError("this decision needs the slow path's Thought to complete")
@@ -1142,10 +1206,11 @@ class Dispatcher:
             stream, events, why = self._stream.after(**self._stream_inputs(action, paid, r1, would1, th),
                                                      sampled=b.sampled, rho=b.rho, probation=b.probation, n=b.n)
             self._stream_told(events, why)
+        learning = None if pre is None else self._learned(pre, x, action, paid, r1, would1, th)
         d = Dispatched(q, answer, by, action, reasons, res, th, cand, disagreement, cost, b.n, b.draw, b.spent, b.drift,
                        b.expected, over, self.config(), slice=b.slice,
                        audit=bool(self.audit) and self.audit_draw(res.trace.init_hash, b.n) < self.audit,
-                       keyed=b.keyed, stream=stream, pending=pending)
+                       keyed=b.keyed, stream=stream, pending=pending, learning=learning)
         if self.storage is not None:
             from .store import FORMAT
             rec = self.storage._append({"v": FORMAT, "kind": "dispatch", **json.loads(d.to_json())})
@@ -1154,6 +1219,26 @@ class Dispatcher:
                 self.storage._append({"v": FORMAT, "kind": "stream",
                                       "stream": json.loads(json.dumps({**e, "question": q, "decision": b.n}))})
         return d
+
+    def _learned(self, pre, x, action, paid, r1, would1, th):
+        """The loop's step of this decision (outside System 1's call and the dispatcher's lock) → the record's
+        "learning". The label is the slow path's accepted answer (an oracle's verdict with its own source); a label
+        whose source the loop's policy refuses is a missing one for the loop. A loop that fails here stops (its own
+        "error" event); the decision stands."""
+        if "stopped" in pre:
+            return {"stopped": pre["stopped"]}
+        out = {k: pre[k] for k in ("n", "served", "candidate", "fingerprint", "alone", "sampled", "rho", "probation")}
+        inp = self._stream_inputs(action, paid, r1, would1, th)
+        try:
+            step = self.loop._post(pre, x, inp["label"], inp["label_source"], inp.get("label_of"))
+        except Exception as e:  # noqa: BLE001 — recorded; the dispatcher's answer is not the loop's
+            out["error"] = f"{type(e).__name__}: {e}"
+            return out
+        out.update(label=_stored(step["label"]), label_source=step["label_source"], by=step["by"],
+                   events=step["events"])
+        if not step["same"]:
+            out["step"] = {"served": step["served"], "candidate": step["candidate"]}
+        return out
 
     # --- the stream certificate (promise=, audit="adaptive")
     def _stream_inputs(self, action, paid, r1, would1, th):
@@ -1627,11 +1712,25 @@ class Dispatcher:
         replays; the draw recomputes (a keyed draw only when this dispatcher has the secret; without it the recorded
         draw is taken); the dispatch follows from the response, the recorded draw and the recorded spend, drift
         flag and expected cost of a run; the slow path's record replays and its cost recomputes; the answer and who
-        gave it follow."""
+        gave it follow. With an adapter loop attached (`loop=`), a decision made under another version than the one
+        served now is replayed with that version installed for the duration (`AdapterLoop.serving`), and the dispatch
+        follows from the loop's recorded view of it (its coin and whether its rule answered alone)."""
         bad = []
         if d.config is not None and d.config != self.config():
             bad.append(("config", "the dispatcher is not configured as it was for this decision"))
-        rep1 = d.s1.trace.replay(self.system, trust_models=trust_models)
+        lr = d.learning or {}
+        ctx = contextlib.nullcontext()
+        if lr.get("served") is not None:
+            if self.loop is None:
+                bad.append(("learning", "a decision made with an adapter loop, and the dispatcher has none attached"))
+            else:
+                ctx = self.loop.serving(lr["served"])
+        try:
+            with ctx:
+                rep1 = d.s1.trace.replay(self.system, trust_models=trust_models)
+        except ValueError as e:                    # the version's files cannot be found or are not the recorded ones
+            bad.append(("learning", f"version {lr.get('served')}: {e}"))
+            rep1 = {"mismatches": []}
         bad += [("s1", f"{m[1]}: {m[2]}") for m in rep1["mismatches"]]
         if d.s1._system is None:
             d.s1._system = self.system
@@ -1648,8 +1747,11 @@ class Dispatcher:
             prob, sampled = bool(sam.get("probation")), bool(sam.get("sampled"))
             if (not d.keyed or self.keyed) and (self.coin(d.n, keyed=d.keyed) < float(sam.get("rho", 1.0))) != sampled:
                 bad.append(("coin", f"recorded sampled={sampled}, the coin gives {not sampled}"))
+        hold = None
+        if d.learning is not None:
+            hold, sampled = self._hold(d.learning)
         action, reasons = self.decide(d.s1, d.draw, d.spent_before, d.drift, d.expected, probation=prob,
-                                      sampled=sampled)
+                                      sampled=sampled, hold=hold)
         if action != d.action:
             bad.append(("dispatch", f"recorded {d.action}, the response gives {action}"))
         elif reasons != d.reasons[:len(reasons)]:
