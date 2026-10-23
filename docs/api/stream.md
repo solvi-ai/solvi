@@ -70,10 +70,27 @@ reaches the loop). `Budget.max_versions_kept` evicts the oldest retired versions
 never the served one, the rollback target or version 0. A result whose training saw the served version change (a
 rollback) is recorded "stale" and discarded, not gated on a comparison with a version no longer served
 (`served_at_start` in "train_start" and "train"). A batch learner's `train(job)` runs on another thread than
-`update`, `seen` and `keys`: it must read the job only (or its own state under its own lock). No checkpoint or attach
-yet. Unmeasured.
+`update`, `seen` and `keys`: it must read the job only (or its own state under its own lock). Stage 4: `save(dir)` /
+`AdapterLoop.load(dir, learner, ...)` and `cancel_training()` (see `stream.checkpoint`). No attach yet. Unmeasured.
 
 ::: solvi.experimental.stream.loop
+
+## `solvi.experimental.stream.checkpoint`
+
+The checkpoint (stage 4): `AdapterLoop.save(dir, cancel=False)` writes the loop's whole state — every version (its
+state, fingerprint, paired samples, the keys it trained on, its `StreamPromise` through `dump()`) and the files of the
+versions that still have a model (through `Served.save`, version 0 included), the δ budget's index, the training
+budget's counters, the policy (now and as built), the `RiskDetector` (`dump()`), the score monitor, the rate's window,
+the label store `labels.jsonl` and the records `records.jsonl` (or, with a `TraceStorage`, its chain head) — into
+`dir/ckpt-<n>-<id>/`, then replaces `dir/CURRENT` atomically, so a crash leaves the previous checkpoint usable.
+`manifest.json` lists every file's SHA-256 and is signed (`manifest.sig`, HMAC-SHA256 under the loop's secret). `load`
+refuses a tampered or missing file, another secret, another learner class, a part with other weights, a version file
+with another fingerprint, a store without the chain head or with records after it. The learner is given fresh and fed
+the saved train labels again. A training in flight refuses the save unless `cancel=True`. A loaded loop continues with
+the same decisions and records as the loop it was saved from and `replay()` rebuilds every decision before and after
+the load. Unmeasured.
+
+::: solvi.experimental.stream.checkpoint
 
 ## `solvi.experimental.stream.lora_learner`
 

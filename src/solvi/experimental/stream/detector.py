@@ -109,6 +109,28 @@ class RiskDetector:
     def state(self) -> dict:
         return {"R": round(self.statistic, 9), "n": self.n, "alarmed_at": self.alarmed_at}
 
+    def dump(self) -> dict:
+        """The statistic's state (JSON data): the configuration (`config()`, its fingerprint) and R_j, n, the alarm
+        flag and count. restore() on a detector of the same configuration gives it back exactly."""
+        return {"format": "solvi risk detector v1", "config": self.fingerprint(), "r": list(self.r), "n": self.n,
+                "alarmed_at": self.alarmed_at, "flagged": self._flagged, "alarms": self.alarms}
+
+    def restore(self, d) -> "RiskDetector":
+        """→ self, in the state of `dump()`; a dump of another configuration is refused (ValueError)."""
+        if d.get("format") != "solvi risk detector v1":
+            raise ValueError(f"not a RiskDetector dump ({d.get('format')!r})")
+        if d.get("config") != self.fingerprint() or len(d["r"]) != len(self.scales):
+            raise ValueError("the dump is of a RiskDetector with another configuration")
+        self.r = [float(x) for x in d["r"]]
+        self.n, self.alarmed_at, self._flagged = int(d["n"]), d["alarmed_at"], bool(d["flagged"])
+        self.alarms = int(d["alarms"])
+        return self
+
+    def config(self) -> dict:
+        """The constructor's arguments: RiskDetector(**det.config()) is a detector of the same configuration."""
+        return {"alpha": self.alpha, "arl": self.arl, "scales": list(self.scales),
+                "alternatives": None if self.alternatives is None else list(self.alternatives)}
+
     @property
     def promise(self) -> str:
         return (f"E[samples to a false alarm] ≥ {self.arl:g} while the deployed risk is ≤ {self.null:g} "

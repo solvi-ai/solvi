@@ -49,7 +49,10 @@ installed with `solvi.experimental.lora.swap`, which changes the adapter and its
 — where a training runs: `SubprocessRunner` (the default: nice, capped threads, the device picked with a CPU fallback,
 the time estimate against `max_train_s`, a heartbeat log, the result file) and `ThreadRunner`. Stage 3b: a training
 runs in the background and its result is applied on a later decision, at a recorded position (deferred apply); `close()`
-cancels it; `Budget.max_versions_kept` evicts old retired versions. No checkpoint or attach yet.
+cancels it; `Budget.max_versions_kept` evicts old retired versions. Stage 4: `stream.checkpoint` —
+`AdapterLoop.save(dir)` / `AdapterLoop.load(dir, learner, ...)`, the loop's whole state (versions and their files,
+promises and the detector through `dump` / `restore`, policy, budget, the label store, the records) in a signed,
+hashed, atomically switched folder. No attach yet.
 
 Unmeasured: no stand has run yet."""
 from __future__ import annotations

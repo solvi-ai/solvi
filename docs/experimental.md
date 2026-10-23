@@ -674,6 +674,19 @@ learner's `train(job)` runs on another thread than its `update`, `seen` and `key
 Unmeasured: the tests run on a tiny random checkpoint and fake learners; nothing here says the loop gains anything, and
 the cost of the background training to live decisions was not measured.
 
+Stage 4 of the LoRA loop is the checkpoint. `loop.save(dir)` writes the loop's whole state to disk: the versions and
+their files (the adapters), which version is served and which one a rollback returns to, the budget counters, the
+policy, the certificates and the risk detector, the labels the loop took (`labels.jsonl`) and the record of
+decisions and events. It writes a new folder and then switches `dir/CURRENT` to it in one step, so a crash in the
+middle leaves the previous checkpoint usable. `AdapterLoop.load(dir, learner, system=part, secret=key)` checks every
+file against the manifest's hashes and the manifest's signature (an HMAC under the loop's secret), refuses a tampered
+file, another secret, another learner class or a model with other weights, installs the served version, and feeds the
+fresh learner its train labels again. A training in flight refuses the save, unless `save(dir, cancel=True)` cancels
+it first (recorded; it stays counted against the budget). In the tests, a loaded loop continued with the same
+decisions and records as the loop it was saved from, through a promotion and a rollback after the load, and its
+replay was exact; with the tiny LoRA checkpoint, a new process did the same. Unmeasured beyond that; the files are
+trusted after their hashes match, so load only checkpoints you wrote.
+
 Measured once on real streams: three public intent sets with a TF-IDF + logistic-regression answerer, 20 seeds per
 set, a shift to held-out intents, corrupted text and noisy labels; the numbers, the setting and the prior work are in
 [best practices](best_practices.md#guarantees-and-calibration). What held:
