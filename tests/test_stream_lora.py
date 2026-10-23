@@ -662,10 +662,10 @@ def test_attach_end_to_end_dispatcher_background_training_promote_rollback_save_
         assert loop.served == k and part.fingerprint() != fp0, loop.versions()
         d = disp.ask(xs[i])
         i += 1
-        adapter = loop._vs[k]["served_as"].adapter.hash
+        adapter = loop._vs[k]["served_as"].adapter.fingerprint()
         rec = [r for r in d.s1.trace.records if r.model is not None]
         assert rec and rec[-1].model["fp"] == part.fingerprint()            # the trace records the served version
-        assert d.s1["team"].extra.get("lora") == adapter and d.learning["served"] == k
+        assert ((rec[-1].extra or {}).get("lora") or {}).get("adapter") == adapter and d.learning["served"] == k
         for x in xs[i:i + 100]:
             disp.ask(x)
         i += 100

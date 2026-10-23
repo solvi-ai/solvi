@@ -399,7 +399,7 @@
   exact across the versions and a rollback; a background training while decisions go on; controls through the
   handle; save, load on a new System and Dispatcher, the same decisions; detach; label mode from `teach` and
   `outcome`; a custom `LoopPolicy`; the refusals; three deciding threads, the part's own calls, controls and a
-  background training with no deadlock under a timeout); a test on the tiny LoRA checkpoint covers attach, a
+  background training with no deadlock under a timeout); and on the tiny LoRA checkpoint: attach, a
   background training, promotion, the trace's fingerprint and `extra["lora"]`, a rollback, save and load on a fresh
   model, the same decisions and an exact replay. Unmeasured: no stand has run; nothing here says the loop improves a system. Costs:
   each decision with a loop attached scores the served version once more (and the candidate in shadow while one is in
