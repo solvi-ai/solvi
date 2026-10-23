@@ -150,7 +150,8 @@ the correct answers moved to another option from decision 2,001, inputs and scor
 A loss detector that reads the audit labels can see them, late: on Banking77 streams with 10 % of the oracle's labels
 randomly wrong after decision 2,000 (20 seeds), the stream certificate's `RiskDetector` ([experimental](experimental.md#stream))
 alarmed on 14 of 20 at a median 1,488 decisions after the change with "never" counted as infinite (1,330 over the 14
-that alarmed); the confidence CUSUM on scores, on 0 of 20. One set, one noise level.
+that alarmed); the score monitor (`DriftMonitor` as of solvi 1.4.0.dev, before the change of its window z-test of the
+mean confidence, CHANGELOG 1.4.0), on 0 of 20. One set, one noise level; the stand's script is not in the repository.
 
 **`ShiftWatch.shift` is a batch test at alpha per call, not a running test.** Called every 50 decisions on a sliding
 window of the last 200 answers (alpha 0.01, a reference of 1,393–2,400 answers drawn from the stream's own population),
@@ -160,9 +161,9 @@ or use `DriftMonitor` for a false-alarm level over the stream. This is the known
 windows (Armitage, McPherson and Rowe 1969).
 
 **A stream certificate (`StreamPromise`, [experimental](experimental.md#stream)) held its promise between change
-points; where you have a calibration set, start with the offline certificate.** Checked once on Banking77, CLINC150 and
-HWU64 with a TF-IDF + logistic-regression answerer: 4,000-decision streams drawn from the test split, 40 % of the
-requests from held-out intents after decision 2,000, 20 seeds per set, plus Banking77 streams with 15 % of the
+points; where you have a calibration set, start with the offline certificate.** Checked once (the stand's script is
+not in the repository) on Banking77, CLINC150 and HWU64 with a TF-IDF + logistic-regression answerer: 4,000-decision
+streams drawn from the test split, 40 % of the requests from held-out intents after decision 2,000, 20 seeds per set, plus Banking77 streams with 15 % of the
 characters corrupted after the change or with 10 % of the oracle's labels randomly wrong; the default detector and two
 variants. No threshold a stream certificate had in force had a risk above the promise on the regime it was certified
 on: 0 of 397 versions over 300 runs (two-sided 95 % Clopper–Pearson upper bound 0.9 %; the versions of one run share
@@ -189,15 +190,16 @@ it answered 17 % alone against 55 % with gold labels (one Banking77 stream, one 
 coverage, not validity against its labels.
 
 **`RiskDetector` counts samples, not decisions: keep the score monitor beside it.** Its bound is an expected run
-length in samples (Shin, Ramdas and Rinaldo 2023, arXiv 2203.03532). A simulation of this code at α = 5 % and
-`arl` = 1000 matched it: at the promise the mean time to a false alarm was 1,333 samples (the median 982; the bound is
+length in samples (Shin, Ramdas and Rinaldo 2023, arXiv 2203.03532). A simulation of this code (not in the
+repository) at α = 5 % and `arl` = 1000 matched it: at the promise the mean time to a false alarm was 1,333 samples (the median 982; the bound is
 on the mean); at half the promise 46 of 3,000 streams alarmed within 1,000 samples (an expectation, not a per-horizon
 probability); a doubling of the risk was caught after a mean of 152 samples, a quadrupling after 36. At the adaptive
 rate, once half or more of the decisions are answered alone, one sample is 12–20 decisions. On the intent streams
 above it alarmed a median 1,005 (Banking77) and 1,410 (CLINC150) decisions after the change and never within 2,000 on
 14 of 20 HWU64 streams and on every corrupted-text stream, against 43–68 decisions (12 on corrupted text) for the
-confidence CUSUM, which reads every decision's score. Use it next to `DriftMonitor` / `OpenSetGate`, not instead of
-them.
+score monitor, which reads every decision's score — `DriftMonitor` as of solvi 1.4.0.dev, before the change of its
+window z-test of the mean confidence (CHANGELOG 1.4.0); on the current monitor that test is less eager, so its delays
+can be longer. Use it next to `DriftMonitor` / `OpenSetGate`, not instead of them.
 
 **`fit` and `teach` move the scores, not the reading.** They shift and scale the logits of one question; they help
 calibration and the mix of answers, and level off within a few dozen examples. When a question needs the model to read
@@ -544,6 +546,39 @@ pool of 200 states, 1,000 trials each, budget 16) every accepted law was correct
 5–6.5 % wrong for the default, and both laws were found in about 42 %. Where only one law is missing it needs about
 1.5× the probes (11.7 against 7.6 on a single-law benchmark; at a budget of 8 it is undetermined in 97.5 % of trials).
 Three or more missing laws are not measured, and the `coverage` warning is off in this mode.
+
+**A law accepted with budget to spare has not been tested where it fires: spend the leftover on falsification
+probes, `admit_by_probes(..., falsify="leftover")`.** `admit_by_probes` stops once one class of candidates is left and
+leaves the rest of its budget unspent; when the grammar cannot express the true law, that survivor is the shortest
+wrong law and no probe has tried to refute it inside its own domain. With the option, once the admission would accept,
+safe pool states not yet asked where the accepted law would be the applied law (its condition holds and no more
+specific active law shadows it) are asked, drawn at random, up to the leftover; any answer other than the law's effect
+makes the admission undetermined and commits nothing. Measured on a synthetic world (8 bits and a counter, 2,560
+states, six rules, two grammars, a benchmark re-created from a published description, a pool of 200 states, 20 seeds,
+budgets 8 and 20; a wrong law is one false on some state where it applies): on the two cells whose law needs a negation
+the grammar lacks, at budget 20 the default accepted 131 wrong laws of 131 and the leftover probes let 1 through, a
+narrow law with only 3 untested pool states where it applies — the leftover probes cannot refute a law when none of
+them falls where it is wrong; on the cells whose law the grammar can express nothing was lost — sound laws accepted
+251 against 236, wrong 5 against 69, final accuracy 0.987 against 0.972 (at budget 8, 124 against 123) — because a right
+law is never refuted and the probes also catch the default's own wrong survivors there. At budget 8 nothing changes on
+the inexpressible cells: the leftover was 0–1 probe in 105 of 140 rounds and 83 of 83 wrong laws survived; holding 2
+probes back for falsification at budget 8 cut sound admissions on the expressible cells from 123 to 31 and accuracy
+from 0.789 to 0.630, so the option does not reserve — give a larger budget. The price is asks: a right law spends its
+whole leftover (about 10 of 20 probes at budget 20; 7.9 → 10.0 asks per round over the whole grid), never above the
+budget. n probes without a refutation bound the law's miss rate on its own domain at about 3/n at 95 % (0.24 at the
+12.5 probes available at budget 20): the wrong laws here were wrong on about half their domain and fell after 1.9
+probes on average; a law wrong on a few percent of its domain will survive. Two laws missing at once (a disjunction)
+are not fixed by this — 19 of 51 wrong at budget 8 against 26 of 57 for the default; use `max_new=2`. Patching a
+refuted law with an exception instead of dropping it was worse (20 wrong against 1 at budget 20). Drawing the
+falsification states from the whole state space where the law applies, instead of the pool, let 0 of 131 through
+(measured once, reported, not a gated result, not an option yet) and is the shape to use when a state generator
+exists. Measured in two pre-registered runs of this one stand, with exact answers and no noise: the first run's
+reproduction gate was sized to a five-seed zero on a two-law cell that the library itself documents at about 6 % wrong,
+failed there (4 of 51; the second run gives 3 of 51), and was re-sized and the change disclosed before the second run;
+the gated result is the second run's, and the first run's ungated numbers agree (2 wrong of 120 at budget 20; sound
+254 against 242). The method is a sampled equivalence query (Angluin 1987) after a version-space search (Mitchell
+1982), with the zero-failure bound (Hanley and Lippman-Hand 1983); what is measured here is the leftover on this world
+and the applied-law probe domain. Default off. Covered by [tests/test_laws_falsify.py](../tests/test_laws_falsify.py).
 
 **When the laws of a stream change, give the law set a window: `Buffer(window=N)` with `LawSet(recent=M,
 readmit="grown")`; size N to a fraction of how long a regime lasts.** On synthetic streams whose laws change abruptly
@@ -1002,8 +1037,8 @@ Recalibrate on a few of your own labelled cases; watch the agreement rate when l
 **Drift on numbers:** `NumericDrift` with a reference of at least ~50 values from calibration data, not the stream's
 start; under 20 values the false-alarm bound does not hold (it warns). Whiten autocorrelated residuals first.
 
-**Facts with `valid=`:** ask with `snapshot(valid_at=<the decision's world time>)`; without it every interval's
-value is a fact at once, and `Knowledge.value(snapshot, s, r)` reads whichever comes first — in a rule, read
+**Facts with `valid=`:** ask with `snapshot(valid_at=<the decision's world time>)`; without it every version's
+value is a fact at once (a version closed by a later since too: its row's `"periods"` says where it holds), and `Knowledge.value(snapshot, s, r)` reads whichever comes first — in a rule, read
 `Knowledge.value(snapshot, s, r, valid_at=<the same time>)`. After retracting a wrong item and telling the correction, `redecide(..., upto="now")` gives
 the corrected answers; the default answers «what would the decision have been without the bad item at the time».
 
@@ -1028,6 +1063,26 @@ every candidate of y = c·x. Values over several orders of magnitude need `rtol=
 1 to 1e5 with relative noise 1e-7 learned no law in 60 steps under exact equality and learned it with rtol=1e-5, with no
 mismatch after; in `admit_by_probes`, tol=1e-4 refuted every candidate where the noise reached 2e-3…0.2 and rtol=1e-4
 admitted the right one.
+
+**Accept a fitted numeric law on its residuals together, not row by row.** `LawSet.test` counts held-out rows inside
+`tol`; a 4σ band has almost no power against a bias of 1–2σ, and when the law's constants are fitted it refuses the true
+law whose predictions carry a fit error larger than σ. Measured on re-created worlds of an external report, one run: on
+a pendulum whose formula list lacks the bob radius (200 worlds; 70 where the best wrong formula sits 1–2σ from the
+truth) the row rule accepted a wrong law in 42 of those 70; on Kepler orbits at 0.03° precision (12 skies) it accepted
+Kepler in 4 of 12. A `confirm=` closure that refits the constants on design and held-out rows together and keeps the law
+only while the χ² is below the 0.995 quantile at n − k degrees of freedom, with the row band off (`tol=math.inf`;
+`min_support` and the sized bound still apply, but with every row a hit the bound no longer binds), gave 10 of 70 and 12
+of 12, with no loss where the truth is in the list (179 of 200 right and 0 wrong, the row rule 179 and 1; Kepler at 1°
+12 of 12). `residual_check(refit)` builds that closure (opt-in, default off; [api/laws.md](api/laws.md)). A sign test on
+the same residuals at α = 0.005 refused nothing in 415 cases — at 12–14 rows it needs near-unanimous signs — so leave it
+out. Widening the band by the fit variance instead (|obs − pred| ≤ 4·√(σ² + Var_fit), delta method) fixed only the
+second failure (Kepler 12 of 12, but 53 of 70 wrong pendulum laws) and added nothing to the χ² check on these bars; on
+an exponential decay fitted from a short window and checked over the whole range it was unreliable both ways (band
+5–680σ, 28 of 100 true laws lost against the χ² alone). Two cautions. The refit χ² is a goodness-of-fit test, not a
+prediction test: a wrong model with many free constants can pass it — a 25-constant epicycle system did, once in 24
+skies at 1°, where the row test on the held-out rows refused it; keep n − k large and prefer a held-out check when the
+model is flexible. And the χ² level carries no term for the number of candidates tested (four here), unlike the sized
+bound it replaces. Synthetic physics worlds only; the reproduction gate held on its exact bar (0.600 against ≥ 0.60).
 
 **A copied environment is an oracle only if it is deterministic.** Before using a clone or a replay as the judge
 (`admit_by_probes(ask=...)` on a `deepcopy` of the environment, a simulator that plans on a copy, `boundary(system=...)`
@@ -1060,7 +1115,8 @@ and `build(novel=[state, ...])` feeds System 1's signal on them to the gate in p
 detector with an ARL bound. A second measurement, once, on Banking77, CLINC150 and HWU64 with a TF-IDF +
 logistic-regression decider, the change at decision 2,001 and 20 streams per case: a conformal test martingale started
 once (simple-jumper bets on online conformal p-values of the answers' three confidence features) held the same nominal
-1 % per 4,000-decision stream as `DriftMonitor`'s confidence CUSUM (0 of 300 unchanged streams flagged) and caught every
+1 % per 4,000-decision stream as `DriftMonitor`'s confidence CUSUM (the monitor with the 1.4.0 window z-test change;
+0 of 300 unchanged streams flagged) and caught every
 shift of the inputs within 2,000 decisions, but later. The ratio of median delays was 2.4–3.6 on abrupt shifts: 145–192
 decisions against 60–75 when 40 % of the traffic moved to unseen intents, 43–62 against 12–22 when all of it came from
 another dataset, 68 against 23 for corrupted text (Banking77). On a gradual ramp of unseen intents it was 1.3–1.4
@@ -1138,6 +1194,26 @@ no error in the sample it is the Wald interval, which collapses at zero (Brown, 
 the true error 59–92 % of the time; at 200 labels it covered 92–96 % and was 8–10 % narrower than Wilson (5–6 %
 narrower than the Wald interval on the same labels). An interval valid at 25 labels exists (a betting confidence
 sequence covered the true error at 2–3 times the Wilson width), but none usefully narrow was found. Not shipped.
+
+**A stratified reading does not fix the small-label case either.** A second pre-registered stand measured, once, the
+interval forms that stay valid when errors are rare: a prediction-powered estimate with the mixing weight fixed from
+calibration and a betting bound on the rectifier, and a post-stratified Wilson interval (two strata on the model's act
+probability, cut on the calibration split, the stratum weights read from all decisions; Yan and Su 2010). Same three
+intent datasets, same TF-IDF + logistic-regression decider, 25–200 random audit labels on windows of about 2,000
+decisions, 5,000 label samples per cell. Among answers given alone (4–6 % error) nothing with an unconditional
+guarantee is narrower than Wilson below 100 labels: the betting form covered ≥ 99 % at 1.5–1.9 times the Wilson
+width; the stratified Wilson covered 95–99 % in every cell, shifts included, but was 11–30 % wider than Wilson at
+25 labels, 7–28 % wider at 50 and within −3 to +15 % at 100. Two reasons, both expected: the act probability
+explains 9–12 % of the error's variance among answers given alone, which caps any such gain at 4–6 % of the width;
+and each stratum pays Wilson's own small-sample cost again (a stratum of 3–20 labels; where no stratum shows an error
+the plain Wilson z is used per stratum, the conservative choice). Over all traffic (8–15 % error, where the act
+probability explains 19–30 % of the variance) the stratified Wilson was valid and 12–18 % narrower than Wilson at
+100 labels before a shift, 9–16 % at 50 (a secondary line declared before the run; nothing ships on it) — the
+textbook post-stratification gain, the square root of one minus the share of the variance the strata explain, and no
+gain after a label-only shift. One decider, one run; the development stream was seen before the bars were fixed. Not
+shipped: the system report keeps the Wilson interval. If you need a narrower reading at 100 labels, the stratified
+Wilson helps only where errors are ≥ 10 % and the score separates them (the strata explain ≥ 20 % of the error's
+variance); below that, buy labels.
 
 **Refit on the hash split when examples keep arriving.** `build(split="hash")` (the default since 1.2; 1.1 shuffled)
 keeps every old example in its share when examples are added (600 + 60 examples, 5 seeds: 0 old examples moved in or out of the fit share, against 101–120 with the

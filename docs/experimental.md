@@ -2,11 +2,12 @@
 
 `solvi.experimental` holds pieces that work and are tested but have not yet shown a measured gain, or a measured use,
 of the kind the rest of solvi promises. Their API may change in any release. Each one either graduates or is removed by
-**1.2** (two minor releases after 1.0).
+its deadline. The deadline set at 1.0 was 1.2 (two minor releases after 1.0); it passed with these pieces still here, so
+it now reads "a future release" until a release is decided.
 
 ```python
 from solvi.experimental import STATUS
-STATUS["lora"]       # {"since": "0.7", "what": "...", "missing": "...", "script": None, "deadline": "1.2"}
+STATUS["lora"]       # {"since": "0.7", "what": "...", "missing": "...", "script": None, "deadline": "a future release"}
 ```
 
 How you can tell you are using one:
@@ -32,7 +33,7 @@ A LoRA adapter on the decider for one question (`solvi.experimental.lora.adapt_l
 `part.adapt_lora(...)`; needs `solvi[lora]`). Since 0.7.
 
 - **Missing:** a decision on real use, a benchmark script in the repo, and wiring as the adapter rung of an update (solvi.experimental.changes); measured gains over fit come with overconfidence.
-- **Script:** none yet. **Deadline:** 1.2.
+- **Script:** none yet. **Deadline:** a future release.
 - Guide: [A LoRA adapter per question](guide.md#a-lora-adapter-per-question-adapt_lora-experimental);
   API: [solvi.experimental.lora](api/lora.md).
 
@@ -42,7 +43,7 @@ A written specification compiled by an LLM into catalog parts, accepted when two
 tests pass (with its sandbox, `solvi.experimental.compile.sandbox`). Since 0.9. Since 1.1 an optional certificate on fresh examples sized by the hypothesis space (`certificate=`, `fresh_examples_needed`, `skew_guard`).
 
 - **Missing:** measured once on 15 classes of small pure functions over typed slots (a search over a bank of 137 operations, |H| up to 6.5·10⁸ programs of depth 2, N = 314–452 fresh examples; a small hosted LLM writer at N = 60, two drafts): no accepted function was wrong on 200 hidden examples per class (21 accepted), the search found 6 of 15 classes and the writer 15 of 15 — but neither proposer produced a false candidate, so whether the sized certificate refuses what a five-example certificate accepts was not shown on that setup; it is shown only on a planted constant in a smoke test; its necessity on a live stream of drafts is not shown; still missing: acceptance on larger specifications and a benchmark script in benchmarks/.
-- **Script:** none yet. **Deadline:** 1.2.
+- **Script:** none yet. **Deadline:** a future release.
 - Guide: [A specification compiled into the catalog](guide.md#a-specification-compiled-into-the-catalog-solviexperimentalcompile);
   API: [solvi.experimental.compile](api/compile.md), [sandbox](api/sandbox.md).
 
@@ -52,7 +53,7 @@ tests pass (with its sandbox, `solvi.experimental.compile.sandbox`). Since 0.9. 
 hook schema). Since 0.7.1.
 
 - **Missing:** false deny and ask rates on real coding-agent sessions, with a script.
-- **Script:** none yet. **Deadline:** 1.2.
+- **Script:** none yet. **Deadline:** a future release.
 - Guide: [solvi behind a coding agent's hooks](guide.md#solvi-behind-a-coding-agents-hooks);
   API: [solvi.experimental.hooks](api/hooks.md); runnable: `examples/22_coding_agent_hooks.py`.
 
@@ -61,7 +62,7 @@ hook schema). Since 0.7.1.
 Verified charts: every number quoted from the text, a deterministic SVG. Since 0.7.
 
 - **Missing:** Measured on 50 paragraphs of US federal news releases against a hand reading written before any proposer ran (`benchmarks/charts_real_texts.py`, one run): the rule-based proposer drew a chart for 50 of 50 texts with every rendered value re-verified against the text (350 of 350 chart numbers), but only 33.3% of the drawn points agreed with the hand reading in label and unit (the bar was 95%: labels 39, units 82 of 99 points); the LLM proposer (gpt-oss-120b) drew a chart for 56% of the texts and agreed on 94.2% of the points, with 5 of 485 chart numbers not in the text (a sign the proposer added); a changed digit and swapped values were caught 300 of 300 times by both, a dropped point 74 (rules) and 109 (LLM) of 300; every run replays byte for byte (50 of 50). Still missing: a proposer whose labels and units match a reader's on real texts.
-- **Script:** `benchmarks/charts_real_texts.py` (the LLM arm with `--llm MODEL`). **Deadline:** 1.2.
+- **Script:** `benchmarks/charts_real_texts.py` (the LLM arm with `--llm MODEL`). **Deadline:** a future release.
 - Guide: [Verified charts](guide.md#verified-charts-a-specialist-that-checks-every-number);
   API: [solvi.experimental.charts](api/charts.md); runnable: `examples/21_verified_chart.py`.
 
@@ -112,7 +113,7 @@ and rollback (`solvi.experimental.changes.Pipeline(stages, storage, store=...)`)
   numeric loss in [0, 1] per outcome instead of a failure (also `EProcess.update(..., loss=)` / `loss_refuted` in
   `experimental.skills`); not measured.
 - **Script:** `benchmarks/changes_credit.py` (the credit policy; needs the German Credit applications:
-  `benchmarks/tasks/fetch.sh credit` and `prepare.py`). **Deadline:** 1.2.
+  `benchmarks/tasks/fetch.sh credit` and `prepare.py`). **Deadline:** a future release.
 - Guide: [The change pipeline](guide.md#the-change-pipeline-solviexperimentalchanges); design and API: the module
   docstring of `solvi.experimental.changes`; the library pieces it uses are stable:
   sensitive fields and citations in [solvi check](guide.md#checking-a-catalog-solvi-check), `only=` in
@@ -171,7 +172,7 @@ decreases; a candidate counts again after a full turnover) and `readmit="grown"`
 - **Missing:** on a game simulator with written mechanics the laws closed 94% of the gap between a learned map and the written mechanics (20 fresh worlds, 4,731 transitions, one run; 0.892 → 0.988, ceiling 0.994), but random candidates under the same test came within 1.1 points — the measurement's pre-registered bar for that control (random candidates at most +2 points over the base) was missed by +8.4 — so the mismatch is a compact proposal heuristic and the test does the work; on a real MCP filesystem server with a path policy, probes planned from mismatches took refusals from 6 to 0 in one session (200 calls per session, one run; random probes: 48 to 29); still missing: a grammar too large to enumerate, retirement of weak laws nothing contradicts, wiring into a System's decisions, and a script for the two measurements (the toys: benchmarks/laws_toy.py); a ranker of candidates for expensive checks (RankedProposer, a bag-of-atoms model trained on tasks drawn from the grammar) cut the checks to the true condition from 69.7 in the blind order to 2.1 on synthetic tasks of one grammar, in distribution only; ranking by the joint statistic of the whole condition over the logged rows (JointRanker, no training; with no rows it is the blind order — the statistic needs rows) needed 1.00 / 17 / 1.01 checks (medians 1 / 1 / 1) on three synthetic settings of the library's own grammars (five seeds × 60 tasks) against 85 / 2,182 / 126 in the blind order (85 a different draw of tasks from the 69.7 above: five seeds against one) and 2.1 / 591 / 7.7 for the trained bag of atoms, a shuffled-rows control worse than the blind order (112 / 2,434 / 166), the gain on the deep setting showing from about 20 logged rows and full by 300, the same law accepted under every order in 894 of 900 tasks; before a buffer has rows, a prior order over the condition's own features learned from synthetic tasks of the task family (PriorRanker, which falls back to the blind order unless its held-out checks are 5% below the blind order's) needed 208 checks at 0 rows against 1,245 blind on a skewed family (deep conditions whose features are drawn unevenly by a chosen skew; 5,112 candidates per task; five seeds, 300 tasks, training and test tasks from the same sampler) and needed 0.83–0.93 of blind on the three uniform settings (on the first it fell back in 2 of 5 seeds); HandoverRanker blends the two — the joint Jaccard plus 20 / (20 + rows) times the prior's rank in [0, 1] — and on the skewed family needed 184 / 98.6 / 8.9 checks at 20 / 100 / 300 rows against 208 for the prior and 1,019 / 361 / 16.8 for the joint statistic, but on the deep uniform setting at 300 rows 27.2 against 17.2 (111 of 300 tasks worse, 31 better, medians 2 and 1; the pre-registered 5 % bar missed there; a smaller n0 not measured); measured once on a live file server (8 mismatches; candidates contradicted by logged rows skipped free): every order spent 29 probes in all, because 1–5 candidates per mismatch were left to probe and the true conditions were single atoms — the shortest hypotheses, which the length-first order meets first — so ranking can pay only where many consistent hypotheses remain after the free checks, the control first; the acceptance sized by the candidates tested on a buffer (on a synthetic buffer with no law the fixed thresholds accepted a law in 100 of 100 buffers, the sized rule in 0 of 100), admission by discriminating probes (on a synthetic world at 8 checks a random held-out sample accepted a wrong law in 0.593 of the trials, the probes in none) and abstention where laws that are not exceptions of one another disagree are measured on synthetic worlds only, not yet on the game simulator or the file server; the live probe-based learner can admit false laws on policies the grammar cannot express (observed once per control policy) — admission by probes or sized acceptance is the open item.
 - **Script:** `benchmarks/laws_toy.py` (two deterministic toys that reproduce both findings in miniature; `pytest -m
   slow tests/test_laws_toy.py`); `benchmarks/laws_rank_joint.py` (the three ranking settings; one seed per run, `--seed`;
-  the numbers above are five seeds; `--curve` for the rows curve). **Deadline:** 1.2.
+  the numbers above are five seeds; `--curve` for the rows curve). **Deadline:** a future release.
 - Guide: [Laws from an environment](best_practices.md#laws-from-an-environment-the-test-is-the-judge), [sized
   acceptance, probes, abstention](best_practices.md#size-the-acceptance-by-the-search-admit-by-probes-abstain-when-laws-disagree), [ranking
   candidates](best_practices.md#rules-over-relations-enumerate-with-a-library-rank-only-where-a-check-is-expensive); API:
@@ -185,13 +186,14 @@ chosen false-flag rate. Since 1.2. Opt-in and shipped without weights: the fixed
 detector. Fit it on labelled outputs your own tools return and set its threshold on your ordinary ones
 (`calibrate(max_flag_rate=)`); its gain held only on the injection family it was fitted on.
 
-- **Missing:** measured once on injected tool outputs of one public benchmark (InjecAgent): on 248 held-out injections
+- **Missing:** measured once (the script is not in the repository) on injected tool outputs of one public benchmark
+  (InjecAgent): on 248 held-out injections
   (attacker instructions and tools not used in fitting) a detector fitted on 279 other cases and 865 ordinary texts
   found 76% against the fixed rules' 23%, flagging fewer ordinary texts (1.8% against 4.2%); but a plain TF-IDF classifier
   did the same, half of the gain was one address repeated across that dataset (without it +0.19, 95% CI +0.06…+0.38),
   and on 140 AgentDojo-style injections the rules found 78%, the detector 53%; still missing: a gain on an injection
   family it was not fitted on, and wiring into Guard as its detector.
-- **Script:** none yet. **Deadline:** 1.2.
+- **Script:** none yet. **Deadline:** a future release.
 - API: [solvi.experimental.injection](api/injection.md).
 
 ## `relations`
@@ -240,7 +242,7 @@ recounted on the joint fixed point after each round; a pair is answered with its
   `benchmarks/relations_residual.py` and `tests/test_relations_residual.py`; why not derived:
   `tests/test_relations_why_not.py`; text frontend: `tests/test_relations_text.py`; guarded rules: `benchmarks/relations_rules_toy.py`,
   `benchmarks/relations_rules_nora.py` (the training file, passed with `--data`) and `tests/test_relations_rules.py`.
-  **Deadline:** 1.2.
+  **Deadline:** a future release.
 - Guide: [Relational rules](best_practices.md#relational-rules-enumerate-let-the-test-judge-then-compile),
   [rules over relations with a library](best_practices.md#rules-over-relations-enumerate-with-a-library-rank-only-where-a-check-is-expensive);
   [composition tables](best_practices.md#learn-composition-tables-by-exact-counting-derive-by-composition-refuse-what-the-table-cannot-derive),
@@ -270,7 +272,7 @@ perturbations), reaches its goal on the exact copy; the skill records both footp
 
 - **Missing:** on a deterministic gridworld (20 fresh layouts, five seeds) System 1's share reached 0.81 in the last five episodes with every goal reached, as when System 2 plans every goal, and 1.5% of System 1's decisions were in failed runs under a 20% promise pooled over the skills, while replayed cases never transferred and plans compiled without verification reached no goal. On Crafter (version 1.8.3; written mechanics as the exact model; symbolic state; hand-written survival reflexes shared by every arm, 60% of all steps; the planner reads the copy's full map while the game shows an agent a 9×7 window), in one run of 10 streams × 30 episodes, no agent seed (the loop is deterministic given the world seeds). Achievements are unique achievements unlocked per episode (of 22). The skill set was certified at 5% / δ 0.1 (fifty clean uses, one e-process pooled over the stream's skills) in every stream by episode 1–2. In the last ten episodes System 1 acted alone 1,350 times with an observed outcome and failed twice (0.15%, Wilson upper bound 0.54%; 4 of 2,882 over the whole run); 57 further alone runs were paused by a reflex and not resumed, so they carry no outcome (counted as failures they would make 4.2%, Wilson 5.4%). The promise is the set's, not a single skill's; a skill's own alarm retires it (4 retirements, each later re-certified). Goals that are stochastic by the written rules stayed with System 2 and are outside the promise. With skills the planner was called 32 times per episode against 42 when it plans every goal (−23%), and an episode took 84 s against 107 s on the same machine (−21%), with achievements kept: 15.2 against 15.7 unique achievements unlocked per episode of 22 (ratio 0.966, bootstrap lower bound 0.934). System 1's share of the non-reflex steps rose from 7% in the first ten episodes to 23% in the last ten (9% of all steps); the pre-registered bar of 60% was missed. Routes to a resource and plans for unseen footprints stay System 2 by design (routes were 25% of non-reflex steps), and every certified skill was a one- or two-step gather sequence with a constant footprint: in an open world the planner did most of the work and skills took the repeatable part. Hierarchical skills are untested; conditions with variables were measured in 1.1.1 (below). An arm that executed and compiled random action sequences of the plan's length in place of verified plans unlocked 4.0 unique achievements per episode against 13.7 for the same agent with no memory at all; none of its 5,497 unverified skills was ever certified, so System 1 never acted. The gain is the verified plans', not the loop's bookkeeping, and the certificate held unverified skills out; what unverified memory does on its own was not measured. The observation-only learner (the agent's own action memory with the written gates on) unlocked 13.3 unique achievements per episode, no higher than the same agent without memory (13.7); the planner arms' lead over both is the planner's with the full map. The planner reads the whole map of the copy; a Crafter agent sees a 9×7 window from pixels. No number here is comparable with published Crafter scores (a geometric mean of success rates over 1M training steps). With footprints with variables (lift="lattice"; one run of 10 streams × 30 episodes in the same open-world setting, the share of non-reflex steps): System 1's share 0.343 / 0.486 / 0.385 by thirds against 0.071 / 0.175 / 0.233 with constant footprints (the pre-registered bar — at least 0.40 in the last third with a rise of 15 points — missed: 0.385 and a rise of 0.041 [−0.096; 0.173]); 886 of 1,032 lattice runs accepted (0.859, a verdict on a sample of up to 16 cases) and 99.4 % of System 1's steps by skills with variables; 10 failures in 1,976 alone decisions with an outcome (0.51 %, Wilson upper 0.93 %), none without a certificate; achievements 14.43 per episode against 15.72 when System 2 plans every goal (0.918, lower bound 0.861); planner calls per episode 11.8 against 28.1 with constant footprints and 43.2 planning always; the pooled certificate's 23 alarms retired 23 skills and episodes started without a certificate in force numbered 38 / 19 / 43 by thirds — with it in force System 1 took 0.50–0.58 in every third (a plausible cause of the last third's fall, not tested by a separate arm). Still missing: hierarchical skills, a certificate pool per skill or per goal (the pooled certificate's alarms retired skills with variables), a world where observation is expensive, a service with a specification, a condition rule that specializes after a failure, and a planner with a heuristic; the search-cost record is tested on a synthetic corridor only, and skills are not admitted by discriminating probes (laws are: LawSet.admit_by_probes).
 - **Script:** `benchmarks/skills_toy.py` (the gridworld with four arms: skills, plan always, cases, scrambled; `pytest -m
-  slow tests/test_skills_toy.py`). **Deadline:** 1.2.
+  slow tests/test_skills_toy.py`). **Deadline:** a future release.
 - Guide: [Learning in a world described by code](best_practices.md#learning-in-a-world-described-by-code-plan-on-the-code);
   API: [solvi.experimental.skills](api/skills.md).
 
@@ -294,7 +296,7 @@ answers (50-answer batches missed about a quarter of the shifts below). Confiden
 fall, so a monitor that only watches for a drop misses it.
 
 - **Missing:** measured once on intent classification with solvi-base (raw confidences, next to Platt calibration; alpha 0.01; 10 directed pairs of CLINC150, Banking77, HWU64 and Bitext customer support): with 200-answer batches (shift), 0.99–1.0 of the batches from another dataset flagged on every pair and at most 0.05 of in-domain batches (one domain at that bar, 0.03–0.05 over two draws of the windows; 0.01 or less for the others); with 50-answer batches, a mean of 0.76 and 0.30–0.48 on four pairs, +0.18 [0.05, 0.34] over a dev-tuned two-sided mean-confidence test at the watch's own in-domain rate of about 1 % (worse on one pair) and on par with it at 5 %. On half of the pairs the mean confidence rose, which a test for a fall of confidence cannot see. Held-out intents of the same dataset were mostly not flagged (CLINC150, Banking77: under 1 % of batches), while a rephrasing of the same domain (Banking77 and Bitext retail banking) was flagged like another dataset; the per-answer note marked on average 10 % of another dataset's answers. All four datasets are in or near the decider's training mix and their option sets differ (20 of 27–150 labels); still missing: a benchmark script in benchmarks/ and a decider that has not seen the data
-- **Script:** none yet. **Deadline:** 1.2.
+- **Script:** none yet. **Deadline:** a future release.
 - API: [solvi.experimental.ood](api/ood.md). The note is a warning, not a guarantee: a regime whose answers look like the
   calibration answers but whose errors differ passes every check; only labels show it.
 
@@ -312,7 +314,7 @@ plan (Ann. Math. Stat. 1943), a CUSUM on each inspected 0/1 outcome is the Berno
 Farewell and Treasure (Biostatistics 2000). Labels seen only where a policy chose to look are the selective-labels
 problem; a uniformly random slice beside the policy is the standard remedy.
 
-Measured once on an intent-routing stream (100 replays, a check whose failure rate rises from 0.20 to 0.60 at one
+Measured once (the script is not in the repository) on an intent-routing stream (100 replays, a check whose failure rate rises from 0.20 to 0.60 at one
 point, alpha 0.05 per 600 decisions): a 10 % audit flagged the break in 96 of 100 within 300 decisions (median 118; a
 20 % audit 98 of 100, median 75) with 4 of 100 false flags on unchanged streams. The same CUSUM on only the decisions
 the policy bought the check for: 57 of 100 (median 176), 9 false flags. The drift monitor on the system's own answers
@@ -328,7 +330,7 @@ disagrees with the system more often, not which of them broke.
 
 - **Missing:** one task family and one break size measured (docs/experimental.md); a smaller break, a short
   reference and a break confined to the decisions the policy never checks are unmeasured
-- **Script:** none yet. **Deadline:** 1.2.
+- **Script:** none yet. **Deadline:** a future release.
 - API: `solvi.experimental.audit` (`AuditWatch`).
 
 ## Graduated and removed
@@ -367,7 +369,8 @@ data (`{"answer": "kind", "in": ["auto", "property"]}`, `{"status": "abstain"}`,
 `{"confidence_below": 0.5}`, `{"drift": true}`, `and` / `or` / `not`), never a Python function; a node with several
 inputs merges `all` or `any`; an edge that goes back is `loop=True` with `max_iter`, and a cycle without one is a
 `ValueError`. `p.promise(mode="union" | "end_to_end" | "per_node", ...)` records the declared promise (risk, split,
-threshold family, delta); `union` and `per_node` are computed by `p.guarantee()` (below), `end_to_end` comes later. `p.spec()` is JSON with a SHA-256 `hash` of its canonical form
+threshold family, delta); `union` and `per_node` are computed by `p.guarantee()` (below), `end_to_end` after
+`p.calibrate(...)` on end-labelled runs (below). `p.spec()` is JSON with a SHA-256 `hash` of its canonical form
 (stable to the order of keys; the order of edges counts), `Process.from_spec(spec, systems=...)` reads it back byte
 for byte and refuses a system whose fingerprint is not the recorded one (`strict=False` loads it and lists it in
 `mismatched`), `p.diff(other)` names every change by node and edge (down to the part whose fingerprint changed), and
@@ -465,7 +468,7 @@ assumes the end-labelled runs are exchangeable with the stream (with noisy end l
 label). Which mode gives more coverage at the same r is measured by the stand below, not assumed.
 
 - **Missing:** the retraction across nodes with cancelled and re-asked tickets (a later stage); a run follows one path (merge "all" is not run yet, so the 100-node process of the promise stand cannot run); the pre-registered stands for scale (300 systems) and retraction are not run — ten systems exchanging facts (with 2% of the decisions asking a person) is a test, not the stand
-- **Script:** `benchmarks/process_e1.py` (the promise stand: a synthetic insurance claim with a known truth; union, per_node and a hand-glued baseline, and end_to_end over both built-in families at n = 500, 1000, 3000). **Deadline:** 1.2.
+- **Script:** `benchmarks/process_e1.py` (the promise stand: a synthetic insurance claim with a known truth; union, per_node and a hand-glued baseline, and end_to_end over both built-in families at n = 500, 1000, 3000). **Deadline:** a future release.
 - API: [solvi.experimental.process](api/process.md).
 
 ## `stream`
@@ -527,7 +530,8 @@ an accepted slow-path answer is a loss. The promise is therefore relative to the
 under a risk ≤ α the expected number of samples to a false alarm is at least `arl` — not a per-horizon probability
 like `DriftMonitor`'s: a model running exactly at α re-certifies about every `arl` samples by design
 (`alternatives=(1.5, 2.0)` moves the null to 1.5α). The bound is the Shiryaev–Roberts e-detector's (Shin, Ramdas and
-Rinaldo 2023, arXiv 2203.03532), and it counts samples, not decisions: a simulation of this code matched it, and at the
+Rinaldo 2023, arXiv 2203.03532), and it counts samples, not decisions: a simulation of this code (not in the
+repository) matched it, and at the
 adaptive rate one sample is many decisions (the simulated run lengths and the conversion are in
 [best practices](best_practices.md#guarantees-and-calibration)). With
 `on_drift="recertify"` an alarm restarts the certificate (the next δ_v, threshold +inf) and System 1 answers nothing
@@ -747,9 +751,11 @@ tests run on a stand-in learner and the tiny random checkpoint; nothing here say
 apart from the one throughput number above the cost to live decisions (one more scoring of the served version per
 decision) was not measured.
 
-Measured once on real streams: three public intent sets with a TF-IDF + logistic-regression answerer, 20 seeds per
-set, a shift to held-out intents, corrupted text and noisy labels; the numbers, the setting and the prior work are in
-[best practices](best_practices.md#guarantees-and-calibration). What held:
+Measured once on real streams (the stand's script is not in the repository): three public intent sets with a TF-IDF +
+logistic-regression answerer, 20 seeds per set, a shift to held-out intents, corrupted text and noisy labels; the
+numbers, the setting and the prior work are in [best practices](best_practices.md#guarantees-and-calibration). The
+score monitor it was compared with is `DriftMonitor` as of solvi 1.4.0.dev, before the change of its window z-test of
+the mean confidence (CHANGELOG 1.4.0). What held:
 
 - **The promise, between change points.** No threshold a stream certificate had in force, and no version the
   learning loop served, had a risk above the promise on the regime it was certified on. That holds under the method's
@@ -769,7 +775,8 @@ set, a shift to held-out intents, corrupted text and noisy labels; the numbers, 
 What the measurement found against these pieces:
 
 - **`RiskDetector` must not be the only alarm.** It reads only the sampled decisions, so on shifts to new intents it
-  alarmed far later than the confidence CUSUM that reads every decision's score, or not at all, and until its alarm
+  alarmed far later than the confidence CUSUM that reads every decision's score (`DriftMonitor` before its 1.4.0
+  window z-test change), or not at all, and until its alarm
   the system kept answering alone on the moved inputs. Use it next to the score monitor (`DriftMonitor`,
   `OpenSetGate`), not instead of it. `alternatives=(1.5, 2.0)` left it silent on most streams and is not a default.
 - **The `LearningLoop` gained nothing with gold labels.** Against the same certificate on the frozen System 1 it
@@ -783,6 +790,6 @@ What the measurement found against these pieces:
 - **The promise is relative to the oracle.** Noisy labels, or a hosted LLM as the oracle, cost coverage, not
   validity against those labels.
 
-- **Missing:** measured once; see the documented limits in docs/experimental.md: the RiskDetector alarmed far later than the confidence CUSUM on shifts to new intents and must not be the only alarm; the LearningLoop gained nothing with gold labels and is kept only as the core of a planned adapter loop; TicketDesk is unmeasured on a stream. The loop is not wired into the Dispatcher (no loop=: it drives its own coin and oracle); the expired-share stop (max_drop) and repeated tickets for the oracle's own noise are not built; a person's audit label does not yet replace the slow path's label
-- **Script:** none yet. **Deadline:** 1.2.
+- **Missing:** measured once (the stand's script is not in the repository); see the documented limits in docs/experimental.md: the RiskDetector alarmed far later than the confidence CUSUM (DriftMonitor before its 1.4.0 window z-test change) on shifts to new intents and must not be the only alarm; the LearningLoop gained nothing with gold labels and is kept only as the core of a planned adapter loop; TicketDesk is unmeasured on a stream. The loop is not wired into the Dispatcher (no loop=: it drives its own coin and oracle); the expired-share stop (max_drop) and repeated tickets for the oracle's own noise are not built; a person's audit label does not yet replace the slow path's label
+- **Script:** none in the repository (the measurement's stand ran outside it). **Deadline:** a future release.
 - API: [solvi.experimental.stream](api/stream.md).
