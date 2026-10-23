@@ -4131,6 +4131,14 @@ What it shows, per question:
   system's own answers. The verdict says "within the promise", "above the promised level, not significantly", or
   "above the promise" with the binomial p-value. When only some decisions are labelled, the report says the measured
   error is that of the labelled ones: corrections are usually made where an answer looked wrong.
+- **How often a person was wrong.** A person is not an oracle. Where a decision has a person's label (a correction,
+  `label_source="human"`, or an audit label) and also an outcome label (`System.outcome`, `label_source="outcome"`) —
+  both naming it with `of=`, or on its input — the person's last answer is compared with the last outcome:
+  `corrections["people"]` gives the pairs, the wrong ones, the error with a two-sided 95% Clopper–Pearson interval, and
+  the same per person (`by=`) and per question; the text report adds a "People:" line. A person's answer to a
+  decision handed over by a dispatcher is such a label too: `teach(..., of=<the dispatched decision's id>, by=...)`.
+  The pairs are the decisions whose outcome happened to be recorded, not a random sample of the person's decisions;
+  read the interval with that in mind. Before 1.4 solvi stored both labels but never paired them.
 - **Drift.** The flags the decisions recorded (an open-set gate's change point, the dispatcher's drift flag), and a
   `DriftMonitor` run over the period's decisions in order, with the stored labels where there are some: the first
   decision at which it flagged and what moved. `drift_window=` sets its window (default 100; `None` or `--no-drift`:
