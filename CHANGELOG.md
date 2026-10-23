@@ -359,6 +359,14 @@
   so a misspelled option passed as "no problems found". A lambda's body is now checked as its return value (found on
   its line by its arguments); a rule whose return values cannot be read is the new warning `rule_unchecked`. Behaviour
   change by design: new findings from `solvi check`; `ask` is unchanged.
+- **Two silent ways a part never runs now warn.** A rule or part argument named like a question of the system is read
+  from the given facts, never from that question's answer (answers are not facts), so without it in the input the
+  reader could not run and its question abstained ("cannot compute: a"); `System(...)` now warns about it (`solvi
+  check` already listed it as `question_as_fact`). An argument with a default value is a fact the part reads like any
+  other, so its default is never used: `def chk(n, _lim=lim)` waits for a fact `_lim`, and a hard check written so
+  abstained with "no data for hard check chk: missing _lim". Registering such a part (fn, rule, check, extract) now
+  warns and shows how to bind the value without a default. Behaviour change by design: the two warnings only — how
+  arguments are read, and every answer, are unchanged.
 
 ### Docs
 - **Drift and audit: measured caveats** (best practices; the `ShiftWatch.shift`, `DriftMonitor` and `sysreport`
