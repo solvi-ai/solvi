@@ -146,6 +146,17 @@
   rewritten from Angelopoulos et al. (2021) with exact p-values; conformal risk control from Theorem 1 of Angelopoulos
   et al. (2022); the split-conformal rank ⌈(n + 1)(1 − α)⌉ and its exact coverage k / (n + 1) by seeded simulation.
   Each test names its source. All agreed; no code changed. MAPIE and confseq are not used (not dependencies).
+- **An identity canary for remote deciders** (`solvi.core.guarantees.canary.IdentityCanary`). A hosted model can
+  change behind its name (other weights, another provider or quantisation) while the decider's fingerprint, which
+  hashes the configuration asked for, stays the same. `IdentityCanary(probes, every=N).attach(model)` asks a small
+  fixed probe set of an `llm(...)` or `systemone(...)` decider — on demand (`probe()`) or every N decisions of the
+  model — and compares the answers, the probabilities (mean total-variation distance above `tol`) and the model name
+  the server reports with the reference round; a difference is asked once more before it counts (`confirm=True`).
+  After a change every decision of the model carries `extra["canary"]["changed"]` in its trace until `accept()`;
+  `DriftMonitor.observe` flags such a decision as the signal `"identity"`; `on_change="escalate"` escalates them.
+  Off by default: no probe is sent unless a canary is attached (probes cost `len(probes)` calls a round). `Trace.replay`
+  runs under `no_probes()`: a replay never probes, counts or marks. Not a statistical test: its false alarms come from
+  the provider's own noise on the probes; tested on fake servers only (`tests/test_identity_canary.py`).
 
 ### Fixed
 - **DriftMonitor no longer flags "mean confidence up" on an unchanged stream** (`solvi.core.guarantees.drift`). The

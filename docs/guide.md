@@ -1755,6 +1755,33 @@ On a real stream, take the reference from traffic like the stream's: a calibrati
 from the stream's can be flagged before anything has changed. A quiet monitor means "no change of this size in the
 last few dozen decisions", not "no change".
 
+#### Is the same model still answering? An identity canary for a remote decider
+
+A hosted model can change behind its name — the provider swaps the weights, a gateway routes to another provider or a
+lower quantisation — and the decider's fingerprint does not see it: it hashes the configuration solvi asked for
+(endpoint, model name, prompt, settings), not the weights that answered. `solvi.core.guarantees.canary` keeps a small
+fixed set of probe questions; their answers, probabilities and the model name the server reports are the model's
+behavioural fingerprint, asked again on a schedule or on demand:
+
+```python
+from solvi.core.guarantees.canary import IdentityCanary
+model = llm("https://openrouter.ai/api/v1", "openai/gpt-oss-20b", api_key=KEY)       # or systemone(...)
+canary = IdentityCanary([("I was charged twice", "Which team?", ["billing", "shipping"]), ...],
+                        every=500).attach(model)     # every 500 decisions of the model; every=None: canary.probe() only
+canary.probe()                                       # the reference (len(probes) calls)
+canary.events[-1]["verdict"]                         # "reference", "same", "changed", "unanswered"
+```
+
+A round differs from the reference when a probe answers differently (`min_changed=1`), the mean total-variation
+distance of the probabilities is above `tol` (0.15), or the server names another model; with `confirm=True` (the
+default) the difference is asked once more and counts only when it repeats. After a change every decision of the model
+carries `extra["canary"]["changed"]` (in the trace) until `canary.accept()` takes the new answers as the reference —
+do that after recalibrating on the new model. `on_change="flag"` (default) only marks: a `DriftMonitor` observing those
+decisions flags `"identity"` at once. `on_change="escalate"` also escalates them. Probes cost calls, so nothing is asked
+unless a canary is attached; a replay never probes. It is a cheap check, not a test with a false-alarm rate: choose
+probes with clear answers (a borderline one flips under the provider's own noise), and a change the probes do not touch
+is missed. Measured on fake servers only.
+
 ### Inputs from outside the calibration set: OpenSetGate
 
 Every promise above holds for inputs like the calibration examples. An input whose right answer is not among the

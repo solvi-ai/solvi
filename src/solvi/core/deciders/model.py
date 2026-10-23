@@ -42,6 +42,7 @@ class DecideModel:
     long_len = _deprecate.removed_attr("long_len", "max_len_long", "DecideModel")
 
     deterministic = True
+    canary = None                           # an identity canary (solvi.core.guarantees.canary) watching a remote model
 
     def __init__(self, scorer, meta=None, model_id=None, path=None, backend=None, cache_size=4096, multi_question=None,
                  act=None, max_len_long=None):
@@ -632,6 +633,8 @@ class DecideModel:
             d.escalate = f"{ESCALATED}: {why}"
             if sp.kind != "span":                   # nor a value: uniform logits would read as the first option
                 d.value, d.probs, d.confidence = None, {}, 0.0
+        if self.canary is not None:                 # counted, probed when due, marked after a change
+            self.canary.mark(d)
         return d
 
     def _decision_v3(self, sp, z, u):
