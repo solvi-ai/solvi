@@ -28,7 +28,7 @@ What it shows, per question, from the records the library already writes:
   error: the report says how many decisions are labelled. A dispatcher with `audit=` marks a random share of its
   decisions for labelling; their "audit" labels are measured apart, as the audited sample, next to every promise — the
   unbiased reading of it. Every observed error and risk on labels carries its Wilson 95 % interval ("error_wilson95",
-  "risk_wilson95");
+  "risk_wilson95"): Wilson 95 % on the random-audit sample is a reading at one time, not a running bound;
 - how often a person was wrong: a decision with a person's label ("human" or "audit") given before its first outcome
   label ("outcome") gives a pair; `corrections["people"]` counts the pairs where they differ, with a two-sided
   Clopper–Pearson interval, per person (`by`) and per question; a person label given only after the outcome is

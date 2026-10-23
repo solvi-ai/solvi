@@ -189,7 +189,8 @@
   with no labels) beside the unchanged keys; the text appends the interval after each rate, e.g. `error among them
   7.50% [2.6%, 19.9%] (Wilson 95 %)`. On the audited sample (`Dispatcher(audit=)`) it is the interval of the live
   error; on labels that are not a random sample it is the interval of the labelled decisions only. `wilson(k, n)` is
-  checked against scipy's `binomtest(...).proportion_ci(method="wilson")`.
+  checked against scipy's `binomtest(...).proportion_ci(method="wilson")`. The interval is for a random-audit sample,
+  a fixed-time reading: not a running bound over the stream.
 
 ### Fixed
 - **DriftMonitor no longer flags "mean confidence up" on an unchanged stream** (`solvi.core.guarantees.drift`). The
@@ -243,6 +244,14 @@
 - **`Guard.replay(id)` of a call denied outside a session's allowed tools** replayed it with the tool's own checks and
   reported a mismatch (`in_session_tools` "not in the catalog"); a stored decision is now replayed with the system that
   made it, read from its recorded steps (also in the process replay of a guard node).
+
+### Docs
+- **Drift and audit: measured caveats** (best practices; the `ShiftWatch.shift`, `DriftMonitor` and `sysreport`
+  docstrings). A change of the correct answers alone is invisible to every label-free test by construction; read it
+  from audit labels. `ShiftWatch.shift` is a batch test at alpha per call, not a running test. A conformal test
+  martingale started once was valid but slower than `DriftMonitor`'s restarting CUSUM, and a prediction-powered
+  (PPI++) live-error estimate was not a better reading than the Wilson interval below about 100 audit labels; neither
+  is shipped. Numbers and their setting in best practices.
 
 ## 1.3.0 — 2026-10-19 — laws for rule-governed worlds: rivals, negations, a factored model
 
