@@ -5,6 +5,7 @@
     solvi serve --decider ./my-decider --model-name kev-latest             # only POST /v1/systemone
     solvi serve myapp.decisions:system --mcp                              # an MCP server over stdio
     solvi serve --guard catalog.py:guard --upstream "CMD"                 # an MCP proxy: the guard checks every tool call
+    solvi serve myapp.decisions:desk --mcp --agent-oracle                 # the agent as the oracle (a preview)
 
 HTTP (`solvi[serve]`: fastapi, uvicorn):
   POST /ask              {"state": {...}, "questions": [names] (default: all), "store": true} → Response.to_dict() plus
@@ -31,6 +32,12 @@ question and returns its result (answer, confidence, status, why, safeguards) wi
 `ask_text` takes a free text and, optionally, the date it is read on (as POST /ask_text). It uses
 the official `mcp` SDK (2.x, `solvi[mcp]`) when it is installed, else a built-in stdio JSON-RPC server with the subset of
 the protocol that tools need (initialize, ping, tools/list, tools/call).
+
+MCP with the agent as the oracle (`--mcp --agent-oracle`, a preview: the stream package's tickets): the object
+served is a TicketDesk (a Dispatcher whose slow path is the agent, with its storage), and the tools are two — `decide`
+({"state"}: the decision, or a blind ticket: all options, the input, the question's text, no model guess) and
+`resolve` ({"ticket", "label"}: the agent's verdict completes the decision). This module does not import the
+stream package: the desk is duck-typed (mcp_tools, call_tool, Error).
 
 Security (see docs/guide.md, Serving): `--token` / $SOLVI_SERVE_TOKEN requires `Authorization: Bearer <token>` on every
 HTTP request (constant-time compare); a request body / MCP message is at most `--max-body` bytes and `--max-depth` levels
@@ -129,7 +136,13 @@ class Service:
     System One requests with a decider. `limits`: a Limits (the request size, JSON depth and timeout)."""
 
     def __init__(self, system=None, decider=None, storage=None, model_name=None, limits=None, textin=None,
-                 allow_client_no_store=False):
+                 allow_client_no_store=False, agent_oracle=None):
+        self.oracle = agent_oracle                    # a TicketDesk (a preview): MCP serves its two tools only
+        if agent_oracle is not None:
+            if not all(callable(getattr(agent_oracle, k, None)) for k in ("mcp_tools", "call_tool")):
+                raise TypeError("agent_oracle= takes a TicketDesk (the stream package's tickets)")
+            if system is None:
+                system = agent_oracle.dispatcher.system
         if system is None and decider is None:
             raise ValueError("solvi serve needs a System, a decider (--decider), or both")
         self.system, self.decider = system, decider
@@ -658,7 +671,10 @@ PROTOCOL_VERSIONS = ("2024-11-05", "2025-03-26", "2025-06-18", "2025-11-25")
 
 
 def mcp_tools(svc):
-    """The questions as MCP tools: [{"name", "description", "inputSchema"}] (a name outside [A-Za-z0-9_-] is mapped)."""
+    """The questions as MCP tools: [{"name", "description", "inputSchema"}] (a name outside [A-Za-z0-9_-] is mapped).
+    With an agent oracle: its two tools (decide, resolve) only."""
+    if svc.oracle is not None:
+        return svc.oracle.mcp_tools()
     tools = []
     for q in svc.system.questions.values():
         at = q.answer
@@ -695,6 +711,8 @@ def tool_name(q):
 def call_tool(svc, name, arguments):
     """tools/call → (result dict, is_error). A refused request says why; any other failure is logged on the server and
     the agent gets an incident id (never the exception's text)."""
+    if svc.oracle is not None:
+        return _call_oracle(svc, name, arguments)
     names = {tool_name(q): q for q in svc.system.questions}
     if name not in names and name != text_tool_name(svc):
         raise KeyError(name)
@@ -704,6 +722,25 @@ def call_tool(svc, name, arguments):
             return svc.ask_text(a.get("text"), a.get("question"), today=a.get("today")), False
         return svc.tool(names[name], _arguments(svc, arguments)), False
     except RequestError as e:
+        return {"error": str(e)}, True
+    except Exception:  # noqa: BLE001 — a tool error is reported to the agent, not a protocol error
+        return {"error": internal_error(f"tools/call {name}")}, True
+
+
+def _call_oracle(svc, name, arguments):
+    """tools/call on an agent oracle (decide, resolve) → (result, is_error): the state is checked as an ask's is; the
+    desk's own errors (an unknown ticket, a label that is not an option) are the agent's; anything else is an incident."""
+    if name not in {t["name"] for t in svc.oracle.mcp_tools()}:
+        raise KeyError(name)
+    try:
+        a = _arguments(svc, arguments)
+        if name == "decide" and isinstance(a.get("state"), dict):
+            svc._checked(a["state"], None)
+        with svc.exclusive():
+            return svc.oracle.call_tool(name, a), False
+    except RequestError as e:
+        return {"error": str(e)}, True
+    except svc.oracle.Error as e:
         return {"error": str(e)}, True
     except Exception:  # noqa: BLE001 — a tool error is reported to the agent, not a protocol error
         return {"error": internal_error(f"tools/call {name}")}, True
@@ -721,10 +758,17 @@ async def acall_tool(svc, name, arguments):
     """tools/call on an event loop → (result dict, is_error): an async System is asked with aask, a sync one in a worker
     thread (its lock serializes the asks); either within the request timeout."""
     import asyncio
+    t = svc.limits.timeout
+    if svc.oracle is not None:
+        if name not in {x["name"] for x in svc.oracle.mcp_tools()}:
+            raise KeyError(name)
+        try:
+            return await asyncio.wait_for(asyncio.to_thread(call_tool, svc, name, arguments), t)
+        except asyncio.TimeoutError:
+            return {"error": f"the call did not finish within {t:g} s"}, True
     names = {tool_name(q): q for q in svc.system.questions}
     if name not in names and name != text_tool_name(svc):
         raise KeyError(name)
-    t = svc.limits.timeout
     try:
         if not svc.is_async:
             return await asyncio.wait_for(asyncio.to_thread(call_tool, svc, name, arguments), t)
@@ -918,7 +962,7 @@ _COMMON = {"max_body", "max_depth", "timeout"}
 _SYSTEM = {"system", "decider", "pull", "api_key", "backend", "store", "max_questions", "max_options", "max_inflight",
            "queue_timeout", "allow_client_no_store"}
 _MODES = {"guard": _COMMON | {"guard", "upstream", "facts", "escalate", "context_messages", "context_chars", "store"},
-          "mcp": _COMMON | _SYSTEM | {"mcp", "mcp_impl"},
+          "mcp": _COMMON | _SYSTEM | {"mcp", "mcp_impl", "agent_oracle"},
           "http": _COMMON | _SYSTEM | {"model_name", "host", "port", "log_level", "token", "cors"}}
 SERVE_DEFAULTS = {}                                    # dest → default, filled by add_parser
 
@@ -939,6 +983,8 @@ def cmd_serve(a):
     _refuse_others(a, mode, _fail)
     if mode == "guard":
         return _serve_guard(a, _fail, load_object)
+    if getattr(a, "agent_oracle", False):
+        return _serve_oracle(a)
     system = load_system(a.system) if a.system else None
     decider = None
     if a.decider:
@@ -984,6 +1030,26 @@ def cmd_serve(a):
     app = create_app(system, decider, store, a.model_name, title=f"solvi: {a.system}" if a.system else "solvi",
                      limits=limits, token=token, cors=a.cors, allow_client_no_store=a.allow_client_no_store)
     uvicorn.run(app, host=a.host, port=a.port, log_level=a.log_level, server_header=False)
+    return 0
+
+
+def _serve_oracle(a):
+    """`solvi serve module:desk --mcp --agent-oracle`: the two tools of a TicketDesk over stdio."""
+    if not a.mcp:
+        _fail("serve --agent-oracle: an MCP mode — add --mcp")
+    if not a.system:
+        _fail("serve --agent-oracle: name the TicketDesk (module:attr or file.py:attr — a TicketDesk or a function "
+              "returning one)")
+    for k in ("store", "decider"):
+        if getattr(a, k):
+            _fail(f"serve --agent-oracle: --{k} does nothing here — the desk's Dispatcher carries its storage and "
+                  "its System")
+    desk = load_object(a.system)
+    if not all(callable(getattr(desk, k, None)) for k in ("mcp_tools", "call_tool", "decide", "resolve")):
+        _fail(f"serve --agent-oracle: {a.system} is not a TicketDesk (the stream package's tickets)")
+    if a.mcp_impl == "sdk" and not sdk_available():
+        _fail("serve --mcp-impl sdk: the MCP SDK (mcp>=2) is not installed: pip install 'solvi[mcp]'")
+    run_mcp(Service(limits=_limits(a), agent_oracle=desk), a.mcp_impl)
     return 0
 
 
@@ -1061,6 +1127,9 @@ def add_parser(sub):
     s.add_argument("--cors", action="append", metavar="ORIGIN",
                    help="let browsers on this origin call the API (repeat; default: no CORS headers)")
     s.add_argument("--mcp", action="store_true", help="an MCP server over stdio instead of HTTP: each question is a tool")
+    s.add_argument("--agent-oracle", action="store_true",
+                   help="with --mcp, a preview: serve a TicketDesk (the stream package's tickets) — the tools "
+                        "decide and resolve, the agent's verdicts on blind tickets are the slow path")
     s.add_argument("--mcp-impl", default="auto", choices=["auto", "sdk", "builtin"],
                    help="the official MCP SDK (auto: when installed) or the built-in JSON-RPC subset")
     s.add_argument("--guard", help="module:attr or file.py:attr — a solvi.Guard: an MCP proxy that checks every "

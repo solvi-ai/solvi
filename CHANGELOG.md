@@ -85,6 +85,21 @@
   different reason text). The design's α/2 numbers are not what the code gives: about 1.5 % of streams at α/2 alarm
   within 1 000 samples (44 of 3 000), not ≤ 1 %, and some do within 20 000 (19 of 100), not none. Without the new
   options a dispatcher's records and config fingerprint are unchanged. Unmeasured: the stand (stage 4).
+- **Stream certificate (experimental), stage 3a: tickets — an agent as the oracle over MCP.**
+  `solvi.experimental.stream.tickets`: `AgentOracle` (the Dispatcher's slow path when it is an agent outside the
+  process) and `TicketDesk` (`decide` → the decision or a blind ticket, `resolve(ticket, label, source="s2" |
+  "human")`, `expire`, `sweep`, `open`); `solvi serve module:desk --mcp --agent-oracle` serves `decide` and `resolve`
+  as MCP tools (serve does not import the experimental code). A ticket shows the question, all options, the input,
+  the question's text and the time left — no model answer, probabilities, reason or kind; audit and escalation tickets
+  have the same payload. Tickets are chain records (kind `pending`, `pending_expired`; "pending" is KEPT), issued with
+  the decision's number, coin and rate fixed and completed later; the stream sample of a ticket records
+  `label_source` and `label_of` (the ticket's record id; `None` before this stage). A ticket past its ttl or given up
+  sends the input to a person and, when sampled, is a loss for the certificate (every grid point where System 1 would
+  have answered alone) and for the detector (1). New in `solvi.core.dispatch` (provisional): `Dispatcher.start` /
+  `complete` (`ask` split in two, records unchanged), `Started`, `Dispatcher.resume()` (a fresh dispatcher continues
+  from its store: numbers, spend, runs, drift flag, the stream state), `Dispatched.pending`; `replay_stream()` reads a
+  ticket's gate and coin where it was issued. Not built: the expired-share stop, repeated tickets for the oracle's
+  noise. Unmeasured.
 - **A secret for the supervision and audit draws: `Dispatcher(secret=)`** (`solvi.core.dispatch`; security). The
   draws were `sha256(f"{seed}|{input hash}|{n}")` with the public default `seed=0`, so whoever could vary the inputs
   could compute which decisions would be supervised or audited and avoid them. With `secret=` (bytes or str; None reads

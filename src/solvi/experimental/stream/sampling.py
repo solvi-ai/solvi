@@ -102,13 +102,18 @@ class StreamDriver:
         prob = self.left > 0
         return self.rate.rate(full=p.grid is None or math.isinf(p.threshold) or prob), prob
 
-    def after(self, *, score, would, alone, label, label_source, sampled, free, rho, in_force) -> tuple:
+    def after(self, *, score, would, alone, label, label_source, sampled, free, rho, in_force, probation=None,
+              label_of=None, lost=None) -> tuple:
         """One decision done → (its record, the stream events it caused, a drift reason for the Dispatcher or None).
         score: the guard's signal (None: not gated); would: System 1's would-be answer; alone: System 1's answer was
         given alone (within the threshold in force); label: the slow path's accepted answer on a sampled decision (None:
-        missing); in_force: the threshold the decision was gated at (None: +inf)."""
+        missing); in_force: the threshold the decision was gated at (None: +inf). A decision completed later (a ticket,
+        stage 3): probation — the flag `before()` gave when it was issued (default: now); label_of — the stored id of
+        the record that holds the label (the ticket's); lost — no verdict came (an expired ticket): a missing label, and
+        the detector's loss is 1 whatever System 1 would have done (the conservative accounting, design §5.4). An
+        oracle's decision records label_of and lost; the others record what stage 2 did."""
         p, det = self.promise, self.detector
-        prob = self.left > 0
+        prob = self.left > 0 if probation is None else bool(probation)
         version = p.v
         drift = None
         alarm = None
@@ -116,14 +121,16 @@ class StreamDriver:
             p.learn(score, would, label)
             if det is not None and in_force is not None and not prob:
                 wrong = label is None or would != label
-                if p.kind == "joint":
+                if lost:
+                    loss, fed = 1.0, True                  # a lost sample: a loss for the detector, every kind
+                elif p.kind == "joint":
                     loss = 1.0 if (alone and wrong) else 0.0
                     fed = True
                 else:                                      # selective: the error among the alone answers
                     loss, fed = (1.0 if wrong else 0.0), bool(alone)
                 if fed and det.update(loss):
                     alarm = det.state()
-        if prob:
+        if prob and self.left > 0:                         # only decisions issued in probation count it down
             self.left -= 1
         events = self._events()
         if alarm is not None:
@@ -141,9 +148,10 @@ class StreamDriver:
         self.rate.push(alone)
         st = p.state()
         rec = {"sample": {"rho": rho, "sampled": bool(sampled), "free": bool(sampled and free),
-                          "label_source": label_source if sampled and label is not None else None, "label_of": None,
+                          "label_source": label_source if sampled and label is not None else None,
+                          "label_of": label_of if sampled and label is not None else None,
                           "alone": bool(alone), "probation": prob, "score": score, "threshold": in_force,
-                          "version": 1},
+                          "version": 1, **({"lost": True} if sampled and lost else {})},
                "certificate": {"version": 1, "v_index": st["v_index"], "decided_under": version,
                                "threshold": st["threshold"], "n": st["n"], "evidence_fp": st["evidence_fp"],
                                "grid_fp": st["grid_fp"], "probation": self.left}}
