@@ -83,7 +83,7 @@ from ...core.sources import TRUSTED_SOURCES
 from . import gates
 
 SLOW_SOURCES = ("s2", "verified")
-STATES = ("served", "candidate", "retired", "discarded")
+STATES = ("served", "candidate", "retired", "discarded", "evicted")
 
 
 # ───────────────────────────────────────────────────────────── the budget
@@ -147,7 +147,8 @@ class Budget:
 # ───────────────────────────────────────────────────────────── what the hooks read
 @dataclass(frozen=True)
 class VersionInfo:
-    """One row of the versions table. state: "served", "candidate", "retired" or "discarded"; n_train: the train
+    """One row of the versions table. state: "served", "candidate", "retired", "discarded" or "evicted" (a retired
+    version past Budget.max_versions_kept: released, no longer a rollback target); n_train: the train
     labels it was trained on (version 0: 0 unless stated); samples: post-freeze samples it has read; certified and
     threshold: its promise now; frozen_at: the decision it was frozen at (None for version 0); train_keys: the content
     keys it trained on, a set snapshotted at the freeze (not a digest: novel / seen is membership, `key in

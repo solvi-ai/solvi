@@ -67,7 +67,11 @@ the loop goes on deciding on the served version, and the result is applied on th
 or `train_now(wait=True)`) keeps the blocking form; `close()` cancels a training in flight; `wait_training(timeout)`
 waits for a result. Lock order: the part's version lock, then the loop's (no deadlock with a decision of the part that
 reaches the loop). `Budget.max_versions_kept` evicts the oldest retired versions ("evict" events, `release()` called),
-never the served one, the rollback target or version 0. No checkpoint or attach yet. Unmeasured.
+never the served one, the rollback target or version 0. A result whose training saw the served version change (a
+rollback) is recorded "stale" and discarded, not gated on a comparison with a version no longer served
+(`served_at_start` in "train_start" and "train"). A batch learner's `train(job)` runs on another thread than
+`update`, `seen` and `keys`: it must read the job only (or its own state under its own lock). No checkpoint or attach
+yet. Unmeasured.
 
 ::: solvi.experimental.stream.loop
 

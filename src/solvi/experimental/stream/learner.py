@@ -25,6 +25,11 @@ it has trained on (a learner that keeps the labels `update` gave it, or warm-sta
 records as the version's training keys the keys of the rows it handed over (or, online, of every label it fed) united
 with `keys()` when the learner has it; a sample on any of them is "seen", never "novel".
 
+Threads (stage 3b): unless the loop runs with `wait=True`, a batch learner's `train(job)` runs on a thread of its own
+while the decision thread keeps calling `update`, `seen` and `keys`. So `train(job)` must read `job` only (or its own
+state under its own lock), and `update` / `seen` / `keys` must not wait for a training. `wait=True` restores the serial
+form (the training inside the step or the control).
+
 `Frozen.as_head(feature)` wraps a frozen model as an answer head (`solvi.core.Head`: options, features, predict,
 contributions, fingerprint; fit and teach refused), which `solvi.core.versions.serve_head` installs on a System."""
 from __future__ import annotations
@@ -58,7 +63,8 @@ class Learner(Protocol):
 class BatchLearner(Protocol):
     def update(self, x, y) -> None: ...               # one train label (may also take key=, source=)
 
-    def train(self, job: "TrainJob") -> Frozen: ...   # one training on job.rows only (else expose keys())
+    def train(self, job: "TrainJob") -> Frozen: ...   # one training on job.rows only (else expose keys()); on
+    #                                                   another thread than update / seen / keys: read job only
 
     def seen(self) -> int: ...
 
@@ -68,7 +74,7 @@ class TrainJob:
     """One training the adapter loop runs. id: "<version>.<attempt>"; version: the version it would become; rows: the
     selected train rows (stream.policy.LabelRow; empty for an online learner, which freezes a snapshot); hyper: the
     policy's settings (r, lr, updates, seed, ...); trigger: "schedule" (the policy's want_train) or "train_now";
-    started: the wall clock; state: "running", "done", "failed" or "refused"; why: the refusal or the error;
+    started: the wall clock; state: "running", "done", "failed", "refused" or "stale"; why: the refusal or the error;
     fingerprint and seconds: the frozen model's and the wall time, once done; frozen: whether the pre-freeze gates
     passed. What the loop also hands a batch learner (stage 3): calib — the calib labels (stream.policy.LabelRow, the
     latest per key; never trained on: the LoRA learner runs act_guard on them); budget — the policy's Budget (the

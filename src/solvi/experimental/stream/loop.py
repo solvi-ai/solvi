@@ -90,7 +90,11 @@ hook "learner.train"; replay exact). `initial=` that has `install` / `uninstall`
 Deferred apply (stage 3b, design §3.2; the author's decision 7): a batch learner's training starts at a decision (or in
 `train_now`) — a "train_start" event there — and runs in a thread of its own, its runner beside it; the loop goes on
 deciding on the served version and no decision waits for it. The pre-freeze report is computed in that thread too, on
-the calib and held-out labels and the served version of the moment the training started. Its result is applied on the
+the calib and held-out labels and the served version of the moment the training started; it stops between two labels
+when the training is cancelled or the served version changed. When the served version changed during the training (a
+rollback), the result is not gated on that stale comparison: the "train" event has state "stale" and the candidate is
+discarded at birth and released ("served_at_start" in "train_start" and "train" names the version compared with).
+Its result is applied on the
 first decision after it is in (not while paused: it waits for resume): the gates, then freeze or discard, a failure, a
 refusal or a stop on a `RunnerError` — the stage-3 paths — recorded at that decision: the "train" event carries
 `started_at` (the decision it started at) and `applied` ("decision", or "train_now" for `train_now(wait=True)`). Replay
@@ -203,6 +207,16 @@ class _Replayed(Exception):
         self.why = why
 
 
+class _Stale(Exception):
+    """The served version changed while a training ran: its pre-freeze comparison would be against a version no longer
+    served."""
+
+    def __init__(self, at_start, now):
+        super().__init__(f"the served version changed during the training (v{at_start} → v{now}): the pre-freeze "
+                         "comparison is stale")
+        self.at_start, self.now = at_start, now
+
+
 def _update_keywords(update) -> frozenset:
     """Which of key= / source= a learner's update takes (read once from its signature)."""
     try:
@@ -253,7 +267,9 @@ class AdapterLoop:
     "budget", "window"} of the rate; storage: a TraceStorage for the records (None: kept in memory); versions_dir: where
     frozen versions are saved; system, feature: install the served version on a System (feature: the text fact a text
     model reads); key: input → content key (None: content_key); served: frozen → Served (None: as_served); clock: the
-    wall clock (None: time.time)."""
+    wall clock (None: time.time); wait: True runs every training inside the step or the control (stage 3's blocking
+    form); part: the part whose version lock the loop takes before its own (None: the learner's or initial's `part`) —
+    from construction on, every decision of that part takes this RLock, whether or not a version is ever swapped."""
 
     def __init__(self, learner, *, question, policy=None, max_risk=None, max_error=None, delta=0.05, initial=None,
                  detector=None, monitor="auto", probation=300, source="human", secret=None, seed=0, sampling=None,
@@ -612,10 +628,11 @@ class AdapterLoop:
         why = e.why if isinstance(e, _Replayed) else f"{type(e).__name__}: {e}"
         self.error = {"n": n, "where": self._where, "why": why}
         self.paused = True
-        self._cancel()
+        run = self._cancel()
         inflight, self._inflight, self._job = self._inflight, None, None
         return self._event("error", self.served, n, where=self._where, call=self._hk, why=why,
-                           candidate=self.candidate, train=inflight, **extra)
+                           candidate=self.candidate, train=inflight,
+                           cancelled=None if run is None else run["job"].id, **extra)
 
     def _cancel(self):
         """The training in flight is dropped: its job's cancel event is set (the runner stops it) → its run."""
@@ -792,26 +809,40 @@ class AdapterLoop:
         calib = [r for k, r in latest.items() if self._split_of[k] == "calib"]
         hold = [r for k, r in latest.items() if self._split_of[k] == "holdout"]
         return {"calib": calib, "hold": hold, "served": self._vs[self.served]["model"],
-                "thr_s": self._threshold(self.served)}
+                "thr_s": self._threshold(self.served), "sv": self.served, "hist": len(self._history)}
 
-    def _report(self, frozen, inp) -> TrainReport:
+    def _report(self, frozen, inp, cancel=None) -> TrainReport:
         """The trained model and the version served when the training started on the held-out labels of that moment
-        (latest label per key); its threshold on the calib labels."""
+        (latest label per key); its threshold on the calib labels. Stops between two labels when the training is
+        cancelled (TrainingCancelled) or the served version changed since the start (_Stale: the comparison would be
+        stale; the apply discards the candidate). The served side is scored under the part's version lock with that
+        check, so a version retired and evicted meanwhile is never scored (and so never staged) again."""
         calib, hold, served, thr_s = inp["calib"], inp["hold"], inp["served"], inp["thr_s"]
+
+        def go_on():
+            if cancel is not None and cancel.is_set():
+                raise TrainingCancelled("the training was cancelled during its report")
+            if len(self._history) != inp["hist"]:
+                raise _Stale(inp["sv"], self.served)
         thr = getattr(frozen, "act_threshold", None)
         if thr is None and calib:
             scored = []
             for r in calib:
+                go_on()
                 a, s = frozen.score(r.x)
                 scored.append((s, a != r.y))
             thr = calib_threshold(scored, self.alpha)
         right = wrong = s_right = s_wrong = better = worse = 0
         items = []
+        pl = self._part_lock
         for r in hold:
+            go_on()
             a, s = frozen.score(r.x)
             ck = (1 if a == r.y else -1) if thr is not None and _alone(s, thr) else 0
             if served is not None:
-                sa, ss = served.score(r.x)
+                with pl if pl is not None else contextlib.nullcontext():   # the served version cannot change here
+                    go_on()
+                    sa, ss = served.score(r.x)
                 cs = (1 if sa == r.y else -1) if _alone(ss, thr_s) else 0
             else:
                 cs = 0
@@ -846,7 +877,8 @@ class AdapterLoop:
         self._attempt += 1                                 # only trainings that start get an id
         job.id = f"{k}.{self._attempt}"
         self._trainings.append(job.started)
-        inline = bool(inline) or not self._batch           # a snapshot is a copy: nothing to wait for
+        wait = bool(inline)                                # what was asked (recorded); an online learner is inline
+        inline = wait or not self._batch                   # a snapshot is a copy: nothing to wait for
         self._job = {"id": job.id, "version": k, "trigger": trigger, "started": job.started, "eta": None,
                      "runner": None, "pid": None, "log": None, "device": None, "last": None, "last_t": None,
                      "state": "running", "started_at": n, "inline": inline}
@@ -859,11 +891,12 @@ class AdapterLoop:
                                                             self._job)
         job.cancel = threading.Event()
         run = {"job": job, "trigger": trigger, "n": n, "inline": inline, "done": threading.Event(), "out": {},
-               "thread": None, "k": k, "n_train": len(job.rows) if self._batch else None}
+               "thread": None, "k": k, "n_train": len(job.rows) if self._batch else None, "sv": self.served,
+               "hist": len(self._history)}
         self._run = run
-        extra = {"control": True, "wait": inline} if trigger == "train_now" else {}
+        extra = {"control": True, "wait": wait} if trigger == "train_now" else {}
         ev = [self._event("train_start", self.served, n, job=job.id, trigger=trigger, rows=len(job.rows),
-                          hyper=job.hyper, t=job.started, inline=inline, **extra)]
+                          hyper=job.hyper, t=job.started, inline=inline, served_at_start=self.served, **extra)]
         if self._fps is not None:                          # replay: nothing runs
             run["done"].set()
             return job, ev
@@ -883,13 +916,13 @@ class AdapterLoop:
         t0 = time.perf_counter()
         try:
             frozen = self.live.train(job) if self._batch else self.live.snapshot()
-        except Exception as e:  # noqa: BLE001 — applied (recorded, or the loop stopped) on the decision thread
-            out.update(exc=e, where="learner.train")
+        except BaseException as e:  # noqa: BLE001 — applied (recorded, or the loop stopped) on the decision thread;
+            out.update(exc=e, where="learner.train")   # a KeyboardInterrupt in the thread is a failed training
         else:
             out.update(frozen=frozen, seconds=time.perf_counter() - t0)
             try:
-                out["report"] = self._report(frozen, inp)
-            except Exception as e:  # noqa: BLE001
+                out["report"] = self._report(frozen, inp, job.cancel)
+            except BaseException as e:  # noqa: BLE001
                 out.update(exc=e, where="report")
         finally:
             if job.status is not None:
@@ -921,6 +954,7 @@ class AdapterLoop:
         — or the loop stops (a RunnerError: the runner failed; an exception of the report). The paths are stage 3's."""
         run = self._run
         job, trigger, k, out = run["job"], run["trigger"], run["k"], run["out"]
+        self._job, self._run = None, None                  # applied here: no longer in flight (nothing to cancel)
         self._inflight = {"job": job.id, "decision": n, "applied": where, "state": None, "fingerprint": None,
                           "report": None, "extra_keys": []}   # what an error record keeps of this training
         self._at("learner.train")                          # a runner that died stops the loop here (RunnerError)
@@ -930,29 +964,28 @@ class AdapterLoop:
             if rec.get("job") not in (None, job.id):
                 raise RuntimeError(f"replay: training {job.id} applied here, the records hold {rec.get('job')}")
         frozen, error, refused = None, None, None
-        try:
-            if rec is not None:
-                if rec.get("state") == "failed":
-                    error = rec.get("why")
-                elif rec.get("state") == "refused":
-                    refused = rec.get("why")
-                else:
-                    frozen = _Recorded(rec.get("fingerprint"))
-            elif out.get("where") == "learner.train":
-                e = out["exc"]
-                if isinstance(e, RunnerError):
-                    raise e                                # the runner itself failed: the loop stops (status "error")
-                if isinstance(e, TrainingRefused):         # the time estimate is above max_train_s: not started
-                    refused = str(e)
-                else:                                      # a failed training is recorded; the served one serves on
-                    error = f"{type(e).__name__}: {e}"
+        if rec is not None:
+            if rec.get("state") == "failed":
+                error = rec.get("why")
+            elif rec.get("state") == "refused":
+                refused = rec.get("why")
             else:
-                frozen = out["frozen"]
-        finally:
-            self._job, self._run = None, None
+                frozen = _Recorded(rec.get("fingerprint"))
+        elif "frozen" not in out and "exc" not in out:  # cannot happen: _body always leaves one of them
+            error = "the training's thread ended without a result"
+        elif out.get("where") == "learner.train":
+            e = out["exc"]
+            if isinstance(e, RunnerError):
+                raise e                                # the runner itself failed: the loop stops (status "error")
+            if isinstance(e, TrainingRefused):         # the time estimate is above max_train_s: not started
+                refused = str(e)
+            else:                                      # a failed training is recorded; the served one serves on
+                error = f"{type(e).__name__}: {e}"
+        else:
+            frozen = out["frozen"]
         n_train = run["n_train"] if self._batch else self._split_n["train"]
         base = {"job": job.id, "trigger": trigger, "rows": len(job.rows), "hyper": job.hyper, "t": job.started,
-                "started_at": run["n"], "applied": where}
+                "started_at": run["n"], "applied": where, "served_at_start": run["sv"]}
         if refused is not None:
             job.state, job.why = "refused", refused
             return job, [self._event("train", self.served, n, state="refused", why=refused, fingerprint=None,
@@ -961,6 +994,8 @@ class AdapterLoop:
             job.state, job.why = "failed", error
             return job, [self._event("train", self.served, n, state="failed", why=error, fingerprint=None,
                                      report=None, frozen=False, **base)]
+        if len(self._history) != run["hist"]:              # S1: the served version changed during the training
+            return job, self._stale(job, run, n, frozen, k, n_train, base)
         self._at("report")
         if rec is not None:
             r = dict(rec["report"])
@@ -1005,6 +1040,27 @@ class AdapterLoop:
             ev.append(self._event("discard", k, n, samples=0, why=f"freeze refused: {why or 'the policy said no'}"))
         self._inflight = None
         return job, ev
+
+    def _stale(self, job, run, n, frozen, k, n_train, base) -> list:
+        """The served version changed while the training ran (a rollback): its pre-freeze report compares the candidate
+        with a version no longer served, so it is not read — the candidate is discarded at birth, released at once, and
+        the "train" event (state "stale") and the "discard" event say which version it was compared with. Chosen over
+        recomputing the report on the decision thread, which would hold the part's lock for a whole held-out pass."""
+        why = str(_Stale(run["sv"], self.served))
+        self._at("fingerprint")
+        fp = frozen.fingerprint()
+        self._inflight.update(state="stale", fingerprint=fp)
+        job.state, job.why, job.fingerprint, job.frozen = "stale", why, fp, False
+        self._release(frozen)                              # never served: unstaged at once
+        keys = frozenset(r.key for r in job.rows) if self._batch else frozenset(self._fed_keys)
+        row = self._row(k, "discarded", None, None, n, self.live.seen(), n_train, keys, fp)
+        row["discarded_at"] = self._split_n["train"]
+        self._vs[k] = row
+        self._ev_seen[k] = 0
+        self._inflight = None
+        return [self._event("train", self.served, n, state="stale", why=why, fingerprint=fp, report=None,
+                            frozen=False, **base),
+                self._event("discard", k, n, samples=0, why=f"stale: {why}")]
 
     # --- eviction (Budget.max_versions_kept)
     def _rollback_target(self):
@@ -1095,10 +1151,13 @@ class AdapterLoop:
 
     def train_now(self, *, wait=None) -> TrainJob:
         """One training now, whatever want_train says — within the budget, never while paused, with a candidate in
-        trial or with a training in flight. → the TrainJob. wait (None: the loop's `wait`): False — the training starts
-        and the call returns at once (state "running"; its result is applied on a later decision, see `step`); True —
-        the call returns when the training is over and its result applied (state "done", "failed" or "refused" with
-        why). A RunnerError stops the loop where the result is applied."""
+        trial or with a training in flight. → the TrainJob. wait (None: the loop's `wait`): False — a batch learner's
+        training starts and the call returns at once (state "running"; its result is applied on a later decision, see
+        `step`); an online learner's snapshot is a copy, always taken here (state "done"; the "train_start" event
+        records the wait asked and inline=True); True — the call returns when the training is over and its result
+        applied (state "done", "failed", "refused" or "stale" with why). A RunnerError stops the loop where the result
+        is applied. A train_now refused (paused, a candidate in trial, a training in flight, the budget) writes its
+        control event, a "train" with state "refused"."""
         wait = self.wait if wait is None else bool(wait)
         with self._locked():
             self._refuse_if_stopped()
@@ -1130,7 +1189,9 @@ class AdapterLoop:
     def close(self, *, timeout=30.0) -> dict | None:
         """Stop the loop: a training in flight is cancelled (its runner stops it: a subprocess is killed, a thread
         runner stops waiting for its thread), `step` and every control refuse from here on; the served version stays
-        installed. Waits up to timeout seconds for the training's thread, outside every lock. → the "close" event
+        installed. With `wait=True` a training runs inside a step or a control under the loop's locks, so a training in
+        progress there ends first. Waits up to timeout seconds for the training's thread, outside every lock. → the
+        "close" event
         (None when already closed). Also `with AdapterLoop(...) as loop:`."""
         with self._locked():
             if self.closed:
@@ -1333,12 +1394,14 @@ class AdapterLoop:
 
     def _check_files(self, fps, items, rescore):
         bad, models = [], {}
+        with self._lock:                                   # a background apply may add a version meanwhile
+            vs = {v: dict(ver) for v, ver in self._vs.items()}
         for v, fp in fps.items():
-            cls = (self._vs.get(v) or {}).get("served_cls")
+            cls = (vs.get(v) or {}).get("served_cls")
             if cls is None:
                 bad.append((None, "version file", f"version {v}: no Served to load it with"))
                 continue
-            srv = (self._vs.get(v) or {}).get("served_as")
+            srv = (vs.get(v) or {}).get("served_as")
             part = getattr(srv, "part", None) or self.part      # an evicted version: the loop's part
             kw = ({"part": part} if part is not None
                   and "part" in inspect.signature(cls.load).parameters else {})   # a LoRA version scores on its part
@@ -1348,8 +1411,8 @@ class AdapterLoop:
                 bad.append((None, "version file", f"version {v}: {e.filename} is missing"))
             except Exception as e:  # noqa: BLE001 — a tampered or foreign file
                 bad.append((None, "version file", f"version {v}: {e}"))
-        if self._vs[0]["model"] is not None:
-            models[0] = self._vs[0]["model"]               # version 0: the model given as initial=
+        if vs[0]["model"] is not None:
+            models[0] = vs[0]["model"]                     # version 0: the model given as initial=
         if rescore:
             for kind, d in items:
                 if kind != "loop":
@@ -1360,8 +1423,8 @@ class AdapterLoop:
                         got = models[v].score(lp.get("input"))[1]
                         if _num(got) != st.get(key):
                             bad.append((st["n"], "rescore", f"version {v}: recorded {st.get(key)}, scores {got}"))
-        live = {id(x) for ver in self._vs.values() for x in (ver.get("model"), ver.get("served_as")) if x is not None}
-        live_fp = {ver["model"].fingerprint() for ver in self._vs.values() if ver.get("model") is not None}
+        live = {id(x) for ver in vs.values() for x in (ver.get("model"), ver.get("served_as")) if x is not None}
+        live_fp = {ver["model"].fingerprint() for ver in vs.values() if ver.get("model") is not None}
         for v, mdl in models.items():                      # the copies loaded for the check: unstaged again, unless
             if id(mdl) not in live and mdl.fingerprint() not in live_fp:   # a live version shares their adapter
                 self._release(mdl)

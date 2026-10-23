@@ -325,3 +325,204 @@ def test_a_decision_under_the_part_lock_and_a_loop_step_do_not_deadlock():
     assert not errors, errors
     assert loop.n == 800 and _events(loop, "train_start")
     loop.close()
+
+
+# ───────────────────────────── stage-3b review fixes
+class _Counted(_Model):
+    """A model that counts its score calls (the served side of a training's report)."""
+
+    def __init__(self, name, share, delay=0.0):
+        super().__init__(name, share)
+        self.calls, self.delay = 0, delay
+
+    def score(self, x):
+        self.calls += 1
+        if self.delay:
+            time.sleep(self.delay)
+        return super().score(x)
+
+
+class _Gated(_Learner):
+    """A batch learner with one gate per training (None: no wait)."""
+
+    def __init__(self, outcomes, gates):
+        super().__init__(outcomes)
+        self.gates = list(gates)
+
+    def train(self, job):
+        self.gate = self.gates.pop(0) if self.gates else None
+        return super().train(job)
+
+
+def test_a_rollback_during_a_training_makes_its_result_stale_discarded_and_released():
+    """S1 (the review's probe 1): version 1 served, a training starts, rollback(0), 400 decisions, the result comes in.
+    The report is not gated on the stale comparison with version 1: the "train" event has state "stale" and names the
+    served version at the start, the candidate is discarded and released, version 1 is never scored again, replay
+    exact."""
+    g1, g2 = threading.Event(), threading.Event()
+    g1.set()
+    m2 = _Counted("m2", 0.95)
+    v1 = _Counted("m1", 0.9)
+    learner = _Gated([v1, m2], gates=[g1, g2])
+    loop = AdapterLoop(learner, question="q", max_risk=0.05, secret=KEY, initial=_Model("v0", 0.6),
+                       policy=_plain(first=20, growth=1.0, trial=300, holdout=0.5))
+    data = iter(_fake(1, 60000))
+    while loop.served != 1:
+        _step(loop, next(data))
+        assert loop.n < 50000, "version 1 was never served"
+    job = loop.train_now(wait=False)
+    assert job.state == "running"
+    assert _events(loop, "train_start")[-1]["served_at_start"] == 1
+    loop.rollback(0)
+    for _ in range(400):
+        _step(loop, next(data))
+    calls = v1.calls
+    g2.set()
+    assert loop.wait_training(10)
+    assert v1.calls == calls                          # the report stopped: version 1 (no longer served) not scored
+    out, _ = _step(loop, next(data))
+    tr = _events(loop, "train")[-1]
+    assert tr["job"] == job.id and tr["state"] == "stale" and tr["served_at_start"] == 1 and not tr["frozen"]
+    assert "v1 → v0" in tr["why"] and tr["decision"] == out["n"]
+    dis = _events(loop, "discard")[-1]
+    assert dis["version"] == 2 and dis["why"].startswith("stale:")
+    assert loop.candidate is None and loop.versions()[2]["state"] == "discarded" and m2.released == 1
+    assert job.state == "stale"
+    for _ in range(200):
+        _step(loop, next(data))
+    r = loop.replay()
+    assert r["ok"], r["mismatches"][:5]
+
+
+def test_the_report_stops_when_the_training_is_cancelled():
+    """S1: close() during a long held-out pass does not wait for the whole pass."""
+    gate = threading.Event()
+    slow = _Counted("slow", 0.9, delay=0.01)
+    loop = AdapterLoop(_Gated([slow], gates=[gate]), question="q", max_risk=0.05, secret=KEY,
+                       initial=_Model("v0", 0.6), policy=_plain(first=10 ** 6, holdout=0.9))
+    for x in _fake(2, 1500):
+        _step(loop, x)
+    assert loop.status()["labels"]["holdout"] > 300
+    loop.train_now()
+    th = loop._run["thread"]
+    gate.set()
+    deadline = time.monotonic() + 10
+    while slow.calls < 5 and time.monotonic() < deadline:
+        time.sleep(0.01)
+    t0 = time.monotonic()
+    loop.close(timeout=10)
+    assert not th.is_alive() and time.monotonic() - t0 < 2.0
+    assert slow.calls < 200
+
+
+def test_the_rollback_target_is_never_evicted():
+    """S2: after every "evict" event the version served before the served one is "retired", a rollback to it succeeds
+    (then the loop rolls forward again), and version 0 is "served" or "retired" throughout."""
+    outcomes = [_Model(f"s{i}", min(0.6 + 0.05 * i, 0.995)) for i in range(40)]
+    loop = AdapterLoop(_Learner(outcomes), question="q", max_risk=0.05, secret=KEY, wait=True,
+                       policy=_plain(keep=2, growth=1.0, trial=300, first=200))
+    data = iter(_fake(8, 60000))
+    checked = 0
+    seen_evicts = 0
+    while checked < 2:
+        _step(loop, next(data))
+        assert loop.n < 55000, [(v["version"], v["state"]) for v in loop.versions()]
+        assert loop.versions()[0]["state"] in ("served", "retired")
+        ev = _events(loop, "evict")
+        if len(ev) == seen_evicts:
+            continue
+        seen_evicts = len(ev)
+        served = [e["to"] for e in _events(loop, "promote", "rollback")]
+        cur = loop.served
+        before = [v for v in [0] + served if v != cur]
+        target = before[-1]
+        assert loop.versions()[target]["state"] == "retired", (target, loop.versions())
+        loop.rollback(target)
+        assert loop.served == target
+        loop.rollback(cur)
+        assert loop.served == cur
+        checked += 1
+    r = loop.replay()
+    assert r["ok"], r["mismatches"][:5]
+
+
+def test_a_candidate_refused_at_the_freeze_is_released_at_once():
+    """S3: with the pre-freeze gates on, a candidate that fails them is released when it is discarded at birth."""
+    bad = _Model("bad", 0.1)
+    loop = AdapterLoop(_Learner([bad]), question="q", max_risk=0.05, secret=KEY, initial=_Model("v0", 0.9),
+                       policy=_plain(first=10 ** 6, pre_freeze=True, holdout=0.3, calib=0.2))
+    for x in _fake(3, 3000):
+        _step(loop, x)
+    job = loop.train_now()
+    assert job.state == "running"
+    assert loop.wait_training(10)
+    data = iter(_fake(4, 100))
+    _step(loop, next(data))
+    tr = _events(loop, "train")[-1]
+    assert tr["state"] == "done" and tr["frozen"] is False
+    dis = _events(loop, "discard")[-1]
+    assert dis["version"] == 1 and dis["why"].startswith("freeze refused")
+    assert bad.released == 1 and loop.versions()[1]["state"] == "discarded" and loop.candidate is None
+    r = loop.replay()
+    assert r["ok"], r["mismatches"][:5]
+
+
+def test_an_error_stop_names_the_cancelled_training():
+    class _Failing(_Learner):
+        fail_at = None
+
+        def update(self, x, y, **_):
+            if self.fail_at is not None and self._seen + 1 == self.fail_at:
+                raise RuntimeError("the label store is gone")
+            self._seen += 1
+    learner = _Failing([_Model("m", 0.9)], gate=threading.Event())
+    loop = AdapterLoop(learner, question="q", max_risk=0.05, secret=KEY, policy=_plain(first=20))
+    data = iter(_fake(3, 5000))
+    while not learner.jobs:
+        _step(loop, next(data))
+    learner.fail_at = learner.seen() + 3
+    with pytest.raises(RuntimeError, match="label store"):
+        for _ in range(200):
+            _step(loop, next(data))
+    err = _events(loop, "error")[-1]
+    assert err["cancelled"] == "1.1" and err["train"] is None
+    r = loop.replay()
+    assert r["ok"], r["mismatches"][:5]
+
+
+def test_train_now_without_wait_on_an_online_learner_records_the_wait_asked():
+    class _Online:
+        def __init__(self):
+            self._seen = 0
+
+        def update(self, x, y, **_):
+            self._seen += 1
+
+        def seen(self):
+            return self._seen
+
+        def snapshot(self):
+            return _Model(f"snap{self._seen}", 0.9)
+    loop = AdapterLoop(_Online(), question="q", max_risk=0.05, secret=KEY, policy=_plain(first=10 ** 6))
+    for x in _fake(2, 30):
+        _step(loop, x)
+    job = loop.train_now(wait=False)
+    ts = _events(loop, "train_start")[-1]
+    assert job.state == "done" and ts["wait"] is False and ts["inline"] is True and loop.candidate == 1
+    r = loop.replay()
+    assert r["ok"], r["mismatches"][:5]
+
+
+def test_a_keyboard_interrupt_in_the_training_thread_is_a_failed_training():
+    loop = AdapterLoop(_Learner([KeyboardInterrupt()]), question="q", max_risk=0.05, secret=KEY,
+                       policy=_plain(first=10 ** 6))
+    data = iter(_fake(5, 200))
+    for _ in range(30):
+        _step(loop, next(data))
+    loop.train_now()
+    assert loop.wait_training(10)
+    _step(loop, next(data))
+    tr = _events(loop, "train")[-1]
+    assert tr["state"] == "failed" and tr["why"].startswith("KeyboardInterrupt") and loop.status()["state"] != "error"
+    r = loop.replay()
+    assert r["ok"], r["mismatches"][:5]
