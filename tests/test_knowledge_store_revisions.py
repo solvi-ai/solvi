@@ -37,19 +37,25 @@ def test_values_on_disjoint_validity_intervals_do_not_dispute():
     assert ks.verify()
 
 
-def test_overlapping_validity_still_disputes():
+def test_an_overlapping_later_since_closes_the_earlier_value_instead_of_disputing_it():
+    # rewritten: under the old rule the two overlapping values were a dispute; a later since now closes the earlier
     ks = KnowledgeStore()
     a = ks.add("fact", fact("x", 1), source="spec", by="p", valid=(None, 10))
     b = ks.add("fact", fact("x", 2), source="spec", by="q", valid=(5, None))
-    assert ks.status(a) == ks.status(b) == "disputed" and len(ks.disputes()) == 1
+    assert ks.status(a) == ks.status(b) == "active" and ks.disputes() == []
+    assert ks.periods(a) == [[None, 5]] and ks.periods(b) == [[5, None]]
+    assert ks.usable(a, valid_at=4) and not ks.usable(a, valid_at=7) and ks.usable(b, valid_at=7)
 
 
-def test_a_later_valid_since_supersedes_whatever_order_the_notes_arrive_in():
+def test_a_later_valid_since_closes_the_earlier_version_whatever_order_the_notes_arrive_in():
+    # rewritten: the earlier version was refuted under the old rule; it is now closed at the later since and stays
     ks = KnowledgeStore()
     new = ks.add("fact", fact("anna", "manager", "role"), source="outcome", by="hr", valid=(50, None))
     old = ks.add("fact", fact("anna", "engineer", "role"), source="outcome", by="wiki", valid=(0, None))
-    assert ks.status(new) == "active" and ks.status(old) == "refuted"
-    assert ks.item(old)["confidence"]["n_refute"] == 1
+    assert ks.status(new) == ks.status(old) == "active"
+    assert ks.item(old)["confidence"]["n_refute"] == 0 and ks.item(old)["valid"]["effective"] == [[0, 50]]
+    assert [f["body"]["o"] for f in ks.snapshot(about="anna", valid_at=10)["facts"]] == ["engineer"]
+    assert [f["body"]["o"] for f in ks.snapshot(about="anna", valid_at=60)["facts"]] == ["manager"]
 
 
 def test_the_same_valid_since_from_two_writers_is_a_dispute():
