@@ -89,7 +89,8 @@ verified, so with a secret a file changed or added by someone without it is refu
 tamper protection against a writer of the folder (a plain SHA-256 anyone can recompute), and `load` warns
 (`CheckpointTrustWarning`). `load` refuses a tampered, missing or unlisted file, a checkpoint saved with a secret
 loaded without one, another secret, another learner class, a part with other weights, a version file
-with another fingerprint, a store without the chain head or with records after it. The learner is given fresh and fed
+with another fingerprint, a store without the chain head or with records after it; the versions are loaded from the
+verified bytes (a private copy), never from the folder again after the check. The learner is given fresh and fed
 the saved train labels again. A training in flight refuses the save unless `cancel=True`. A loaded loop continues with
 the same decisions and records as the loop it was saved from and `replay()` rebuilds every decision before and after
 the load. A save holds the part's version lock and the loop's lock for all its writes, so the part's decisions wait
