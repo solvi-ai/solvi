@@ -55,6 +55,7 @@ a hook reads; `Budget`; `DefaultPolicy`. Unmeasured.
 ## `solvi.experimental.stream.gates`
 
 The content-key split and the gate arithmetic the default policy uses: the held-out gate, the honesty gate, label
-mode's paired Wilson bound, the memorisation probe, the improvement signal.
+mode's paired Wilson sign test (safe only together with the held-out gate), the memorisation probe, the improvement
+signal.
 
 ::: solvi.experimental.stream.gates

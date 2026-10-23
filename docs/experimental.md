@@ -623,8 +623,10 @@ The adapter (LoRA) loop that will build on `LearningLoop` has its first stage: t
 70 / 15 / 15 into train / calib / holdout by a hash of the content key (a key never changes split), trains only when
 the labels grew and the served version is measurably short on its held-out labels, freezes on held-out gates the
 candidate never trained on, and promotes only on samples whose keys it never trained on, with a memorisation probe
-(error on novel minus error on seen inputs ≤ 0.10). `stream.gates` holds the arithmetic. Unmeasured: the numbers are
-the design's.
+(error on novel minus error on seen inputs ≤ 0.10, and at least 30 alone answers on novel inputs: a model that
+answers only what it trained on is not promoted). `stream.gates` holds the arithmetic. Unmeasured: the numbers are
+the design's. A limit: "novel" is exact-key identity, so a paraphrase of a trained item counts as novel; the probe and
+the held-out gate do not see near-duplicates.
 
 Measured once on real streams: three public intent sets with a TF-IDF + logistic-regression answerer, 20 seeds per
 set, a shift to held-out intents, corrupted text and noisy labels; the numbers, the setting and the prior work are in

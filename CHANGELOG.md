@@ -211,15 +211,19 @@
   clock, paused, the mode). `Budget`: trainings over the life and per 24 h, the interval between two, the seconds of
   one, threads, device, rows per training, adapter files kept; `Budget.refuse` says why a training may not start.
   `DefaultPolicy`: trusted label sources (slow-path ones only with `s2_labels=True`); a 70 / 15 / 15 train / calib /
-  holdout split by a hash of the content key (a key never changes split); train at ≥ 300 labels and ≥ 1.5 × the
-  served version's, only with an improvement signal (the served version errs alone above α, or answers nothing
-  alone, on its last 200 held-out labels); a class-balanced, half-recent selection; r 8, lr 3e-4, updates
+  holdout split by a hash of the content key with the change pipeline's salt (a key never changes split, and the
+  loop never trains on a key the change pipeline holds out); train at ≥ 300 labels and ≥ 1.5 × the largest n_train
+  of any version (a discarded one included), never while a training is in flight, only with an improvement signal
+  (the served version errs alone above α, or answers nothing alone, on its last 200 held-out labels, or has fewer
+  than 100 of them); one label per key (the latest), then a class-balanced, half-recent selection; r 8, lr 3e-4, updates
   clamp(⌈n / 4⌉, 200, 3000), seed = the version; freeze on ≥ 100 held-out labels with a gain of 0.01 in (right −
   wrong) answered alone, an `act_guard` threshold, honesty within 0.02 and the time budget (label mode adds a paired
-  Wilson bound > 0); promote when certified, with ≥ 100 samples on keys the candidate never trained on, ≥ 5 % alone
-  on them and ≥ the served share + 1 point, and the memorisation probe (error alone on novel − on seen ≤ 0.10);
-  discard on a failed probe, uncertified after 1 500 samples or not better after 1 500; on a second alarm within 300
-  decisions roll back. `LabelRow`, `TrainReport`, `Paired`, `VersionInfo` carry what the hooks read. Policies
+  Wilson sign test > 0, safe only together with the held-out gate); promote when certified, with ≥ 100 samples on
+  keys the candidate never trained on, ≥ 5 % alone on them and ≥ the served share + 1 point, ≥ 30 alone answers on
+  them, and the memorisation probe (error alone on novel − on seen ≤ 0.10); discard when the probe shows the gap
+  beyond noise (Wilson bounds), uncertified after 1 500 samples or not better after 1 500; on a second alarm on the
+  current serving within 300 decisions roll back to the highest retired version below it with no alarm on record.
+  `LabelRow`, `TrainReport`, `Paired`, `VersionInfo` (with the trained key set) carry what the hooks read. Policies
   pickle (they go into the loop's checkpoint). Unmeasured: the numbers are the design's, not tuned.
 - **A secret for the supervision and audit draws: `Dispatcher(secret=)`** (`solvi.core.dispatch`; security). The
   draws were `sha256(f"{seed}|{input hash}|{n}")` with the public default `seed=0`, so whoever could vary the inputs
