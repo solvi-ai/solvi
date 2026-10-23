@@ -1,10 +1,10 @@
-"""A process of several solvi systems (experimental, stages 0 to 3): the nodes, the edges with predicates written as
+"""A process of several solvi systems (experimental, stages 0 to 4): the nodes, the edges with predicates written as
 data, merges, loops with a mandatory iteration limit and the declared promise — a JSON specification with a hash, a
 structural diff and a drawing (stage 0) — and running it: each node's decision in its own store, chained into one run,
 with an index record of the path (stage 1a), and questions put to a person through a queue, a run waiting for the
 answer and going on when it comes (stage 1b) — replaying a run from its records (stage 2) — and the path promise in
-the modes union and per_node, with a watch on the mix of paths (stage 3). The end_to_end promise (stage 4) and
-retraction come in later stages.
+the modes union and per_node, with a watch on the mix of paths (stage 3), and end_to_end, calibrated on end-labelled
+runs over a threshold family (stage 4). Retraction comes in a later stage.
 
     from solvi.experimental.process import Process, MemoryQueue
 
@@ -110,8 +110,8 @@ Replay (stage 2). `p.replay(run)` re-checks one run from the records alone → {
 "record" (the record intact in its store, of this run, after the decision before it, agreeing with the step),
 "trace_hash", "replay" (the decision re-checked by its own means: Dispatcher.replay, Trace.replay, Guard.replay),
 "facts" (the facts given are those the recorded answers upstream and the input give, in the step and in the node's
-own record), "edge" (the first edge that holds on the recorded answers is the recorded one); "promise" (the
-end_to_end rule) waits for stage 4. A person's answer is a leaf, "recorded, not recomputed": its "human" record must
+own record), "edge" (the first edge that holds on the recorded answers is the recorded one), "promise" (the
+calibrated end_to_end rule recomputed on the node's recorded confidence). A person's answer is a leaf, "recorded, not recomputed": its "human" record must
 be intact, follow from the pending segment, be the ticket's only answer, come through the same channel and answer the
 request asked. "at" is the first divergence {"node", "step", "segment", "position"}; "kind" is "integrity" (records
 disagree), "recompute" (a decision does not recompute, or the spec changed) or "missing_part" (a node without its
@@ -137,8 +137,28 @@ promise then holds with probability ≥ 1 − Σ δ_i (Bonferroni, a warning) �
 split over), no node was loaded against another fingerprint (strict=False), and the path watch has not flagged. It
 assumes (A2) that each node was calibrated on what reaches it in the process — in place, on upstream's answers with
 their errors and the routing of the edges; a node calibrated on clean inputs breaks it. mode "per_node": each node
-keeps its own promise, and the statement says the end error is not bounded. mode "end_to_end" is stage 4
-(guarantee() raises NotImplementedError; a run runs and carries no risk).
+keeps its own promise, and the statement says the end error is not bounded.
+
+The end_to_end promise (stage 4). The process is one decider with thresholds on its nodes' signals (their
+confidence): `p.promise(mode="end_to_end", risk=r, delta=δ, family=..., examples=[(input, end_label)])` then
+`p.calibrate()` (or calibrate(examples)). It promises P(a run ends automatically and its end answer is wrong) ≤ r with
+probability ≥ 1 − δ over the n end-labelled runs. The loss is not monotone in a threshold vector in general (routing),
+so the calibration is learn then test (a binomial test per threshold of a finite grid), not CRC. Each example runs
+once with no threshold (each node asked, its decision stored; no person asked: a node that does not answer alone makes
+the example not automatic); the loss at a threshold t is recomputed from the recorded signals, as a node held back
+by t goes to a person and the run is not automatic. The family is the user's choice (`ThresholdFamily`: grid(spec,
+signals), automatic(node, signal, t), fingerprint(), procedure "bonferroni" | "fixed"); built in: "shared_rank" (the
+default — one rank threshold shared by every node, 64 values, Bonferroni) and "per_node_fixed" (a rank threshold per
+node, nodes opened one at a time in the declared order, by default from the end back to the start, as a fixed
+sequence). A family of your own is valid when its grid and order did not look at the labels. The chosen threshold
+and what it was calibrated on (n, the examples' hash, the process's hash without its promise, the family's
+fingerprint) are kept in the promise (`thresholds`, `calibrated_on`). At run time a node that answered alone with a
+signal t does not let through is turned into "a person decides" (status "human", by "human", its question handed
+over as when its own guard does it), and each step of a decision node records {"signal", "automatic"} (+ "held");
+replay step 6 recomputes it. guarantee() is in force when calibrated, the process (spec, nodes' fingerprints) and the
+family are the ones it was calibrated with, and the path watch has not flagged; it assumes (A3) that the
+end-labelled runs are exchangeable with the stream (with noisy end labels the promise is about the noisy label).
+Nothing certified: every node's answer goes to a person.
 
 `PathWatch` watches the mix of paths: `p.monitor(PathWatch(alpha=, horizon=), reference=runs of the calibration
 stream)`; every run that ends is observed (result.path_drift: {"drift", "why", "edge", "S", "h", "seen"}). Each
@@ -152,6 +172,7 @@ import abc
 import dataclasses
 import hashlib
 import json
+import math
 import re
 import threading
 import uuid
@@ -759,7 +780,8 @@ class Process:
         self.merges: dict[str, str] = {}
         self._promise = None                          # the declared promise: values, or a callable split kept until spec()
         self._human_spec = None                       # a channel as recorded, kept for a loaded spec without a channel
-        self.examples = None                          # end_to_end calibration examples (used by a later stage)
+        self.examples = None                          # end_to_end calibration examples [(input, end_label)]
+        self._family_obj = None                       # a custom ThresholdFamily object (end_to_end)
         self.mismatched: dict[str, dict] = {}
         self.unbound: list[str] = []
         self._store = None                            # the opened storage= (on the first run)
@@ -842,11 +864,12 @@ class Process:
         return self
 
     def promise(self, mode="union", risk=None, split="equal", delta=None, examples=None, family=None):
-        """Declare the process promise (computed by a later stage; here its configuration is recorded and checked).
+        """Declare the process promise (its configuration is recorded and checked; end_to_end is then calibrated by
+        calibrate()).
         mode: "union" (risk r split over the automatic nodes: split="equal" — r / K_auto each —, {node: r_i} with
         Σ r_i ≤ r, or callable(spec) → {node: r_i}), "end_to_end" (risk, delta, examples=[(input, end_label)],
-        family="shared_rank" | "per_node_fixed" | {"kind": "per_node_fixed", "order": [...]} | a ThresholdFamily
-        object with fingerprint()) or "per_node" (each node keeps its own promise). → self."""
+        family="shared_rank" (the default) | "per_node_fixed" | {"kind": "per_node_fixed", "order": [...]} | a
+        ThresholdFamily object of your own) or "per_node" (each node keeps its own promise). → self."""
         if mode not in MODES:
             raise ProcessSpecError(f"promise mode is one of {', '.join(MODES)}, not {mode!r}")
         pr = {"mode": mode, "risk": None, "split": None, "family": None, "delta": None, "thresholds": None,
@@ -871,6 +894,7 @@ class Process:
                 raise ProcessSpecError(f"promise delta is in (0, 1), not {delta!r}")
             pr["delta"] = delta
             pr["family"] = _family(family if family is not None else "shared_rank")
+            self._family_obj = family if pr["family"]["kind"] == "custom" else None
             self.examples = None if examples is None else list(examples)
         elif family is not None or delta is not None:
             raise ProcessSpecError(f"promise mode {mode} takes no family or delta (end_to_end does)")
@@ -907,7 +931,7 @@ class Process:
             _check_split(pr["split"]["per_node"], pr["risk"], auto)
         fam = pr["family"]
         if isinstance(fam, dict) and fam["kind"] == "per_node_fixed" and fam["order"] is None:
-            fam = dict(fam, order=_topological(self.nodes, self.edges, auto))
+            fam = dict(fam, order=list(reversed(_topological(self.nodes, self.edges, auto))))   # end → start
         if isinstance(fam, dict) and fam.get("order") is not None:
             bad = [n for n in fam["order"] if n not in auto]
             if bad or len(set(fam["order"])) != len(fam["order"]):
@@ -916,11 +940,12 @@ class Process:
         return pr
 
     @classmethod
-    def from_spec(cls, spec, systems=None, human=None, storage=None, strict=True, user_verifier=None):
+    def from_spec(cls, spec, systems=None, human=None, storage=None, strict=True, user_verifier=None, family=None):
         """A process from its spec (a dict or JSON text). systems: {node: system} to bind (each checked against its
         recorded fingerprint); human: the channel (checked likewise); storage, user_verifier: as Process() — a process
         loaded with the store of the one that asked resumes its pending runs. strict=False loads a mismatch and lists it in
-        `mismatched` instead of raising. A node given no system is listed in `unbound`."""
+        `mismatched` instead of raising. A node given no system is listed in `unbound`. family: the ThresholdFamily
+        object of an end_to_end promise with a family of your own (checked against its recorded fingerprint)."""
         if isinstance(spec, (str, bytes)):
             spec = json.loads(spec)
         if not isinstance(spec, dict) or "solvi_process" not in spec:
@@ -977,6 +1002,18 @@ class Process:
         pr = spec.get("promise")
         if pr is not None:
             p._promise = _load_promise(pr)
+        if family is not None:
+            rec_f = (p._promise or {}).get("family") or {}
+            if rec_f.get("kind") != "custom":
+                raise ProcessSpecError("family= is for an end_to_end promise with a family of your own; the spec "
+                                       f"records {rec_f.get('kind')!r}")
+            act = _family(family)
+            if act["fingerprint"] != rec_f.get("fingerprint"):
+                if strict:
+                    raise ProcessSpecError(f"the threshold family given (fingerprint {act['fingerprint']}) is not the "
+                                           f"recorded one ({rec_f.get('fingerprint')})")
+                p.mismatched["family"] = {"recorded": rec_f.get("fingerprint"), "actual": act["fingerprint"]}
+            p._family_obj = family
         _check_graph(p.nodes, p.edges, p.merges, p._start)
         return p
 
@@ -1021,8 +1058,10 @@ class Process:
         path, results = [], {}
         node, status, answer, why = w["node"], None, None, None
 
-        def step(node, ns, res, state, kind):
+        def step(node, ns, res, state, kind, gate=None):
             st, edge = self._step(node, ns, res, state, kind, facts, prov, taken)
+            if gate is not None:
+                st["promise"] = gate
             results[node] = res
             path.append(st)
             return edge
@@ -1049,7 +1088,8 @@ class Process:
                 with run_context(parent=parent):
                     res = runner.run(state)
                 kind = ns["kind"]
-            edge = step(node, ns, res, state, kind)
+                res, gate = self._gate(spec, node, res)
+            edge = step(node, ns, res, state, kind, gate if kind != "human" else None)
             if res.stored_id is not None:
                 parent = res.stored_id
             if edge is None and res.status in ("human", "abstain") and kind != "human":   # not a person's answer
@@ -1088,10 +1128,163 @@ class Process:
         if self.path_watch is not None:
             res.path_drift = self.path_watch.observe(sorted(edges), names=_edge_names(self.edges))
         pr = spec.get("promise")
-        if pr is not None and pr["mode"] == "union":           # end_to_end: stage 4; per_node bounds no end risk
+        if pr is not None and pr["mode"] in ("union", "end_to_end"):     # per_node bounds no end risk
             g = self.guarantee(spec)
             res.risk = g["risk"] if g["in_force"] else None
         return res
+
+    def _gate(self, spec, node, res):
+        """The end_to_end decision rule on one node's result → (the result, {"signal", "automatic"} or None). With a
+        calibrated end_to_end promise, a node that answered alone and whose signal (its confidence) the family's
+        calibrated threshold does not let through is turned into "a person decides" (by "human", status "human", no
+        answer), as if its own guard had sent it on; a run and its replay both pass through here."""
+        pr = spec.get("promise")
+        if pr is None or pr["mode"] != "end_to_end" or pr.get("thresholds") is None:
+            return res, None
+        sig = res.confidence
+        if not _alone(res):
+            return res, {"signal": sig, "automatic": False}
+        t = pr["thresholds"]["t"]
+        ok = t is not None and bool(self._family(pr["family"]).automatic(node, sig, t))
+        if ok:
+            return res, {"signal": sig, "automatic": True}
+        held = NodeResult(None, {k: None for k in res.answers}, "human", "human", sig, res.stored_id, res.trace_hash,
+                          res.cost, res.drift, res.budget_over, res.raw, res.store)
+        return held, {"signal": sig, "automatic": False, "held": True}
+
+    def _family(self, fam):
+        """The ThresholdFamily object of a recorded family (a built-in, or the custom object given)."""
+        if fam["kind"] == "shared_rank":
+            return SharedRank()
+        if fam["kind"] == "per_node_fixed":
+            return PerNodeFixed()
+        obj = self._family_obj
+        if obj is None:
+            raise ProcessRunError("an end_to_end promise with a family of your own needs its object: promise(family="
+                                  "obj) or Process.from_spec(spec, family=obj)")
+        if _family(obj)["fingerprint"] != fam.get("fingerprint"):
+            raise ProcessSpecError("the threshold family object is not the recorded one (another fingerprint)")
+        for m in ("grid", "automatic"):
+            if not callable(getattr(obj, m, None)):
+                raise TypeError(f"a ThresholdFamily needs {m}(): {type(obj).__name__}")
+        return obj
+
+    # --- the end_to_end promise: calibration on end-labelled runs
+
+    def calibrate(self, examples=None):
+        """Calibrate the end_to_end promise on end-labelled runs: examples [(input facts, end label)] (default: the
+        ones given to promise(examples=)). Each example runs through the process once with no threshold — each node
+        asked by its own system and its decision stored in its own store, under a run of its own; no "process"
+        record; a node that does not answer alone (sends its decision to a person, or abstains) makes the example
+        "not automatic" at every threshold and no person is asked. The family's grid is built from the signals the
+        nodes gave (never from the labels); at each threshold t of it, the loss of an example is 1 when the run would
+        end automatically (an end node answered and every node on its path answered alone with a signal the family
+        lets through at t) and its end answer differs from the label. Learn then test: each t is the null "P(loss)
+        > risk", rejected by a binomial test on the n examples — Bonferroni over the grid (procedure "bonferroni";
+        of the certified thresholds the one that lets most examples through) or a fixed sequence in the grid's order
+        at the full delta, stopping at the first that fails (procedure "fixed"; the last certified one). Nothing
+        certified: every node's answer goes to a person. The chosen threshold, the counts and what it was calibrated
+        on (n, the examples' hash, the process without its promise, the family's fingerprint) go into the promise,
+        so the spec's hash changes. → the promise's "thresholds" record."""
+        from ..core.calibration import ltt_certified
+        from ..core.store import run_context
+        spec = self.spec()
+        pr = spec.get("promise")
+        if pr is None or pr["mode"] != "end_to_end":
+            raise ProcessSpecError("calibrate() is for an end_to_end promise (p.promise(mode='end_to_end', ...))")
+        examples = list(examples if examples is not None else (self.examples or []))
+        if not examples:
+            raise ValueError("calibrate(examples=[(input facts, end label), ...]): no end-labelled examples")
+        self._check_bound()
+        fam = self._family(pr["family"])
+        procedure = getattr(fam, "procedure", "bonferroni")
+        if procedure not in ("bonferroni", "fixed"):
+            raise ValueError(f"a ThresholdFamily's procedure is 'bonferroni' or 'fixed', not {procedure!r}")
+        walks = []
+        for facts, _ in examples:
+            with run_context(run=None) as rc:
+                walks.append(self._walk(spec, dict(facts), rc.id))
+        auto_nodes = [n for n, ns in self.nodes.items() if ns["kind"] != "human"]
+        signals = {n: [] for n in auto_nodes}
+        for w in walks:
+            for node, sig, alone in w["steps"]:
+                if alone and sig is not None:
+                    signals[node].append(float(sig))
+        grid = list(fam.grid(spec, signals))
+        if not grid:
+            raise ValueError("the threshold family gave an empty grid")
+        wrong = np.array([w["decided"] and _cj(w["answer"]) != _cj(lab) for w, (_, lab) in zip(walks, examples)], bool)
+        live = np.array([w["decided"] and all(a for _, _, a in w["steps"]) for w in walks], bool)
+        n = len(examples)
+        through = np.zeros((len(grid), n), bool)
+        if isinstance(fam, _ByNode):                   # the built-ins: the same rule, by arrays
+            names = {nd: i for i, nd in enumerate(auto_nodes)}
+            J = np.array([j for j, w in enumerate(walks) if live[j] for _ in w["steps"]], int)
+            N = np.array([names[nd] for j, w in enumerate(walks) if live[j] for nd, _, _ in w["steps"]], int)
+            S = np.array([np.nan if sg is None else float(sg) for j, w in enumerate(walks) if live[j]
+                          for _, sg, _ in w["steps"]], float)
+            for g, t in enumerate(grid):
+                thr = np.array([np.nan if t.get(nd) is None else t[nd] for nd in auto_nodes], float)
+                failed = np.zeros(n, bool)
+                if len(J):
+                    with np.errstate(invalid="ignore"):
+                        np.logical_or.at(failed, J, ~(S >= thr[N]))
+                through[g] = live & ~failed
+        else:
+            for g, t in enumerate(grid):
+                for j, w in enumerate(walks):
+                    if live[j]:
+                        through[g, j] = all(bool(fam.automatic(node, sig, t)) for node, sig, _ in w["steps"])
+        m = (through & wrong[None, :]).sum(1)
+        a = through.sum(1)
+        risk, delta = float(pr["risk"]), float(pr["delta"])
+        k = np.full(len(grid), n)
+        if procedure == "bonferroni":
+            good = ltt_certified(k, m, risk, delta, "bonferroni")
+            hit = np.flatnonzero(good)
+            pick = int(hit[np.argmax(a[hit])]) if len(hit) else None
+        else:                                          # first tested first: ltt_certified descends from the last index
+            good = ltt_certified(k[::-1], m[::-1], risk, delta, "fixed")[::-1]
+            hit = np.flatnonzero(good)
+            pick = int(hit[-1]) if len(hit) else None
+        t = _plain(grid[pick]) if pick is not None else None
+        th = {"t": t, "index": pick, "grid": len(grid), "procedure": procedure, "certified": int(good.sum()),
+              "n": n, "automatic": int(a[pick]) if pick is not None else 0,
+              "wrong": int(m[pick]) if pick is not None else 0}
+        body = dict(spec, promise=None)
+        cal = {"n": n, "examples": _vh([[_plain_or_repr(f), _plain_or_repr(lab)] for f, lab in examples]),
+               "process": spec_hash(body), "family": str(fam.fingerprint())}
+        self._promise = dict(self._promise, thresholds=_plain(th), calibrated_on=cal)
+        return th
+
+    def _walk(self, spec, facts, run_id):
+        """One calibration run with no threshold → {"steps": [(node, signal, answered alone)], "decided", "answer"}:
+        it stops at the first node that does not answer alone (nobody is asked)."""
+        from ..core.store import run_context
+        prov, taken, parent, steps = {}, [0] * len(self.edges), None, []
+        node = spec["start"]
+        while True:
+            ns = self.nodes[node]
+            if ns["kind"] == "human":
+                return {"steps": steps + [(node, None, False)], "decided": False, "answer": None}
+            if self.merges.get(node) == "all" and sum(1 for e in self.edges if e["to"] == node
+                                                      and not e.get("loop")) > 1:
+                raise NotImplementedError(f"node {node!r} merges 'all' of several inputs: this stage follows one "
+                                          "path")
+            state = self._given(ns, facts, prov)
+            with run_context(parent=parent):
+                res = runner_for(ns["kind"], self.systems[node], ns).run(state)
+            alone = _alone(res)
+            steps.append((node, res.confidence, alone))
+            if res.stored_id is not None:
+                parent = res.stored_id
+            if not alone:
+                return {"steps": steps, "decided": False, "answer": None}
+            _, edge = self._step(node, ns, res, state, ns["kind"], facts, prov, taken)
+            if edge is not None:
+                node = edge["to"]
+                continue
+            return {"steps": steps, "decided": bool(ns.get("end")), "answer": res.answer if ns.get("end") else None}
 
     def _step(self, node, ns, res, state, kind, facts, prov, taken):
         """One step of a path: the node's writes and their labels go into facts / prov, the first edge out of the node
@@ -1326,7 +1519,7 @@ class Process:
                                                 dict(d["resume"]["provenance"]), rid, rec, spec["hash"],
                                                 f"{req.node}: cancelled ({why})", ticket, continues=tip.id))
 
-    # --- the path promise (stage 3: union and per_node; end_to_end is stage 4)
+    # --- the path promise (stage 3: union and per_node; stage 4: end_to_end)
 
     def guarantee(self, spec=None):
         """What the declared promise says about this process now (stage 3) → {"mode", "risk", "in_force", "bound",
@@ -1338,7 +1531,10 @@ class Process:
         keeps a promise at its share (a CRC risk ≤ r_i; an LTT node's error level ≤ r_i, with the process promise then
         holding with probability ≥ 1 − Σ δ_i, Bonferroni, and a warning), Σ r_i·m_i ≤ risk, no system was loaded
         against another fingerprint, and the path watch (monitor()) has not flagged. per_node: every node keeps its
-        own promise, and the end error is not bounded. nodes: {node: {"r_i", "visits", "promise", "ok", "why"}}."""
+        own promise, and the end error is not bounded. nodes: {node: {"r_i", "visits", "promise", "ok", "why"}}.
+        end_to_end: the calibrated promise (see calibrate()): bound = risk with probability ≥ 1 − delta; in force when
+        calibrated on this very process (its spec without the promise, the nodes' fingerprints) with this family, and
+        the path watch has not flagged."""
         spec = spec if spec is not None else self.spec()
         pr = spec.get("promise")
         out = {"mode": None if pr is None else pr["mode"], "risk": None if pr is None else pr.get("risk"),
@@ -1349,8 +1545,7 @@ class Process:
             out["problems"].append(out["statement"])
             return out
         if pr["mode"] == "end_to_end":
-            raise NotImplementedError("the end_to_end promise (a threshold family calibrated on end-labelled runs) is "
-                                      "stage 4 of the process; this stage computes union and per_node")
+            return self._guarantee_e2e(spec, pr, out)
         auto = [n for n, s in spec["nodes"].items() if s["kind"] != "human"]
         visits = _visits(spec["nodes"], spec["edges"])
         for n in auto:
@@ -1425,6 +1620,48 @@ class Process:
         out["in_force"] = not out["problems"]
         return out
 
+    def _guarantee_e2e(self, spec, pr, out):
+        th, cal, fam = pr.get("thresholds"), pr.get("calibrated_on"), pr["family"]
+        out["delta"] = pr["delta"]
+        name = fam["kind"] if fam["kind"] != "custom" else f"custom {fam.get('name')}"
+        for n, m in self.mismatched.items():
+            out["problems"].append(f"{n}: loaded against another fingerprint than the recorded one (strict=False)")
+        if th is None:
+            out["problems"].append("not calibrated: p.calibrate([(input, end label), ...]) on end-labelled runs")
+            out["statement"] = (f"end_to_end over the {name} threshold family, not calibrated yet: no end risk is "
+                                "promised")
+            return out
+        if spec_hash(dict(spec, promise=None)) != (cal or {}).get("process"):
+            out["problems"].append("the process (a node, its system's fingerprint, an edge or a policy) changed after "
+                                   "its calibration: calibrate it again on fresh end-labelled runs")
+        try:
+            fp = str(self._family(fam).fingerprint())
+            if fp != (cal or {}).get("family"):
+                out["problems"].append(f"the threshold family ({fp}) is not the one it was calibrated with")
+        except (ProcessRunError, ProcessSpecError, TypeError) as e:
+            out["problems"].append(str(e))
+        if self.path_watch is not None and self.path_watch.flagged:
+            out["problems"].append(f"the mix of paths drifted ({'; '.join(self.path_watch.why)}): the stream is not "
+                                   "the one the process was calibrated on (A3)")
+        out["bound"] = pr["risk"]
+        how = ("Bonferroni over the grid" if th["procedure"] == "bonferroni" else "a fixed sequence in the grid's order")
+        out["statement"] = (f"P(a run ends automatically and its end answer is wrong) ≤ {pr['risk']:g} with "
+                            f"probability ≥ {1 - pr['delta']:g} over the {th['n']} end-labelled calibration runs: "
+                            f"learn then test over the {name} threshold family ({th['grid']} thresholds, {how}); "
+                            + (f"{th['automatic']} of the {th['n']} would have ended automatically at the chosen "
+                               f"threshold, {th['wrong']} of them wrong" if th["t"] is not None else
+                               "no threshold was certified: every node's answer goes to a person")
+                            + ". A run ends automatically when an end node answered and no person answered on its "
+                            "path")
+        out["assumptions"] = [
+            "A3: the end-labelled calibration runs are exchangeable with the runs the process makes — the same process "
+            "(its spec and every node's fingerprint are frozen in the promise), the same stream; with noisy end labels "
+            "the promise is about the noisy label",
+            "the family's grid and order were fixed without looking at the calibration labels",
+        ]
+        out["in_force"] = not out["problems"]
+        return out
+
     def monitor(self, watch, reference=None):
         """Watch the mix of paths: watch is a PathWatch; reference: runs (ProcessResults, or lists of the edges each
         took) from the stream the nodes were calibrated on, to set its reference (else set it yourself). Every run
@@ -1456,14 +1693,19 @@ class Process:
             e = st["edge"]
             nxt = (f"; → {e['to']} because {describe(e['when'])}" + (" (loop)" if e["loop"] else "")) if e else "; stop"
             where = f" [{st['stored_id']}]" if st["stored_id"] else ""
-            lines.append(f"  {i}. {st['node']} ({st['kind']}): by {st['by']}, {st['status']}{ans}{conf}{where}{nxt}")
+            gate = st.get("promise") or {}
+            held = (f" (signal {gate['signal']:.3g} below the process threshold: a person decides)"
+                    if gate.get("held") and gate.get("signal") is not None else
+                    " (no signal: a person decides)" if gate.get("held") else "")
+            lines.append(f"  {i}. {st['node']} ({st['kind']}): by {st['by']}, {st['status']}{ans}{conf}{held}{where}"
+                         f"{nxt}")
         if result.status == "decided":
             lines.append(f"  decided: {json.dumps(_plain_or_repr(result.answer), ensure_ascii=False)}"
                          + ("" if result.automatic is None else
                             " (automatically)" if result.automatic else " (with a person on the path)"))
         else:
             lines.append(f"  {result.status}: {result.why}")
-        if self._promise is not None and self._promise["mode"] != "end_to_end":
+        if self._promise is not None:
             g = self.guarantee()
             lines.append(f"  promise ({g['mode']}): {g['statement']}"
                          + ("" if g["mode"] == "per_node" else
@@ -1484,7 +1726,7 @@ class Process:
         re-checked by its own means (Dispatcher.replay, Trace.replay, Guard.replay; trust_models as there);
         (4) "facts": the facts it was given are the ones the recorded answers upstream and the input give, in the path
         and in its own record; (5) "edge": the first edge that holds on the recorded answers is the recorded one;
-        (6) "promise": the end_to_end decision rule (stage 4: not checked yet). A person's answer is a leaf, recorded
+        (6) "promise": the calibrated end_to_end rule recomputed on the node's recorded confidence. A person's answer is a leaf, recorded
         and not recomputed ("human"): its "human" record is intact, in this run, after the pending segment that asked
         (or the decision before it), the ticket's only answer, through the same channel, to the request asked; its
         value is what the next facts carry. The segments are checked as a chain ("segment": `continues`, the same
@@ -1698,10 +1940,13 @@ class _Replay:
                 if i >= len(path):
                     self.fail(node, "record", "integrity", "the recorded path stops before this node's step")
                 res, init, rep = self.load(path[i], node, ns)
+                res, gate = self.p._gate(self.spec, node, res)
                 self.learn(ns, init)
                 state, known = self.given(ns)
                 kind = ns["kind"]
             edge = self.check(path[i], node, ns, res, state, known, kind, init, rep)
+            if kind != "human":
+                self.check_promise(path[i], node, gate)
             seen.append(node)
             i += 1
             if res.stored_id is not None:
@@ -1951,6 +2196,24 @@ class _Replay:
             self.fail(node, "record", "integrity", f"record {sid} does not load: {type(e).__name__}: {e}")
         return res, init, rep
 
+    def check_promise(self, entry, node, gate):
+        """Step 6: the end_to_end decision rule recomputed on the node's recorded confidence against the recorded one."""
+        rec = entry.get("promise")
+        if gate is None and rec is None:
+            return
+        if gate is None:
+            self.fail(node, "promise", "integrity", "the path records a decision of the process threshold, and the "
+                                                    "spec's promise has no calibrated end_to_end threshold")
+        if rec is None:
+            self.fail(node, "promise", "integrity", "the path records no decision of the process threshold, and the "
+                                                    "spec's calibrated end_to_end promise makes one")
+        if _cj(rec.get("signal")) != _cj(gate["signal"]):
+            self.fail(node, "promise", "integrity", f"the path records the signal {rec.get('signal')!r}, the node's "
+                                                    f"record gives {gate['signal']!r}")
+        if _cj(rec) != _cj(gate):
+            self.fail(node, "promise", "recompute", "the calibrated threshold decides otherwise than the path records")
+        self.steps[-1]["checked"].append("promise")
+
     def human(self, path, i, node, ns, reason, pending, state, known, seen):
         """A person's answer: a leaf, recorded and not recomputed — its "human" record checked against the run."""
         if i >= len(path):
@@ -2112,7 +2375,102 @@ def _short(fp):
     return hashlib.sha256(canonical(fp).encode()).hexdigest()[:12] if fp is not None else "none"
 
 
+def _alone(res):
+    """A node's result that it gave alone (System 1 or 2 answered; not a person, not an abstention)."""
+    return res.by in ("s1", "s2") and res.status in ("ok", "forced")
+
+
+class ThresholdFamily(abc.ABC):
+    """The thresholds an end_to_end promise is calibrated over (subclass it for a family of your own). grid(spec,
+    signals) → a finite list of thresholds t (JSON-ready values), built before any label is read — signals is
+    {node: [the confidences its calibration runs gave when it answered alone]}, the spec is the process's; automatic(
+    node, signal, t) → whether a node's answer with this signal (its confidence, None when it has none) goes out
+    without a person at t; fingerprint() → a string that names the family (recorded in the promise; another one is
+    refused when the spec is loaded). procedure: "bonferroni" (each t tested at delta / len(grid); of the certified
+    ones the one that lets most calibration runs through) or "fixed" (the grid is the order of the test: the first
+    tested first, each at the full delta, stopping at the first that fails; the last certified one). Your family's
+    validity rests on one point: the grid and its order did not look at the calibration labels."""
+    procedure = "bonferroni"
+
+    @abc.abstractmethod
+    def grid(self, spec, signals):
+        raise NotImplementedError
+
+    @abc.abstractmethod
+    def automatic(self, node, signal, t):
+        raise NotImplementedError
+
+    @abc.abstractmethod
+    def fingerprint(self):
+        raise NotImplementedError
+
+
+RANKS = 64                                         # the rank grid of the built-in families
+
+
+def _rank_threshold(ss, u):
+    """The smallest calibration signal whose rank (the share of the node's signals ≤ it) is ≥ u, ss sorted; None
+    when the node gave no signal (it never answers alone then)."""
+    if not len(ss):
+        return None
+    q = max(1, int(math.ceil(u * len(ss) - 1e-12)))
+    return float(ss[q - 1])
+
+
+def _ranked(signals):
+    return {n: sorted(float(x) for x in v) for n, v in signals.items()}
+
+
+class _ByNode(ThresholdFamily):
+    """A threshold t = {node: the least signal that goes out alone, or None: nothing does}."""
+
+    def automatic(self, node, signal, t):
+        thr = t.get(node)
+        return signal is not None and thr is not None and float(signal) >= thr
+
+
+class SharedRank(_ByNode):
+    """The built-in default: one rank threshold u shared by every node — a node's answer goes out alone when its
+    signal's rank among the node's own calibration signals is ≥ u (as act_guard(scale="rank")). 64 values of u
+    (0, 1/64, …, 63/64), Bonferroni over them; one parameter, no order to declare. A signal below every calibration
+    signal of its node, or no signal (a node answered by its slow path), never goes out alone."""
+    procedure = "bonferroni"
+
+    def grid(self, spec, signals):
+        ss = _ranked(signals)
+        return [{n: _rank_threshold(v, j / RANKS) for n, v in ss.items()} for j in range(RANKS)]
+
+    def fingerprint(self):
+        return f"solvi.shared_rank/1 ranks={RANKS}"
+
+
+class PerNodeFixed(_ByNode):
+    """Built in: a rank threshold per node, searched by a fixed sequence. Every node starts closed (nothing goes out
+    alone); in the declared order (spec promise family "order", by default from the end nodes back to the start) each
+    node in turn is opened from its strictest rank to its softest (63/64, …, 0), the others held where they are. Each
+    step moves one node, so the sequence is tested at the full delta, stopping at the first step that fails; the
+    result depends on the declared order."""
+    procedure = "fixed"
+
+    def grid(self, spec, signals):
+        ss = _ranked(signals)
+        order = ((spec.get("promise") or {}).get("family") or {}).get("order") or list(ss)
+        cur = {n: None for n in ss}
+        out = []
+        for node in order:
+            for j in range(RANKS - 1, -1, -1):
+                cur = dict(cur)
+                cur[node] = _rank_threshold(ss.get(node, []), j / RANKS)
+                out.append(cur)
+        return out
+
+    def fingerprint(self):
+        return f"solvi.per_node_fixed/1 ranks={RANKS}"
+
+
 def _family(f):
+    if isinstance(f, (SharedRank, PerNodeFixed)):
+        f = "shared_rank" if isinstance(f, SharedRank) else "per_node_fixed"
     if isinstance(f, str):
         if f not in FAMILIES:
             raise ProcessSpecError(f"promise family is one of {', '.join(FAMILIES)} or a ThresholdFamily, not {f!r}")
