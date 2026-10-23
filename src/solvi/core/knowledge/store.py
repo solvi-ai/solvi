@@ -25,14 +25,17 @@ journal position it opened at): the same two items disputed again after a resolu
 value, by=)` is the person's answer. A disputed item is never a fact.
 
 Validity. `valid=(since, until)` is when a value holds in the world (half-open, None unbounded — a missing since is
-the beginning of time; ints, ISO date strings or datetime.date, which is kept as its ISO text). On a key where some
+the beginning of time, and an assertion without `valid` on a key where others carry one is the beginning-of-time
+version, open-ended; ints, ISO date strings or datetime.date, which is kept as its ISO text). On a key where some
 assertion carries one, values compete only when their intervals overlap (a dose label for 2023 and another from
 mid-2024 are both facts, for their times). Versions of different sinces are versions in time, not a contradiction:
 the later since closes the earlier version at that since and the earlier stays active (its effective interval ends
 there; a bounded later version gives the earlier value back after its until; a retracted later version re-opens what
 it closed), whatever order they were written in. Validity is per assertion: a value told for two periods (12, then 24,
 then 12 again) holds in both under one id; `valid(id)` is the latest assertion's interval, `periods(id)` the effective
-intervals and `item(id)["valid"]` lists every claim. The same since from two writers (two missing sinces too) is not an
+intervals and `item(id)["valid"]` lists every claim. A version is one item's claims of one since: when they give
+different untils, the latest claim's until is the version's (a correction, as one validity per item was), so (45, 55)
+then (45, None) reads open from 45 and the reverse order reads bounded at 55. The same since from two writers (two missing sinces too) is not an
 observation of a change — rank decides, equal ranks dispute; that holds while any other writer still asserts the old
 value, even when the new value's writer had asserted it too. The winner takes only the overlap: a loser whose interval
 reaches beyond it is closed there and holds outside (refuted only when the winner covers it whole), and a dispute is
@@ -64,9 +67,11 @@ premises, and so does an inferred item that rested on one: once the premise pass
 without a re-test of its own. `pending_retest(id)` reads it.
 
 Derived validity. An item with `derived_from` and no `valid` of its own gets the intersection of its premises'
-validity (each premise's span over its live claims); when they never hold together it is refused with the reason in
-the journal. It holds at a time (`usable(id, valid_at=)`, `snapshot(valid_at=)`, `periods(id)`) only where, for one of
-its derivations, every premise holds — a premise closed by a later version no longer carries it.
+validity (each premise's span over its live claims); when they never hold together, or their times do not compare
+(an int and an ISO date), it is refused with the reason in the journal. It holds at a time (`usable(id, valid_at=)`,
+`snapshot(valid_at=)`, `periods(id)`) only where, for one of its derivations, every premise holds — a premise closed by
+a later version no longer carries it; an item with its own `valid` over premises whose times do not compare reads its
+own `valid` only.
 
 Staleness. `flag(scope=..., why=...)` (a drift or open-set flag) or `reconfirm(id)` marks items for re-confirmation: an
 item learned before the flag is a hint, not a fact, until a newer observation or person confirms it or the flag ends
@@ -469,6 +474,10 @@ class KnowledgeStore:
                 if r.get("retest"):
                     self.items[r["item"]].rechecked.append(t)
                 self._touch(r["item"])
+        elif op == "retract_assertions":                 # its own op: a store that knows only "retract" refuses
+            if r["item"] in self.items:                  # it loudly instead of reading a whole retraction
+                self.items[r["item"]].acuts.extend((t, n) for n in r["assertions"])
+                self._touch(r["item"])
         elif op == "retract":
             if r["item"] in self.items:
                 if r.get("assertions") is not None:
@@ -634,7 +643,8 @@ class KnowledgeStore:
     def _derived_valid(self, premises):
         """The validity of an item derived from `premises` that gives none of its own: the intersection of the premises'
         validity (each premise's span: from its earliest live since to its latest until) → (valid or None, None), or
-        (None, why) when they never hold together. None when no premise carries `valid` (the item is as before)."""
+        (None, why) when they never hold together or their times do not compare (an int and an ISO date). None when no
+        premise carries `valid` (the item is as before)."""
         ivs = []
         for p in sorted(set(premises)):
             it = self.items.get(p)
@@ -655,7 +665,7 @@ class KnowledgeStore:
             for x in ivs[1:]:
                 acc = _ivs_and(acc, x)
         except TypeError:
-            raise ValueError(f"the premises' validity times do not compare: {ivs}") from None
+            return None, f"the premises' validity times do not compare: {ivs}"
         if not acc:
             return None, "the premises' validity intervals do not intersect: " + ", ".join(
                 f"{p} {self.valid(p)}" for p in sorted(set(premises)) if self.valid(p) is not None)
@@ -674,8 +684,10 @@ class KnowledgeStore:
         content told by others stays (one item for both, since an id is its content); the item goes only when no other
         assertion is left. only_from=(writer, evidence): only that writer's assertions given with this evidence (one of
         two publications of the same content). assertion: the journal position of one standing assertion of the item
-        (`item(id)["valid"]["claims"]` lists them as "at"; a list takes several) — only it is taken back. → {id: (status
-        before, status after)} of every item whose status changed."""
+        (`item(id)["valid"]["claims"]` lists them as "at"; a list takes several) — only it is taken back (a journal
+        entry of its own, "retract_assertions"; a duplicate taken back while its writer's other claim of the content
+        stands is not a withdrawal of that content). → {id: (status before, status after)} of every item whose status
+        changed."""
         with self._lock:
             if iid not in self.items:
                 raise KeyError(f"no item {iid!r}")
@@ -704,7 +716,8 @@ class KnowledgeStore:
                 extra = {"only_from": only_from}
             self._settle()
             before = self._statuses(self.component([iid]))
-            rec = self._write("retract", item=iid, by=None if by is None else str(by), why=why, **extra)
+            rec = self._write("retract_assertions" if "assertions" in extra else "retract", item=iid,
+                              by=None if by is None else str(by), why=why, **extra)
             self._apply(rec)
             after = self._statuses(before)
             return {i: (before[i], after[i]) for i in before if before[i] != after[i]}
@@ -1073,7 +1086,7 @@ class KnowledgeStore:
         the bounded one ends), outside any contested overlap; versions pending a re-test take no part. A derived item
         holds where its own validity and, for one of its derivations, every premise holds."""
         self._settle()
-        return self._periods(iid, set())
+        return self._periods(iid, set(), {})
 
     def _periods(self, iid, seen, memo=None):
         it, st = self.items.get(iid), self.state.get(iid) or {}
@@ -1089,26 +1102,29 @@ class KnowledgeStore:
             own = None if v is None else [list(_interval(v))]
         live = _live(it)
         pre = None
-        if live and all(a["just"] for a in live):          # every support is a derivation: it holds where they hold
-            pre = []
-            for a in live:
-                ps = [self._periods(p, seen, memo) for p in a["just"]]
-                ps = [x for x in ps if x is not None]
-                if not ps:
-                    pre = None
-                    break
-                acc = ps[0]
-                for x in ps[1:]:
-                    acc = _ivs_and(acc, x)
-                pre = _ivs_or(pre + acc)
-        out = pre if own is None else own if pre is None else _ivs_and(own, pre)
+        try:
+            if live and all(a["just"] for a in live):      # every support is a derivation: it holds where they hold
+                pre = []
+                for a in live:
+                    ps = [self._periods(p, seen, memo) for p in a["just"]]
+                    ps = [x for x in ps if x is not None]
+                    if not ps:
+                        pre = None
+                        break
+                    acc = ps[0]
+                    for x in ps[1:]:
+                        acc = _ivs_and(acc, x)
+                    pre = _ivs_or(pre + acc)
+            out = pre if own is None else own if pre is None else _ivs_and(own, pre)
+        except TypeError:                                  # premises whose times do not compare (an int and an ISO
+            out = own                                      # date): this item reads its own validity, nothing else
         if memo is not None:
             memo[iid] = out
         return out
 
     def _holds_at(self, iid, at):
         try:
-            p = self._periods(iid, set())
+            p = self._periods(iid, set(), {})
         except TypeError:                                # times that do not compare: the item's own `valid`
             return covers(self.valid(iid), at)
         return p is None or any(covers(iv, at) for iv in p)
@@ -1381,6 +1397,7 @@ def _guard(items, ids):
     assertions are not copies (they follow their premises). → ({(id, assertion position): why} pending,
     {(id, assertion position)} copies admitted while held)."""
     wd = []
+    vj = {i: json.dumps(items[i].value, sort_keys=True) for i in ids}
     for i in ids:
         it = items[i]
         for a in it.asserts:
@@ -1388,13 +1405,15 @@ def _guard(items, ids):
                 continue
             tc = min([x for x in it.retracted if x > a["t"]], default=None)
             x = _acut(it, a)
-            if x is not None and (tc is None or x < tc):
-                tc = x
+            own = min([tx for tx, n in it.acuts if n == a["t"] and tx > a["t"]], default=None)
+            if x is not None and x == own and _kept(items, ids, vj, i, a, x):
+                x = min([tw for tw, w in it.cuts if tw > a["t"] and w == a["by"]], default=None)  # a duplicate taken
+            if x is not None and (tc is None or x < tc):                       # back: its writer still stands behind
+                tc = x                                                         # the content (not a withdrawal)
             if tc is not None:
                 wd.append((tc, i, a))
     if not wd:
-        return {}, set()
-    vj = {i: json.dumps(items[i].value, sort_keys=True) for i in ids}
+        return {}, {}
     clears = defaultdict(list)
     for i in ids:
         clears[vj[i]] += items[i].rechecked
@@ -1410,21 +1429,35 @@ def _guard(items, ids):
                 clean.append((i, a))
             else:
                 copies.append((i, a, w))
-    pending, held = {}, set()
+    pending, held = {}, {}
     for i, a, w in copies:
         ws = sorted({str(b["by"]) for _, b in w})
-        base = [(vj[j], _interval(b["valid"])) for j, b in clean if not (vj[j] == vj[i] and str(b["by"]) in ws)]
+        base = [(vj[j], _interval(b["valid"]), (j, json.dumps(_interval(b["valid"])[0], sort_keys=True)))
+                for j, b in clean if not (vj[j] == vj[i] and str(b["by"]) in ws)]
+        why = (f"re-published content withdrawn from {', '.join(ws)} (journal entry {max(tc for tc, _ in w)}) and "
+               f"held by no other writer")
         if _held(_interval(a["valid"]), vj[i], base):
-            held.add((i, a["t"]))
+            held[(i, a["t"])] = (_interval(a["valid"]), vj[i], base, why)
         else:
-            pending[(i, a["t"])] = (f"re-published content withdrawn from {', '.join(ws)} (journal entry "
-                                    f"{max(tc for tc, _ in w)}) and held by no other writer")
+            pending[(i, a["t"])] = why
     return pending, held
 
 
-def _held(iv, value, base):
-    """Do the uncopied assertions `base` ([(value, interval)]) hold `value` wherever an assertion of it on `iv` could
-    hold (not where a version with a later since holds)?"""
+def _kept(items, ids, vj, i, a, tc):
+    """Does a's writer still stand behind a's content on a's validity after a's own cut at `tc`: a live assertion of
+    the same content from the same writer, written before the cut, whose interval covers a's (a duplicate taken back)?"""
+    iv = _interval(a["valid"])
+    return any(b["by"] == a["by"] and b["t"] < tc and b.get("valid") is not None and not b["just"]
+               and _inside(iv, [_interval(b["valid"])])
+               for j in ids if vj[j] == vj[i] for b in _live(items[j]))
+
+
+def _held(iv, value, base, lost=None):
+    """Do the uncopied assertions `base` ([(value, interval, version)]) hold `value` wherever an assertion of it on `iv`
+    could hold (not where a version with a later since holds)? lost: after the walk, {version in play: the versions
+    that took its overlap} — then `base` holds only the versions in play, a version that lost the segment to another
+    at the top since does not count, and the segment is held only when `value` is the one value left there (a
+    contested segment, or one the content lost, is not held)."""
     try:
         for seg in _segments([iv] + [b[1] for b in base]):
             if not _covers_seg(iv, seg):
@@ -1438,7 +1471,13 @@ def _held(iv, value, base):
                     top = b[1][0]
             if _lo_lt(iv[0], top):
                 continue                                # a later version holds here: the copy could not
-            if value not in {b[0] for b in cov if not _lo_lt(b[1][0], top)}:
+            best = [b for b in cov if not _lo_lt(b[1][0], top)]
+            if lost is None:
+                if value not in {b[0] for b in best}:
+                    return False
+                continue
+            names = {b[2] for b in best}
+            if {b[0] for b in best if not (lost[b[2]] & names)} != {value}:
                 return False
         return True
     except TypeError:
@@ -1474,11 +1513,54 @@ def _resolve(items, comp, by_key, resolves, clock, flagged, max_iter=200, taints
         if t is not None and not any(p > t for p in items[i].promoted):
             retest.add(i)
             why[i] = _retest_why(items, i, t, taints)
-    pclaims, held = {}, set()                           # the revival guard: copies of withdrawn content
+    pclaims, hinfo = {}, {}                             # the revival guard: copies of withdrawn content
     for k in sorted({items[i].key for i in order if items[i].key is not None}):
         p, h = _guard(items, sorted(by_key[k]))
         pclaims.update(p)
-        held |= h
+        hinfo.update(h)
+    retest0 = set(retest)
+    keys = sorted({items[i].key for i in order if items[i].key is not None})
+    while True:                                         # a copy admitted as held is re-checked after the walk
+        status, live, keyed, rank, units, retest, partial = _resolve_walk(
+            items, order, keys, by_key, resolves, clock, flagged, max_iter, fixed, comp, retest0, why, pclaims)
+        inplay = {u[0]: u[4] for k in keys for u in units.get(k, ())}
+        bad = {c: h[3] for c, h in hinfo.items()
+               if not _held(h[0], h[1], [b for b in h[2] if b[2] in inplay], inplay)}
+        if not bad:                                     # its holders hold in the walk: refuted, disputed or closed
+            break                                       # versions do not (the copy goes pending)
+        for c, w in bad.items():
+            pclaims[c] = w
+            del hinfo[c]
+    held = set(hinfo)
+    eff = {}
+    for k in keys:                                      # effective intervals on the keys with `valid`
+        if units.get(k):
+            eff.update(_effective(units[k]) or {})
+    rec = {}
+    for i, s in status.items():
+        if i in fixed:
+            continue
+        la = live[i]
+        kr = keyed.get(i) or ("", None, [], None)
+        rec[i] = {"status": s, "rank": rank[i], "n_confirm": len(la) - 1, "refuted_by": kr[2],
+                  "learned_at": min(a["t"] for a in la), "invalidated_at": kr[1] if s == "refuted" else None,
+                  "last_support": max(a["t"] for a in la), "dispute_at": kr[3] if s == "disputed" else None,
+                  **({"pending_retest": True, "pending_why": why[i]} if i in retest or i in partial else {})}
+        if i in partial:                                # copies waiting for a re-test; the item's other claims hold
+            rec[i]["pending_claims"] = partial[i]
+        if any(j == i for j, _ in held):
+            rec[i]["unchecked_claims"] = sorted(t for j, t in held if j == i)
+        if i in eff:                                    # not in the fingerprint: a function of the assertions
+            rec[i]["periods"] = eff[i]["periods"]
+            if eff[i]["contested"]:
+                rec[i]["contested"] = eff[i]["contested"]
+    return rec
+
+
+def _resolve_walk(items, order, keys, by_key, resolves, clock, flagged, max_iter, fixed, comp, retest0, why, pclaims):
+    """The fixed point of _resolve for a given set of pending copies → (status, live, keyed, rank, units, retest,
+    partial)."""
+    retest = set(retest0)
     partial = defaultdict(list)
     for (i, t), w in sorted(pclaims.items()):
         if i in items and i not in retest:
@@ -1491,8 +1573,7 @@ def _resolve(items, comp, by_key, resolves, clock, flagged, max_iter=200, taints
     live_asserts = _live
 
     status = {**{p: f["status"] for p, f in fixed.items()}, **{i: "active" for i in order if live_asserts(items[i])}}
-    keys = sorted({items[i].key for i in order if items[i].key is not None})
-    live, keyed, rank = {}, {}, {}
+    live, keyed, rank, units = {}, {}, {}, {}
     for _ in range(max_iter):
         prev_rank = rank                                # a premise later in `order` is read from the last round
         live, rank, arank = {}, {p: f["rank"] for p, f in fixed.items()}, {}
@@ -1543,29 +1624,7 @@ def _resolve(items, comp, by_key, resolves, clock, flagged, max_iter=200, taints
         status = new
     else:
         raise RuntimeError(f"resolution did not converge on a component of {len(comp)} items")
-    eff = {}
-    for k in keys:                                      # effective intervals on the keys with `valid`
-        if units.get(k):
-            eff.update(_effective(units[k]) or {})
-    rec = {}
-    for i, s in status.items():
-        if i in fixed:
-            continue
-        la = live[i]
-        kr = keyed.get(i) or ("", None, [], None)
-        rec[i] = {"status": s, "rank": rank[i], "n_confirm": len(la) - 1, "refuted_by": kr[2],
-                  "learned_at": min(a["t"] for a in la), "invalidated_at": kr[1] if s == "refuted" else None,
-                  "last_support": max(a["t"] for a in la), "dispute_at": kr[3] if s == "disputed" else None,
-                  **({"pending_retest": True, "pending_why": why[i]} if i in retest or i in partial else {})}
-        if i in partial:                                # copies waiting for a re-test; the item's other claims hold
-            rec[i]["pending_claims"] = partial[i]
-        if any(j == i for j, _ in held):
-            rec[i]["unchecked_claims"] = sorted(t for j, t in held if j == i)
-        if i in eff:                                    # not in the fingerprint: a function of the assertions
-            rec[i]["periods"] = eff[i]["periods"]
-            if eff[i]["contested"]:
-                rec[i]["contested"] = eff[i]["contested"]
-    return rec
+    return status, live, keyed, rank, units, retest, partial
 
 
 def _walk_key(ids, live, arank, values, res, units=None):
