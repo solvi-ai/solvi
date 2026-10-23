@@ -267,3 +267,86 @@ def test_only_from_a_writer_keeps_its_meaning_and_wrong_addresses_are_refused():
     ks.retract(a, only_from="w")
     assert ks.status(a) == "retracted"
     assert ks.add("fact", {"s": "x", "r": "r", "o": 1}, source="spec", by="w") == a and ks.pending_retest(a)
+
+
+# --- the revival guard: withdrawn content told again
+def test_withdrawn_content_told_again_by_another_writer_waits_for_a_retest_and_the_honest_period_stays():
+    # before: the partner's copy revived 12 from 174 without a re-test and the read at 10 was empty
+    km = solvi.Knowledge()
+    st = km.store
+    old = km.tell({"s": "A", "r": "warranty", "o": 12}, source="outcome", by="product", valid=(0, None))
+    km.tell({"s": "A", "r": "warranty", "o": 24}, source="outcome", by="product", valid=(22, None))
+    km.tell({"s": "A", "r": "warranty", "o": 12}, source="outcome", by="vendor", valid=(174, None))
+    st.retract_source("vendor")
+    km.tell({"s": "A", "r": "warranty", "o": 12}, source="outcome", by="partner", valid=(174, None))
+    assert st.pending_retest(old) and st.pending() == [old] and "withdrawn from vendor" in st.item(old)["pending"]
+    assert st.status(old) == "active"                        # the product's own period still holds
+    assert [vals(km, "A", "warranty", t) for t in (10, 100, 200)] == [[12], [24], [24]]
+    assert [c.get("pending", False) for c in st.item(old)["valid"]["claims"]] == [False, True]
+    st.retest(old, ok=False, by="qa")                        # only the copy is taken back
+    assert st.status(old) == "active" and st.pending() == [] and vals(km, "A", "warranty", 10) == [12]
+    assert st.verify()
+
+
+def test_a_passed_retest_lets_the_copy_hold():
+    km = solvi.Knowledge()
+    st = km.store
+    x = km.tell({"s": "A", "r": "p", "o": 12}, source="outcome", by="vendor", valid=(174, None))
+    st.retract_source("vendor")
+    assert km.tell({"s": "A", "r": "p", "o": 12}, source="outcome", by="partner", valid=(180, None)) == x
+    assert st.pending() == [x] and vals(km, "A", "p", 200) == []          # overlapping, not the same interval
+    st.retest(x, ok=True, by="qa")
+    assert st.pending() == [] and vals(km, "A", "p", 200) == [12]
+    km.tell({"s": "A", "r": "p", "o": 12}, source="outcome", by="mirror", valid=(190, None))
+    assert st.pending() == []                                # the re-test cleared the withdrawal before it
+
+
+def test_a_copy_admitted_while_another_writer_held_it_goes_pending_when_that_holder_is_cut():
+    # before: the item stayed usable on the mirror's copy after the vendor was exposed
+    km = solvi.Knowledge()
+    st = km.store
+    f = km.tell({"s": "A", "r": "price", "o": 50}, source="outcome", by="vendor", valid=(99, None))
+    km.tell({"s": "A", "r": "price", "o": 50}, source="outcome", by="pricing", valid=(99, None))
+    st.retract(f, only_from="pricing")
+    km.tell({"s": "A", "r": "price", "o": 50}, source="outcome", by="mirror", valid=(99, None))
+    assert not st.pending_retest(f) and st.usable(f)
+    assert [c.get("unchecked", False) for c in st.item(f)["valid"]["claims"]] == [False, True]
+    st.retract_source("vendor")
+    assert st.pending_retest(f) and not st.usable(f) and st.pending() == [f]
+
+
+def test_with_an_erratum_the_exposed_copy_no_longer_blocks_the_right_value():
+    # before: the mirror's 50 and the erratum 84 stayed a dispute after the vendor's exposure; the read at 120 was empty
+    km = solvi.Knowledge()
+    st = km.store
+    f = km.tell({"s": "A", "r": "price", "o": 50}, source="outcome", by="vendor", valid=(99, None))
+    km.tell({"s": "A", "r": "price", "o": 50}, source="outcome", by="pricing", valid=(99, None))
+    st.retract(f, only_from="pricing")
+    e = km.tell({"s": "A", "r": "price", "o": 84}, source="outcome", by="pricing", valid=(99, None))
+    km.tell({"s": "A", "r": "price", "o": 50}, source="outcome", by="mirror", valid=(99, None))
+    st.retract_source("vendor")
+    assert st.pending() == [f] and st.status(e) == "active" and vals(km, "A", "price", 120) == [84]
+
+
+def test_a_retold_retracted_item_is_pending_and_takes_no_side_in_a_dispute():
+    km = solvi.Knowledge()
+    st = km.store
+    km.tell({"s": "A", "r": "p", "o": 50}, source="outcome", by="vendor", valid=(99, None))
+    km.tell({"s": "A", "r": "p", "o": 84}, source="outcome", by="pricing", valid=(99, None))
+    st.retract_source("vendor")
+    g = km.tell({"s": "A", "r": "p", "o": 50}, source="outcome", by="partner", valid=(99, None))
+    assert (st.status(g), st.pending_retest(g), len(st.disputes())) == ("hypothesis", True, 0)
+
+
+def test_the_guard_matches_content_across_ids_and_an_honest_re_dating_goes_to_a_retest():
+    ks = KnowledgeStore()
+    a = ks.add("fact", {"s": "A", "r": "p", "o": 7, "note": "feed"}, source="outcome", by="feed", valid=(10, 20))
+    ks.retract(a, why="wrong feed")
+    b = ks.add("fact", {"s": "A", "r": "p", "o": 7}, source="outcome", by="other", valid=(15, 30))
+    assert b != a and ks.pending() == [b]                    # another id, same content, overlapping validity
+    c = ks.add("fact", {"s": "A", "r": "p", "o": 7}, source="outcome", by="other", valid=(20, 30))
+    assert ks.pending() == [b]                               # c is b (same content, same key): one more claim on b
+    d = ks.add("fact", {"s": "A", "r": "q", "o": 7}, source="outcome", by="other", valid=(15, 30))
+    assert not ks.pending_retest(d)                          # another key is other content
+    e = ks.add("fact", {"s": "A", "r": "p", "o": 8}, source="outcome", by="feed", valid=(40, 50))
+    assert not ks.pending_retest(e) and c == b
