@@ -381,6 +381,17 @@
   says why (None otherwise), and an alarm's `why` repeats it. A robust scale (MAD, quantiles) would not help here: it
   is zero on such a reference too; watch an aggregate over a window instead. Behaviour change by design: the warning
   and the longer `why`; the test and its flags are unchanged.
+- **Knowledge: three narrow fixes to the two-writer dispute on a key with `valid`.** (1) A value another writer still
+  asserts is disputed, not refuted, when a writer that had confirmed it tells a new value from the same since: the
+  rule judged "another writer" by the last assertion only, so the regulator's 23 followed by a wiki's confirming 23 and
+  then the wiki's 21 refuted the regulator's value, while without the wiki's confirmation the two disputed. Every
+  writer seen asserting the value now counts; one writer changing its own value still refutes it. (2) Two unbounded
+  sinces (`valid=(None, None)` from two writers) are the same since, so the two values dispute as two equal given
+  sinces do; the later writer refuted the earlier one silently. A missing since against a given one, and keys whose
+  assertions carry no `valid` at all, resolve as before. (3) An item pending re-test (content told again after a
+  retraction) takes no side on its key: it was a hypothesis and still made the other value `disputed` and opened a
+  dispute; after `retest(id, ok=True)` it takes its side again. Behaviour change by design in these three cases (item
+  statuses, `disputes()` and the snapshots built from them); every other key resolves as before.
 
 ### Changed
 - **The experimental deadline reads "a future release".** The deadline set at 1.0 for every experimental piece was 1.2;
