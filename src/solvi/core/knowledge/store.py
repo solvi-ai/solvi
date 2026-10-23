@@ -14,7 +14,8 @@ and effects), episode (one finished case) — with a source: "person", "outcome"
 decision `of=`). The system's own unverified answers are never admitted: the source check is part of the store, not a
 setting (SourceGate; solvi.core.sources.check_source).
 
-State is a function of the live journal entries (JTMS-style): an item is present while it has a live assertion whose
+State is a function of the live journal entries (JTMS-style; `valid=` is valid time and the journal position is
+transaction time, as in a bitemporal store): an item is present while it has a live assertion whose
 premises (`derived_from`) are present and not refuted. Per key (scope, subject, relation) the live assertions are walked
 in time order: the same value confirms; an outcome refutes the current value (the world changed) — unless the outcome
 assertion is `inferred` (a consequence computed from premises, not an observation: it competes by rank, so two inferences

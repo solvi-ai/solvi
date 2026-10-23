@@ -4848,7 +4848,7 @@ retract the conclusion (its premises stand) but marks it for review: a hypothesi
 rested on a retracted source is then reviewed instead of staying a fact unnoticed. Such a retraction is not exact in
 the sense above until the re-test: the rebuilt store has no review mark.
 
-Withdrawn content does not come back unchecked. Content told again after its retraction waits for a re-test
+Withdrawn content is not served again without a re-test. Content told again after its retraction waits for a re-test
 (`ks.pending()` lists what waits, `ks.item(id)["pending"]` says why; `retest(id, ok=)` decides). On facts told with
 `valid`, this holds whatever the item id and on any overlapping validity: every retraction (`retract`, `only_from=`,
 `retract_source`, a failed re-test, a rollback) withdraws its content on its validity; a later assertion of it waits
