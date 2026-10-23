@@ -382,6 +382,27 @@
   "a future release": no release is named until one is decided. The old paths of the pieces that graduated in 1.1
   (`solvi.experimental.specialist`, `.mcp`, `.counterfactual`) say the same in their warning. Only text changes.
 
+
+### Upgrading from 1.1: behaviour changes of 1.2 outside its Breaking list
+1.2.0 changed the behaviour of some experimental modules, and of the knowledge store's re-told content, under its
+"Fixed" heading only; its headline "Breaking" list did not name them. A pipeline or simulation written for 1.1 can
+score differently on 1.2 and later with no code change. Each one, with the switch that restores 1.1 where there is one:
+- **Knowledge (stable): content told again after a retraction waits for a re-test.** It is a hypothesis until
+  `retest(id, ok=True)`, and so is every item that rested on it; under 1.1 the new assertion revived it at once. No
+  switch: call `retest` where the content was checked again.
+- **`solvi.experimental.changes`: a rollback with a reason is a failure.** `Pipeline.rollback(v, why=...)` records the
+  undone changes as failed, and the failure memory (`KnownFailures`) then refuses the same proposal again.
+  `rollback(..., failed=False)` per call, or `KnownFailures(rollbacks=False)`, keeps 1.1's behaviour.
+- **`solvi.experimental.changes`: a stage that raises gives status `"error"`**, not a rejection remembered for ever; the
+  candidate runs again once the stage is fixed. `Pipeline(raise_stage_errors=True)` re-raises after journaling.
+- **`solvi.experimental.laws`: support and precision are counted where the candidate would be the applied law.**
+  `LawSet(support_on="matched")` restores 1.1's count.
+- **`solvi.experimental.laws`: the sized acceptance's N counts distinct candidates**, so re-scoring the same candidates
+  no longer raises the bar. No switch.
+- **`solvi.experimental.laws`: `admit_by_probes` keeps witnesses** when more than one law may be missing, and a lone
+  survivor waits for them. `assume_one_law=True` keeps 1.1's rule. The noisy admission's fit check (`fit_level`,
+  default on) refuses a law that does not fit the noise; `fit_level=None` turns it off.
+
 ### Docs
 - **Drift and audit: measured caveats** (best practices; the `ShiftWatch.shift`, `DriftMonitor` and `sysreport`
   docstrings). A change of the correct answers alone is invisible to every label-free test by construction; read it
