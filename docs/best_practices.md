@@ -140,6 +140,21 @@ A regime change can raise the decider's confidence as well as lower it: on half 
 classification the mean confidence rose, where a monitor for a drop of confidence sees nothing. Test both directions,
 or the whole spread of the answers' features (`ShiftWatch`, [experimental](experimental.md#ood)).
 
+**A label-free monitor cannot see a change in the correct answers alone — by construction, not by weakness.** A
+stream whose inputs, answers and confidences are unchanged is the same stream to every label-free test; only the
+correct answer given the input moved (real drift with no virtual drift: Hinder, Vaquet and Hammer 2023, arXiv
+2310.15826). Checked once on three intent datasets (Banking77, CLINC150, HWU64; 4,000-decision streams): with 30 % of
+the correct answers moved to another option from decision 2,001, inputs and scores unchanged, the sequential detectors
+— `DriftMonitor` and a conformal test martingale with simple-jumper bets on the answers' confidence features — flagged
+0 of 60 streams each. Read such changes from the audit labels (`Dispatcher(audit=)`, `AuditWatch`).
+
+**`ShiftWatch.shift` is a batch test at alpha per call, not a running test.** Called every 50 decisions on a sliding
+window of the last 200 answers (alpha 0.01, a reference of 1,393–2,400 answers drawn from the stream's own population),
+it flagged 97 of 300 unchanged 4,000-decision streams (32 %) on the same three datasets; on disjoint batches of 200, 36
+of 300 (12 %). Call it once per disjoint batch and budget alpha over the calls (twenty calls spend up to twenty alpha),
+or use `DriftMonitor` for a false-alarm level over the stream. This is the known cost of repeated tests on overlapping
+windows (Armitage, McPherson and Rowe 1969).
+
 **`fit` and `teach` move the scores, not the reading.** They shift and scale the logits of one question; they help
 calibration and the mix of answers, and level off within a few dozen examples. When a question needs the model to read
 the input differently, use a LoRA adapter (`adapt_lora`), a head over computed facts, or a rule.
@@ -998,7 +1013,16 @@ and `build(novel=[state, ...])` feeds System 1's signal on them to the gate in p
 
 **For detection, restart the test.** An e-process started once adapts slowly after a long quiet prefix (detected in
 0 of 200 seeds, a delay of 185 of 187 steps); `DriftMonitor`'s CUSUM restarts — use it, or a Shiryaev–Roberts
-detector with an ARL bound.
+detector with an ARL bound. A second measurement, once, on Banking77, CLINC150 and HWU64 with a TF-IDF +
+logistic-regression decider, the change at decision 2,001 and 20 streams per case: a conformal test martingale started
+once (simple-jumper bets on online conformal p-values of the answers' three confidence features) held the same nominal
+1 % per 4,000-decision stream as `DriftMonitor`'s confidence CUSUM (0 of 300 unchanged streams flagged) and caught every
+shift of the inputs within 2,000 decisions, but later. The ratio of median delays was 2.4–3.6 on abrupt shifts: 145–192
+decisions against 60–75 when 40 % of the traffic moved to unseen intents, 43–62 against 12–22 when all of it came from
+another dataset, 68 against 23 for corrupted text (Banking77). On a gradual ramp of unseen intents it was 1.3–1.4
+(827–851 against 599–644). This is the known slowness of a once-started martingale after a long quiet stretch (Vovk et
+al. 2021, arXiv 2102.10439; Volkhonskiy et al. 2017, arXiv 1706.03415, found about 2.5 times on synthetic streams), not
+a general property of CUSUM over martingales; the martingale is not shipped.
 
 **Wrap a strong agent only at the decision points where it is unsure; without evidence the agent's action stands.**
 The full layer over a tuned classic policy passed 0 of 22 primary checks; the parts chosen on a small preliminary run, 7 of 22.
@@ -1060,6 +1084,16 @@ decisions gives an unbiased reading (within 5 points on 1,200 decisions at audit
 check that broke silently: in a drift simulation the current monitor missed a broken check in 98 of 100 runs, while a 10 %
 random audit with `AuditWatch` found it in 96 of 100 (4 of 100 false flags on unchanged streams; the audit's merit is
 that it held its false-alarm level — see experimental.md).
+
+**Read the audited error with its Wilson 95 % interval** (`sysreport` prints it): an interval for a random-audit
+sample at one reading time, not a running bound. Below about 100 random audit labels a prediction-powered estimate
+(PPI++: the labels plus the model's calibrated act probability on every decision) is not a better reading. Measured
+once on three intent datasets with a TF-IDF + logistic-regression decider at a 4–6 % error among the answers given
+alone, its interval was [0, 0] whenever the 25–50 labels drew no error (23–39 % of label samples at 25 labels) — with
+no error in the sample it is the Wald interval, which collapses at zero (Brown, Cai and DasGupta 2001) — and it covered
+the true error 59–92 % of the time; at 200 labels it covered 92–96 % and was 8–10 % narrower than Wilson (5–6 %
+narrower than the Wald interval on the same labels). An interval valid at 25 labels exists (a betting confidence
+sequence covered the true error at 2–3 times the Wilson width), but none usefully narrow was found. Not shipped.
 
 **Refit on the hash split when examples keep arriving.** `build(split="hash")` (the default since 1.2; 1.1 shuffled)
 keeps every old example in its share when examples are added (600 + 60 examples, 5 seeds: 0 old examples moved in or out of the fit share, against 101–120 with the

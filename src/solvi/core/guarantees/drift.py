@@ -37,6 +37,10 @@ minimum. So on a stream that has not changed, the chance of a false flag within 
 at most alpha (default 1%), as far as each test's p-value is exact and the reference stands for the stream; a longer
 stream gets alpha per horizon.
 
+A change of the correct answers alone — inputs, answers and scores unchanged — cannot be seen by this or any other
+label-free test, because such a stream is distributed exactly like an unchanged one: only labels show it
+(Dispatcher(audit=), AuditWatch).
+
 A decision marked by an identity canary (solvi.core.guarantees.canary: the remote model answering is not the one of the
 reference) is flagged "identity" at once, whatever min_signals says.
 
