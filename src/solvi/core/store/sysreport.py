@@ -164,7 +164,7 @@ def system_report(store, since=None, until=None, *, question=None, price=None, d
 
     def within(t):
         return (t0 is None or t >= t0) and (t1 is None or t < t1)
-    asks, disp, policies, teach, erased, loops, specialists = [], [], {}, [], 0, [], {}
+    asks, disp, policies, teach, erased, loops, specialists, streams = [], [], {}, [], 0, [], {}, []
     for s in store.iter(None, redacted=True):
         d = s.data
         if s.kind == "teach":
@@ -179,6 +179,8 @@ def system_report(store, since=None, until=None, *, question=None, price=None, d
             asks.append(s)
         elif s.kind == "dispatch" and (question is None or d.get("question") == question):
             disp.append(s)
+        elif s.kind == "stream" and (question is None or (d.get("stream") or {}).get("question") == question):
+            streams.append(d.get("stream") or {})
         elif s.kind == "refine" and (question is None or d.get("question") == question):
             loops.append(s)
         elif s.kind == "specialist":                  # a specialist's run (solvi.core.specialist): counted by name
@@ -219,7 +221,7 @@ def system_report(store, since=None, until=None, *, question=None, price=None, d
         if src == AUDIT:
             audited[key] = labels[key]
     s1, cost1 = _system1(asks, labels, question, price, drift_window, monitor)
-    dp, cost2 = _dispatch(disp, labels, policies, audited)
+    dp, cost2 = _dispatch(disp, labels, policies, audited, streams)
     times = [s.time for s in asks + disp]
     catalogs, models, experimental = {}, {}, {}
     for s in asks:
@@ -456,7 +458,28 @@ def _refine(loops, price):
     return out
 
 
-def _dispatch(disp, labels, policies, audited=None):
+def _stream_block(st, p):
+    """One dispatch record's stream fields into the question's stream block (Dispatcher(promise=, audit="adaptive"))."""
+    b = p.setdefault("stream", {"decisions": 0, "sampled": 0, "free": 0, "paid": 0, "missing": 0, "alone": 0,
+                                "alone_covered": 0, "alone_sampled": 0, "alone_wrong": 0, "_ipw": 0.0,
+                                "threshold": None, "v_index": None, "alarms": 0, "events": {}})
+    sam = st.get("sample") or {}
+    b["decisions"] += 1
+    alone, sampled = bool(sam.get("alone")), bool(sam.get("sampled"))
+    thr, score = sam.get("threshold"), sam.get("score")
+    b["alone"] += alone
+    b["alone_covered"] += alone and thr is not None and score is not None and score >= thr
+    if sampled:
+        b["sampled"] += 1
+        b["free"] += bool(sam.get("free"))
+        b["paid"] += not sam.get("free")
+        lab = sam.get("label_source") is not None
+        b["missing"] += not lab
+        return b, alone, lab, float(sam.get("rho") or 1.0)
+    return b, alone, None, None
+
+
+def _dispatch(disp, labels, policies, audited=None, streams=()):
     per_q, total = {}, {"system1": _cost([], 0.0, None), "slow_path": _cost([], 0.0, None)}
     total["system1"]["usd"] = total["slow_path"]["usd"] = 0.0
     for s in disp:
@@ -499,6 +522,15 @@ def _dispatch(disp, labels, policies, audited=None):
             p["policies"][pk]["decisions"] += 1
         else:
             p["uncalibrated"] += 1
+        if d.get("stream"):
+            b, alone, lab, rho = _stream_block(d["stream"], p)
+            cert = d["stream"].get("certificate") or {}
+            b["threshold"], b["v_index"] = cert.get("threshold"), cert.get("v_index")
+            if lab is not None:                      # a sample: its deployed loss (a missing label on an alone answer: a loss)
+                b["alone_sampled"] += alone
+                wrong = alone and (not lab or (d.get("disagreement") or {}).get("s2_accepted", False))
+                b["alone_wrong"] += wrong
+                b["_ipw"] += wrong / rho
         p["_marked"] += bool(d.get("audit"))
         au = (audited or {}).get((s.id, q))
         if au is not None and d.get("audit"):
@@ -517,7 +549,16 @@ def _dispatch(disp, labels, policies, audited=None):
             p["_slices"].setdefault(d.get("slice") or "none (System 1 alone)", []).append(row)
             if pol is not None:
                 p["policies"][pol["policy"].get("fingerprint")]["_labels"].append(row)
+    for e in streams:
+        p = per_q.get(e.get("question"))
+        if p is not None and "stream" in p:
+            ev = p["stream"]["events"]
+            ev[e.get("event")] = ev.get(e.get("event"), 0) + 1
+            p["stream"]["alarms"] += e.get("event") == "alarm"
     for p in per_q.values():
+        if "stream" in p:
+            b = p["stream"]
+            b["risk_ipw"] = b.pop("_ipw") / b["decisions"]
         L = p.pop("_labels")
         p["labels"] = {"all": _labels_block(L["all"]), "by_s1": _labels_block(L["s1"]), "by_s2": _labels_block(L["s2"]),
                        "by_slice": {k: _labels_block(v) for k, v in p.pop("_slices").items()}}
@@ -677,6 +718,17 @@ def render(d):
         for who, key in (("System 1", "by_s1"), ("slow path", "by_s2")):
             if lab[key]["labelled"]:
                 L.append(f"    by {who}: " + _labels_line(lab[key]))
+        if p.get("stream"):
+            b = p["stream"]
+            thr = b["threshold"]
+            L.append(f"  stream certificate  {b['sampled']} of {b['decisions']} decision(s) sampled by the calibration "
+                     f"coin ({b['free']} free: escalated anyway; {b['paid']} extra slow-path call(s); {b['missing']} "
+                     f"without a label, counted as losses); threshold now "
+                     + ("+inf (nothing certified)" if thr is None else f"{thr:.4g}") + f", version index {b['v_index']}"
+                     + f"; alarms {b['alarms']}")
+            L.append(f"    alone answers {b['alone']}, of which covered by the threshold in force {b['alone_covered']}; "
+                     f"sampled alone {b['alone_sampled']}, wrong {b['alone_wrong']}; deployed risk estimated on the "
+                     f"sample (weighted by 1/ρ) {b['risk_ipw']:.4g}")
         if p["first_drift"]:
             f = p["first_drift"]
             L.append(f"  drift flag up on {p['drift_flagged']} decision(s), first at decision {f['n']} ({f['id']}): {f['why']}")

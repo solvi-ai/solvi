@@ -467,3 +467,167 @@ label). Which mode gives more coverage at the same r is measured by the stand be
 - **Missing:** the retraction across nodes with cancelled and re-asked tickets (a later stage); a run follows one path (merge "all" is not run yet, so the 100-node process of the promise stand cannot run); the pre-registered stands for scale (300 systems) and retraction are not run — ten systems exchanging facts (with 2% of the decisions asking a person) is a test, not the stand
 - **Script:** `benchmarks/process_e1.py` (the promise stand: a synthetic insurance claim with a known truth; union, per_node and a hand-glued baseline, and end_to_end over both built-in families at n = 500, 1000, 3000). **Deadline:** 1.2.
 - API: [solvi.experimental.process](api/process.md).
+
+## `stream`
+
+A promise earned on the stream instead of on a fixed calibration set: `StreamPromise` starts at +inf (nothing
+answered alone) and loosens its threshold as labelled samples arrive, with a statement that holds at every point in
+time, not only at the end of a calibration. Stages 1–3b of 4: the certificate, its change detector, the sampling
+wired into the Dispatcher, the agent as the oracle and the closed learning loop. Since 1.4.
+
+```python
+from solvi.experimental.stream import StreamPromise
+
+sp = StreamPromise(max_risk=0.05, delta=0.05)          # or max_error= (the error among the answers given alone)
+system.guarantee("intent", promise=sp, signal="act")    # installed as OpenSetGate is
+sp.learn(score, would_be_answer, label)                 # one labelled sample; label None: missing, counted as a loss
+sp.restart("alarm")                                     # uncertified again, the next δ_v from the budget
+```
+
+One e-process per grid point against "the risk at this threshold is above α": by default a mixture of constant bets
+(fractions 0.9 / 0.5 / 0.25 / 0.1, weights 0.6 / 0.25 / 0.1 / 0.05), or `bets="agrapa"` (the predictable bet of
+`MeanBound`, mirrored). A point is certified once its wealth reaches 1/δ_v (Ville's inequality) and the threshold in
+force is the loosest point with every stricter one certified (fixed-sequence over a grid fixed before any label: by
+default the scores of the first 200 decisions it gates). The threshold only loosens. `max_risk=` (joint) promises
+P(answered alone and wrong) ≤ α over all inputs; `max_error=` (selective) the error among the answers given alone.
+`DeltaBudget` spends δ over restarts, δ_v = 6δ/(π²v²) (`experimental.skills.Certificate.delta_at`), so every threshold
+ever in force holds together with probability ≥ 1 − δ. The statement assumes the risk given the past is constant
+(i.i.d. between change points) and that the labelled samples are drawn by a coin independent of the input; a model
+that degrades is never un-certified by the certificate itself (a change detector and its `restart` are a later
+stage). Every gated decision records the state (`v_index`, `delta_v`, `threshold`, `n`, an evidence fingerprint and
+the grid's); the same samples in the same order rebuild it exactly.
+
+The price of being valid at every time: at α = δ = 5 % a fresh certificate needs 85 clean samples (v = 1), 116 after
+one restart and 134 after two; 74 for the mixture at the full δ, against 59 for a one-shot binomial test. These are
+arithmetic from the code, not measurements.
+
+Stage 2 runs it inside the Dispatcher:
+
+```python
+from solvi.experimental.stream import RiskDetector
+
+det = RiskDetector(alpha=0.05, arl=1000)                # E[samples to a false alarm] ≥ 1000 at the promise
+d = Dispatcher(system, slow, question="intent", audit="adaptive", promise=sp, detector=det,
+               on_drift="recertify", probation=300, secret=key)
+d.ask(x).stream                                         # the decision's sample, certificate and detector state
+d.replay_stream()                                       # the certificate, detector and rate rebuilt from the records
+```
+
+The calibration coin is HMAC-SHA256(secret, "sample|question|seed|n"): it reads no input bytes, so which decisions
+are sampled is independent of the input (without `secret=` it is a plain hash, predictable, with a warning). Its rate
+comes from the past only: 1 until something is certified and during probation, else min(1, max(0.05, 0.05 / the
+share answered alone over the last 500 decisions)) — `sampling={"floor", "budget", "window"}`. A sampled decision
+that System 1 hands over anyway is a free sample (the slow path answers it; its accepted answer is the label); a
+sampled decision System 1 would answer alone is checked by the slow path (an audit, one extra call); a sample without
+an accepted slow-path answer is a loss. The promise is therefore relative to the slow path's labels.
+
+`RiskDetector` watches the deployed loss of the samples, 1{answered alone and wrong}, with a Shiryaev–Roberts mixture
+(bets c/α, c = 0.01 … 0.4) and alarms when the mean statistic reaches `arl`. Its statement is an expected run length —
+under a risk ≤ α the expected number of samples to a false alarm is at least `arl` — not a per-horizon probability
+like `DriftMonitor`'s: a model running exactly at α re-certifies about every `arl` samples by design
+(`alternatives=(1.5, 2.0)` moves the null to 1.5α). Arithmetic with this code, at α = 5 %, `arl` = 1000 (the
+design's script, reproduced bit for bit): at p = α a mean of 1 333 samples to a false alarm (median 982), at α/2 about
+1.5 % of streams alarm within 1 000 samples, a 2× shift is caught after 153 samples on average, 4× after 36. With
+`on_drift="recertify"` an alarm restarts the certificate (the next δ_v, threshold +inf) and System 1 answers nothing
+alone for `probation` decisions and until certified again, every one of them a free sample; with the default
+`on_drift="human"` the alarm is the dispatcher's drift flag, as a `DriftMonitor`'s. Every dispatch record carries
+`stream` (sample, certificate, detector), each state change is a record of kind `stream`, both kept by a redaction,
+and the system report has one block (samples, free and paid, alarms, alone answers covered by the threshold in force,
+the deployed risk estimated on the sample). A control in the tests shows why the coin covers every decision:
+calibrating on the escalated decisions only loosens the threshold past the promise on every seed.
+
+Stage 3a makes an agent the oracle, over MCP: its verdicts on blind tickets are the slow path.
+
+```python
+from solvi.experimental.stream import AgentOracle, TicketDesk
+
+d = Dispatcher(system, AgentOracle(system), audit="adaptive", promise=sp, detector=det, secret=key, storage=store)
+desk = TicketDesk(d, ttl=3600)
+desk.decide(x)            # {"status": "decided", ...} or {"status": "needs_verdict", "ticket", "options", "input", ...}
+desk.resolve(ticket, "billing")                         # source="human" when a person gives the verdict
+```
+
+`solvi serve module:desk --mcp --agent-oracle` serves it as two MCP tools, `decide` and `resolve`. Every decision the
+slow path would take — an escalation, an audit drawn by the coin, a supervision or drift check — becomes a ticket that
+shows the question, all its options, the input as given, the question's text and the time left: no model guess, no
+probabilities, no reason, and an audit ticket is byte for byte the shape of an escalation one (the kind is kept only
+in the record). That is the second half of the sampling assumption: the label does not depend on whether the
+decision was sampled. A ticket is a hash-chained record (kind `pending`) written at issue with the decision begun
+(its number, coin, rate, System 1's response); the dispatch record is written when the verdict comes (`"pending":
+ticket`), and the stream sample records `label_source` ("s2" for the agent, "human" for a person) and `label_of`
+(the ticket's record). A restart rebuilds it all from the store: a new desk over a freshly built dispatcher resumes
+it (`Dispatcher.resume`: numbers, spend, certificate, detector, rate) and lists the open tickets. A ticket past its
+`ttl`, or given up (`expire`), gets a `pending_expired` record and its input goes to a person; on a sampled decision
+the missing label is a loss at every grid point where System 1 would have answered alone and a loss of 1 for the
+detector — the conservative direction for both under any missingness, so an agent that skips hard tickets only lowers
+its own coverage. A verdict after expiry, on an unknown ticket or a second time is refused; a label outside the
+options is refused and the ticket stays open. `replay_all()` and `replay_stream()` replay a store with tickets exactly
+(the gate, rate and coin where the ticket was issued, the sample where it was completed). Not built: the expired-share
+stop, repeated tickets for the oracle's own noise, several servers on one store, a free-text input.
+
+Stage 3b closes the loop: a live learner takes the oracle's labels, and frozen copies of it are certified and served.
+
+```python
+from solvi.experimental.stream import HashedTextLearner, LearningLoop
+
+loop = LearningLoop(HashedTextLearner(), question="intent", max_risk=0.05, delta=0.05, secret=key, storage=store,
+                    versions_dir="intent.versions", system=system, feature="text")
+out = loop.step(text, lambda: oracle(text))   # the oracle is called only when a label is needed
+out["by"]                                     # "local" (the served version alone), "oracle" or "person"
+loop.versions()                               # each version: state, certified, threshold, δ_v, frozen at
+loop.replay(rescore=True)                     # every decision and event rebuilt from the chain
+```
+
+Version 0 is "no model" by default: it answers nothing alone, has no certificate and spends no δ. With `initial=` it
+is an existing frozen model instead — the fitted System 1, e.g. `FrozenFast.of_system(system, question)` — with its own
+`StreamPromise` (the budget's first δ_v), fed from decision 1, so the loop starts from what is already deployed. The
+live learner is never served. Once it has taken max(300, 2 × the served version's labels at its freeze) labels, a copy is frozen as the
+candidate with its own `StreamPromise`, its (v, δ_v) drawn from the loop's one `DeltaBudget`, so every version ever
+frozen holds together with probability ≥ 1 − δ. Each decision is scored by the served version and, in shadow, by the
+candidate before its label is read. A sampled decision reaches the promises of the served version and the candidate,
+both frozen before it, and only then trains the live learner: a version never reads a sample from before its freeze
+(a test checks this for every version). The coin and the rate are stage 2's. A candidate is promoted once it is
+certified and, on its own samples, answers alone on at least `min_share` of them (default 0.05) and on at least one
+point more than the served version at the served threshold (ℓ_k ≥ ℓ_s + `margin`, default 0.01). The floor is the
+author's rule after the joint promise certified a model of shuffled labels at a threshold almost nothing passes and
+promoted it over "no model" with margin 0. A candidate not certified after 1 500 samples, or certified and not better
+after `trial` samples (default 1 500), is discarded. Its δ_v stays spent, and the next freeze waits for 1.5 × the
+labels taken. Labels from "human", "outcome", "rule" or "audit" are taken by default. A slow path's answer ("s2" or
+"verified") is refused unless `s2_labels=True`, and with it is recorded as "s2". Each decision is a record of kind
+`loop` (its `stream` part is kept by a redaction; the input, the would-be answers and the label are not). Each freeze,
+promote, discard and rollback is a record of kind `stream` with the version, (v, δ_v), and, for a freeze, the frozen
+model's fingerprint. `replay()` re-runs the protocol from the records alone and compares which version served each
+decision, both certificates' states and every event; with `versions_dir` it also checks each pickled version's
+fingerprint and, with `rescore=True`, recomputes every recorded score. With `system=`, the served version is the
+question's answer head (`solvi.core.versions.serve_head`), so the System's fingerprint and every trace name it.
+With `detector=RiskDetector(alpha=<the promised rate>)` (stage 2's class) the served version is watched: each
+sampled decision under a threshold in force feeds the detector its deployed loss. An alarm restarts the served
+version's promise (a new δ_v from the same budget, threshold +inf) and opens probation: nothing is answered alone for
+the next `probation` decisions (300) and until the served version certifies again. A certified candidate is promoted
+at once (the served share is 0 under +inf) but answers alone only after probation. The oracle may return a
+`Verdict(label, source, label_of)`; `ticket_verdict(desk, resolved)` reads one from a ticket resolved on a stage-3a
+`TicketDesk` (the agent's verdict has source "s2", so it needs `s2_labels=True`; an expired ticket has no label), and
+the decision records `label_of`, the ticket's record id.
+`HashedTextLearner` is hashed word and character n-grams with an online softmax in numpy; `FastHeadLearner` is
+solvi's `FastHead` over facts (`FastHeadLearner.for_system(system, question)`).
+
+In the tests, on a synthetic five-intent text stream of 2 000 decisions the loop answers more than half alone in the
+last 500 with no wrong alone answer. Shuffled labels never promote a candidate under either promise (3 seeds each,
+the shuffled-label control). These are smoke checks, not measurements.
+
+Measured on real streams; see the documented limits. What the measurement found against these pieces:
+
+- **`RiskDetector` must not be the only alarm.** It reads only the sampled decisions, so on shifts to new intents it
+  alarmed far later than the confidence CUSUM that reads every decision's score, or not at all, and until its alarm
+  the system kept answering alone on the moved inputs. Use it next to the score monitor (`DriftMonitor`,
+  `OpenSetGate`), not instead of it. `alternatives=(1.5, 2.0)` left it silent on most streams and is not a default.
+- **The `LearningLoop` gained nothing with gold labels.** Against the same certificate on the frozen System 1 it
+  promoted no better version; what it did promote answered alone mostly on items it had been given labels for, and it
+  called the oracle more. It is kept in solvi only as the core of a planned adapter (LoRA) loop, with no claim of gain.
+- **`TicketDesk` / `AgentOracle` are unmeasured on a stream** (tests only). The promise is relative to the agent's
+  labels: a noisy agent lowers coverage, not validity.
+- The promise holds between change points: between a shift and its alarm the realised risk can exceed it.
+
+- **Missing:** measured once; see the documented limits in docs/experimental.md: the RiskDetector alarmed far later than the confidence CUSUM on shifts to new intents and must not be the only alarm; the LearningLoop gained nothing with gold labels and is kept only as the core of a planned adapter loop; TicketDesk is unmeasured on a stream. The loop is not wired into the Dispatcher (no loop=: it drives its own coin and oracle); the expired-share stop (max_drop) and repeated tickets for the oracle's own noise are not built; a person's audit label does not yet replace the slow path's label
+- **Script:** none yet. **Deadline:** 1.2.
+- API: [solvi.experimental.stream](api/stream.md).

@@ -13,6 +13,19 @@ Every stored decision is one record (a dict of plain JSON):
   kind "update"   a labelled update (solvi.experimental.changes, LearningTarget): what changed, the gates' results, the state
                   to roll back to;
   kind "specialist" a specialist's run (solvi.core.specialist): the source's hash, the proposal, the check, the output's hash;
+  kind "stream"   a state change of a Dispatcher's stream certificate (promise=, audit="adaptive"): {"stream": {"event":
+                  "grid" | "certified" | "loosened" | "alarm" | "recertify", "question", "decision", "v_index",
+                  "delta_v", "threshold", "n", ...}}; a dispatch record of such a dispatcher carries "stream" too (its
+                  sample, certificate and detector state). "stream" is KEPT: a redaction leaves it;
+  kind "pending"  a ticket issued to an oracle outside the process (solvi.experimental.stream.tickets): {"pending":
+                  {"ticket", "question", "n", "created", "ttl", "kind_hidden", "rho", "probation", "sampled"}, "issue":
+                  the decision begun (Dispatcher.start: the input, System 1's response, the draws)}; its dispatch record,
+                  written when the ticket is resolved or expires, carries "pending": the ticket. kind "pending_expired":
+                  {"pending": {"ticket", "question", "n", "at", "why"}} — no verdict came. "pending" is KEPT;
+  kind "loop"     one decision of the closed learning loop (solvi.experimental.stream.versions): "question", "stream"
+                  (KEPT: the served and candidate versions, the coin, the scores, both certificates' states) and "loop"
+                  (the input, the would-be answers, the label: not kept); its freeze / promote / discard / rollback are
+                  records of kind "stream";
   every record    seq (0, 1, 2, ...), time (seconds since the epoch), meta (optional, yours; a decision made with
                   solvi.experimental pieces has meta["experimental"]: their names), prev and hash.
 
@@ -159,7 +172,7 @@ def _body(rec):
 
 
 KEPT = ("v", "kind", "seq", "time", "prev", "init_hash", "catalog", "records", "flow", "producers", "models", "guards",
-        "safeguards", "teach", "source", "of", "of_hash", "by", "note", "segment", "run")
+        "safeguards", "teach", "source", "of", "of_hash", "by", "note", "segment", "run", "stream", "pending")
 """The fields of a record that are never erased (redact leaves them; a redaction record is made of them)."""
 
 
