@@ -4816,7 +4816,10 @@ different sinces are versions in time, not a contradiction: a later since closes
 earlier one stays a fact for its own time (a price of 100 from day 0 and a promotion of 80 on days 50–80 give 100,
 then 80, then 100 again; a value announced ahead does not end the current one before its date; retracting the later
 version re-opens the earlier). Validity is per assertion: a value told for two periods holds in both under one id
-(`ks.item(id)["valid"]["claims"]` lists them, `ks.periods(id)` gives where the item holds). Two values from the same
+(`ks.item(id)["valid"]["claims"]` lists them, `ks.periods(id)` gives where the item holds). Claims of one item from
+one since are one version: when they give different untils, the latest claim's until decides (a correction of the
+until). A missing since is the beginning of time: an assertion without `valid` on a key where others carry one is the
+version that holds from the beginning until the first later since. Two values from the same
 since compete by rank as below, and the winner takes only the overlap. A fact derived from others (`derived_from=`)
 without its own `valid` gets the intersection of its premises' validity and holds only where they hold.
 `snapshot(valid_at=t)` keeps as facts only those that hold at `t`, a snapshot row carries its item's `valid` (and
