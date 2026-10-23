@@ -116,6 +116,21 @@
   the joint promise a model of shuffled labels can be certified at a strict threshold and promoted (it answers almost
   nothing alone; the design's control C3 assumed it cannot certify); under `max_error=` it is never promoted. Not
   wired into the Dispatcher yet. Unmeasured: the gain is unproven; the stage-4 stand measures it.
+- **Learning loop: the promotion floor, version 0 = System 1, the detector, tickets** (experimental,
+  `solvi.experimental.stream.versions`; changes the stage-3b rule). Promotion now needs ℓ_k ≥ `min_share` (default
+  0.05) AND ℓ_k ≥ ℓ_s + `margin` (default 0.01, was 0), both on the candidate's own post-freeze samples (author's
+  decision, 2026-10-23): under the joint promise a model of shuffled labels was certified at a near-empty strict
+  threshold and promoted with margin 0; with the floor shuffled labels never promote under `max_risk=` or
+  `max_error=` (3 seeds each). `initial=` (opt-in; default still "no model"): version 0 is an existing frozen model
+  with its own `StreamPromise` (the budget's first δ_v), fed from decision 1, its fingerprint the "start" event;
+  `FrozenFast.of_system(system, question)` freezes a System's fitted head for it. `detector=RiskDetector(...)`,
+  `probation=300`: stage 2's detector on the served version — an alarm ("alarm" event) restarts the served promise
+  (new δ_v, threshold +inf) and nothing is answered alone for `probation` decisions and until re-certified; a
+  certified candidate is promoted at once but waits out probation; promotion and rollback reset the detector. The
+  oracle may return a `Verdict(label, source, label_of)`; `ticket_verdict(desk, resolved)` reads one from a ticket
+  resolved on a `TicketDesk` (the agent's: source "s2"; an expired one: no label); decisions record `label_of`,
+  `probation`, `left` and the detector's state. With `system=`, rolling back to version 0 puts back the head the
+  System had. Still no `Dispatcher(loop=)`. Unmeasured.
 - **A secret for the supervision and audit draws: `Dispatcher(secret=)`** (`solvi.core.dispatch`; security). The
   draws were `sha256(f"{seed}|{input hash}|{n}")` with the public default `seed=0`, so whoever could vary the inputs
   could compute which decisions would be supervised or audited and avoid them. With `secret=` (bytes or str; None reads

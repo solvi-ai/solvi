@@ -10,11 +10,14 @@
     loop.versions()                        # [{"version", "state", "certified", "threshold", ...}]
     loop.replay()                          # every decision and event rebuilt from the records and compared
 
-Versions. Version 0 is "no model": it answers nothing alone, has no certificate and spends no δ (it never
-certifies). The live learner (`stream.learner.Learner`) takes every accepted oracle label and is never served. When no
-candidate exists and the live learner has taken ≥ max(freeze_min, growth × the served version's labels at its
-freeze, the refreeze floor) labels (300, 2: kadi's constants), a snapshot is frozen as the candidate, with its own
-`StreamPromise` drawing the next (v, δ_v) from the loop's one `DeltaBudget` (Σ δ_v ≤ δ over every version ever
+Versions. Version 0 is "no model" by default: it answers nothing alone, has no certificate and spends no δ (it never
+certifies). With `initial=` (opt-in) version 0 is an existing frozen model — the fitted System 1, e.g.
+`FrozenFast.of_system(system, question)` over its fitted head — with its own `StreamPromise` (the first (v, δ_v) of the
+budget), fed from decision 1 (its freeze is before the stream); its fingerprint is the "start" event of decision 1. The
+live learner starts empty either way. The live learner (`stream.learner.Learner`) takes every accepted oracle label and
+is never served. When no candidate exists and the live learner has taken ≥ max(freeze_min, growth × the served version's
+labels at its freeze, the refreeze floor) labels (300, 2: kadi's constants), a snapshot is frozen as the candidate, with
+its own `StreamPromise` drawing the next (v, δ_v) from the loop's one `DeltaBudget` (Σ δ_v ≤ δ over every version ever
 frozen). Each decision is scored by the served version and, in shadow, by the candidate, before its label is read.
 
 Calibration. A version's promise reads only samples drawn after its freeze: the samples of decision n go to the
@@ -26,35 +29,52 @@ the share answered alone))); a decision the served version does not answer alone
 label trains the live learner, but it reaches a promise only when the coin drew it (escalation-only calibration
 breaks the promise: the stage-2 control).
 
-Promotion (the joint / LTT kind). Once the candidate is certified, on the candidate's own samples (all after its
-freeze): ℓ_k = the share with the candidate's score ≥ its threshold, ℓ_s = the share with the served version's score
-≥ the served threshold now — a paired comparison on the same samples. Promote when ℓ_k ≥ ℓ_s + margin (margin 0,
-kadi) and ℓ_k > 0. Discard a candidate not certified after `stale` samples (1 500) or certified and not better after
-`trial` samples (default: stale); the refreeze floor becomes `refreeze` × the live learner's labels (1.5). A
-discarded version's δ_v stays spent. Every version's certificate holds together under the budget, so the rule only
-affects utility, not validity.
+Promotion. Once the candidate is certified, on the candidate's own samples (all after its freeze): ℓ_k = the share with
+the candidate's score ≥ its threshold, ℓ_s = the share with the served version's score ≥ the served threshold now — a
+paired comparison on the same samples. Promote when ℓ_k ≥ `min_share` (0.05) AND ℓ_k ≥ ℓ_s + `margin` (0.01: one point)
+— the author's rule (2026-10-23): under the joint promise a model of noise certifies at a strict threshold that almost
+nothing passes, and with margin 0 over a version that answers nothing it was promoted; the floor keeps such a version
+out (control C3: shuffled labels never promote, both kinds). Discard a candidate not certified after `stale` samples
+(1 500) or certified and not better after `trial` samples (default: stale); the refreeze floor becomes `refreeze` × the
+live learner's labels (1.5). A discarded version's δ_v stays spent. Every version's certificate holds together under the
+budget, so the rule only affects utility, not validity.
+
+The detector (opt-in, `detector=RiskDetector(alpha=<the promised rate>)`, stage 2's class). Each sampled decision
+whose served version had a threshold in force, outside probation, feeds it the deployed loss as the Dispatcher's
+driver does (joint: answered alone and wrong; selective: wrong, fed only when answered alone; a missing label is
+wrong). On an alarm: a "stream" event "alarm" (R, the detector's n, why), the detector is reset, the served
+version's promise restarts (the next (v, δ_v) from the loop's budget, threshold +inf) and probation opens: the next
+`probation` (300) decisions are not answered alone whatever the threshold (ρ = 1), and after that until the served
+version is certified again — the stricter of the two. Probation belongs to the question, not the version: a certified
+candidate is promoted at once (ℓ_s is 0 under +inf) but answers alone only after probation. A promotion or a rollback
+resets the detector.
 
 Labels. Accepted by default: the trusted sources ("human", "outcome", "rule", "audit"; solvi.core.sources). A slow
 path's answer ("s2", or "verified") is refused (UntrustedLabel, before anything changes) unless `s2_labels=True`; with
-it the label is taken and recorded as "s2". The loop is not a `Head` a System's `teach` reaches.
+it the label is taken and recorded as "s2". The loop is not a `Head` a System's `teach` reaches. The oracle may return
+a `Verdict(label, source, label_of)` instead of a bare label: its source replaces step()'s and label_of (the stored id
+of the record that holds the label) is recorded. `ticket_verdict(desk, resolved)` reads one from a ticket resolved on
+a stage-3a `TicketDesk` (the agent's verdict: source "s2", so `s2_labels=True`; a person's: "human"; an expired or
+refused ticket: no label).
 
-In the chain. Each decision is a record of kind "loop": "stream" (kept by a redaction) holds n, the served and
-candidate versions, ρ, sampled, alone, by, label_source, the served score and threshold, the candidate's shadow
-score, both promises' states and the live learner's labels; "loop" (not kept) holds the input, the would-be answers,
-the label and the answer. Each state change is a record of kind "stream" ({"event": "freeze" | "promote" |
-"discard" | "rollback" | the promises' "grid" / "certified" / "loosened", "question", "version", "v_index",
-"delta_v", ...}); a freeze carries the frozen model's fingerprint, its decision and the labels it had seen. With
-`versions_dir=`, each frozen model is pickled as `<versions_dir>/<version>.pkl`. `replay()` re-runs the protocol
-from the records alone (the coin recomputed with the secret, the scores read from the records, the live learner
-replaced by its label count) and compares every decision — which version served it and the certificates' states —
-and every event; with `versions_dir` each pickle's fingerprint is checked and, with `rescore=True`, every recorded
-score is recomputed by the frozen model that gave it.
+In the chain. Each decision is a record of kind "loop": "stream" (kept by a redaction) holds n, the served and candidate
+versions, ρ, sampled, alone, by, label_source, label_of, probation (at issue) and the decisions of it left, the served
+score and threshold, the candidate's shadow score, both promises' states, the detector's state and the live learner's
+labels; "loop" (not kept) holds the input, the would-be answers, the label and the answer. Each state change is a record
+of kind "stream" ({"event": "freeze" | "promote" | "discard" | "rollback" | "start" | "alarm" | the promises' "grid" /
+"certified" / "loosened" / "recertify", "question", "version", "v_index", "delta_v", ...}); a freeze carries the frozen
+model's fingerprint, its decision and the labels it had seen. With `versions_dir=`, each frozen model is pickled as
+`<versions_dir>/<version>.pkl`. `replay()` re-runs the protocol from the records alone (the coin recomputed with the
+secret, the scores read from the records, the live learner replaced by its label count) and compares every decision —
+which version served it and the certificates' states — and every event; with `versions_dir` each pickle's fingerprint is
+checked and, with `rescore=True`, every recorded score is recomputed by the frozen model that gave it.
 
 With `system=` a promoted or rolled-back version is installed as the question's answer head
-(`solvi.core.versions.serve_head`; version 0 removes it), so the System's fingerprint and every trace name it.
+(`solvi.core.versions.serve_head`; version 0 puts back the head the System had when the loop was built, or removes
+it), so the System's fingerprint and every trace name it.
 
-Not built here: the Dispatcher's `loop=` (the loop drives its own coin and oracle), a RiskDetector on the served
-version, tickets (the oracle is a callable). Unmeasured: the gain is unproven (solvi's prior evidence is against
+Not built here: the Dispatcher's `loop=` (the loop drives its own coin and oracle; a ticket's verdict reaches it
+through `ticket_verdict`). Unmeasured: the gain is unproven (solvi's prior evidence is against
 it); the stand (stage 4) measures it."""
 from __future__ import annotations
 
@@ -65,13 +85,44 @@ import math
 import pickle
 import warnings
 from pathlib import Path
+from typing import Any, NamedTuple
 
 from ._eprocess import DeltaBudget
 from .certificate import StreamPromise, _sha
+from .detector import RiskDetector
 from .sampling import Rate, coin_message, coin_value
 
 S2_SOURCES = ("s2", "verified")
 _warned = False
+
+
+class Verdict(NamedTuple):
+    """What an oracle may return instead of a bare label: the label (None: missing), its source (None: step()'s) and
+    label_of — the stored id of the record that holds it (a ticket's), recorded with the decision."""
+    label: Any
+    source: str | None = None
+    label_of: str | None = None
+
+
+def ticket_verdict(desk, resolved) -> Verdict:
+    """A ticket resolved (or expired) on a stage-3a TicketDesk → its Verdict, read from the stored dispatch record.
+    desk: the TicketDesk (or its TraceStorage); resolved: what `TicketDesk.resolve` returned, or the record's stored
+    id. The agent's verdict has source "s2" (the loop takes it only with s2_labels=True), a person's "human"; a
+    ticket that expired or whose verdict the contract refused has no label."""
+    store = desk.dispatcher.storage if hasattr(desk, "dispatcher") else desk
+    sid = resolved["stored_id"] if isinstance(resolved, dict) else resolved
+    rec = store.record(sid)
+    th = rec.get("s2") if rec.get("kind") == "dispatch" else None
+    oracle = ((th or {}).get("record") or {}).get("oracle")
+    if oracle is None:
+        raise ValueError(f"record {sid} is not a decision completed through a ticket")
+    if not th.get("accepted") or oracle.get("lost"):
+        return Verdict(None, oracle.get("label_source"), None)
+    return Verdict(th.get("answer"), oracle.get("label_source"), oracle.get("label_of"))
+
+
+def _fresh_detector(det):
+    return None if det is None else RiskDetector(det.alpha, det.arl, det.scales, det.alternatives)
 
 
 def _num(x):
@@ -116,21 +167,23 @@ class _Counting:
 class LearningLoop:
     """See the module docstring. learner: the live Learner; question: the question's name (in the coin and the
     records); max_risk= / max_error=, delta: each version's StreamPromise (promise_options: its other keywords — grid,
-    grid_from, bets ...); freeze_min, growth, stale, trial, margin, refreeze: the protocol's constants; s2_labels: take
-    slow-path labels; source: the default source of the oracle's labels; secret, seed: the coin's key and run;
-    sampling: {"floor", "budget", "window"} of the rate; storage: a TraceStorage for the records (None: kept in
-    memory for replay); versions_dir: where frozen models are pickled; system, feature: install the served version
+    grid_from, bets ...); freeze_min, growth, stale, trial, refreeze: the protocol's constants; min_share, margin: the
+    promotion rule (ℓ_k ≥ min_share and ℓ_k ≥ ℓ_s + margin); initial: version 0's frozen model (None: no model);
+    detector, probation: a RiskDetector on the served version and the decisions escalated after its alarm;
+    s2_labels: take slow-path labels; source: the default source of the oracle's labels; secret, seed: the coin's key
+    and run; sampling: {"floor", "budget", "window"} of the rate; storage: a TraceStorage for the records (None: kept
+    in memory for replay); versions_dir: where frozen models are pickled; system, feature: install the served version
     as the question's answer head (feature: the text fact a text model reads)."""
 
     def __init__(self, learner, *, question, max_risk=None, max_error=None, delta=0.05, freeze_min=300, growth=2.0,
-                 stale=1500, trial=None, margin=0.0, refreeze=1.5, s2_labels=False, source="human", secret=None,
-                 seed=0, sampling=None, promise_options=None, storage=None, versions_dir=None, system=None,
-                 feature="text"):
+                 stale=1500, trial=None, min_share=0.05, margin=0.01, refreeze=1.5, initial=None, detector=None,
+                 probation=300, s2_labels=False, source="human", secret=None, seed=0, sampling=None,
+                 promise_options=None, storage=None, versions_dir=None, system=None, feature="text"):
         global _warned
         self._kw = dict(question=question, max_risk=max_risk, max_error=max_error, delta=delta, freeze_min=freeze_min,
-                        growth=growth, stale=stale, trial=trial, margin=margin, refreeze=refreeze,
-                        s2_labels=s2_labels, source=source, secret=secret, seed=seed, sampling=sampling,
-                        promise_options=promise_options, feature=feature)
+                        growth=growth, stale=stale, trial=trial, min_share=min_share, margin=margin,
+                        refreeze=refreeze, initial=initial, probation=probation, s2_labels=s2_labels, source=source,
+                        secret=secret, seed=seed, sampling=sampling, promise_options=promise_options, feature=feature)
         self._pkw = {"max_risk": max_risk, "max_error": max_error, **(promise_options or {})}
         for k in ("delta", "budget"):
             if k in self._pkw:
@@ -138,12 +191,25 @@ class LearningLoop:
         StreamPromise(**self._pkw, budget=DeltaBudget(delta))          # the promise's arguments, checked once
         if int(freeze_min) < 1 or float(growth) < 1.0 or int(stale) < 1 or float(refreeze) < 1.0:
             raise ValueError("freeze_min ≥ 1, growth ≥ 1, stale ≥ 1, refreeze ≥ 1")
-        if float(margin) < 0.0:
-            raise ValueError("margin is a share ≥ 0")
+        if not 0.0 <= float(margin) <= 1.0 or not 0.0 <= float(min_share) <= 1.0:
+            raise ValueError("margin and min_share are shares in [0, 1]")
+        if int(probation) < 0:
+            raise ValueError("probation is a number of decisions ≥ 0")
+        level = max_risk if max_risk is not None else max_error
+        if detector is not None:
+            if not isinstance(detector, RiskDetector):
+                raise TypeError("detector is a RiskDetector (stream.detector)")
+            if abs(detector.alpha - float(level)) > 1e-12:
+                raise ValueError(f"the detector's alpha {detector.alpha:g} is not the promised rate {float(level):g}")
+            detector.reset()                               # the loop owns it from here
+        for a in ("score", "fingerprint"):
+            if initial is not None and not hasattr(initial, a):
+                raise TypeError(f"initial is a frozen model (score, fingerprint): missing {a}")
         self.live, self.question = learner, str(question)
         self.freeze_min, self.growth, self.stale = int(freeze_min), float(growth), int(stale)
         self.trial = self.stale if trial is None else int(trial)
-        self.margin, self.refreeze = float(margin), float(refreeze)
+        self.min_share, self.margin, self.refreeze = float(min_share), float(margin), float(refreeze)
+        self.detector, self.probation, self.left = detector, int(probation), 0
         self.s2_labels, self.source, self.seed = bool(s2_labels), str(source), int(seed)
         if isinstance(secret, str):
             secret = secret.encode()
@@ -156,16 +222,18 @@ class LearningLoop:
         self.budget = DeltaBudget(delta)
         self.rate = Rate(**(sampling or {}))
         self.storage, self.system, self.feature = storage, system, feature
+        self._head0 = None if system is None else system.heads.get(self.question)
         self.versions_dir = None if versions_dir is None else Path(versions_dir)
         if self.versions_dir is not None:
             self.versions_dir.mkdir(parents=True, exist_ok=True)
         self.n = 0
         self.served, self.candidate = 0, None
-        self._vs = {0: {"version": 0, "state": "served", "model": None, "promise": None, "frozen_at": 0, "seen": 0,
-                        "fingerprint": None, "samples": [], "fed": []}}
+        p0 = None if initial is None else StreamPromise(**self._pkw, budget=self.budget)
+        self._vs = {0: {"version": 0, "state": "served", "model": initial, "promise": p0, "frozen_at": 0, "seen": 0,
+                        "fingerprint": None if initial is None else initial.fingerprint(), "samples": [], "fed": []}}
         self.refreeze_floor = 0.0
         self.log = []                                      # (kind, record) when there is no storage
-        self._ev_seen = {}
+        self._ev_seen = {0: 0}
         self._fps = None                                   # replay: the recorded fingerprints by version
 
     # --- the per-decision step
@@ -200,18 +268,26 @@ class LearningLoop:
         from ...core.sources import check_source
         return check_source(src)
 
-    def _advance(self, x, would_s, score_s, would_k, score_k, label_of, src):
+    def _advance(self, x, would_s, score_s, would_k, score_k, oracle, src):
         n = self.n + 1
         sv, c = self.served, self.candidate
         thr_s = self._threshold(sv)
-        rho = self.rate.rate(full=math.isinf(thr_s))
+        prob = self.left > 0
+        rho = self.rate.rate(full=math.isinf(thr_s) or prob)
         sampled = self._coin(n) < rho
-        alone = score_s is not None and math.isfinite(thr_s) and score_s >= thr_s
-        label, lsrc = None, None
+        alone = not prob and score_s is not None and math.isfinite(thr_s) and score_s >= thr_s
+        label, lsrc, lof = None, None, None
         if sampled or not alone:
-            label = label_of()
+            got = oracle()
+            if isinstance(got, Verdict):
+                label, lof = got.label, got.label_of
+                src = src if got.source is None else got.source
+            else:
+                label = got
             if label is not None:
                 lsrc = self._check(src)                    # a refused source: nothing has changed yet
+            else:
+                lof = None
         # --- from here the state changes
         self.n = n
         for v, score in ((sv, score_s), (c, score_k)):
@@ -228,6 +304,17 @@ class LearningLoop:
                 ver["fed"].append(n)
             if c is not None:
                 self._vs[c]["samples"].append([score_k, score_s])
+        alarm, det, ps = None, self.detector, self._vs[sv]["promise"]
+        if sampled and det is not None and ps is not None and math.isfinite(thr_s) and not prob:
+            wrong = label is None or would_s != label
+            if ps.kind == "joint":
+                loss, fed = (1.0 if (alone and wrong) else 0.0), True
+            else:                                          # selective: the error among the alone answers
+                loss, fed = (1.0 if wrong else 0.0), alone
+            if fed and det.update(loss):
+                alarm = det.report()
+        if prob:
+            self.left -= 1
         if label is not None:
             self.live.update(x, label)
         self.rate.push(alone)
@@ -237,14 +324,24 @@ class LearningLoop:
             answer, by = label, "oracle"
         else:
             answer, by = None, "person"
-        events = self._promise_events()
+        events = []
+        if n == 1 and self._vs[0]["model"] is not None:
+            events.append(self._event("start", 0, n, fingerprint=self._vs[0]["fingerprint"], why=None))
+        events += self._promise_events()
+        if alarm is not None:
+            events.append(self._event("alarm", sv, n, R=alarm["R"], detector_n=alarm["n"], why=alarm["why"][0]))
+            det.reset()
+            ps.restart("alarm")
+            self.left = self.probation
+            events += self._promise_events()
         events += self._protocol(n)
         events += self._promise_events()
         st = lambda v: None if v is None or self._vs[v]["promise"] is None else self._vs[v]["promise"].state()  # noqa: E731
         rec = {"n": n, "served": sv, "candidate": c, "rho": rho, "sampled": sampled, "alone": alone, "by": by,
-               "label_source": lsrc, "missing": (sampled or not alone) and label is None, "score": _num(score_s),
+               "label_source": lsrc, "label_of": lof, "missing": (sampled or not alone) and label is None,
+               "probation": prob, "left": self.left, "score": _num(score_s),
                "threshold": None if math.isinf(thr_s) else thr_s, "shadow": _num(score_k), "served_state": st(sv),
-               "candidate_state": st(c), "seen": self.live.seen()}
+               "candidate_state": st(c), "detector": None if det is None else det.state(), "seen": self.live.seen()}
         payload = {"input": x, "would": would_s, "shadow_would": would_k, "label": label, "answer": answer}
         self._write(rec, payload, events)
         return {"n": n, "answer": answer, "by": by, "served": sv, "candidate": c, "sampled": sampled, "label": label,
@@ -275,7 +372,7 @@ class LearningLoop:
             k = len(ver["samples"])
             if not math.isinf(ver["promise"].threshold):
                 lk, ls = self._shares(ver)
-                if lk > 0.0 and lk >= ls + self.margin:
+                if lk >= self.min_share and lk >= ls + self.margin:
                     ev.append(self._event("promote", c, n, **{"from": self.served, "to": c, "l_k": lk, "l_s": ls,
                                                              "samples": k, "why": None}))
                     self._serve(c)
@@ -304,9 +401,13 @@ class LearningLoop:
         self.served = v
         if self.candidate == v:
             self.candidate = None
+        if self.detector is not None:
+            self.detector.reset()                          # a new served version: its deployed risk from scratch
         if self.system is not None:
             model = self._vs[v]["model"]
-            if model is None:
+            if v == 0 and self._head0 is not None:
+                self.system.heads[self.question] = self._head0
+            elif model is None:
                 self.system.heads.pop(self.question, None)
             else:
                 from ...core.versions import serve_head
@@ -394,7 +495,8 @@ class LearningLoop:
         items = self._items()
         stored_ev = [e for k, e in items if k == "stream"]
         fps = {e["version"]: e.get("fingerprint") for e in stored_ev if e.get("event") == "freeze"}
-        fresh = LearningLoop(_Counting(), **{**self._kw, "secret": self._secret})
+        fresh = LearningLoop(_Counting(), **{**self._kw, "secret": self._secret},
+                             detector=_fresh_detector(self.detector))
         fresh._fps = fps
         bad, k = [], 0
         for kind, d in items:
@@ -415,7 +517,8 @@ class LearningLoop:
                                                 f"{st.get('candidate')}, rebuilt {fresh.served} / {fresh.candidate}"))
             label = lp.get("label")
             fresh._advance(lp.get("input"), lp.get("would"), st.get("score"), lp.get("shadow_would"), st.get("shadow"),
-                           lambda: label, st.get("label_source") or fresh.source)
+                           lambda: Verdict(label, st.get("label_source") or fresh.source, st.get("label_of")),
+                           fresh.source)
             got = next(r for kk, r in reversed(fresh.log) if kk == "loop")["stream"]
             for f in sorted(set(st) | set(got)):
                 if st.get(f) != got.get(f):
@@ -440,6 +543,8 @@ class LearningLoop:
                 bad.append((None, "version file", f"version {v}: fingerprint {m.fingerprint()[:12]}, recorded "
                                                   f"{str(fp)[:12]}"))
             models[v] = m
+        if self._vs[0]["model"] is not None:
+            models[0] = self._vs[0]["model"]               # version 0: the model given as initial=
         if rescore:
             for kind, d in items:
                 if kind != "loop":
@@ -477,4 +582,4 @@ class LearningLoop:
                 f"labels {self.live.seen()})")
 
 
-__all__ = ["LearningLoop", "S2_SOURCES"]
+__all__ = ["LearningLoop", "S2_SOURCES", "Verdict", "ticket_verdict"]

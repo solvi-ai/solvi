@@ -291,13 +291,15 @@ STATUS: dict[str, dict] = {
                "the store, an expired ticket a recorded loss (stage 3a); the closed learning loop (stream.versions, "
                "LearningLoop over stream.learner's HashedTextLearner / FastHeadLearner): frozen versions, each with "
                "its own StreamPromise calibrated only on samples drawn after its freeze, δ from one DeltaBudget, "
-               "promoted when certified and answering alone at least as often as the served version on the same "
-               "samples, every freeze / promote / discard / rollback in the chain and replayed (stage 3b)",
+               "promoted when certified, answering alone on ≥ min_share (5 %) and ≥ the served version's share + "
+               "margin (1 point) on the same samples, every freeze / promote / discard / rollback in the chain and "
+               "replayed; version 0 optionally the fitted System 1 with its own promise (initial=), a RiskDetector "
+               "and probation on the served version, a resolved ticket's verdict as a label (ticket_verdict) "
+               "(stage 3b)",
                "missing": "unmeasured: the stand against offline calibration and the loop's stand (stage 4) have not "
                "run, so the loop's gain is unproven (solvi's earlier evidence is against it); the loop is not wired "
-               "into the Dispatcher (no loop=, no detector on the served version, no tickets) and version 0 is "
-               "always 'no model'; under the joint promise a model of noise can be promoted at a strict threshold "
-               "(it answers almost nothing alone); the expired-share stop (max_drop) and repeated tickets for the "
+               "into the Dispatcher (no loop=: it drives its own coin and oracle); the expired-share stop "
+               "(max_drop) and repeated tickets for the "
                "oracle's own noise are not built; a person's audit label does not yet replace the slow path's label",
                "script": None},
 }
