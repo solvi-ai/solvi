@@ -367,7 +367,9 @@
   a secret warns (`CheckpointTrustWarning`: a plain SHA-256 detects damage, not tampering); the removal of older
   folders runs under the save's locks and never removes the folder `CURRENT` names (before, two concurrent saves could
   leave `CURRENT` naming a removed folder); a save holds the part's version lock for all its writes, so the part's
-  decisions wait for it (unmeasured).
+  decisions wait for it (unmeasured). The version loaders read the verified bytes, not the folder: they are written to
+  a private temporary folder first, so a version file swapped in the checkpoint after its hash was checked is never
+  read (before, `load` read `versions/` again after the check; tested with a swap between the check and the load).
 - **A secret for the supervision and audit draws: `Dispatcher(secret=)`** (`solvi.core.dispatch`; security). The
   draws were `sha256(f"{seed}|{input hash}|{n}")` with the public default `seed=0`, so whoever could vary the inputs
   could compute which decisions would be supervised or audited and avoid them. With `secret=` (bytes or str; None reads

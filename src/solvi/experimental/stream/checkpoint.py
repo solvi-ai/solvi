@@ -48,7 +48,9 @@ the same records on the same continuation, and `replay()` on it rebuilds every d
 
 Trust: the pickles (policy, monitor, a `HeadVersion`'s model, a label that is not JSON) are run only after the
 manifest's signature and every file's hash are verified, and a folder holding a file the manifest does not list is
-refused; the version files copied into `versions_dir` are written from the verified bytes. With `secret=` the signature
+refused; the version files are read from the verified bytes only (written to a private temporary folder the loaders
+read, so a file swapped in the checkpoint after its hash was checked is never read), and the ones copied into
+`versions_dir` are written from them too. With `secret=` the signature
 is an HMAC, so a file changed or added by someone without the secret is refused. Without a secret it is a plain SHA-256
 that anyone can recompute: a check against accidental damage, with no tamper protection against whoever can write the
 folder, and `load` warns (`CheckpointTrustWarning`). Whether the checkpoint was keyed is recorded inside the signed
@@ -69,6 +71,7 @@ import os
 import pickle
 import secrets
 import shutil
+import tempfile
 import warnings
 from collections import deque
 from pathlib import Path
@@ -425,6 +428,29 @@ def load_loop(cls, dir, learner, *, system=None, storage=None, versions_dir=None
                       stacklevel=3)
     folder = _folder(dir)
     m, data = _verified(folder, secret)
+    with tempfile.TemporaryDirectory(prefix="solvi-ckpt-") as tmp:   # private (0700): the verified bytes only
+        vdir = _private_versions(data, Path(tmp))
+        return _load_verified(cls, folder, m, data, vdir, learner, system=system, storage=storage,
+                              versions_dir=versions_dir, part=part, initial=initial, key=key, served=served,
+                              clock=clock, secret=secret, groups=groups)
+
+
+def _private_versions(data, tmp: Path) -> Path:
+    """The verified bytes of the checkpoint's version files, written to a private folder the version loaders read:
+    a file swapped in the checkpoint folder after `_verified` checked it is never read."""
+    vdir = tmp / "versions"
+    vdir.mkdir()
+    for rel, b in data.items():
+        if rel.startswith("versions/"):
+            fname = rel[len("versions/"):]
+            if "/" in fname:
+                continue
+            _write(vdir / fname, b)
+    return vdir
+
+
+def _load_verified(cls, folder, m, data, vdir, learner, *, system, storage, versions_dir, part, initial, key, served,
+                   clock, secret, groups):
     st = json.loads(data["state.json"])
     if _cls_path(type(learner)) != m["learner"]:
         raise ValueError(f"the checkpoint's learner is {m['learner']}, not {_cls_path(type(learner))}")
@@ -456,10 +482,10 @@ def load_loop(cls, dir, learner, *, system=None, storage=None, versions_dir=None
             raise ValueError(f"initial= has fingerprint {initial.fingerprint()[:12]}, version 0 was {str(fp0)[:12]}")
     elif v0["kind"] == "served":
         p0 = part or getattr(learner, "part", None)
-        initial = _load_version(_cls_of(v0["cls"]), folder / "versions", 0, fp0, part=p0, question=m["question"],
+        initial = _load_version(_cls_of(v0["cls"]), vdir, 0, fp0, part=p0, question=m["question"],
                                 feature=cfg["feature"], groups=groups)
     elif v0["kind"] == "head":
-        initial = HeadVersion.load(folder / "versions", 0, expect_fp=fp0).frozen
+        initial = HeadVersion.load(vdir, 0, expect_fp=fp0).frozen
     the_part = part or getattr(learner, "part", None) or getattr(initial, "part", None)
     if m["weights"] is not None:
         if the_part is None:
@@ -476,7 +502,7 @@ def load_loop(cls, dir, learner, *, system=None, storage=None, versions_dir=None
                **cfg)
     loop._policy0 = data["policy0.pkl"]
     loop._monitor0 = pickle.loads(data["monitor0.pkl"])  # noqa: S301
-    _restore(loop, m, st, data, folder, groups)
+    _restore(loop, m, st, data, vdir, groups)
     if versions_dir is not None:                         # the version files a replay reads: the verified bytes only
         for rel, b in sorted(data.items()):
             if not rel.startswith("versions/"):
@@ -492,7 +518,7 @@ def load_loop(cls, dir, learner, *, system=None, storage=None, versions_dir=None
     return loop
 
 
-def _restore(loop, m, st, data, folder, groups):
+def _restore(loop, m, st, data, vdir, groups):
     loop.n, loop.served, loop.candidate, loop.left = st["n"], st["served"], st["candidate"], st["left"]
     loop.paused, loop.closed, loop.error = st["paused"], st["closed"], st["error"]
     loop._attempt, loop._trainings = st["attempt"], list(st["trainings"])
@@ -505,8 +531,7 @@ def _restore(loop, m, st, data, folder, groups):
     loop._ev_seen = {int(v): k for v, k in st["ev_seen"].items()}
     if loop.detector is not None:
         loop.detector.restore(st["detector"])
-    # versions
-    vdir = folder / "versions"
+    # versions (vdir: the private copy of the verified bytes)
     v0_model = loop._vs[0]["model"]
     loop._vs = {}
     for r in st["versions"]:

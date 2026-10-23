@@ -474,3 +474,29 @@ def test_two_saves_of_one_loop_never_leave_current_naming_a_removed_folder(tmp_p
     assert not errs, errs[:3]
     assert _load(root).n == 800
     assert [p.name for p in root.iterdir() if p.name.startswith("ckpt-")] == [_current_ok(root)[1]]
+
+
+def test_a_version_file_swapped_after_the_check_is_never_read(tmp_path, monkeypatch):
+    """The version loaders read the verified bytes (a private copy), not the checkpoint folder: a file replaced between
+    the hash check and the load is never read, its pickle never run."""
+    import pickle
+    a = _loop()
+    _run(a, _fake(12, 2500))
+    info = a.save(tmp_path / "ck")
+    vfiles = sorted(f for f in info["files"] if f.startswith("versions/") and f.endswith(".pkl"))
+    assert vfiles, info["files"]
+    real = ckpt_mod._verified
+
+    def swap_after_check(folder, secret):
+        out = real(folder, secret)
+        for rel in vfiles:                         # every version file replaced once its hash was checked
+            (folder / rel).write_bytes(pickle.dumps(_Boom()))
+        return out
+
+    monkeypatch.setattr(ckpt_mod, "_verified", swap_after_check)
+    _PLANTED.clear()
+    b = _load(tmp_path / "ck")
+    assert not _PLANTED
+    assert b.versions() == a.versions() and b.status() == a.status()
+    data = _fake(13, 1500)
+    assert _run(a, data) == _run(b, data)
