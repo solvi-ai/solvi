@@ -13,6 +13,15 @@ guard signal) and has a fingerprint; `LearningLoop` (stream.versions) freezes, c
   schedule as `System.fit`'s). The score is the head's largest probability. `facts=` turns an input into the facts
   row (`system.facts_for`), so the input can be a System's init state.
 
+- `HashedTextTrainer` — a batch learner (the stand-in for the LoRA learner of stage 3, no torch): `train(job)` fits a
+  fresh `HashedTextLearner` on the job's rows (shuffled by the job's seed, `epochs` passes) and freezes it; every
+  version is trained from scratch, never warm-started.
+
+A batch learner has `train(job: TrainJob) → Frozen` (one training on `job.rows`, the rows the policy selected); the
+adapter loop (`stream.loop.AdapterLoop`) calls it when the policy asks for a training and calls `snapshot()` on an
+online learner (one without `train`). Its `update` may take `key=` and `source=` keywords; `keys()` is optional and not
+read: the loop records the keys of the rows it handed over (a set snapshotted at the freeze).
+
 `Frozen.as_head(feature)` wraps a frozen model as an answer head (`solvi.core.Head`: options, features, predict,
 contributions, fingerprint; fit and teach refused), which `solvi.core.versions.serve_head` installs on a System."""
 from __future__ import annotations
@@ -20,8 +29,10 @@ from __future__ import annotations
 import copy
 import hashlib
 import math
+import random
 import re
 import zlib
+from dataclasses import dataclass, field
 from typing import Any, Protocol
 
 import numpy as np
@@ -36,9 +47,38 @@ class Frozen(Protocol):
 class Learner(Protocol):
     def update(self, x, y) -> None: ...               # one oracle label (the live learner only)
 
-    def snapshot(self) -> Frozen: ...                 # a copy that never changes again
+    def snapshot(self) -> Frozen: ...                 # a copy that never changes again (online learners)
 
     def seen(self) -> int: ...                        # labels taken so far
+
+
+class BatchLearner(Protocol):
+    def update(self, x, y) -> None: ...               # one train label (may also take key=, source=)
+
+    def train(self, job: "TrainJob") -> Frozen: ...   # one training on job.rows
+
+    def seen(self) -> int: ...
+
+
+@dataclass
+class TrainJob:
+    """One training the adapter loop runs. id: "<version>.<attempt>"; version: the version it would become; rows: the
+    selected train rows (stream.policy.LabelRow; empty for an online learner, which freezes a snapshot); hyper: the
+    policy's settings (r, lr, updates, seed, ...); trigger: "schedule" (the policy's want_train) or "train_now";
+    started: the wall clock; state: "running", "done", "failed" or "refused"; why: the refusal or the error;
+    fingerprint and seconds: the frozen model's and the wall time, once done; frozen: whether the pre-freeze gates
+    passed."""
+    id: str
+    version: int
+    rows: tuple = ()
+    hyper: dict = field(default_factory=dict)
+    trigger: str = "schedule"
+    started: float = 0.0
+    state: str = "running"
+    why: str | None = None
+    fingerprint: str | None = None
+    seconds: float = 0.0
+    frozen: bool | None = None
 
 
 class FrozenError(TypeError):
@@ -198,6 +238,38 @@ class HashedTextLearner:
         return f"HashedTextLearner({len(self.classes)} classes, seen {self._seen})"
 
 
+class HashedTextTrainer:
+    """See the module docstring: a batch learner over HashedTextLearner. options, lr, n_features, words, chars: as
+    HashedTextLearner; epochs: passes over the rows (job.hyper["epochs"] overrides)."""
+
+    def __init__(self, options=None, *, lr: float = 0.5, n_features: int = 2 ** 18, words=(1, 2), chars=(2, 5),
+                 epochs: int = 1):
+        HashedTextLearner(options, lr=lr, n_features=n_features, words=words, chars=chars)    # the arguments, checked
+        if int(epochs) < 1:
+            raise ValueError("epochs is at least 1")
+        self._kw = {"options": options, "lr": lr, "n_features": n_features, "words": words, "chars": chars}
+        self.epochs, self._seen = int(epochs), 0
+
+    def update(self, x, y, **_) -> None:
+        self._seen += 1
+
+    def seen(self) -> int:
+        return self._seen
+
+    def train(self, job) -> FrozenText:
+        live = HashedTextLearner(self._kw["options"], **{k: v for k, v in self._kw.items() if k != "options"})
+        rows = list(job.rows)
+        rng = random.Random(f"train|{job.hyper.get('seed', job.version)}")
+        for _ in range(int(job.hyper.get("epochs", self.epochs))):
+            rng.shuffle(rows)
+            for r in rows:
+                live.update(r.x, r.y)
+        return live.snapshot()
+
+    def __repr__(self):
+        return f"HashedTextTrainer(seen {self._seen})"
+
+
 # ───────────────────────────────────────────────────────────── solvi's FastHead over facts
 class FrozenFast:
     """A frozen copy of a FastHeadLearner (None head: not fitted yet — it answers nothing, score -inf)."""
@@ -297,4 +369,5 @@ class FastHeadLearner:
         return f"FastHeadLearner({len(self.options)} options, seen {self._seen})"
 
 
-__all__ = ["FastHeadLearner", "Frozen", "FrozenError", "FrozenFast", "FrozenText", "HashedTextLearner", "Learner"]
+__all__ = ["BatchLearner", "FastHeadLearner", "Frozen", "FrozenError", "FrozenFast", "FrozenText", "HashedTextLearner",
+           "HashedTextTrainer", "Learner", "TrainJob"]

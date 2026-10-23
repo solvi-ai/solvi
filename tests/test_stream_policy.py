@@ -285,8 +285,23 @@ def test_promote_needs_all_four_conditions_and_the_probe():
                        wrong_seen=0)
     assert not p.promote(st, memoriser)                                              # 5 the probe
     assert not p.promote_checks(st, memoriser)["probe"]["ok"]
-    assert DefaultPolicy(gap=1.0).promote(st, memoriser)                              # probe off: promoted
+    assert not DefaultPolicy(gap=1.0).promote(st, memoriser)                          # probe off: the novel-risk bar
+    assert DefaultPolicy(gap=1.0, novel_risk=False).promote(st, memoriser)            # both off: promoted
     assert not p.promote(_state(), GOOD)                                              # no candidate
+
+
+def test_promotion_needs_the_candidates_error_on_novel_samples_within_alpha():
+    """Author's decision 5 (2026-10-23): wrong_novel / n_novel ≤ α on top of the probe and probe_min."""
+    p, st = DefaultPolicy(), _cand()
+    over = Paired(n_novel=200, alone_novel=60, wrong_novel=11, alone_served=20, n_seen=100, alone_seen=40,
+                  wrong_seen=4)                                     # 11 / 200 = 0.055 > 0.05; the probe passes
+    checks = p.promote_checks(st, over)
+    assert not checks["novel_risk"]["ok"] and all(g["ok"] for k, g in checks.items() if k != "novel_risk")
+    assert not p.promote(st, over)
+    at = Paired(n_novel=200, alone_novel=60, wrong_novel=10, alone_served=20, n_seen=100, alone_seen=40, wrong_seen=4)
+    assert p.promote(st, at)                                        # 10 / 200 = 0.05: at α passes
+    assert DefaultPolicy(novel_risk=False).promote(st, over)
+    assert not p.promote_checks(st, Paired(0, 0, 0, 0))["novel_risk"]["ok"]
 
 
 def test_the_probe_is_measured_only_with_enough_alone_answers_on_both_sides():
