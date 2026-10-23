@@ -49,26 +49,14 @@ change the probes do not touch is missed. fpverify (MIT) does an anytime-valid s
 canary is the cheap first step, measured on fakes only."""
 from __future__ import annotations
 
-import contextlib
-import contextvars
 import threading
 
 import numpy as np
 
-from ..provenance import digest
+from ..provenance import _NO_PROBES as _QUIET
+from ..provenance import digest, no_probes
 
-_QUIET = contextvars.ContextVar("solvi_canary_quiet", default=False)
 ON_CHANGE = ("flag", "escalate")
-
-
-@contextlib.contextmanager
-def no_probes():
-    """Within this block no canary probes, counts or marks a decision (replay runs under it)."""
-    tok = _QUIET.set(True)
-    try:
-        yield
-    finally:
-        _QUIET.reset(tok)
 
 
 def _probe(p):

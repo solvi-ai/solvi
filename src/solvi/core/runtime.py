@@ -411,7 +411,7 @@ class Trace(Serial):
         it are still checked.
         Limits: a trace rebuilt honestly from a *different* input is internally consistent — compare `init_hash` with a
         receipt you published elsewhere to catch that."""
-        from .guarantees.canary import no_probes
+        from .provenance import no_probes
         with no_probes():                              # an identity canary never probes, counts or marks in a replay
             return self._replay(catalog, flow, trust_models)
 
