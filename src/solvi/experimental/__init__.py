@@ -282,6 +282,31 @@ STATUS: dict[str, dict] = {
                 "cannot run); the pre-registered stands for scale (300 systems) and retraction are not run — ten "
                 "systems exchanging facts (with 2% of the decisions asking a person) is a test, not the stand",
                 "script": "benchmarks/process_e1.py"},
+    "stream": {"since": "1.4",
+               "what": "StreamPromise: an anytime-valid learn-then-test certificate on a threshold grid, earned on "
+               "the stream (an e-process per grid point — a mixture of constant bets or the aGRAPA bet — "
+               "fixed-sequence from strict to loose, the threshold only loosens, a missing label counted as a loss, "
+               "δ spent over restarts by DeltaBudget), installed with System.guarantee(promise=); RiskDetector "
+               "(a Shiryaev–Roberts e-detector on the deployed risk) and the calibration coin wired into the "
+               "Dispatcher (audit=\"adaptive\", promise=, detector=, on_drift=\"recertify\", probation=), recorded "
+               "in the chain and rebuilt by Dispatcher.replay_stream (stages 1–2 of 4); tickets: an agent as the "
+               "oracle over MCP (stream.tickets, TicketDesk, solvi serve --mcp --agent-oracle) — blind, durable in "
+               "the store, an expired ticket a recorded loss (stage 3a); the closed learning loop (stream.versions, "
+               "LearningLoop over stream.learner's HashedTextLearner / FastHeadLearner): frozen versions, each with "
+               "its own StreamPromise calibrated only on samples drawn after its freeze, δ from one DeltaBudget, "
+               "promoted when certified, answering alone on ≥ min_share (5 %) and ≥ the served version's share + "
+               "margin (1 point) on the same samples, every freeze / promote / discard / rollback in the chain and "
+               "replayed; version 0 optionally the fitted System 1 with its own promise (initial=), a RiskDetector "
+               "and probation on the served version, a resolved ticket's verdict as a label (ticket_verdict) "
+               "(stage 3b)",
+               "missing": "measured once; see the documented limits in docs/experimental.md: the "
+               "RiskDetector alarmed far later than the confidence CUSUM on shifts to new intents and must not "
+               "be the only alarm; the LearningLoop gained nothing with gold labels and is kept only as the core "
+               "of a planned adapter loop; TicketDesk is unmeasured on a stream. The loop is not wired "
+               "into the Dispatcher (no loop=: it drives its own coin and oracle); the expired-share stop "
+               "(max_drop) and repeated tickets for the "
+               "oracle's own noise are not built; a person's audit label does not yet replace the slow path's label",
+               "script": None},
 }
 for _s in STATUS.values():
     _s["deadline"] = DEADLINE
