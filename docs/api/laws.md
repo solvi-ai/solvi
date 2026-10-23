@@ -23,6 +23,15 @@ as exceptions to a provenance guard's verdicts) the opt-in 1.3.0 features showed
 feature on, 0.218 with the default, at about 0.10 false interruptions), about a tuned gradient-boosting model on the
 same atoms (0.188). For noisy behavioural logs use a calibrated scorer.
 
+Numeric laws: the held-out test accepts row by row. `LawSet.test` counts a held-out row as a hit when the law's
+prediction is within `tol` / `rtol` / `same` of the observed value, and accepts on that count. Nothing reads the
+residuals together, so two cases go wrong. A law with a systematic bias — every residual inside the tolerance but on one
+side, or growing with an input — passes as easily as the true law. When the law's constants are fitted from the data, a
+tolerance set from the measurement error alone ignores the error of the fitted constants, and the true law can fail
+rows it should pass. Before trusting an accepted numeric law, check its residuals as a whole: a `confirm=` closure over
+the held-out rows that refits the constants and runs, for example, a χ² or a sign test on the residuals. Widen the
+tolerance by the fitted constants' uncertainty. Neither check is built in; both are on the ROADMAP with a stand.
+
 ::: solvi.experimental.laws
 
 ## `solvi.experimental.laws.factored`
