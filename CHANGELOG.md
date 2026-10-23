@@ -373,7 +373,14 @@
   open a path as `System(storage=)` does (`open_storage`), before anything is written; a storage that cannot be opened
   raises with the journal unchanged. `Knowledge.forget(writer, by=, why=, storage=, decide=)` is the facade, beside
   `Knowledge.retract`. With a TraceStorage nothing changes.
-
+- **`NumericDrift` warns on a degenerate reference.** On a stream that is mostly one exact value with rare spikes (a
+  cost that is 0 on most decisions) the reference's spread is near zero, the values are far from Gaussian, and an
+  unchanged stream was flagged far more often than alpha with no word (the reference warning fired only below 20
+  values, and not at all for a reference collected from the stream). When half of the reference's values or more are
+  one and the same value, `set_reference` and the reference collected from the stream now warn, `NumericDrift.degenerate`
+  says why (None otherwise), and an alarm's `why` repeats it. A robust scale (MAD, quantiles) would not help here: it
+  is zero on such a reference too; watch an aggregate over a window instead. Behaviour change by design: the warning
+  and the longer `why`; the test and its flags are unchanged.
 
 ### Changed
 - **The experimental deadline reads "a future release".** The deadline set at 1.0 for every experimental piece was 1.2;
