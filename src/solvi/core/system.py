@@ -271,6 +271,14 @@ class System:
                         warnings.warn(f"hard check {part.name}: `then` answers {qn!r} with {ans!r}: {e} — when the check "
                                       f"fails, {qn!r} will abstain", stacklevel=2)
 
+        asked = sorted({x for p in list(catalog.parts.values()) + list(catalog.rules.values()) for x in p.inputs
+                        if x in self.questions and x not in catalog.parts})
+        if asked:                                     # answers are not facts: such an argument is read from the input,
+            import warnings                           # and without it the reader cannot run (its question abstains)
+            warnings.warn(f"{', '.join(map(repr, asked))} {'is a question' if len(asked) == 1 else 'are questions'} of "
+                          "this system and an argument of a part or rule: answers are not facts, so it is read from the "
+                          "given facts, never from the answer — give it in the input, or compute it with a part "
+                          "(cat.fn) of that name", stacklevel=2)
         idle = _idle_hard_checks(catalog, self.questions.values())
         if idle:                                      # a hard check no question's flow can reach never runs: an answer
             import warnings                           # it should have stopped would be given without a word
