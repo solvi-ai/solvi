@@ -291,6 +291,17 @@
   error; on labels that are not a random sample it is the interval of the labelled decisions only. `wilson(k, n)` is
   checked against scipy's `binomtest(...).proportion_ci(method="wilson")`. The interval is for a random-audit sample,
   a fixed-time reading: not a running bound over the stream.
+- **Laws (experimental): `admit_by_probes(..., falsify="leftover")`, default off.** Once the split phase would accept,
+  the leftover budget is spent on safe pool probes not yet asked where the accepted law would be the applied law,
+  drawn at random with `seed`; any answer other than the law's effect makes the admission "undetermined" and commits
+  nothing. The falsification probes are in `asked` (ids `falsify-…`) and `cost["probes"]`, never above `budget`;
+  `noise=` and `max_new=2` refuse it (`ValueError`), as does any value other than None and `"leftover"`. With the
+  option unset the admission is unchanged. Measured on synthetic boolean worlds in two pre-registered runs (the
+  reproduction gate was revised after the first run failed it, disclosed before the second): at budget 20, 1 wrong law
+  admitted against 131 for the default where the grammar cannot express the true law — the one survivor was
+  probe-starved, with no leftover probe in its wrong region; no loss in sound admissions (124 vs 123 at budget 8,
+  251 vs 236 at budget 20); little effect at budget 8; the price is asks. Covered by
+  [tests/test_laws_falsify.py](tests/test_laws_falsify.py).
 
 ### Fixed
 - **DriftMonitor no longer flags "mean confidence up" on an unchanged stream** (`solvi.core.guarantees.drift`). The

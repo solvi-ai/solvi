@@ -547,6 +547,39 @@ pool of 200 states, 1,000 trials each, budget 16) every accepted law was correct
 1.5× the probes (11.7 against 7.6 on a single-law benchmark; at a budget of 8 it is undetermined in 97.5 % of trials).
 Three or more missing laws are not measured, and the `coverage` warning is off in this mode.
 
+**A law accepted with budget to spare has not been tested where it fires: spend the leftover on falsification
+probes, `admit_by_probes(..., falsify="leftover")`.** `admit_by_probes` stops once one class of candidates is left and
+leaves the rest of its budget unspent; when the grammar cannot express the true law, that survivor is the shortest
+wrong law and no probe has tried to refute it inside its own domain. With the option, once the admission would accept,
+safe pool states not yet asked where the accepted law would be the applied law (its condition holds and no more
+specific active law shadows it) are asked, drawn at random, up to the leftover; any answer other than the law's effect
+makes the admission undetermined and commits nothing. Measured on a synthetic world (8 bits and a counter, 2,560
+states, six rules, two grammars, a benchmark re-created from a published description, a pool of 200 states, 20 seeds,
+budgets 8 and 20; a wrong law is one false on some state where it applies): on the two cells whose law needs a negation
+the grammar lacks, at budget 20 the default accepted 131 wrong laws of 131 and the leftover probes let 1 through, a
+narrow law with only 3 untested pool states where it applies — the leftover probes cannot refute a law when none of
+them falls where it is wrong; on the cells whose law the grammar can express nothing was lost — sound laws accepted
+251 against 236, wrong 5 against 69, final accuracy 0.987 against 0.972 (at budget 8, 124 against 123) — because a right
+law is never refuted and the probes also catch the default's own wrong survivors there. At budget 8 nothing changes on
+the inexpressible cells: the leftover was 0–1 probe in 105 of 140 rounds and 83 of 83 wrong laws survived; holding 2
+probes back for falsification at budget 8 cut sound admissions on the expressible cells from 123 to 31 and accuracy
+from 0.789 to 0.630, so the option does not reserve — give a larger budget. The price is asks: a right law spends its
+whole leftover (about 10 of 20 probes at budget 20; 7.9 → 10.0 asks per round over the whole grid), never above the
+budget. n probes without a refutation bound the law's miss rate on its own domain at about 3/n at 95 % (0.24 at the
+12.5 probes available at budget 20): the wrong laws here were wrong on about half their domain and fell after 1.9
+probes on average; a law wrong on a few percent of its domain will survive. Two laws missing at once (a disjunction)
+are not fixed by this — 19 of 51 wrong at budget 8 against 26 of 57 for the default; use `max_new=2`. Patching a
+refuted law with an exception instead of dropping it was worse (20 wrong against 1 at budget 20). Drawing the
+falsification states from the whole state space where the law applies, instead of the pool, let 0 of 131 through
+(measured once, reported, not a gated result, not an option yet) and is the shape to use when a state generator
+exists. Measured in two pre-registered runs of this one stand, with exact answers and no noise: the first run's
+reproduction gate was sized to a five-seed zero on a two-law cell that the library itself documents at about 6 % wrong,
+failed there (4 of 51; the second run gives 3 of 51), and was re-sized and the change disclosed before the second run;
+the gated result is the second run's, and the first run's ungated numbers agree (2 wrong of 120 at budget 20; sound
+254 against 242). The method is a sampled equivalence query (Angluin 1987) after a version-space search (Mitchell
+1982), with the zero-failure bound (Hanley and Lippman-Hand 1983); what is measured here is the leftover on this world
+and the applied-law probe domain. Default off. Covered by [tests/test_laws_falsify.py](../tests/test_laws_falsify.py).
+
 **When the laws of a stream change, give the law set a window: `Buffer(window=N)` with `LawSet(recent=M,
 readmit="grown")`; size N to a fraction of how long a regime lasts.** On synthetic streams whose laws change abruptly
 (two conjunctive laws over 12 atoms, one flipped and one replaced at each of five switches, phases of 1,500–2,500 rows),
