@@ -45,7 +45,8 @@ own counters in `self` and must pickle (the loop's checkpoint saves it).
 - freeze — on the held-out labels: ≥ min_holdout (100) of them and (alone & right − alone & wrong) / n ≥ the served
   version's + min_gain (0.01); act_guard found a threshold; no honesty number worse by more than tolerance (0.02);
   the training within budget.max_train_s; in label mode also the paired held-out gain's Wilson lower bound > 0.
-  pre_freeze=False freezes every training (the lane LearningLoop's protocol: the stream certificate alone decides).
+  pre_freeze=False freezes every training (the lane LearningLoop's protocol: the stream certificate alone decides);
+  refused in label mode, where the gates are the only measurement before a version is served.
 - promote — the candidate certified, ≥ min_novel (100) post-freeze samples on keys it never trained on, on those
   share_k ≥ min_share (0.05) and share_k ≥ share_s + margin (0.01), and the memorisation probe passes (error alone on
   novel − on seen ≤ gap, 0.10). The candidate must have ≥ probe_min (30) alone answers on novel samples: a thin
@@ -69,6 +70,12 @@ own counters in `self` and must pickle (the loop's checkpoint saves it).
 - alarm — "recertify"; a second alarm on the current serving of the served version (alarms at n ≥ served_since)
   within `probation` (300) decisions → "rollback:<v>", v the highest retired version below the served one with no
   alarm on record (the versions rolled back from were alarmed); no such version → "recertify".
+- watch — label mode only, from a promotion until the served version changes again: on each calib or held-out
+  label the served version and the version served before it are scored on the same input (+1 alone and right, −1
+  alone and wrong, 0 not alone, each at its own threshold); after ≥ `watch_min` (100) such labels the served version
+  is rolled back when the paired sign test's Wilson lower bound (at `wilson`) is above 0 and the margin per label is ≥
+  `min_gain` — the freeze's two gates with the roles swapped (`watch_rollback`; watch=False: off). Looked at on every
+  label, so it is a stand-in for a fixed-sample test; its false-rollback rate is unmeasured.
 
 Unmeasured: no stand has run on this policy; its numbers are the design's, not tuned."""
 from __future__ import annotations
@@ -298,6 +305,24 @@ class Paired:
     def err_s_novel(self) -> float | None:
         return self.wrong_served / self.alone_served if self.alone_served else None
 
+
+@dataclass(frozen=True)
+class Watch:
+    """Label mode, after a promotion: the served version against the version served before it (`target`, the
+    rollback target) on the same labels since the promotion — calib and held-out labels only (keys no version trained
+    on). Each label scores each version +1 (answered alone and right at its own threshold), −1 (alone and wrong) or 0
+    (not alone). n: the labels compared; better: those where the target scored higher; worse: those where the served
+    version scored higher; margin: Σ (target − served) / n (0.0 with n = 0)."""
+    target: int
+    n: int = 0
+    better: int = 0
+    worse: int = 0
+    total: int = 0
+
+    @property
+    def margin(self) -> float:
+        return self.total / self.n if self.n else 0.0
+
     @property
     def err_k_seen(self) -> float | None:
         return self.wrong_seen / self.alone_seen if self.alone_seen else None
@@ -347,7 +372,9 @@ class LoopPolicy(abc.ABC):
     # --- freezing
     @abc.abstractmethod
     def freeze(self, st: LoopState, report: TrainReport) -> bool:
-        """Freeze the trained model as the candidate (the pre-freeze gates on labels it never trained on)."""
+        """Freeze the trained model as the candidate (the pre-freeze gates on labels it never trained on). In label mode
+        this is the only measurement before a version is served (the candidate is promoted on the next label, and only
+        the watch after it can roll it back): a freeze that measures nothing serves every training."""
 
     # --- promotion / rollback
     @abc.abstractmethod
@@ -363,6 +390,14 @@ class LoopPolicy(abc.ABC):
     def alarm(self, st: LoopState, who: str, report: dict) -> str:
         """An alarm on the served version (who: "detector" or "monitor") → "recertify", "rollback:<v>" or "ignore"."""
 
+    # --- label mode: the watch after a promotion (not abstract: a policy without it gets this rule)
+    def watch(self, st: LoopState, w: Watch) -> bool:
+        """Label mode: roll the served version back to `w.target` now? Called on each calib or held-out label while a
+        watch runs (from a promotion to the next change of the served version). This default is `watch_rollback(w)`
+        at its defaults (≥ 100 labels, Wilson 95 %, margin ≥ 0.01); `DefaultPolicy` reads its own keywords; return
+        False to switch the watch off."""
+        return watch_rollback(w)
+
 
 # ───────────────────────────────────────────────────────────── the out-of-the-box policy
 class DefaultPolicy(LoopPolicy):
@@ -377,7 +412,9 @@ class DefaultPolicy(LoopPolicy):
     probe on (False: off, promotion and discard); pre_freeze: the pre-freeze gates on (False: every training is
     frozen); min_calib: the calib labels a training waits for (None: the fewest the calib threshold needs at α, 73 at
     α = 0.05; 0 for a learner with its own threshold); novel_risk: promotion needs the Wilson upper bound (at
-    `wilson`) of wrong_novel / n_novel ≤ α (False: off)."""
+    `wilson`) of wrong_novel / n_novel ≤ α (False: off); watch, watch_min: label mode's watch after a promotion (False:
+    off; the labels it needs before it may roll back). In label mode pre_freeze=False is refused by the loop: there
+    the pre-freeze gates are the only measurement before a version is served."""
 
     def __init__(self, budget: Budget | None = None, *, s2_labels: bool = False, calib: float = 0.15,
                  holdout: float = 0.15, first: int = 300, growth: float = 1.5, window: int = 200, target_share=None,
@@ -385,12 +422,14 @@ class DefaultPolicy(LoopPolicy):
                  min_novel: int = 100, min_share: float = 0.05, margin: float = 0.01, gap: float = 0.10,
                  probe_min: int = 30, stale: int = 1500, trial: int = 1500, probation: int = 300, r: int = 8,
                  lr: float = 3e-4, min_updates: int = 200, max_updates: int = 3000, refreeze=None, probe: bool = True,
-                 pre_freeze: bool = True, novel_risk: bool = True, min_calib: int | None = None):
+                 pre_freeze: bool = True, novel_risk: bool = True, min_calib: int | None = None, watch: bool = True,
+                 watch_min: int = 100):
         super().__init__(budget)
         gates.split("", calib=calib, holdout=holdout)                     # the shares, checked once
         for name, v in (("first", first), ("window", window), ("min_holdout", min_holdout), ("min_novel", min_novel),
                         ("probe_min", probe_min), ("stale", stale), ("trial", trial), ("probation", probation),
-                        ("r", r), ("min_updates", min_updates), ("max_updates", max_updates)):
+                        ("r", r), ("min_updates", min_updates), ("max_updates", max_updates),
+                        ("watch_min", watch_min)):
             if isinstance(v, bool) or not isinstance(v, int) or v < (0 if name == "probation" else 1):
                 raise ValueError(f"{name} must be an integer ≥ {0 if name == 'probation' else 1}, not {v!r}")
         if min_updates > max_updates:
@@ -419,6 +458,7 @@ class DefaultPolicy(LoopPolicy):
         if min_calib is not None and (isinstance(min_calib, bool) or not isinstance(min_calib, int) or min_calib < 0):
             raise ValueError(f"min_calib must be an integer ≥ 0 or None, not {min_calib!r}")
         self.min_calib = min_calib
+        self.watch_on, self.watch_min = bool(watch), watch_min
 
     # --- collecting
     def accept(self, st, x, y, source) -> bool:
@@ -590,6 +630,14 @@ class DefaultPolicy(LoopPolicy):
                     f"{paired.share_s:.4g}, {paired.n_novel} novel)")
         return None
 
+    def watch(self, st, w) -> bool:
+        """Label mode: `watch_rollback(w, min_n=watch_min, confidence=wilson, min_gain=min_gain)`; never with
+        watch=False."""
+        if not getattr(self, "watch_on", True):          # a policy pickled before the watch existed: on
+            return False
+        return watch_rollback(w, min_n=getattr(self, "watch_min", 100), confidence=self.wilson,
+                              min_gain=self.min_gain)
+
     def rollback_target(self, st) -> int | None:
         """The highest retired version below the served one with no alarm on record, or None. Conservative: any alarm
         on record excludes a version, also one on an earlier serving that was recertified and then served well."""
@@ -606,6 +654,18 @@ class DefaultPolicy(LoopPolicy):
             if target is not None:
                 return f"rollback:{target}"
         return "recertify"
+
+
+def watch_rollback(w: Watch, *, min_n: int = 100, confidence: float = 0.95, min_gain: float = 0.01) -> bool:
+    """The watch's rule: the served version is shown worse than the target on the labels since its promotion — ≥ min_n
+    labels compared, the paired sign test's Wilson lower bound (`gates.paired_gain_low(better, worse)`, at
+    `confidence`) > 0, and the margin (target − served, per label) ≥ min_gain. The freeze's two gates (the held-out
+    margin and the paired gain) with the roles swapped. Looked at on every label: a stand-in for a fixed-sample test,
+    not an anytime guarantee; its false-rollback rate is unmeasured."""
+    if w.n < min_n:
+        return False
+    low = gates.paired_gain_low(w.better, w.worse, confidence)
+    return low is not None and low > 0 and w.margin >= min_gain
 
 
 def _balanced(rows, k, rng) -> list:
@@ -628,4 +688,4 @@ def _balanced(rows, k, rng) -> list:
 
 
 __all__ = ["Budget", "DefaultPolicy", "LabelRow", "LoopPolicy", "LoopState", "Paired", "STATES", "SLOW_SOURCES",
-           "TrainReport", "VersionInfo"]
+           "TrainReport", "VersionInfo", "Watch", "watch_rollback"]

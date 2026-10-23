@@ -402,8 +402,36 @@
   background training with no deadlock under a timeout); and on the tiny LoRA checkpoint: attach, a
   background training, promotion, the trace's fingerprint and `extra["lora"]`, a rollback, save and load on a fresh
   model, the same decisions and an exact replay. Unmeasured: no stand has run; nothing here says the loop improves a system. Costs:
-  each decision with a loop attached scores the served version once more (and the candidate in shadow while one is in
-  trial), and the loop's decisions of one Dispatcher do not run in parallel.
+  each decision with a loop attached scores the served version once more (and the candidate in shadow while its grid
+  is not fixed and on coin-sampled decisions), and the loop's decisions of one Dispatcher do not run in parallel.
+- **The adapter loop: attach, review fixes (experimental)** (`solvi.experimental.stream.loop`, `.policy`,
+  `.checkpoint`, `solvi.core.dispatch`, `solvi.core.system`, `solvi.core.deciders.combine`). Label mode never serves an
+  unmeasured version: `DefaultPolicy(pre_freeze=False)` is refused there (the pre-freeze gates are its only measurement;
+  before, every training was served on the next label), and the automatic promotion needs the candidate certified as
+  the `promote()` control does (before, a candidate with no calib threshold was promoted; stream mode checks the same).
+  New in label mode: a watch after each promotion — on every calib or held-out label the served version and the
+  version served before it are scored on the same input (+1 alone and right, −1 alone and wrong, 0 not alone); after
+  ≥ `watch_min` (100) labels it rolls back when the paired sign test's Wilson lower bound is above zero and the margin
+  per label is ≥ `min_gain` (the freeze's gates with the roles swapped). A `LoopPolicy.watch(st, Watch)` hook with that
+  rule as its default (`policy.Watch`, `policy.watch_rollback`; `DefaultPolicy(watch=False)`, `watch_min=`); the
+  rollback is a recorded "rollback" event (`by: "policy"`, the counts under `watch`), replayed from the recorded scores
+  and saved in the checkpoint; `status()["watch"]` shows the counts. Before, nothing watched a promoted version in
+  label mode. It is looked at on every label, so it is not a fixed-sample test; its false-rollback rate is unmeasured;
+  one more scoring per label while it runs. A promote event in label mode carries `l_k`, `l_s`, `n_novel`, `n_seen`
+  as None (there are no paired samples), and `versions()` reports label mode's threshold and certificate. The loop's
+  controls on a Dispatcher take its per-decision lock first (order dispatcher → part → loop), so a control waits for
+  the decision in flight and never lands between the loop's read and System 1's call (before, the decision could be
+  recorded under a version System 1 did not decide with). With a loop a Dispatcher serves one decision at a time, the
+  slow path's call included: throughput ≤ 1 / the slow path's latency (measured once on a stand-in: 40 decisions in
+  four threads with a 50 ms slow path, 3.7 × as long as without a loop); a test pins the serialisation. A stream-mode
+  attach whose `DefaultPolicy` refuses the slow path's labels is refused with the options (`s2_labels=True`, a trusted
+  oracle as the slow path — a slow path that says `label_source = "human"` — or label mode): the loop had no label
+  source, never certified and escalated every decision. The candidate is scored in shadow only while its grid is not
+  fixed and on coin-sampled decisions (before, on every decision); the record's `shadow` is None otherwise and
+  `replay(rescore=True)` skips it. `teach` in stream mode without storage warns that the correction is lost. A Cascade,
+  Vote or Route built over a part a loop serves is refused at construction until `detach()`
+  (`combine.serve_by_loop` / `served_by_loop`). Tests: each fix with a mutation that makes its test fail; a
+  label-mode save / load continues as the unbroken run (thresholds, watch). Unmeasured.
 - **A secret for the supervision and audit draws: `Dispatcher(secret=)`** (`solvi.core.dispatch`; security). The
   draws were `sha256(f"{seed}|{input hash}|{n}")` with the public default `seed=0`, so whoever could vary the inputs
   could compute which decisions would be supervised or audited and avoid them. With `secret=` (bytes or str; None reads

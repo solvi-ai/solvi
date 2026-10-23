@@ -692,25 +692,50 @@ and without a secret there is no tamper protection against a writer of the folde
 anyone can recompute, and `load` warns. A checkpoint saved with a secret is refused without one. A save holds the
 part's lock for all its writes, so the part's decisions wait for it (unmeasured).
 
-Stage 5 of the LoRA loop attaches it to a running system. `AdapterLoop.attach(dispatcher, dir="loop/", max_risk=0.05,
-secret=key)` puts a LoRA learner on the question's decision part and routes every `dispatcher.ask` through the loop:
-before the dispatch the loop reads the decision (the served version's score, the candidate's in shadow, the
-calibration coin, whether its rule answers alone), the dispatch escalates what its rule does not answer alone and
-checks what its coin draws, and after it the loop takes its step with the slow path's accepted answer as the label.
-Neither runs inside the part's call, and one Dispatcher's loop decisions run one at a time under a lock taken before
-the part's and the loop's, so the lock order is dispatcher → part → loop on every path. System 1 decides with the
-served version (the part's fingerprint and `extra["lora"]` in its trace change with it); each `Dispatched` records
-`learning` — the version, its fingerprint, the coin, the loop's events — and `replay_all` replays each decision with
-its own version installed. `AdapterLoop.attach(system, learner)` on a System alone is label mode: the corrections of
-`teach` and `outcome` are the loop's labels, there is no coin and no stream promise, and a version is promoted on the
-pre-freeze gates alone (`status()["guarantee"]` names the weaker, fixed-set guarantee). Controls go through the
-handle (`dispatcher.loop.pause()`, `rollback`, `train_now`, `status`, `save`), `detach()` puts version 0 back, and
-any `LoopPolicy` subclass and any learner attach the same way. A question answered by a Cascade, Vote or Route, or by
-a part that is a member of one, is refused: a combination reads its members without their version lock. The labels
-the default policy takes are a person's, an outcome's, a rule's or an audit's; the slow path's only with
-`DefaultPolicy(s2_labels=True)`, so with the defaults and an LLM slow path the loop gets no labels. Unmeasured: the
-tests run on a stand-in learner and the tiny random checkpoint; nothing here says the loop improves a system, and the
-cost to live decisions (one more scoring per decision, decisions of one Dispatcher serialized) was not measured.
+Attaching the LoRA loop to a running system. `AdapterLoop.attach(dispatcher, dir="loop/", max_risk=0.05,
+secret=key, policy=DefaultPolicy(s2_labels=True))` puts a LoRA learner on the question's decision part and routes
+every `dispatcher.ask` through the loop: before the dispatch the loop reads the decision (the served version's score,
+the calibration coin, whether its rule answers alone, and the candidate's score in shadow while its grid is not fixed
+or when the coin draws the decision), the dispatch escalates what its rule does not answer alone and checks what its
+coin draws, and after it the loop takes its step with the slow path's accepted answer as the label. Neither runs
+inside the part's call. A stream-mode loop needs a label source: with the default policy the only one is the slow
+path's accepted answer, which `DefaultPolicy` takes only with `s2_labels=True` (tickets are not built with a loop and
+`teach` is only stored), so an attach whose policy refuses the slow path's labels is refused with the options —
+`s2_labels=True`, a trusted oracle as the slow path (a slow path that says `label_source = "human"`), or label mode.
+Without a label source no version could ever be certified and every decision would escalate to the slow path.
+
+One Dispatcher with a loop serves one decision at a time, the slow path's call included, under a lock taken before
+the part's and the loop's (order: dispatcher → part → loop on every path): its throughput is at most one decision per
+slow-path latency. Measured once on a stand-in: 40 decisions in four threads with a 50 ms slow path took 3.7 × as
+long as without a loop. The lock is needed as built (the decision's number and coin are read before System 1 and the
+step after it). The loop's controls (`promote`, `rollback`, `detach`, `pause`, `train_now`, `serving`, `save`) take
+the same lock first, so a control waits for the decision in flight and every decision is recorded under the version
+System 1 decided with. System 1 decides with the served version (the part's fingerprint and `extra["lora"]` in its
+trace change with it); each `Dispatched` records `learning` — the version, its fingerprint, the coin, the loop's
+events — and `replay_all` replays each decision with its own version installed.
+
+`AdapterLoop.attach(system, learner)` on a System alone is label mode: the corrections of `teach` and `outcome` are
+the loop's labels, there is no coin and no stream promise. A version is served only after the pre-freeze gates
+measured a gain on held-out labels it never trained on (the held-out margin, the paired sign test, a calib threshold;
+`status()["guarantee"]` names the weaker, fixed-set guarantee), and a candidate without a calib threshold is never
+promoted, automatically or by the `promote()` control. Label mode refuses `DefaultPolicy(pre_freeze=False)`: there the
+gates are the only measurement before a version is served. After a promotion a watch compares the served version with
+the version served before it on the same calib and held-out labels (+1 alone and right, −1 alone and wrong, 0 not
+alone, each at its own threshold); after at least 100 such labels it rolls back when the paired sign test's Wilson
+lower bound is above zero and the margin per label is at least `min_gain` — the freeze's gates with the roles swapped.
+The rollback is a recorded "rollback" event (`by: "policy"`, the counts in `watch`) and replays exactly. It is a
+`LoopPolicy.watch(st, w)` hook (`DefaultPolicy(watch=False)` switches it off, `watch_min=` sets the count); it is looked
+at on every label, so its false-rollback rate is not that of a fixed-sample test, and it was not measured. It costs
+one more scoring per label while it runs.
+
+Controls go through the handle (`dispatcher.loop.pause()`, `rollback`, `train_now`, `status`, `save`), `detach()`
+puts version 0 back, and any `LoopPolicy` subclass and any learner attach the same way. A question answered by a
+Cascade, Vote or Route, or by a part that is a member of one, is refused at attach, and a combination built over a part
+while a loop serves it is refused at construction: a combination reads its members without their version lock.
+`teach` in stream mode only stores the correction; without storage a UserWarning says it is lost. Unmeasured: the
+tests run on a stand-in learner and the tiny random checkpoint; nothing here says the loop improves a system, and
+apart from the one throughput number above the cost to live decisions (one more scoring of the served version per
+decision) was not measured.
 
 Measured once on real streams: three public intent sets with a TF-IDF + logistic-regression answerer, 20 seeds per
 set, a shift to held-out intents, corrupted text and noisy labels; the numbers, the setting and the prior work are in

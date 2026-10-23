@@ -136,9 +136,17 @@ the policy refuses (the slow path's "s2" under the default policy) is a missing 
 `outcome` with a loop attached learn nothing at once (the part is the loop's): in label mode they are the loop's
 labels (`label(x, y)`), in stream mode they are only stored. Label mode has no coin, no promise and no alarm: every
 call is a labelled step, a version serves at its own act_guard threshold on the calib labels, and a frozen candidate
-is promoted on the next label when `policy.promote(st, None)` says so (the default: the pre-freeze gates decided;
-`status()["guarantee"]` names the fixed-set guarantee). Refused: a question answered by a combination or a part that
-is a member of one (`combinations_of`), a Dispatcher with its own `promise=`, a second loop on a System.
+with such a threshold is promoted on the next label when `policy.promote(st, None)` says so (the default: the
+pre-freeze gates decided; `DefaultPolicy(pre_freeze=False)` is refused in label mode; `status()["guarantee"]` names
+the fixed-set guarantee). After a promotion a watch scores the served version and the one served before it on each
+calib or held-out label and rolls back when `policy.watch(st, Watch)` says so (the default: `policy.watch_rollback`,
+the freeze's gates with the roles swapped); the target's scores are recorded, so the watch replays. The automatic
+promotion, in both modes, needs the candidate certified, as the `promote()` control does. The candidate is scored in
+shadow only while its grid is not fixed and on coin-sampled decisions. The controls take the Dispatcher's
+`_learn_lock` first (`_locked`), so a control waits for the decision in flight. Refused: a question answered by a
+combination or a part that is a member of one (`combinations_of`), a combination built over the part while a loop
+serves it (`combine.served_by_loop`), a Dispatcher with its own `promise=`, a second loop on a System, a stream-mode
+attach whose `DefaultPolicy` takes no label from the slow path (no label source).
 
 Labels are kept in memory, inputs included (`LabelRow.x`): with dict
 inputs the memory grows with the label count (the checkpoint writes them to `labels.jsonl`). `status()` takes no lock.
@@ -165,7 +173,7 @@ from .certificate import StreamPromise, _sha
 from .detector import RiskDetector
 from .gates import calib_threshold
 from .learner import TrainJob
-from .policy import DefaultPolicy, LabelRow, LoopPolicy, LoopState, Paired, TrainReport, VersionInfo
+from .policy import DefaultPolicy, LabelRow, LoopPolicy, LoopState, Paired, TrainReport, VersionInfo, Watch
 from .runner import RunnerError, TrainingCancelled, TrainingRefused
 from .sampling import Rate, coin_message, coin_value
 from .serving import BaseVersion, as_served
@@ -341,6 +349,10 @@ class AdapterLoop:
         policy = DefaultPolicy() if policy is None else policy
         if not isinstance(policy, LoopPolicy):
             raise TypeError(f"policy is a LoopPolicy (stream.policy), not {type(policy).__name__}")
+        if mode == "label" and isinstance(policy, DefaultPolicy) and not policy.pre_freeze:
+            raise ValueError("label mode with pre_freeze=False measures nothing: the pre-freeze gates are the only "
+                             "measurement before a version is served there (no stream certificate) — keep "
+                             "pre_freeze=True")
         try:
             self._policy0 = pickle.dumps(policy)           # replay starts from the policy as built; it must pickle
         except Exception as e:  # noqa: BLE001
@@ -421,6 +433,7 @@ class AdapterLoop:
         self._split_n = {"train": 0, "calib": 0, "holdout": 0}
         self._fed_keys: set = set()                        # keys of the train labels the learner took
         self._holdout: deque = deque(maxlen=10_000)        # the served version's (alone, wrong) on held-out labels
+        self._watch = None                                 # label mode after a promotion: the Watch counts (a dict)
         self._alarms: list = []
         self._history, self._served_since = [0], 0
         self._trainings: list = []
@@ -463,13 +476,17 @@ class AdapterLoop:
 
     @contextlib.contextmanager
     def _locked(self):
-        """The part's version lock (when the loop has a part), then the loop's: the order a decision of the part that
-        reaches the loop (a hook under the part's lock) takes them too, so no path holds the loop's lock and waits for
-        the part's (shadow scoring, the report, a swap)."""
+        """Attached to a Dispatcher: its per-decision lock (`_learn_lock`) first, so a control waits for the decision in
+        flight — the slow path's call included — and never lands between the loop's read before System 1 and System
+        1's call. Then the part's version lock (when the loop has a part), then the loop's: the order a decision of the
+        part that reaches the loop takes them too, so no path holds the loop's lock and waits for the part's (shadow
+        scoring, the report, a swap). The training thread never takes this."""
+        ll = getattr(self.host, "_learn_lock", None)
         pl = self._part_lock
-        with pl if pl is not None else contextlib.nullcontext():
-            with self._lock:
-                yield
+        with ll if ll is not None else contextlib.nullcontext():
+            with pl if pl is not None else contextlib.nullcontext():
+                with self._lock:
+                    yield
 
     # --- what the hooks read
     def _now(self) -> float:
@@ -531,15 +548,34 @@ class AdapterLoop:
         key function)."""
         with self._locked():
             self._refuse_if_stopped()
-            s, c = self._vs[self.served], self._vs.get(self.candidate)
+            s = self._vs[self.served]
             would_s, score_s = s["model"].score(x) if s["model"] is not None else (None, None)
-            would_k, score_k = c["model"].score(x) if c is not None else (None, None)
+            sampled = self._draw(self.n + 1, score_s, self._threshold(self.served))[2]
+            would_k, score_k = self._shadow(x, sampled)
             if oracle is None:
                 def oracle():
                     raise ValueError("this decision needs a label: step(x, oracle)")
             k = self._key(x) if key is None else str(key)
             return self._advance(x, k, would_s, score_s, would_k, score_k, oracle,
-                                 self.source if source is None else source)
+                                 self.source if source is None else source, watch=self._watch_scores(x))
+
+    def _shadow(self, x, sampled):
+        """The candidate's (would, score) on x when the step reads it: while its promise's grid is not fixed yet (the
+        grid reads the scores) or on a coin-sampled decision (its paired sample); (None, None) otherwise — and always
+        in label mode (no promise, no sample) or with no candidate."""
+        c = self._vs.get(self.candidate)
+        if c is None or c["model"] is None or c["promise"] is None:
+            return None, None
+        if c["promise"].grid is None or sampled:
+            return c["model"].score(x)
+        return None, None
+
+    def _watch_scores(self, x):
+        """Label mode with a watch running: the rollback target's (would, score) on x (None: no watch)."""
+        if self.mode != "label" or self._watch is None:
+            return None
+        m = self._vs[self._watch["target"]]["model"]
+        return m.score(x) if m is not None else (None, None)
 
     def label(self, x, y, *, source=None, key=None) -> dict:
         """Label mode: one label (x, y) → as `step` (by "oracle"). The served version is scored on it (the held-out
@@ -569,18 +605,19 @@ class AdapterLoop:
 
     # --- attached to a Dispatcher (stream mode): the decision is split around the dispatch, outside the part's call
     def _pre(self, x) -> dict:
-        """Before the Dispatcher decides: the scores of the served version (and the candidate's, in shadow), the next
-        decision's number, coin and whether the loop's rule answers alone — read under the part's lock then the
+        """Before the Dispatcher decides: the served version's score, the next decision's number, coin and whether the
+        loop's rule answers alone, and the candidate's score in shadow when the step reads it (`_shadow`: until its
+        grid is fixed, then on coin-sampled decisions only) — read under the Dispatcher's lock, the part's, then the
         loop's, nothing changed."""
         with self._locked():
             self._refuse_if_stopped()
             if self.mode != "stream":
                 raise ValueError("a label-mode loop takes no decisions")
-            s, c = self._vs[self.served], self._vs.get(self.candidate)
+            s = self._vs[self.served]
             would_s, score_s = s["model"].score(x) if s["model"] is not None else (None, None)
-            would_k, score_k = c["model"].score(x) if c is not None else (None, None)
             n = self.n + 1
             prob, rho, sampled, alone = self._draw(n, score_s, self._threshold(self.served))
+            would_k, score_k = self._shadow(x, sampled)
             return {"n": n, "served": self.served, "candidate": self.candidate, "hist": len(self._history),
                     "scores": (would_s, score_s, would_k, score_k), "key": self._key(x), "sampled": sampled,
                     "alone": alone, "probation": prob, "rho": rho, "fingerprint": s["fingerprint"]}
@@ -596,9 +633,9 @@ class AdapterLoop:
             if same:
                 would_s, score_s, would_k, score_k = pre["scores"]
             else:
-                s, c = self._vs[self.served], self._vs.get(self.candidate)
+                s = self._vs[self.served]
                 would_s, score_s = s["model"].score(x) if s["model"] is not None else (None, None)
-                would_k, score_k = c["model"].score(x) if c is not None else (None, None)
+                would_k, score_k = self._shadow(x, self._draw(self.n + 1, score_s, self._threshold(self.served))[2])
             src = self.source if source is None else source
             out = self._advance(x, pre["key"], would_s, score_s, would_k, score_k,
                                 lambda: Verdict(label, source, label_of), src, lenient=True)
@@ -690,10 +727,32 @@ class AdapterLoop:
                 if isinstance(self._base, BaseVersion) and self.served == 0:
                     self._base = BaseVersion(system, self.question)
             if isinstance(host, Dispatcher):
+                self._refuse_no_label_source(host)
                 host.loop = self
             system.adapter_loop = self                      # System.teach / outcome read it
             self.host = host
+            if self.part is not None:
+                from ...core.deciders.combine import serve_by_loop
+                serve_by_loop(self.part, self)              # a combination built over the part from now on: refused
             return self
+
+    def _refuse_no_label_source(self, disp):
+        """Stream mode with the out-of-the-box policy: the loop's only labels are the slow path's (tickets are not
+        built with a loop, `teach` is only stored). When the policy refuses them the loop learns nothing and every
+        decision escalates for ever (nothing can certify a version) — refused. The slow path's labels have its
+        `label_source` attribute ("human" for a trusted oracle in the process; "s2" when it has none)."""
+        if not isinstance(self.policy, DefaultPolicy):
+            return
+        src = str(getattr(disp.slow, "label_source", None) or "s2")
+        if self.policy.accept(self._state(), None, None, src):
+            return
+        raise ValueError(
+            f"the policy refuses the slow path's labels (source {src!r}) and a Dispatcher's loop has no other label "
+            "source (tickets are not built with a loop; teach is only stored): the loop would learn nothing and every "
+            "decision would escalate to the slow path for ever. Give one of: DefaultPolicy(s2_labels=True) (the slow "
+            "path's accepted answers count); a trusted oracle as the slow path (a SlowPath whose Thoughts carry "
+            "{'oracle': {'label_source': 'human'}} and that says label_source = 'human'); or label mode "
+            "(AdapterLoop.attach(system, ...) on the System alone, fed by teach / outcome)")
 
     def detach(self, *, by=None, why=None, timeout=30.0) -> dict | None:
         """Take the loop off its host: a training in flight is cancelled, version 0 (the part as attached) is put back
@@ -707,6 +766,9 @@ class AdapterLoop:
             run, self._detach_run = self._detach_run, None
             if getattr(host, "loop", None) is self:
                 host.loop = None
+            if self.part is not None:
+                from ...core.deciders.combine import serve_by_loop
+                serve_by_loop(self.part, None)
             sysm = _host_system(host)
             if getattr(sysm, "adapter_loop", None) is self:
                 sysm.adapter_loop = None
@@ -802,7 +864,7 @@ class AdapterLoop:
             self._split_of[key] = sp                       # the first state change, before the decision's own
         return sp
 
-    def _advance(self, x, key, would_s, score_s, would_k, score_k, oracle, src, lenient=False):
+    def _advance(self, x, key, would_s, score_s, would_k, score_k, oracle, src, lenient=False, watch=None):
         from ...core.sources import UntrustedLabel
         n = self.n + 1
         sv, c = self.served, self.candidate
@@ -831,18 +893,19 @@ class AdapterLoop:
         self._step_t = t
         try:
             return self._advance_at(n, x, key, sv, c, thr_s, prob, rho, sampled, alone, label, lsrc, lof, split,
-                                    would_s, score_s, would_k, score_k, t)
+                                    would_s, score_s, would_k, score_k, t, watch)
         finally:
             self._step_t = None
 
     def _advance_at(self, n, x, key, sv, c, thr_s, prob, rho, sampled, alone, label, lsrc, lof, split, would_s,
-                    score_s, would_k, score_k, t):
+                    score_s, would_k, score_k, t, watch=None):
         # --- from here the state changes: a hook that raises from here on stops the loop (`_stop`), the decision is
         # recorded with its "error" event and replay raises the same error at the same place
         self.n = n
         self._hk, self._where = 0, "loop"
         det = self.detector
         events, answer, by = [], None, None
+        wrec = None                                        # label mode: the watch's view of this label
         try:
             if self._inject is not None and self._inject["call"] == 0:
                 raise _Replayed(self._inject["why"])
@@ -896,25 +959,65 @@ class AdapterLoop:
             events += self._promise_events()
             if det_rep is not None or mon_rep is not None:
                 events += self._on_alarm(n, sv, c, det_rep, mon_rep)
+            if self.mode == "label" and self._watch is not None:
+                wrec, ev_w = self._watched(n, sv, thr_s, would_s, score_s, label, split, watch)
+                events += ev_w
             events += self._protocol(n)
             events += self._promise_events()
         except Exception as e:  # noqa: BLE001 — recorded, then raised again
             err = self._stop(n, e)
             events += self._promise_events() + [err]
             self._write(self._record(n, sv, c, rho, sampled, alone, by, lsrc, lof, label, prob, score_s, thr_s,
-                                     score_k, det, key, split, t, error={k: err[k] for k in ("where", "call", "why")}),
-                        {"input": x, "would": would_s, "shadow_would": would_k, "label": label, "answer": answer},
-                        events)
+                                     score_k, det, key, split, t, error={k: err[k] for k in ("where", "call", "why")},
+                                     watch=wrec),
+                        self._payload(x, would_s, would_k, label, answer, watch), events)
             raise
         rec = self._record(n, sv, c, rho, sampled, alone, by, lsrc, lof, label, prob, score_s, thr_s, score_k, det,
-                           key, split, t)
-        payload = {"input": x, "would": would_s, "shadow_would": would_k, "label": label, "answer": answer}
-        self._write(rec, payload, events)
+                           key, split, t, watch=wrec)
+        self._write(rec, self._payload(x, would_s, would_k, label, answer, watch), events)
         return {"n": n, "answer": answer, "by": by, "served": sv, "candidate": c, "sampled": sampled, "label": label,
                 "label_source": lsrc, "events": [e["event"] for e in events]}
 
+    def _payload(self, x, would_s, would_k, label, answer, watch):
+        out = {"input": x, "would": would_s, "shadow_would": would_k, "label": label, "answer": answer}
+        if self.mode == "label":
+            out["watch_would"] = None if watch is None else watch[0]
+        return out
+
+    def _watched(self, n, sv, thr_s, would_s, score_s, label, split, watch):
+        """Label mode, a watch running: a calib or held-out label scores the served version and the rollback target on
+        the same input (+1 alone and right, −1 alone and wrong, 0 not alone, each at its own threshold); the counts
+        grow and the policy's `watch` may roll the served version back to the target → (the record's "watch", events).
+        A train label (a key a version may have trained on) and a missing label are not counted."""
+        w = self._watch
+        tgt = w["target"]
+        if watch is None:
+            raise RuntimeError(f"decision {n}: a watch runs and the target's score was not read")
+        would_t, score_t = watch
+        rec = {"target": tgt, "score": _num(score_t), "counted": False}
+        if label is None or split not in ("calib", "holdout"):
+            return rec, []
+
+        def val(would, score, thr):
+            return (1 if would == label else -1) if _alone(score, thr) else 0
+        cs, ct = val(would_s, score_s, thr_s), val(would_t, score_t, self._threshold(tgt))
+        w["n"] += 1
+        w["better"] += ct > cs
+        w["worse"] += ct < cs
+        w["total"] += ct - cs
+        rec.update(counted=True, served_value=cs, target_value=ct)
+        self._at("policy.watch")
+        cur = Watch(**w)
+        if not self.policy.watch(self._state(), cur):
+            return rec, []
+        why = (f"watch: version {sv} worse than version {tgt} on {cur.n} calib / held-out label(s) since its "
+               f"promotion ({cur.better} better on {tgt}, {cur.worse} better on {sv}, margin {cur.margin:+.3f})")
+        _, ev = self._rollback(tgt, by="policy", why=why, control=False)
+        ev[[e["event"] for e in ev].index("rollback")]["watch"] = dict(w)
+        return rec, ev
+
     def _record(self, n, sv, c, rho, sampled, alone, by, lsrc, lof, label, prob, score_s, thr_s, score_k, det, key,
-                split, t, error=None):
+                split, t, error=None, watch=None):
         st = lambda v: None if v is None or self._vs[v]["promise"] is None else self._vs[v]["promise"].state()  # noqa: E731
         rec = {"n": n, "served": sv, "candidate": c, "rho": rho, "sampled": sampled, "alone": alone, "by": by,
                "label_source": lsrc, "label_of": lof, "missing": (sampled or not alone) and label is None,
@@ -922,6 +1025,8 @@ class AdapterLoop:
                "threshold": None if math.isinf(thr_s) else thr_s, "shadow": _num(score_k), "served_state": st(sv),
                "candidate_state": st(c), "detector": None if det is None else det.state(), "seen": self.live.seen(),
                "key": key, "split": split, "t": t}
+        if self.mode == "label":
+            rec["watch"] = watch
         if error is not None:
             rec["error"] = error
         return rec
@@ -1041,16 +1146,14 @@ class AdapterLoop:
         c = self.candidate
         if c is not None:
             paired = None if self.mode == "label" else self._paired(c)    # label mode: the pre-freeze gates decided
-            pz = paired if paired is not None else Paired(0, 0, 0, 0)
             st = self._state()
+            certified = math.isfinite(self._threshold(c))     # as the promote() control: never an uncertified one
             if not self.paused:
                 self._at("policy.promote")
-            if not self.paused and self.policy.promote(st, paired):
-                ev.append(self._event("promote", c, n, **{"from": self.served, "to": c, "l_k": pz.share_k,
-                                                         "l_s": pz.share_s, "samples": len(self._vs[c]["samples"]),
-                                                         "n_novel": pz.n_novel, "n_seen": pz.n_seen,
+            if not self.paused and certified and self.policy.promote(st, paired):
+                ev.append(self._event("promote", c, n, **{"from": self.served, "to": c, **self._paired_fields(c, paired),
                                                          "why": None}))
-                ev[-1]["install"] = self._serve(c, n)
+                ev[-1]["install"] = self._serve(c, n, promoted=True)
                 ev += self._evict(n)
             else:
                 self._at("policy.discard")
@@ -1065,6 +1168,14 @@ class AdapterLoop:
             if self._run is not None and self._ready(n, "decision"):
                 ev += self._apply(n, "decision")[1]
         return ev
+
+    def _paired_fields(self, c, paired):
+        """A promote event's comparison: the paired samples' numbers (stream mode); None in label mode, which has none
+        (its measurement is the freeze's report)."""
+        if paired is None:
+            return {"l_k": None, "l_s": None, "samples": len(self._vs[c]["samples"]), "n_novel": None, "n_seen": None}
+        return {"l_k": paired.share_k, "l_s": paired.share_s, "samples": len(self._vs[c]["samples"]),
+                "n_novel": paired.n_novel, "n_seen": paired.n_seen}
 
     def _restart(self, v, n, why="alarm") -> list:
         """Version v's promise from scratch (the next (v, δ_v), threshold +inf, wealth 1) and, for a candidate, its
@@ -1097,8 +1208,12 @@ class AdapterLoop:
         self.candidate = None
         return self._event("discard", c, n, samples=len(ver["samples"]), why=why)
 
-    def _serve(self, v, n):
+    def _serve(self, v, n, promoted=False):
+        """Version v served from decision n (its install on the System → the install record). Label mode: a promotion
+        starts the watch against the version served until now; any other change of the served version ends it."""
         old = self.served
+        self._watch = ({"target": old, "n": 0, "better": 0, "worse": 0, "total": 0}
+                       if promoted and self.mode == "label" and old != v else None)
         if old != v:
             self._vs[old]["state"] = "retired"
         self._vs[v]["state"] = "served"
@@ -1560,7 +1675,8 @@ class AdapterLoop:
 
     def promote(self, v=None, *, force=False, by=None, why=None) -> dict:
         """Serve the candidate now: it must be certified; without force the policy's promote must agree (force skips
-        the promotion rule, never the certificate); refused while paused. → the "promote" event."""
+        the promotion rule, never the certificate); refused while paused. Attached to a Dispatcher, every control waits
+        for the decision in flight (its slow path's call included). → the "promote" event."""
         with self._locked():
             self._refuse_if_stopped()
             return self._guarded("promote", {"version": v, "forced": bool(force), "by": by, "why": why},
@@ -1574,18 +1690,16 @@ class AdapterLoop:
             raise ValueError(f"version {v} is not the candidate in trial (candidate: {c})")
         if not math.isfinite(self._threshold(c)):
             raise ValueError(f"version {c} is not certified: a promotion never skips the certificate")
-        paired = self._paired(c)
+        paired = None if self.mode == "label" else self._paired(c)
         if not force:
             self._at("policy.promote")
-        if not force and not self.policy.promote(self._state(), None if self.mode == "label" else paired):
+        if not force and not self.policy.promote(self._state(), paired):
             raise ValueError(f"the policy does not promote version {c} now (force=True skips its rule)")
         self._changing = True
-        e = self._event("promote", c, self.n, **{"from": self.served, "to": c, "l_k": paired.share_k,
-                                                "l_s": paired.share_s, "samples": len(self._vs[c]["samples"]),
-                                                "n_novel": paired.n_novel, "n_seen": paired.n_seen, "why": why,
-                                                "by": None if by is None else str(by), "forced": bool(force),
-                                                "control": True, "t": self._now()})
-        e["install"] = self._serve(c, self.n)
+        e = self._event("promote", c, self.n, **{"from": self.served, "to": c, **self._paired_fields(c, paired),
+                                                "why": why, "by": None if by is None else str(by),
+                                                "forced": bool(force), "control": True, "t": self._now()})
+        e["install"] = self._serve(c, self.n, promoted=True)
         ev = self._evict(self.n)
         self._write(None, None, [e] + ev + self._promise_events())
         return e
@@ -1593,7 +1707,7 @@ class AdapterLoop:
     def rollback(self, v, *, by=None, why=None) -> dict:
         """Serve an earlier version again (its certificate and threshold as it left them, unless an alarm came after it
         retired: then its promise restarts → "restart"; version 0 without a model: nothing alone). A candidate in trial
-        is discarded (its δ_v stays spent) → the "rollback" event."""
+        is discarded (its δ_v stays spent); waits for a Dispatcher's decision in flight → the "rollback" event."""
         with self._locked():
             self._refuse_if_stopped()
             rb, ev = self._guarded("rollback", {"to": v, "by": by, "why": why},
@@ -1719,10 +1833,11 @@ class AdapterLoop:
             err = st.get("error")
             fresh._inject = None if err is None else {"call": err["call"], "why": err["why"]}
             try:
+                wr = st.get("watch")
                 fresh._advance(lp.get("input"), st.get("key"), lp.get("would"), st.get("score"),
                                lp.get("shadow_would"), st.get("shadow"),
                                lambda: Verdict(label, st.get("label_source") or fresh.source, st.get("label_of")),
-                               fresh.source)
+                               fresh.source, watch=None if wr is None else (lp.get("watch_would"), wr.get("score")))
             except _Replayed:
                 pass
             except Exception as e:  # noqa: BLE001 — an error the records do not hold
@@ -1768,6 +1883,8 @@ class AdapterLoop:
                     continue
                 st, lp = d["stream"], d.get("loop") or {}
                 for v, key in ((st.get("served"), "score"), (st.get("candidate"), "shadow")):
+                    if key == "shadow" and st.get(key) is None:      # not scored in shadow on that decision
+                        continue
                     if v in models:
                         got = models[v].score(lp.get("input"))[1]
                         if _num(got) != st.get(key):
@@ -1788,8 +1905,9 @@ class AdapterLoop:
         out = []
         for v, ver in sorted(self._vs.items()):
             p = ver["promise"]
-            out.append({"version": v, "state": ver["state"], "certified": p is not None and not math.isinf(p.threshold),
-                        "threshold": None if p is None or math.isinf(p.threshold) else p.threshold,
+            thr = self._threshold(v)                       # label mode: the version's fixed-set threshold
+            out.append({"version": v, "state": ver["state"], "certified": math.isfinite(thr),
+                        "threshold": None if math.isinf(thr) else thr,
                         "n": None if p is None else p.n, "v_index": None if p is None else p.v,
                         "delta_v": None if p is None else p.delta_v, "frozen_at": ver["frozen_at"],
                         "seen": ver["seen"], "n_train": ver["n_train"], "train_keys": len(ver["keys"]),
@@ -1800,7 +1918,9 @@ class AdapterLoop:
 
     def status(self) -> dict:
         """{"state", "error", "served", "candidate", "n", "labels": {"train", "calib", "holdout"}, "trainings",
-        "budget": {...}, "job", "paused", "alarms", "mode", "attached", "guarantee", "delta_spent", "versions_kept"}.
+        "budget": {...}, "job", "paused", "alarms", "mode", "attached", "guarantee", "watch", "delta_spent",
+        "versions_kept"}. watch: label mode after a promotion, the watch's counts {"target", "n", "better", "worse",
+        "total"} (None otherwise).
         attached: "dispatcher", "system" or None. state: "detached", "closed", "error" (a hook raised: the loop stopped; error: {"n", "where", "why"}), "training", "paused" or
         "running". job: the training in flight — id, version, trigger, started (wall clock), started_at (its decision),
         inline, state ("running"; "ready": its result waits for the next decision), and what the runner fills in
@@ -1823,6 +1943,7 @@ class AdapterLoop:
                 "guarantee": ("anytime stream certificate per version (StreamPromise on post-freeze coin samples)"
                               if self.mode == "stream" else
                               "fixed-set (act_guard on calib labels); no anytime certificate"),
+                "watch": None if self._watch is None else dict(self._watch),
                 "delta_spent": self.budget.spent,
                 "versions_kept": sum(1 for ver in list(self._vs.values()) if ver["state"] in KEPT)}
 

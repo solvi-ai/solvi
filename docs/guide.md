@@ -2153,7 +2153,8 @@ to move anything. The report's `labels` lists the stored ids it read; calibratin
 A learner can be attached to a running system and replace the model it decides with only when a measured comparison
 says the new version is better (`solvi.experimental.stream`; no gain is claimed: no stand has run). On a Dispatcher
 every decision goes through the loop and each version serves under its own stream certificate; on a System alone the
-corrections are the loop's labels and only the pre-freeze gates decide.
+corrections are the loop's labels, only the pre-freeze gates decide (they cannot be switched off there), and a watch
+rolls a promoted version back when it measures worse than the one before it.
 
 ```python
 from solvi.experimental.stream import AdapterLoop, DefaultPolicy
@@ -2167,6 +2168,7 @@ dispatcher.replay_all()             # each decision replayed under the version i
 loop.detach()                       # version 0 back, hooks removed
 
 loop = AdapterLoop.attach(system, learner, initial=v0)   # a System alone: system.teach(...) feeds it (label mode)
+loop.status()["watch"]              # label mode after a promotion: the served version against the one before it
 ```
 
 The control is a `LoopPolicy` subclass: give each hook, and the loop calls them.
@@ -2176,7 +2178,7 @@ from solvi.experimental.stream import LoopPolicy
 
 class OnlyHuman(LoopPolicy):
     def accept(self, st, x, y, source): return source == "human"
-    def split(self, st, key): return "holdout" if hash(key) % 3 == 0 else "train"   # use a stable hash in practice
+    def split(self, st, key): return ("holdout", "calib", "train")[hash(key) % 3]   # use a stable hash in practice
     def want_train(self, st): return st.labels["train"] >= 100 and st.served == 0
     def select(self, st, rows): return list(rows)
     def hyper(self, st): return {"seed": st.next_version}
@@ -2184,14 +2186,22 @@ class OnlyHuman(LoopPolicy):
     def promote(self, st, paired): return True
     def discard(self, st, paired): return None
     def alarm(self, st, who, report): return "recertify"
+    # optional: def watch(self, st, w) — label mode's rollback after a promotion (default: watch_rollback(w))
 ```
+
+A version is promoted only when it is certified (label mode: a threshold found on the calib labels), whatever
+`promote` returns.
 
 A learner is any object with `update`, `seen` and either `snapshot` (online) or `train(job)` (batch); its versions
 score (`score(x) → (answer, signal)`, `fingerprint()`) and, to serve, `install(system)` / `uninstall(system)`. Refused:
 a question answered by a Cascade, Vote or Route, or by a part that is a member of one. With a loop attached
 `System.teach` changes nothing at once (the loop owns the part). The labels the default policy takes are a person's,
-an outcome's, a rule's or an audit's; the slow path's only with `s2_labels=True`. See
-[experimental](experimental.md#stream).
+an outcome's, a rule's or an audit's; the slow path's only with `s2_labels=True`. A loop on a Dispatcher needs a label
+source: an attach whose policy takes no label from the slow path is refused (give `s2_labels=True`, a trusted oracle as
+the slow path, or use label mode on the System). With a loop, a Dispatcher serves one decision at a time, the slow
+path's call included (measured once on a stand-in: 3.7 × slower at four threads and a 50 ms slow path). A Cascade, Vote
+or Route over a part a loop serves is refused until `detach()`. Unmeasured: nothing here says the loop improves a
+system. See [experimental](experimental.md#stream).
 
 ## Guarding an agent's tool calls
 

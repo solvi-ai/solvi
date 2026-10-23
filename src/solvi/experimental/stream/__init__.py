@@ -63,7 +63,8 @@ from .. import warn_on_import
 from ._eprocess import DeltaBudget, MirrorBound, Mixture, clean_need
 from .certificate import StreamPromise, fixed_grid
 from .detector import RiskDetector
-from .policy import Budget, DefaultPolicy, LabelRow, LoopPolicy, LoopState, Paired, TrainReport, VersionInfo
+from .policy import (Budget, DefaultPolicy, LabelRow, LoopPolicy, LoopState, Paired, TrainReport, VersionInfo, Watch,
+                     watch_rollback)
 from .learner import (BatchLearner, FastHeadLearner, Frozen, FrozenError, FrozenFast, HashedTextLearner,
                       HashedTextTrainer, Learner, TrainJob)
 from .loop import AdapterLoop, content_key
@@ -82,5 +83,5 @@ __all__ = ["AdapterLoop", "AgentOracle", "BaseVersion", "BatchLearner", "Budget"
            "LoopPolicy", "LoopState", "LoraLearner", "LoraVersion", "MirrorBound", "Mixture", "Paired", "Rate",
            "RiskDetector", "RunnerError", "Served", "StreamDriver", "StreamPromise", "SubprocessRunner", "ThreadRunner",
            "TicketDesk", "TicketError", "TrainJob", "TrainReport", "TrainingCancelled", "TrainingFailed", "TrainingRefused", "Verdict",
-           "VersionInfo", "clean_need", "coin_message", "content_key", "fixed_grid", "lane_policy", "pick_device",
-           "ticket_verdict"]
+           "VersionInfo", "Watch", "clean_need", "coin_message", "content_key", "fixed_grid", "lane_policy", "pick_device",
+           "ticket_verdict", "watch_rollback"]
