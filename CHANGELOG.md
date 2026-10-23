@@ -165,6 +165,13 @@
   used as given. It cannot tell a wrong label from a confident model mistake, so a model with many confident mistakes
   fills the list with them; documented in the guide. Simulated (400 examples, 12 planted flips): 8–12 flips listed and
   0–2 others over ten seeds. Two protocol tests now ignore that warning line where they compared `"warnings"`.
+- **How often a person was wrong, in the system report** (`corrections["people"]`, a "People:" line in the text
+  report; `solvi.core.store.sysreport.clopper_pearson`). The store already kept a person's label of a decision
+  (`teach`, source "human" or "audit", `of=`, `by=`) and its outcome (`System.outcome`, source "outcome") but never
+  paired them. Now every decision with both gives a pair — the person's last answer against the last outcome — and the
+  report gives the pairs, the wrong ones, the error with a two-sided 95% Clopper–Pearson interval, per person and per
+  question. Only existing store fields are read; no new record kind. The pairs are the decisions whose outcome was
+  recorded, not a random sample.
 
 ### Fixed
 - **DriftMonitor no longer flags "mean confidence up" on an unchanged stream** (`solvi.core.guarantees.drift`). The
