@@ -271,6 +271,21 @@ class System:
                         warnings.warn(f"hard check {part.name}: `then` answers {qn!r} with {ans!r}: {e} — when the check "
                                       f"fails, {qn!r} will abstain", stacklevel=2)
 
+        asked = sorted({x for p in list(catalog.parts.values()) + list(catalog.rules.values()) for x in p.inputs
+                        if x in self.questions and x not in catalog.parts})
+        if asked:                                     # answers are not facts: such an argument is read from the input,
+            import warnings                           # and without it the reader cannot run (its question abstains)
+            warnings.warn(f"{', '.join(map(repr, asked))} {'is a question' if len(asked) == 1 else 'are questions'} of "
+                          "this system and an argument of a part or rule: answers are not facts, so it is read from the "
+                          "given facts, never from the answer — give it in the input, or compute it with a part "
+                          "(cat.fn) of that name", stacklevel=2)
+        idle = _idle_hard_checks(catalog, self.questions.values())
+        if idle:                                      # a hard check no question's flow can reach never runs: an answer
+            import warnings                           # it should have stopped would be given without a word
+            warnings.warn(f"hard {'check' if len(idle) == 1 else 'checks'} {', '.join(idle)}: no `then=` and no "
+                          "question of this system requires it, so it never runs and never stops an answer — add "
+                          f"requires=[{idle[0]!r}] to the questions it guards, or then={{question: answer}}",
+                          stacklevel=2)
         if self.strategist is not None:
             self._then_wired()
         self._cache = None
@@ -830,9 +845,9 @@ class System:
         if failed:
             f, part = failed[0]
             r = by[f]
+            because = (r.extra or {}).get("reasons") if isinstance(r.extra, dict) else None   # refine.Fail
+            said = f"hard check {f} is false" + (": " + "; ".join(because) if because else "")
             if q.name in part.then:
-                because = (r.extra or {}).get("reasons") if isinstance(r.extra, dict) else None   # refine.Fail
-                said = f"hard check {f} is false" + (": " + "; ".join(because) if because else "")
                 if callable(part.then[q.name]):   # a function of facts gives the answer (1.0): run and recorded here
                     return _then_answer(self.catalog, part, q, trace, vals, flow, said)
                 try:
@@ -841,8 +856,9 @@ class System:
                     return Result(None, 0.0, f"hard check {f} is false and its `then` answer is not usable: {e}",   # still
                                   "abstain", source=f, guard="hard_check")                                         # decides
                 return Result(forced, 1.0, said, "forced", provenance=r.origin, source=f, guard="hard_check")
-            return Result(None, 0.0, f"hard check {f} is false and no answer is set for it", "abstain", source=f,
-                          guard="hard_check")
+            text = (f"{said} and no answer is set for it" if because   # the reason kept
+                    else f"hard check {f} is false and no answer is set for it")
+            return Result(None, 0.0, text, "abstain", source=f, guard="hard_check")
         for f, part in hard:                          # a governing hard check that could not be evaluated: the answer
             r = by.get(f)                             # is unknown, never "passed"
             if r is not None and r.value is MISSING and governs(part, q):
@@ -1649,6 +1665,15 @@ def _then_answer(catalog, check, q, trace, vals, flow, said):
     return Result(answer, 1.0, f"{said}; then {getattr(fn, '__name__', 'function')}("
                   + ", ".join(f"{x} = {srepr(plain[x])}" for x in names) + f") = {srepr(answer)}", "forced",
                   provenance="computed", source=check.name, guard="hard_check")
+
+
+def _idle_hard_checks(catalog, questions):
+    """Hard checks that no question of a system can reach: no `then=`, required by none of its questions and read by no
+    part (a hard check enters a question's flow only through one of these) → [names], in catalog order."""
+    questions = list(questions)
+    read = {x for p in list(catalog.parts.values()) + list(catalog.rules.values()) for x in p.inputs}
+    return [p.name for p in catalog.parts.values() if p.kind == "check" and p.hard and not p.then
+            and p.name not in read and not any(p.name in q.requires for q in questions)]
 
 
 def governs(part, question):
