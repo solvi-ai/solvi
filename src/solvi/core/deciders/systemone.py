@@ -35,7 +35,8 @@ model name (and `served_by` when the service names another), the request's `ms` 
 reports them, its `usage` (input / output / reasoning tokens), `cost` and `latency_ms` — for the whole request, which
 answers `questions` questions at once — the service's own `confidence` for the question when the reply has one
 (Jev's Choice / Score: a number distinct from the probability, https://docs.typesafe.ai/confidence; per option for a
-multi-label question), `prob_floor` when the floor used was not 1e-6 (systemone(prob_floor=...)) — and the question's
+multi-label question, so `signal="extra:systemone.confidence"` abstains on it: a dict is not a number), `prob_floor`
+when the floor used was not 1e-6 (systemone(prob_floor=...)) — and the question's
 `reasoning` when the service returns it (Jeeves with
 `return_reasoning`: the text cut to REASONING_CHARS characters, for the audit; the answer is read from the
 probabilities, never from that text). The API key is sent in the Authorization header only, never recorded. A service
@@ -107,12 +108,13 @@ def _logit(p, floor=EPS):
 
 
 def _grid_floor(answers):
-    """The probability floor of one reply under prob_floor="auto": half the step of the grid the reply's interior
+    """The probability floor of one answer under prob_floor="auto": half the step of the grid the answer's interior
     probabilities (0 < p < 1) lie on — all of them multiples of 10^-d within 1e-9, the coarsest such d of 2..4: a
     service that rounds to 0.01 gets 0.005, and so does one that rounds to 0.1 — else EPS, the floor a reply that is
-    not on a grid always had. Exact 0s and 1s say nothing about a grid: a reply with no interior probability (all 0 /
+    not on a grid always had. Exact 0s and 1s say nothing about a grid: an answer with no interior probability (all 0 /
     1) keeps EPS, so a service's confident 0 / 1 answer reads as before. Values that are not probabilities are left
-    out here (they escalate when the answer is read)."""
+    out here (they escalate when the answer is read). `answers` is one question's answers only (a multi-label
+    question's `noul` per option), never the whole reply: a question's logits do not depend on what was asked with it."""
     ps = []
     for a in answers.values() if isinstance(answers, dict) else ():
         if not isinstance(a, dict):
@@ -130,11 +132,11 @@ def _grid_floor(answers):
 
 
 def _prob_floor(v):
-    """prob_floor= → "auto", or the floor as a float (None: EPS); ValueError for anything else."""
-    if v == "auto" and isinstance(v, str):
-        return "auto"
+    """prob_floor= → None (1e-6, as before 1.4), "auto", or the floor as a float; ValueError for anything else."""
     if v is None:
-        return EPS
+        return None
+    if isinstance(v, str) and v == "auto":
+        return "auto"
     if isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v) or not 0 < v < 0.5:
         raise ValueError(f'prob_floor must be "auto", None or a probability in (0, 0.5), not {v!r}')
     return float(v)
@@ -177,11 +179,11 @@ class SystemOneScorer(RemoteClient):
     error = SystemOneError
 
     def __init__(self, base_url, model, api_key=None, *, timeout=30.0, opener=None, extra_body=None, retries=2,
-                 backoff=1.0, sleep=None, prob_floor="auto", max_options=None):
+                 backoff=1.0, sleep=None, prob_floor=None, max_options=None):
         super().__init__(base_url, model, api_key, path="/v1/systemone", timeout=timeout, retries=retries,
                          backoff=backoff, opener=opener, sleep=sleep)
         self.extra_body = _extra_body(extra_body)
-        self.prob_floor = _prob_floor(prob_floor)       # "auto" or a float
+        self.prob_floor = _prob_floor(prob_floor)       # None (1e-6), "auto" or a float
         if max_options is not None and (isinstance(max_options, bool) or not isinstance(max_options, int)
                                         or max_options < 2):
             raise ValueError(f"max_options must be a number of options of at least 2, not {max_options!r}")
@@ -199,17 +201,21 @@ class SystemOneScorer(RemoteClient):
         if x:                                            # provider pinning, thinking options ... change what answers
             blob = json.dumps(x, sort_keys=True, ensure_ascii=False)
             fp += "|x:" + hashlib.sha256(blob.encode()).hexdigest()[:16]
-        if self.prob_floor != "auto":                    # the default ("auto") hashes as before: stored records stay valid
-            fp += f"|floor:{self.prob_floor!r}"
+        if self.prob_floor is not None:                  # the default (None, 1e-6) hashes as before 1.4; "auto" and a
+            fp += f"|floor:{self.prob_floor!r}"         # float change the numbers, so they change the fingerprint
         return fp
 
     def floor(self, answers):
-        """The probability floor for one reply's answers: the explicit prob_floor, or (auto) half its grid step."""
+        """The probability floor for one question's answers: 1e-6 (None), the explicit float, or (auto) half the grid
+        step of those answers."""
+        if self.prob_floor is None:
+            return EPS
         return _grid_floor(answers) if self.prob_floor == "auto" else self.prob_floor
 
     def check_item(self, name, it):
         """At build time (DecideModel.decision): a question with more options than the service takes (max_options=)
-        is refused here, rather than by every request."""
+        is refused here, rather than by every request. Only DecideModel.decision calls it: model.decide / score / fit /
+        teach on a raw Item skip it, and such a question escalates per request as before."""
         if self.max_options is None:
             return
         for q in self.questions(it).values():
@@ -369,22 +375,23 @@ class SystemOneScorer(RemoteClient):
             self.count(info.get("usage", {}))
             self.cost += info.get("cost", 0.0)
             answers = resp.get("answers") if isinstance(resp.get("answers"), dict) else {}
-            floor = self.floor(answers)
-            if floor != EPS:
-                info["prob_floor"] = floor
             for n, i in names.items():
                 try:
                     gone = [n + s for s in qs[n] if not isinstance(answers.get(n + s), dict)]
                     if gone:
                         raise ValueError(f"the service gave no answer to question {gone[0]!r}")
+                    mine = {s: answers[n + s] for s in qs[n]}
+                    floor = self.floor(mine)             # per question: never read off the questions asked with it
                     rec = dict(info)
+                    if floor != EPS:
+                        rec["prob_floor"] = floor
                     why = self._reasoning(items[i], [(n + s, s) for s in qs[n]], resp)
                     if why is not None:
                         rec["reasoning"] = why
                     conf = self._confidences(items[i], [(n + s, s) for s in qs[n]], answers)
                     if conf is not None:
                         rec["confidence"] = conf
-                    out[i] = {**self.read(items[i], {s: answers[n + s] for s in qs[n]}, floor),
+                    out[i] = {**self.read(items[i], mine, floor),
                               "info": {"systemone": rec}}
                 except (ValueError, TypeError, KeyError) as e:     # a reply that breaks the contract: never a guess
                     out[i] = {"logits": np.zeros(len(items[i].options)), "escalate": f"invalid System One output — {e}",
@@ -393,7 +400,7 @@ class SystemOneScorer(RemoteClient):
 
 
 def systemone(base_url, model, api_key=None, *, timeout=30.0, opener=None, extra_body=None, deterministic=False,
-              retries=2, backoff=1.0, sleep=None, max_len=None, prob_floor="auto", max_options=None):
+              retries=2, backoff=1.0, sleep=None, max_len=None, prob_floor=None, max_options=None):
     """A DecideModel over a System One endpoint (see the module docs).
 
     extra_body: request fields merged into every request's JSON, e.g. OpenRouter's provider routing and `user`; a field
@@ -419,17 +426,19 @@ def systemone(base_url, model, api_key=None, *, timeout=30.0, opener=None, extra
     proxies); sleep: for the backoff (tests). max_len: the tokens one request reads under long="retrieve" (words and
     punctuation × 1.3, the question included; default None: 512, as for a local decider) — as llm(max_len=...).
 
-    prob_floor: the smallest probability taken from a reply before its log (a 0 has no log). "auto" (default): half the
-    step of the grid the reply's probabilities strictly between 0 and 1 lie on — all of them multiples of 0.01 (a
-    service that rounds, as Jev does; or of 0.1) → 0.005; on no grid of 10^-2 … 10^-4 → 1e-6, as before 1.4, bit for
-    bit. A reply whose probabilities are all exactly 0 or 1 shows no grid and keeps 1e-6 (a rounding service's exact 0
-    on the right answer in such a reply is still read at 1e-6: set a float floor for that service). A float
-    sets it for every reply; None keeps 1e-6 everywhere. Why: with a 1e-6 floor one rounded-to-0 probability on the
-    right answer weighs log(1e-6) ≈ −13.8 and drags fit / teach / calibration — a third-party measurement on Jev
+    prob_floor: the smallest probability taken from a reply before its log (a 0 has no log). None (default): 1e-6, as
+    before 1.4, bit for bit, with the same fingerprint. "auto" (recommended for a service that rounds its
+    probabilities, as Jev does to 0.01): per question, half the step of the grid that question's probabilities strictly
+    between 0 and 1 lie on — all of them multiples of 0.01 (or of 0.1) → 0.005; on no grid of 10^-2 … 10^-4 → 1e-6.
+    An answer whose probabilities are all exactly 0 or 1 shows no grid and keeps 1e-6 (a rounding service's exact 0 on
+    the right answer in such an answer is still read at 1e-6: set a float floor for that service). A float sets it for
+    every reply. Why: with a 1e-6 floor one rounded-to-0 probability on the right answer weighs log(1e-6) ≈ −13.8 and
+    drags fit / teach / calibration — a third-party measurement on Jev
     (https://github.com/scienthoon/jev-ood-calibration, their numbers) refit the choice temperature to 3.29 with a 1e-6
-    floor and to 1.30 with 0.005. A floor other than "auto" enters the fingerprint ("auto" hashes as before 1.4, so
-    stored records stay valid); a decision records the floor used in extra["systemone"]["prob_floor"] when it is not
-    1e-6. The logits are not renormalised after clipping: they go through a softmax.
+    floor and to 1.30 with 0.005. "auto" and a float change the numbers, so they enter the fingerprint: switching one
+    on is a new model — calibrate again (a guarantee calibrated under the old fingerprint is refused, not reused, and
+    stored records keep their own). A decision records the floor used in extra["systemone"]["prob_floor"] when it is
+    not 1e-6. The logits are not renormalised after clipping: they go through a softmax.
 
     max_options: the most options the service takes in one choice question (Jev 255, Solar Decide 26, by their docs;
     "not stated", when the question allows it, counts as one); a question with more is refused when it is built

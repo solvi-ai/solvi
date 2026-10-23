@@ -52,17 +52,19 @@
 - **`Guard.fingerprint()`**: what decides a guard's calls as one hash, read from its declarations (tools with their
   schemas and functions, policies, functions, firewalls, the authorizer, settings); building nothing. The process
   records it per guard node instead of reading the guard's private attributes.
-- **`systemone`: a probability floor for services that round** (`prob_floor="auto"`). Hosted decision models round
-  probabilities (Jev to 0.01), and an exact 0 on the right option became log(1e-6) ≈ −13.8, which drags fit, teach and
-  calibration (a third-party measurement on Jev, https://github.com/scienthoon/jev-ood-calibration: choice temperature
-  refit to 3.29 with a 1e-6 floor, 1.30 with 0.005). The floor is now half the step of the grid a reply's probabilities
-  strictly between 0 and 1 lie on (0.01 or 0.1 → 0.005); a reply on no grid of 10^-2 … 10^-4 reads bit for bit as
-  before, and so does a reply whose probabilities are all exactly 0 or 1 (it shows no grid: 1e-6; a float floor covers
-  that case for a service known to round). A float sets the
-  floor, None keeps 1e-6; any value but "auto" enters the fingerprint, so stored records and the golden fingerprints
-  stay valid. A decision records the floor in `extra["systemone"]["prob_floor"]` when it is not 1e-6.
+- **`systemone`: a probability floor for services that round** (`prob_floor="auto"`, opt-in). Hosted decision
+  models round probabilities (Jev to 0.01), and an exact 0 on the right option becomes log(1e-6) ≈ −13.8, which drags
+  fit, teach and calibration (a third-party measurement on Jev, https://github.com/scienthoon/jev-ood-calibration:
+  choice temperature refit to 3.29 with a 1e-6 floor, 1.30 with 0.005). `prob_floor="auto"` — recommended for a
+  service that rounds, such as Jev — takes the floor per question as half the step of the grid that question's
+  probabilities strictly between 0 and 1 lie on (0.01 or 0.1 → 0.005); an answer on no grid of 10^-2 … 10^-4, or
+  whose probabilities are all exactly 0 or 1, keeps 1e-6 (a float floor covers that case for a service known to
+  round). A float sets the floor for every reply. The default stays `None` (1e-6): existing systems read bit for bit
+  as before, under the same fingerprint. `"auto"` and a float enter the fingerprint, so switching one on is a new
+  model: calibrate again. A decision records the floor in `extra["systemone"]["prob_floor"]` when it is not 1e-6.
 - **`systemone`: the service's own `confidence` is kept** in `extra["systemone"]["confidence"]` (Jev's Choice / Score
-  number, distinct from the probability; per option for a multi-label question), and a guarantee can be set on it:
+  number, distinct from the probability; per option, as a dict, for a multi-label question — a guarantee on
+  `signal="extra:systemone.confidence"` abstains on such a question), and a guarantee can be set on it:
   `System.guarantee(..., signal="extra:systemone.confidence")` — the new `signal="extra:<path>"` reads any number the
   answer's decision recorded; an answer without it abstains with the reason.
 - **`systemone(max_options=)`**: the most options the service takes in a choice (Jev 255, Solar Decide 26, by their
