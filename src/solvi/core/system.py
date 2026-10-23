@@ -1328,6 +1328,11 @@ class System:
                 al._taught(self, init_state, correct, source)   # a source its policy refuses raises before storing
             if self.storage is not None:
                 self.storage.save_correction(question, init_state, correct, label_source=source, by=by, of=of)
+            elif al.mode != "label":                  # stream mode: not the loop's label, and nowhere to keep it
+                import warnings
+                warnings.warn(f"teach({question!r}): an adapter loop in stream mode takes its labels with its "
+                              "decisions, not from teach, and the system has no storage to keep it: the correction is "
+                              "lost", stacklevel=2)
             return None
         loop = getattr(self, "_learning", None)
         if loop is not None and loop.gate_teach:

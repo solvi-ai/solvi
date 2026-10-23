@@ -114,8 +114,17 @@ def test_learning_loop_is_the_adapter_loop_with_the_default_policy_at_the_lanes_
         else:
             got.append([k, {**d, "stream": {f: v for f, v in d["stream"].items() if f not in new_fields["loop"]}}])
     assert len(got) == len(old) == 1506
+    unscored = 0
     for n, (g, o) in enumerate(zip(got, old)):
+        if g[0] == "loop" and g[1]["stream"]["shadow"] is None and o[1]["stream"]["shadow"] is not None:
+            # the candidate is scored in shadow only while its grid is not fixed and on coin-sampled decisions now;
+            # the old class scored it on every decision: only that value (and its would-be answer) may differ
+            unscored += 1
+            assert not g[1]["stream"]["sampled"], n
+            o = [o[0], {**o[1], "stream": {**o[1]["stream"], "shadow": None},
+                        "loop": {**o[1]["loop"], "shadow_would": None}}]
         assert g == o, n
+    assert unscored > 0
     assert _events(a, "promote") and a.replay()["ok"]
 
 

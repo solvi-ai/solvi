@@ -75,23 +75,40 @@ rollback) is recorded "stale" and discarded, not gated on a comparison with a ve
 `AdapterLoop.attach(host, learner=None, *, question=None, dir=None, policy=None, initial="auto", part=None, **kw)`
 builds a loop and attaches it — to a `Dispatcher` (stream mode: every `ask` is one decision of the loop) or to a
 `System` alone (label mode, `mode="label"`: `teach` / `outcome` call `label(x, y)`; no coin, no promise, no alarm; a
-version serves at its own act_guard threshold; a frozen candidate is promoted when `policy.promote(st, None)` says so;
-`status()["guarantee"]` is "fixed-set (act_guard on calib labels); no anytime certificate"). Without a learner it is a
+version serves at its own act_guard threshold; a frozen candidate is promoted when it has that threshold and
+`policy.promote(st, None)` says so — the `promote()` control and the automatic promotion check the same; `DefaultPolicy(
+pre_freeze=False)` is refused, since the pre-freeze gates are the only measurement before a version is served;
+`status()["guarantee"]` is "fixed-set (act_guard on calib labels); no anytime certificate"). Label mode's watch: from a
+promotion until the served version changes again, each calib or held-out label scores the served version and the one
+served before it on the same input (+1 alone and right, −1 alone and wrong, 0 not alone); `policy.watch(st, Watch)`
+(`LoopPolicy`'s default and `DefaultPolicy`: `watch_rollback` — ≥ `watch_min` (100) labels, the paired sign test's
+Wilson lower bound > 0 and the margin per label ≥ `min_gain`) returns True to roll back to the earlier version: a
+"rollback" event with `by: "policy"`, why "watch: …" and the counts under `watch`, replayed from the recorded scores;
+`status()["watch"]` shows the counts. Looked at on every label (not a fixed-sample test); its false-rollback rate is
+unmeasured; one more scoring per label while it runs. Without a learner it is a
 `LoraLearner` on the question's decision part (dir= required). `loop.attach_to(host)` attaches a loop built by hand;
 `Dispatcher(..., loop=loop)` calls it. `detach()` cancels a training in flight, puts version 0 back on the System,
 removes the hooks and closes the loop ("detach" event, replayed). `serving(v)`: version v installed for the duration
 (the Dispatcher's replay). Refused: a question answered by a combination or a part that is a member of one, a
 Dispatcher with its own `promise=`, a second loop on a System or a Dispatcher, `start` / `complete` with a loop (use
-`ask`). In stream mode the decision is split around the dispatch: the loop reads it (scores, coin, whether its rule
+`ask`), a stream-mode attach whose `DefaultPolicy` refuses the slow path's labels (the slow path's `label_source`
+attribute, "s2" when it has none) — the loop would have no label source and every decision would escalate: give
+`s2_labels=True`, a trusted oracle as the slow path, or use label mode — and, while a loop serves a part, a Cascade,
+Vote or Route built over it (refused at construction until `detach()`). In stream mode the decision is split around the dispatch: the loop reads it (scores, coin, whether its rule
 answers alone) before System 1 is asked and takes its step after, with the slow path's accepted answer as the label —
 neither inside the part's call. A Dispatcher's loop decisions run one at a time under its own lock, taken before the
-part's and the loop's and never while either is held (order: dispatcher → part → loop). The dispatch escalates what the
+part's and the loop's and never while either is held (order: dispatcher → part → loop), the slow path's call included:
+throughput ≤ 1 / the slow path's latency (measured once on a stand-in: 40 decisions in four threads with a 50 ms slow
+path, 3.7 × as long as without a loop). The controls take the same lock first: a control waits for the decision in
+flight. The candidate is scored in shadow only while its grid is not fixed and on coin-sampled decisions (`shadow` is
+None in the record otherwise). The dispatch escalates what the
 loop's rule does not answer alone and checks what its coin draws; each `Dispatched` records `learning` (the loop's
 decision number, the version served and its fingerprint, the candidate, the coin, whether the loop's rule answered
 alone, the label it took, its events); `Dispatcher.replay` / `replay_all` replay each decision with its version
 installed. A label whose source the policy refuses is a missing label for the loop (the default policy refuses the
 slow path's "s2" unless `s2_labels=True`). A loop that stops or fails leaves the dispatch as it would be without it
-(`learning: {"stopped": ...}` or `"error"`). Unmeasured.
+(`learning: {"stopped": ...}` or `"error"`). `teach` in stream mode only stores the correction; without storage a
+UserWarning says it is lost. Unmeasured.
 
 ::: solvi.experimental.stream.loop
 

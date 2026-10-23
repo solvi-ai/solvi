@@ -212,6 +212,7 @@ def _state(loop) -> dict:
             "paused": loop.paused, "closed": loop.closed, "error": loop.error, "attempt": loop._attempt,
             "trainings": list(loop._trainings), "history": list(loop._history), "served_since": loop._served_since,
             "alarms": [dict(a) for a in loop._alarms], "holdout": [[bool(a), bool(w)] for a, w in loop._holdout],
+            "watch": None if loop._watch is None else dict(loop._watch),
             "split_n": dict(loop._split_n),
             "split_extra": {k: sp for k, sp in loop._split_of.items() if k not in rows_keys},
             "rate": {"alone": [bool(a) for a in loop.rate._alone], "count": loop.rate._count},
@@ -527,6 +528,7 @@ def _restore(loop, m, st, data, vdir, groups):
     loop._history, loop._served_since = list(st["history"]), st["served_since"]
     loop._alarms = [dict(a) for a in st["alarms"]]
     loop._holdout = deque(((bool(a), bool(w)) for a, w in st["holdout"]), maxlen=loop._holdout.maxlen)
+    loop._watch = None if st.get("watch") is None else {k: int(v) for k, v in st["watch"].items()}
     loop.rate._alone = deque((bool(a) for a in st["rate"]["alone"]), maxlen=loop.rate.window)
     loop.rate._count = int(st["rate"]["count"])
     loop.budget.v = int(st["budget_v"])

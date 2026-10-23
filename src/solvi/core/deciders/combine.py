@@ -303,6 +303,31 @@ def _wrap(m):
 _MEMBER_OF: "weakref.WeakKeyDictionary" = weakref.WeakKeyDictionary()   # part → WeakSet of the combinations over it
 
 
+_SERVED_BY: "weakref.WeakKeyDictionary" = weakref.WeakKeyDictionary()   # part → weakref of the adapter loop on it
+
+
+def serve_by_loop(part, loop) -> None:
+    """Mark `part` as served by an adapter loop (solvi.experimental.stream, at attach; None: unmark, at detach): a
+    combination over it is refused from then on (it would read the part without its version lock)."""
+    try:
+        if loop is None:
+            _SERVED_BY.pop(part, None)
+        else:
+            _SERVED_BY[part] = weakref.ref(loop)
+    except TypeError:                                 # a part that cannot be weakly referenced: never marked
+        pass
+
+
+def served_by_loop(part):
+    """The attached adapter loop serving `part`, or None."""
+    try:
+        ref = _SERVED_BY.get(part)
+    except TypeError:
+        return None
+    loop = None if ref is None else ref()
+    return loop if loop is not None and getattr(loop, "host", None) is not None else None
+
+
 def combinations_of(part) -> list:
     """The combinations (Cascade, Vote, Route; nested ones too) built over `part` that are still alive. A combination
     reads its members' internals without their version lock, so a part that swaps versions (the adapter loop of
@@ -331,6 +356,10 @@ class Combination:
         self.members = [_wrap(m) for m in members]
         if not self.members:
             raise ValueError(f"a {self.kind_name} needs at least one decision part")
+        for lf in self.leaves():                      # a part an adapter loop serves: refused (detach it first)
+            if served_by_loop(lf.part) is not None:
+                raise ValueError(f"the part {getattr(lf.part, 'name', lf.part)!r} is served by an adapter loop: a "
+                                 f"{self.kind_name} would read it without its version lock — detach the loop first")
         for lf in self.leaves():                      # combinations_of(part): the adapter loop refuses such a part
             try:
                 _MEMBER_OF.setdefault(lf.part, weakref.WeakSet()).add(self)

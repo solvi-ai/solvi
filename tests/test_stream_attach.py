@@ -134,10 +134,18 @@ def _s2():
 
 
 def _policy(**kw):
+    """Stream mode's test policy: no split, the stream certificate alone decides (pre_freeze=False)."""
     base = dict(calib=0.0, holdout=0.0, pre_freeze=False, probe=False, growth=1.0, trial=300, first=200,
                 s2_labels=True)
     base.update(kw)
     return DefaultPolicy(Budget(min_interval_s=0.0, per_day=10 ** 6, max_versions_kept=10), **base)
+
+
+def _label_policy(**kw):
+    """Label mode's test policy: the pre-freeze gates on (calib and held-out labels; label mode refuses them off)."""
+    base = dict(first=100, growth=1.0, calib=0.15, holdout=0.15, pre_freeze=True, min_holdout=20)
+    base.update(kw)
+    return _policy(**base)
 
 
 def _attach(disp, learner=None, **kw):
@@ -271,24 +279,166 @@ def test_detach_puts_version_0_back_and_removes_the_hooks(tmp_path):
     assert loop.detach() is None
 
 
+def test_a_control_from_another_thread_waits_for_the_decision_in_flight(tmp_path):
+    """A rollback sent while a decision is between the loop's read and System 1's call: it waits for that decision
+    (the Dispatcher's per-decision lock), so the decision is recorded under the version System 1 decided with and the
+    replay is exact."""
+    disp = _disp(storage=JSONLStorage(tmp_path / "d.jsonl"))
+    loop = _attach(disp)
+    for x in _emails(2500):
+        disp.ask(x)
+    assert loop.served != 0 and disp.replay_all() == []
+    target = next(v["version"] for v in reversed(loop.versions()) if v["state"] == "retired")
+    real, state = disp.system.ask, {}
+
+    def ask_with_control(*a, **k):                   # runs between _pre and System 1's call
+        if not state:
+            th = threading.Thread(target=lambda: state.update(e=loop.rollback(target, by="ops")))
+            state["th"] = th
+            th.start()
+            th.join(0.5)
+            state["blocked"] = th.is_alive()         # waiting for this decision
+        return real(*a, **k)
+    disp.system.ask = ask_with_control
+    try:
+        d = disp.ask(_emails(1, 7000)[0])
+    finally:
+        disp.system.ask = real
+    state["th"].join(10)
+    assert state["blocked"] and state["e"]["event"] == "rollback"
+    assert d.learning["fingerprint"] == disp.system.holder.used[-1] and "step" not in d.learning
+    assert loop.served == target
+    d2 = disp.ask(_emails(1, 7001)[0])
+    assert d2.learning["served"] == target
+    assert disp.replay_all() == [] and loop.replay()["ok"]
+
+
+def test_with_a_loop_a_dispatcher_serves_one_decision_at_a_time():
+    """The per-decision lock: two threads with a slow path; each decision's loop number is the Dispatcher's (no two
+    decisions read the same number between the loop's read and its step)."""
+    import time
+
+    def slow():
+        cat = Catalog()
+
+        @cat.rule("team")
+        def team(email):
+            time.sleep(0.02)
+            return Decision(_gold(email), {_gold(email): 1.0})
+        return System(cat, [Question("team", "Which team?", Answer.choice(list(TEAMS)))])
+    disp = Dispatcher(_s1(), AskPath(slow()), secret=KEY)
+    loop = _attach(disp)
+    out, errs = [], []
+
+    def go(k):
+        try:
+            for x in _emails(15, 100 * k):
+                out.append(disp.ask(x))
+        except Exception as e:  # noqa: BLE001
+            errs.append(repr(e))
+    th = [threading.Thread(target=go, args=(k,)) for k in range(2)]
+    for t in th:
+        t.start()
+    for t in th:
+        t.join(60)
+    assert not errs, errs
+    assert len(out) == 30 and loop.n == 30
+    assert all(d.learning["n"] == d.n and "step" not in d.learning for d in out), \
+        [(d.n, d.learning.get("n")) for d in out]
+    assert sorted(d.learning["n"] for d in out) == list(range(1, 31))
+
+
+def test_the_candidate_is_scored_in_shadow_only_on_grid_and_sampled_decisions():
+    calls = {"n": 0}
+
+    class Counted(Ver):
+        def score(self, x):
+            calls["n"] += 1
+            return super().score(x)
+
+    class L(Learner):
+        def train(self, job):
+            return Counted(f"c{job.version}", 0.97)
+    disp = _disp()
+    loop = _attach(disp, L(), policy=_policy(trial=10 ** 6, first=200))
+    xs = _emails(1600)
+    for x in xs[:300]:
+        disp.ask(x)
+    c = loop.candidate
+    assert c is not None, loop.versions()
+    trial, scored = [], 0
+    for x in xs[300:1500]:
+        if loop.candidate != c:                      # promoted: System 1 itself scores with it from here
+            break
+        before = calls["n"]
+        trial.append(disp.ask(x))
+        scored += calls["n"] - before
+    sampled = sum(1 for d in trial if d.learning["sampled"])
+    assert len(trial) > 400 and all(d.learning["candidate"] == c for d in trial)
+    assert scored <= 200 + sampled, (scored, sampled, len(trial))   # not once per decision
+    assert loop.replay()["ok"]
+
+
+def test_stream_mode_without_a_label_source_is_refused_with_the_options():
+    pol = DefaultPolicy(Budget(min_interval_s=0.0, per_day=10 ** 6))      # s2_labels False: the default
+    with pytest.raises(ValueError, match=r"s2_labels=True.*trusted oracle.*label mode") as e:
+        _attach(_disp(), policy=pol)
+    assert "every decision would escalate" in str(e.value)
+
+    class Trusted(AskPath):                          # a slow path that says its labels are a person's
+        label_source = "human"
+    disp = Dispatcher(_s1(), Trusted(_s2()), secret=KEY)
+    assert _attach(disp, policy=DefaultPolicy(Budget(min_interval_s=0.0, per_day=10 ** 6))).host is disp
+    assert _attach(_disp(), policy=DefaultPolicy(s2_labels=True)).host is not None
+
+
+def test_teach_in_stream_mode_without_storage_warns_that_the_correction_is_lost():
+    disp = _disp()
+    loop = _attach(disp)
+    with pytest.warns(UserWarning, match="correction is lost"):
+        assert disp.system.teach("team", {"email": "order x: I was charged"}, "billing") is None
+    assert loop.n == 0
+
+
+def test_a_combination_over_an_attached_part_is_refused_until_detach():
+    s, (part, other), _ = _llm_system(2)
+    disp = Dispatcher(s, AskPath(_s2()), secret=KEY)
+    loop = AdapterLoop.attach(disp, Learner(), question="team", max_risk=0.05, secret=KEY, policy=_policy())
+    assert loop.part is part
+    with pytest.raises(ValueError, match="served by an adapter loop"):
+        Cascade([part, other])
+    from solvi.core.deciders.combine import combinations_of
+    assert combinations_of(part) == []
+    Cascade([other])                                  # another part: built
+    loop.detach()
+    keep = Cascade([part, other])                     # detached: built
+    assert keep in combinations_of(part)
+
+
 # ───────────────────────────── label mode
 def test_a_system_alone_learns_from_teach_and_outcome_and_promotes_on_its_pre_freeze_gates(tmp_path):
     s1 = _s1(storage=JSONLStorage(tmp_path / "s.jsonl"))
     loop = AdapterLoop.attach(s1, Learner(), question="team", max_risk=0.05, secret=KEY, initial=s1.holder.ver,
-                              policy=_policy(first=150), wait=True, clock=lambda: 1000.0)
+                              policy=_label_policy(), wait=True, clock=lambda: 1000.0)
     assert loop.mode == "label" and s1.adapter_loop is loop
     st = loop.status()
     assert st["guarantee"] == "fixed-set (act_guard on calib labels); no anytime certificate" and st["mode"] == "label"
-    for x in _emails(160):
+    for x in _emails(700):
         s1.teach("team", x, _gold(x["email"]))
-    assert loop.n == 160
-    ev = [e["event"] for k, e in loop.log if k == "stream"]
-    assert "freeze" in ev and "promote" in ev, ev
-    assert loop.served != 0 and s1.holder.ver.fingerprint() == loop.versions()[loop.served]["fingerprint"]
+    assert loop.n == 700
+    ev = [e for k, e in loop.log if k == "stream"]
+    train = [e for e in ev if e["event"] == "train"]
+    assert train and train[0]["frozen"] and train[0]["report"]["n_holdout"] >= 20, train
+    assert [e["event"] for e in ev].count("promote") == 1, [e["event"] for e in ev]
+    promote = next(e for e in ev if e["event"] == "promote")
+    assert promote["l_k"] is None and promote["n_novel"] is None  # label mode has no paired samples: not zeros
+    assert loop.served == 1 and loop.versions()[1]["certified"]   # measured on held-out labels, then served
+    assert s1.holder.ver.fingerprint() == loop.versions()[loop.served]["fingerprint"]
+    assert loop.status()["watch"]["target"] == 0                  # the watch runs from the promotion
     res = s1.ask({"email": "order 7: I was charged twice"})
     s1.outcome(res, "billing")
-    assert loop.n == 161
-    assert len(s1.storage.corrections()) == 161       # every label is stored too
+    assert loop.n == 701
+    assert len(s1.storage.corrections()) == 701       # every label is stored too
     with pytest.raises(ValueError, match="label mode"):
         AdapterLoop(Learner(), question="team", mode="stream", secret=KEY, max_risk=0.05).label({"email": "x"}, "billing")
     assert loop.replay()["ok"]
@@ -296,15 +446,154 @@ def test_a_system_alone_learns_from_teach_and_outcome_and_promotes_on_its_pre_fr
     assert s1.holder.ver.fingerprint() == "ver-v0-0.5" and s1.adapter_loop is None
 
 
+class Sure(Ver):
+    """Every answer with score 0.95, right or wrong."""
+
+    def score(self, x):
+        return super().score(x)[0], 0.95
+
+
+class Worse(Learner):
+    """Every training gives a version that is sure and right on 30 % only: the gates refuse it."""
+
+    def train(self, job):
+        return Sure(f"w{job.version}", 0.3)
+
+
+def test_label_mode_never_serves_a_training_its_gates_refuse_and_refuses_the_gates_off():
+    s1 = _s1()
+    loop = AdapterLoop.attach(s1, Worse(), question="team", max_risk=0.05, secret=KEY, initial=s1.holder.ver,
+                              policy=_label_policy(), wait=True, clock=lambda: 1000.0)
+    for x in _emails(700):
+        s1.teach("team", x, _gold(x["email"]))
+    ev = [e for k, e in loop.log if k == "stream"]
+    train = [e for e in ev if e["event"] == "train"]
+    assert train and not any(e["frozen"] for e in train), train
+    assert any(e["event"] == "discard" and "freeze refused" in e["why"] for e in ev)
+    assert "promote" not in [e["event"] for e in ev] and loop.served == 0 and s1.holder.ver.name == "v0"
+    assert loop.replay()["ok"]
+    for pol in (_policy(), _label_policy(pre_freeze=False)):       # label mode with the gates off: refused
+        with pytest.raises(ValueError, match="pre_freeze=False measures nothing"):
+            AdapterLoop.attach(_s1(), Learner(), question="team", max_risk=0.05, secret=KEY, policy=pol)
+
+
+class Uncalibrated(Ver):
+    """Every answer with the same score and right on 70 %: no calib threshold exists (no certificate in label mode)."""
+
+    def score(self, x):
+        a, _ = super().score(x)
+        return a, 0.5
+
+
+class PassAll(DefaultPolicy):
+    """The default policy with a freeze that lets every training through."""
+
+    def freeze(self, st, report):
+        return True
+
+
+def test_label_mode_automatic_promotion_needs_the_certificate_as_the_promote_control():
+    class L(Learner):
+        def train(self, job):
+            return Uncalibrated(f"u{job.version}", 0.7)
+    s1 = _s1()
+    pol = PassAll(Budget(min_interval_s=0.0, per_day=10 ** 6), **{**dict(first=100, growth=1.0, calib=0.15,
+                                                                         holdout=0.15, min_holdout=20, probe=False)})
+    loop = AdapterLoop.attach(s1, L(), question="team", max_risk=0.05, secret=KEY, initial=s1.holder.ver, policy=pol,
+                              wait=True, clock=lambda: 1000.0)
+    for x in _emails(700):
+        s1.teach("team", x, _gold(x["email"]))
+    ev = [e["event"] for k, e in loop.log if k == "stream"]
+    assert "freeze" in ev and "promote" not in ev, ev
+    assert loop.served == 0 and loop.candidate is not None and not loop.versions()[loop.candidate]["certified"]
+    with pytest.raises(ValueError, match="not certified"):
+        loop.promote()
+    assert loop.replay()["ok"]
+
+
+class LetThrough(DefaultPolicy):
+    """The default policy whose freeze serves any training with a calib threshold (the held-out gates skipped): what
+    a freeze that measured well and a version that degraded after it look like to the loop once it is served."""
+
+    def freeze(self, st, report):
+        return report.threshold is not None
+
+
+class Seq(Learner):
+    """Version 1 right on 99 % of the inputs, version 2 on 60 % (probe 7a's pair)."""
+
+    def train(self, job):
+        return Ver(f"v{job.version}", {1: 0.99, 2: 0.6}[job.version])
+
+
+def test_label_mode_watch_rolls_back_a_promoted_version_that_is_worse_than_the_one_before(tmp_path):
+    s1 = _s1()
+    pol = LetThrough(Budget(min_interval_s=0.0, per_day=10 ** 6), first=100, growth=1.0, calib=0.15, holdout=0.15,
+                     min_holdout=20, probe=False)
+    loop = AdapterLoop.attach(s1, Seq(), question="team", max_risk=0.05, secret=KEY, initial=s1.holder.ver,
+                              policy=pol, wait=True, clock=lambda: 1000.0, storage=JSONLStorage(tmp_path / "l.jsonl"))
+    xs = _emails(3000)
+    i = 0
+    while loop.served != 1 and i < 1000:
+        s1.teach("team", xs[i], _gold(xs[i]["email"]))
+        i += 1
+    assert loop.served == 1 and loop.status()["watch"]["target"] == 0
+    for x in xs[i:i + 400]:                          # version 1 is better than version 0: the watch stays quiet
+        s1.teach("team", x, _gold(x["email"]))
+    i += 400
+    assert loop.served == 1 and loop.status()["watch"]["n"] >= 100, loop.status()["watch"]
+    assert loop.train_now(wait=True).state == "done" and loop.candidate == 2
+    s1.teach("team", xs[i], _gold(xs[i]["email"]))  # promoted on the next label: 0.60 after 0.99
+    i += 1
+    assert loop.served == 2 and s1.holder.ver.name == "v2" and loop.status()["watch"]["target"] == 1
+    while loop.served == 2 and i < len(xs):
+        s1.teach("team", xs[i], _gold(xs[i]["email"]))
+        i += 1
+    ev = [e for _, e in loop._items() if e.get("event") == "rollback"]
+    assert len(ev) == 1 and ev[0]["to"] == 1 and ev[0]["by"] == "policy" and ev[0]["why"].startswith("watch:"), ev
+    w = ev[0]["watch"]
+    assert w["n"] >= 100 and w["better"] > w["worse"] and w["target"] == 1, w
+    assert loop.served == 1 and s1.holder.ver.name == "v1" and loop.status()["watch"] is None
+    assert loop.replay()["ok"]                       # the watch and its rollback replay from the records
+
+
+def test_label_mode_checkpoint_continues_as_the_unbroken_run(tmp_path):
+    xs = _emails(1200)
+    sa = _s1()
+    la = AdapterLoop.attach(sa, Learner(), question="team", max_risk=0.05, secret=KEY, initial=sa.holder.ver,
+                            policy=_label_policy(), wait=True, clock=lambda: 1000.0)
+    for x in xs[:700]:
+        sa.teach("team", x, _gold(x["email"]))
+    assert la.served == 1 and la.versions()[1]["certified"], la.versions()
+    la.save(tmp_path / "ck")
+    sb = _s1()
+    lb = AdapterLoop.load(tmp_path / "ck", Learner(), system=sb, secret=KEY, clock=lambda: 1000.0)
+    lb.attach_to(sb)
+    assert lb.mode == "label" and sb.holder.ver.fingerprint() == sa.holder.ver.fingerprint()
+    assert lb.versions() == la.versions()            # the fixed-set thresholds restored (certified, threshold)
+    sta, stb = la.status(), lb.status()
+    assert {k: sta[k] for k in ("served", "n", "labels", "watch", "guarantee")} == \
+        {k: stb[k] for k in ("served", "n", "labels", "watch", "guarantee")}
+    for x in xs[700:]:
+        sa.teach("team", x, _gold(x["email"]))
+        sb.teach("team", x, _gold(x["email"]))
+    assert la.n == lb.n == 1200
+    ra = [e["stream"] for k, e in la.log if k == "loop"][-500:]
+    rb = [e["stream"] for k, e in lb.log if k == "loop"][-500:]
+    assert ra == rb                                  # the same records: thresholds, held-out outcomes, the watch
+    assert la.versions() == lb.versions() and lb.replay()["ok"]
+
+
 # ───────────────────────────── a custom policy
 class OnlyHuman(LoopPolicy):
-    """A minimal policy: human labels only, every third key held out, train at 100 labels, promote any candidate."""
+    """A minimal policy: human labels only, a third of the keys held out and a third calib, train at 100 labels,
+    promote any candidate (the loop still needs it certified: a threshold on the calib labels)."""
 
     def accept(self, st, x, y, source):
         return source == "human"
 
     def split(self, st, key):
-        return "holdout" if int(hashlib.sha256(key.encode()).hexdigest(), 16) % 3 == 0 else "train"
+        return ("holdout", "calib", "train")[int(hashlib.sha256(key.encode()).hexdigest(), 16) % 3]
 
     def want_train(self, st):
         return st.labels["train"] >= 100 and st.served == 0
@@ -332,9 +621,10 @@ def test_a_custom_policy_and_learner_attach():
     s1 = _s1()
     loop = AdapterLoop.attach(s1, Learner(), policy=OnlyHuman(), initial=s1.holder.ver, secret=KEY, max_risk=0.05,
                               wait=True, clock=lambda: 1000.0)
-    for x in _emails(200):
+    for x in _emails(400):
         s1.teach("team", x, _gold(x["email"]))
     assert loop.served == 1 and s1.holder.ver.name == "v1"
+    assert loop.status()["watch"] is not None         # a policy without its own watch hook gets the default rule
     from solvi.core.sources import UntrustedLabel
     with pytest.raises(UntrustedLabel):
         s1.teach("team", _emails(1, 900)[0], "billing", label_source="outcome")
