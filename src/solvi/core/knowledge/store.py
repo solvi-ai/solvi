@@ -50,7 +50,7 @@ re-test), "disputed",
 Re-test. Content written again after it was retracted — the same item id, since an id is its content — is not revived
 by the new assertion: it is a hypothesis "pending re-test" until `retest(id, ok=True)` (a person or a test confirms
 it; ok=False retracts it again), and so is every item that rested on it when it was retracted, each until its own
-re-test. Items derived after the re-test are fresh; an item a rule only re-infers (`inferred=True`) follows its
+re-test. `pending()` lists the items waiting, `item(id)["pending"]` says why. Items derived after the re-test are fresh; an item a rule only re-infers (`inferred=True`) follows its
 premises, and so does an inferred item that rested on one: once the premise passes its re-test it is a fact again
 without a re-test of its own. `pending_retest(id)` reads it.
 
@@ -705,6 +705,11 @@ class KnowledgeStore:
         self._settle()
         return bool((self.state.get(iid) or {}).get("pending_retest"))
 
+    def pending(self):
+        """The items waiting for a re-test (`retest(id, ok=)`), sorted; `item(id)["pending"]` says why."""
+        self._settle()
+        return sorted(i for i, st in self.state.items() if st.get("pending_retest"))
+
     def _needs_retest(self, iid):
         it = self.items.get(iid)
         if it is None:
@@ -1064,7 +1069,7 @@ class KnowledgeStore:
                 "valid": {"world": last.get("valid") or [None, None],
                           "known": [st.get("learned_at", first.get("t")), st.get("invalidated_at")],
                           "reconfirm_after": it.reconfirm_after, **self._claims(it)},
-                "of": last.get("of")}
+                "of": last.get("of"), **({"pending": st.get("pending_why")} if st.get("pending_retest") else {})}
 
     def _claims(self, it):
         """{"claims": every live assertion's validity, "effective": where the item holds} for an item told with
@@ -1287,6 +1292,21 @@ def _taint(items, iid, memo):
     return memo[iid]
 
 
+def _retest_why(items, iid, t, memo):
+    """Why an item waits for a re-test (its support cut at journal entry t) → a sentence for item(id)["pending"]."""
+    it = items[iid]
+    if _cut(it) == t:
+        return f"written again after its retraction at journal entry {t}"
+    for a in _live(it):
+        for p in a["just"]:
+            if _taint(items, p, memo) == t:
+                return f"rests on {p}, whose support was cut at journal entry {t}"
+        for p in a.get("consulted", ()):
+            if _taint(items, p, memo) == t:
+                return f"consulted {p}, whose support was cut at journal entry {t}"
+    return f"its support was cut at journal entry {t}"
+
+
 def _resolve(items, comp, by_key, resolves, clock, flagged, max_iter=200, taints=None, state=None):
     """The state of the items in `comp` (closed under dependents and shared keys) from their raw entries → {id:
     record} for present items. Fixed point of: liveness of justifications ↔ per-key walk. Deterministic; premises
@@ -1295,11 +1315,12 @@ def _resolve(items, comp, by_key, resolves, clock, flagged, max_iter=200, taints
     fixed = {p: state[p] for i in order for a in items[i].asserts for p in a["just"]
              if p not in comp and p in (state or {})}
     taints = {} if taints is None else taints
-    retest = set()
+    retest, why = set(), {}
     for i in order:
         t = _taint(items, i, taints)
         if t is not None and not any(p > t for p in items[i].promoted):
             retest.add(i)
+            why[i] = _retest_why(items, i, t, taints)
 
     live_asserts = _live
 
@@ -1368,7 +1389,7 @@ def _resolve(items, comp, by_key, resolves, clock, flagged, max_iter=200, taints
         rec[i] = {"status": s, "rank": rank[i], "n_confirm": len(la) - 1, "refuted_by": kr[2],
                   "learned_at": min(a["t"] for a in la), "invalidated_at": kr[1] if s == "refuted" else None,
                   "last_support": max(a["t"] for a in la), "dispute_at": kr[3] if s == "disputed" else None,
-                  **({"pending_retest": True} if i in retest else {})}
+                  **({"pending_retest": True, "pending_why": why[i]} if i in retest else {})}
         if i in eff:                                    # not in the fingerprint: a function of the assertions
             rec[i]["periods"] = eff[i]["periods"]
             if eff[i]["contested"]:
