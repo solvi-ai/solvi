@@ -212,8 +212,9 @@ def _state(loop) -> dict:
             "paused": loop.paused, "closed": loop.closed, "error": loop.error, "attempt": loop._attempt,
             "trainings": list(loop._trainings), "history": list(loop._history), "served_since": loop._served_since,
             "alarms": [dict(a) for a in loop._alarms], "holdout": [[bool(a), bool(w)] for a, w in loop._holdout],
-            "watch": None if loop._watch is None else dict(loop._watch),
+            "watch": None if loop._watch is None else {**loop._watch, "lw": [float(x) for x in loop._watch["lw"]]},
             "split_n": dict(loop._split_n),
+            "refused": dict(loop._refused),
             "split_extra": {k: sp for k, sp in loop._split_of.items() if k not in rows_keys},
             "rate": {"alone": [bool(a) for a in loop.rate._alone], "count": loop.rate._count},
             "budget_v": loop.budget.v, "ev_seen": {str(v): k for v, k in loop._ev_seen.items()},
@@ -295,7 +296,8 @@ def save_loop(loop, dir, *, cancel=False) -> dict:
                 "candidate": loop.candidate, "delta_spent": loop.budget.spent, "learner": _cls_path(type(loop.live)),
                 "weights": None if loop.part is None else _weights(loop.part),
                 "config": {k: kw[k] for k in ("max_risk", "max_error", "delta", "probation", "source", "seed",
-                                              "sampling", "promise_options", "feature", "wait", "mode")},
+                                              "sampling", "promise_options", "feature", "wait", "mode",
+                                              "warn_refused")},
                 "detector_alone": loop._detector_alone, "batch": loop._batch,
                 "detector": None if loop.detector is None else loop.detector.config(),
                 "system": loop.system is not None, "version0": v0["0"], "keyed": loop._secret is not None,
@@ -521,6 +523,15 @@ def _load_verified(cls, folder, m, data, vdir, learner, *, system, storage, vers
     return loop
 
 
+def _watch_restored(w) -> dict:
+    """The watch's counts and its e-process's log wealths ("lw"). A checkpoint saved before the watch had an e-process
+    restarts it at wealth 1: still valid, it only delays a rollback."""
+    from .policy import watch_eprocess
+    out = {k: int(v) for k, v in w.items() if k != "lw"}
+    out["lw"] = [float(x) for x in w["lw"]] if w.get("lw") is not None else watch_eprocess().vector()
+    return out
+
+
 def _restore(loop, m, st, data, vdir, groups):
     loop.n, loop.served, loop.candidate, loop.left = st["n"], st["served"], st["candidate"], st["left"]
     loop.paused, loop.closed, loop.error = st["paused"], st["closed"], st["error"]
@@ -528,7 +539,9 @@ def _restore(loop, m, st, data, vdir, groups):
     loop._history, loop._served_since = list(st["history"]), st["served_since"]
     loop._alarms = [dict(a) for a in st["alarms"]]
     loop._holdout = deque(((bool(a), bool(w)) for a, w in st["holdout"]), maxlen=loop._holdout.maxlen)
-    loop._watch = None if st.get("watch") is None else {k: int(v) for k, v in st["watch"].items()}
+    loop._watch = None if st.get("watch") is None else _watch_restored(st["watch"])
+    r = st.get("refused") or {}
+    loop._refused = {"n": int(r.get("n", 0)), "run": int(r.get("run", 0)), "warned": bool(r.get("warned", False))}
     loop.rate._alone = deque((bool(a) for a in st["rate"]["alone"]), maxlen=loop.rate.window)
     loop.rate._count = int(st["rate"]["count"])
     loop.budget.v = int(st["budget_v"])

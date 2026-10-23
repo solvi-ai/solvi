@@ -2186,7 +2186,8 @@ class OnlyHuman(LoopPolicy):
     def promote(self, st, paired): return True
     def discard(self, st, paired): return None
     def alarm(self, st, who, report): return "recertify"
-    # optional: def watch(self, st, w) — label mode's rollback after a promotion (default: watch_rollback(w))
+    # optional: def watch(self, st, w) — label mode's rollback after a promotion (default: False, never;
+    #           DefaultPolicy's rule is watch_rollback(w), an anytime-valid e-process and the margin)
 ```
 
 A version is promoted only when it is certified (label mode: a threshold found on the calib labels), whatever
@@ -2198,7 +2199,8 @@ a question answered by a Cascade, Vote or Route, or by a part that is a member o
 `System.teach` changes nothing at once (the loop owns the part). The labels the default policy takes are a person's,
 an outcome's, a rule's or an audit's; the slow path's only with `s2_labels=True`. A loop on a Dispatcher needs a label
 source: an attach whose policy takes no label from the slow path is refused (give `s2_labels=True`, a trusted oracle as
-the slow path, or use label mode on the System). With a loop, a Dispatcher serves one decision at a time, the slow
+the slow path whose Thoughts carry `{"oracle": {"label_source": "human"}}`, or use label mode on the System); refused
+labels are counted in `status()["labels"]["refused"]` and 200 in a row with none accepted warn once. With a loop, a Dispatcher serves one decision at a time, the slow
 path's call included (measured once on a stand-in: 3.7 × slower at four threads and a 50 ms slow path). A Cascade, Vote
 or Route over a part a loop serves is refused until `detach()`. Unmeasured: nothing here says the loop improves a
 system. See [experimental](experimental.md#stream).

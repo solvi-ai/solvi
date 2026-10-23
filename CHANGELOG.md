@@ -411,13 +411,20 @@
   the `promote()` control does (before, a candidate with no calib threshold was promoted; stream mode checks the same).
   New in label mode: a watch after each promotion — on every calib or held-out label the served version and the
   version served before it are scored on the same input (+1 alone and right, −1 alone and wrong, 0 not alone); after
-  ≥ `watch_min` (100) labels it rolls back when the paired sign test's Wilson lower bound is above zero and the margin
-  per label is ≥ `min_gain` (the freeze's gates with the roles swapped). A `LoopPolicy.watch(st, Watch)` hook with that
-  rule as its default (`policy.Watch`, `policy.watch_rollback`; `DefaultPolicy(watch=False)`, `watch_min=`); the
-  rollback is a recorded "rollback" event (`by: "policy"`, the counts under `watch`), replayed from the recorded scores
-  and saved in the checkpoint; `status()["watch"]` shows the counts. Before, nothing watched a promoted version in
-  label mode. It is looked at on every label, so it is not a fixed-sample test; its false-rollback rate is unmeasured;
-  one more scoring per label while it runs. A promote event in label mode carries `l_k`, `l_s`, `n_novel`, `n_seen`
+  ≥ `watch_min` (100) labels it rolls back when an anytime-valid e-process on the discordant labels
+  (`policy.watch_eprocess()`, the package's `Mixture(0.5)` fed 1 when the served version wins one, 0 when the earlier
+  one does) reaches wealth 1 / (1 − `wilson`) (20), the earlier version won more of them, and the margin per label is
+  ≥ `min_gain`: P(a false rollback) ≤ 5 % per promotion at any horizon (Ville). Simulated, not a stand (2 000 runs per
+  cell): false rollbacks with both versions equally good 0.4–1.4 % within 300 watched labels,
+0.5–1.9 % within 1 000 and 0.8–2.1 % within 3 000; a served version truly worse (it wins 40 % of the discordant
+labels, 10 % of the labels discordant) rolled back in 10 / 28 / 70 % of runs by those horizons, a truly better one in
+≤ 0.2 %; watched labels are the calib and held-out ones, about 30 % of all labels at the default split. A first draft used the paired sign test's Wilson bound looked at on every label: in the same
+  simulation 8–12 % false rollbacks within 300 watched labels, 21–23 % within 3 000 — replaced before release. A
+  `LoopPolicy.watch(st, Watch)` hook, opt-in (the base returns False; `DefaultPolicy` has the rule on,
+  `DefaultPolicy(watch=False)`, `watch_min=`; `policy.Watch` with `log_e`, `policy.watch_rollback`); the rollback is a
+  recorded "rollback" event (`by: "policy"`, the counts and the e-process under `watch`), replayed from the recorded
+  scores and saved in the checkpoint with the e-process; `status()["watch"]` shows them. Before, nothing watched a
+  promoted version in label mode. One more scoring per calib or held-out label while it runs (train labels: none). A promote event in label mode carries `l_k`, `l_s`, `n_novel`, `n_seen`
   as None (there are no paired samples), and `versions()` reports label mode's threshold and certificate. The loop's
   controls on a Dispatcher take its per-decision lock first (order dispatcher → part → loop), so a control waits for
   the decision in flight and never lands between the loop's read and System 1's call (before, the decision could be
@@ -425,8 +432,12 @@
   slow path's call included: throughput ≤ 1 / the slow path's latency (measured once on a stand-in: 40 decisions in
   four threads with a 50 ms slow path, 3.7 × as long as without a loop); a test pins the serialisation. A stream-mode
   attach whose `DefaultPolicy` refuses the slow path's labels is refused with the options (`s2_labels=True`, a trusted
-  oracle as the slow path — a slow path that says `label_source = "human"` — or label mode): the loop had no label
-  source, never certified and escalated every decision. The candidate is scored in shadow only while its grid is not
+  oracle as the slow path — a slow path that says `label_source = "human"` and whose Thoughts carry
+  `{"oracle": {"label_source": "human"}}` — or label mode): the loop had no label source, never certified and escalated
+  every decision. The refusal comes before any state is set, so a refused loop can attach elsewhere. Since the
+  attribute is only a declaration, the run time checks it: labels the policy refuses on the attached path are counted
+  (`status()["labels"]["refused"]`) and after `warn_refused` (200) of them in a row with none accepted the loop warns
+  once that it learns nothing. The candidate is scored in shadow only while its grid is not
   fixed and on coin-sampled decisions (before, on every decision); the record's `shadow` is None otherwise and
   `replay(rescore=True)` skips it. `teach` in stream mode without storage warns that the correction is lost. A Cascade,
   Vote or Route built over a part a loop serves is refused at construction until `detach()`
