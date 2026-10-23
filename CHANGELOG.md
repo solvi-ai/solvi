@@ -400,6 +400,20 @@
   answers in both arms); on one machine the median ask was about 39% shorter (one run, 4,000 asks per arm).
 
 ### Changed
+- **Versions in time on a key with `valid`.** **Behaviour change**: on a key with `valid`, a later `since` on an
+  overlapping interval closes the earlier version at that `since` instead of refuting it (a bounded version gives the
+  old value back after it; a retracted version re-opens what it closed; a missing since is the beginning of time);
+  validity is per assertion, so a value told for two periods holds in both under one id; the winner of a same-since
+  contest or of a person's answer takes only the overlap, and a dispute is contested only there; a derived item's
+  validity is the intersection of its premises' (refused when they never hold together) and it holds only where its
+  premises hold; re-published withdrawn content waits for a re-test whatever its id, and a copy admitted while another
+  writer held the content goes pending when that holder is cut; an inferred item follows its premise after the
+  premise's re-test. New: `KnowledgeStore.pending()` (with the reason in `item(id)["pending"]`), `periods(id)`,
+  `retract(id, assertion=n)` and `retract(id, only_from=(writer, evidence))`, `item(id)["valid"]["claims"]` /
+  `["effective"]`, a snapshot row's `"periods"`, `Knowledge.tell(inferred=)`, `Knowledge.retract(only_from=,
+  assertion=)`; `datetime.date` works as a time (kept as its ISO text). Fingerprints of stores with overlapping
+  `valid` change once (an item that was refuted by a later since is active); keys without `valid` are unchanged, and
+  journals written before load, verify and replay.
 - **The experimental deadline reads "a future release".** The deadline set at 1.0 for every experimental piece was 1.2;
   it passed with the pieces still here, and the import warning of 1.3 and 1.4 still said "it is removed in 1.2 unless it
   graduates". `solvi.experimental.DEADLINE`, each `STATUS[...]["deadline"]`, the warning and docs/experimental.md now say
