@@ -30,7 +30,10 @@ side, or growing with an input — passes as easily as the true law. When the la
 tolerance set from the measurement error alone ignores the error of the fitted constants, and the true law can fail
 rows it should pass. Before trusting an accepted numeric law, check its residuals as a whole: a `confirm=` closure over
 the held-out rows that refits the constants and runs, for example, a χ² or a sign test on the residuals. Widen the
-tolerance by the fitted constants' uncertainty. Neither check is built in; both are on the ROADMAP with a stand.
+tolerance by the fitted constants' uncertainty. The χ² after a refit is built in as an opt-in,
+`residual_check(refit, level=0.995)`, used with `tol=math.inf` (see its docstring and
+[best practices](../best_practices.md) for the measurement and its cautions); the widened tolerance and the sign test
+are not shipped.
 
 ::: solvi.experimental.laws
 

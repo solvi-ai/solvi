@@ -1062,8 +1062,27 @@ every candidate of y = c·x. Values over several orders of magnitude need `rtol=
 `LawSet` itself (`LawSet(..., rtol=)`) so that `step` / `test` / `observe` compare within it too: y = 2.5·x over x from
 1 to 1e5 with relative noise 1e-7 learned no law in 60 steps under exact equality and learned it with rtol=1e-5, with no
 mismatch after; in `admit_by_probes`, tol=1e-4 refuted every candidate where the noise reached 2e-3…0.2 and rtol=1e-4
-admitted the right one. A tolerance is checked row by row: it does not catch a law biased inside it, and it ignores
-the error of fitted constants — check the residuals as a whole with `confirm=` ([api/laws.md](api/laws.md)).
+admitted the right one.
+
+**Accept a fitted numeric law on its residuals together, not row by row.** `LawSet.test` counts held-out rows inside
+`tol`; a 4σ band has almost no power against a bias of 1–2σ, and when the law's constants are fitted it refuses the true
+law whose predictions carry a fit error larger than σ. Measured on re-created worlds of an external report, one run: on
+a pendulum whose formula list lacks the bob radius (200 worlds; 70 where the best wrong formula sits 1–2σ from the
+truth) the row rule accepted a wrong law in 42 of those 70; on Kepler orbits at 0.03° precision (12 skies) it accepted
+Kepler in 4 of 12. A `confirm=` closure that refits the constants on design and held-out rows together and keeps the law
+only while the χ² is below the 0.995 quantile at n − k degrees of freedom, with the row band off (`tol=math.inf`;
+`min_support` and the sized bound still apply, but with every row a hit the bound no longer binds), gave 10 of 70 and 12
+of 12, with no loss where the truth is in the list (179 of 200 right and 0 wrong, the row rule 179 and 1; Kepler at 1°
+12 of 12). `residual_check(refit)` builds that closure (opt-in, default off; [api/laws.md](api/laws.md)). A sign test on
+the same residuals at α = 0.005 refused nothing in 415 cases — at 12–14 rows it needs near-unanimous signs — so leave it
+out. Widening the band by the fit variance instead (|obs − pred| ≤ 4·√(σ² + Var_fit), delta method) fixed only the
+second failure (Kepler 12 of 12, but 53 of 70 wrong pendulum laws) and added nothing to the χ² check on these bars; on
+an exponential decay fitted from a short window and checked over the whole range it was unreliable both ways (band
+5–680σ, 28 of 100 true laws lost against the χ² alone). Two cautions. The refit χ² is a goodness-of-fit test, not a
+prediction test: a wrong model with many free constants can pass it — a 25-constant epicycle system did, once in 24
+skies at 1°, where the row test on the held-out rows refused it; keep n − k large and prefer a held-out check when the
+model is flexible. And the χ² level carries no term for the number of candidates tested (four here), unlike the sized
+bound it replaces. Synthetic physics worlds only; the reproduction gate held on its exact bar (0.600 against ≥ 0.60).
 
 **A copied environment is an oracle only if it is deterministic.** Before using a clone or a replay as the judge
 (`admit_by_probes(ask=...)` on a `deepcopy` of the environment, a simulator that plans on a copy, `boundary(system=...)`

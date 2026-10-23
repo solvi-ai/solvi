@@ -302,6 +302,17 @@
   probe-starved, with no leftover probe in its wrong region; no loss in sound admissions (124 vs 123 at budget 8,
   251 vs 236 at budget 20); little effect at budget 8; the price is asks. Covered by
   [tests/test_laws_falsify.py](tests/test_laws_falsify.py).
+- **Laws (experimental): `residual_check(refit, level=0.995)`, an opt-in χ² check on a fitted numeric law**
+  (`solvi.experimental.laws`; default off, nothing changes unless it is passed). It returns a `confirm=` closure: the
+  caller's `refit(candidate)` fits the law's constants on the design and held-out rows together and returns the
+  residuals in σ units and the number of constants k; the law is kept only while Σ r² ≤ χ²_0.995(n − k). Used with
+  `tol=math.inf` (the row band off; under it the sized bound is vacuous and the χ² level, which has no term for the
+  number of candidates, is the only false-accept control). Measured once on synthetic physics worlds re-created from
+  another group's description: wrong pendulum laws at 1–2σ bias accepted 0.60 → 0.14 (70 worlds), Kepler at Tycho's
+  precision 4 → 12 of 12, no loss where the truth is in the list (179 of 200 right, 0 wrong). A flexible wrong model
+  can pass (a 25-constant epicycle system on 1 of 12 extra skies): the refit χ² checks goodness of fit, not
+  prediction. The sign test and the fit-variance-widened tolerance were measured and are not shipped. A default change
+  waits for a second task outside physics.
 
 ### Fixed
 - **DriftMonitor no longer flags "mean confidence up" on an unchanged stream** (`solvi.core.guarantees.drift`). The

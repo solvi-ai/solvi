@@ -1121,7 +1121,9 @@ class LawSet:
     binomial bound, so nothing bounds the false accepts over many candidates (with min_support=2 the same few-shot task
     learned the law in 20 of 20) — give it an independent check through `confirm`. Overrides `sized`.
     confirm: `confirm(candidate)` → bool, an external check (a probe, a person, a second data set) asked about each
-    candidate that passed, best first, before it is accepted; a refusal sets the candidate aside for this test.
+    candidate that passed, best first, before it is accepted; a refusal sets the candidate aside for this test. For a
+    fitted numeric law, `residual_check(refit)` builds one: the χ² of the residuals after a refit on all rows (opt-in,
+    used with `tol=math.inf`; its docstring has the measurement and the cautions).
 
     ties: the order between laws of equal length — "earlier" (the default: the earlier accepted law speaks) or "newer"
     (the later one does: a law learned after the world changed is not hidden behind an older one of the same length).
