@@ -344,6 +344,21 @@
 - **`Guard.replay(id)` of a call denied outside a session's allowed tools** replayed it with the tool's own checks and
   reported a mismatch (`in_session_tools` "not in the catalog"); a stored decision is now replayed with the system that
   made it, read from its recorded steps (also in the process replay of a guard node).
+- **A hard check that no question's flow reaches is no longer silent.** A hard check with no `then=`, that no question
+  requires and no part reads, is never planned, so it never ran and never stopped an answer, and nothing said so (`solvi
+  check` listed it as an ordinary `unused_part` warning). `System(...)` now warns about it, naming the check and the
+  two ways to wire it (`requires=[...]` on the questions it guards, or `then=`), and `solvi check` reports it as the
+  error `hard_check_never_runs`, so `rep.ok` is False for such a system. Behaviour change by design: the new warning and
+  the lint error; answers are unchanged.
+- **The `Fail` reason of a hard check reached through `requires=` is kept in `why`.** A hard check without a `then=`
+  answer for the question that failed with `Fail("...")` gave `why` = "hard check X is false and no answer is set for
+  it"; the reason now follows, as it does when `then=` sets the answer ("hard check adult is false: age 9 < 18 and no
+  answer is set for it"). Only the text of `why` changes.
+- **`solvi check` reads lambda rules and says when it cannot read a rule.** `rule_returns_non_option` skipped a lambda
+  (`cat.rule("q")(lambda x: "aprove")`) and a rule without source (made by `exec`, a callable object) without a word,
+  so a misspelled option passed as "no problems found". A lambda's body is now checked as its return value (found on
+  its line by its arguments); a rule whose return values cannot be read is the new warning `rule_unchecked`. Behaviour
+  change by design: new findings from `solvi check`; `ask` is unchanged.
 
 ### Docs
 - **Drift and audit: measured caveats** (best practices; the `ShiftWatch.shift`, `DriftMonitor` and `sysreport`

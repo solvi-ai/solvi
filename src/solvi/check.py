@@ -34,6 +34,9 @@ Errors (a decision is, or can be, wrong or impossible):
   hard_check_untyped    a hard check without `-> bool` with a `return` that is plainly not True or False (`return 0`,
                         `return None`, a bare `return`, a string): on that path the check is rejected and every
                         question it governs abstains — return a bool and declare it `-> bool`
+  hard_check_never_runs a hard check with no `then=`, required by no question and read by no part: no question's flow
+                        reaches it, so it never stops an answer (System() warns about it) — add requires=[...] to the
+                        questions it guards, or then=
   rule_returns_non_option   a rule with `return <literal>` (also in `a if c else b`) that is not one of its question's
                         options (`return "aprove"`): on that path the question abstains
   reads_sensitive       a part (fn, extract, check, rule, a `then` function, an alternative producer, a constraint) reads a
@@ -42,6 +45,9 @@ Errors (a decision is, or can be, wrong or impossible):
   reads_sensitive_via   a part reads a fact computed from a sensitive field (the message gives the chain: "reads
                         'risk_band', computed from 'age'"); a fact a part computes from a tainted fact is tainted too
 Warnings:
+  rule_unchecked        a rule of a yes/no, choice, ordinal or multi-label question whose return values cannot be read (no
+                        source: made by exec, a callable object; a lambda that cannot be told apart on its line), so
+                        rule_returns_non_option did not check it
   unused_part           a part no question's flow uses (a question without a rule, fit or `uses` uses everything computable:
                         those are the candidate features of the head it will be fitted with)
   then_on_soft_check    `then=` on a check that is not hard: it is ignored
@@ -195,8 +201,14 @@ def lint(obj, strict=False, max_combos=100_000, sensitive=None):
     _provenance(cat, questions, flows, rep)
     if questions:
         used = set().union(*counted.values()) if counted else set()
+        from .core.system import _idle_hard_checks
+        idle = set(_idle_hard_checks(cat, questions.values()))
         for name, p in cat.parts.items():
-            if name not in used and name not in in_cycle:
+            if name in idle:
+                rep.add("error", "hard_check_never_runs", name, "a hard check with no `then=` that no question "
+                        "requires and no part reads: it never runs, so it never stops an answer — add "
+                        f"requires=[{name!r}] to the questions it guards, or then=")
+            elif name not in used and name not in in_cycle:
                 rep.add("warning", "unused_part", name, f"no question's flow uses this {p.kind}")
         _rules(cat, questions, rep)
         _names(cat, system, questions, rep)
@@ -461,24 +473,24 @@ def _hard_checks(cat, questions, flows, rep):
 def _returns(func):
     """The `return` statements of a function's own body (not of functions defined inside it) → [(line, the returned
     literals)] where a literal is a constant, also in the branches of `a if c else b`; a bare `return` is the literal
-    None; a return of anything else gives no literal. None when the source is not available."""
+    None; a return of anything else gives no literal. A lambda's body is its one return. None when the source is not
+    available (or a lambda's line holds several lambdas with its arguments)."""
     f = inspect.unwrap(func)
     try:
         lines, start = inspect.getsourcelines(f)
         tree = ast.parse(textwrap.dedent("".join(lines)))
     except (OSError, TypeError, SyntaxError, IndentationError):
         return None
+    co = getattr(f, "__code__", None)
+    if co is not None and co.co_name == "<lambda>":   # a lambda: its body is the one value it returns — found on its
+        args = list(co.co_varnames[:co.co_argcount + co.co_kwonlyargcount])     # line by its arguments, or not checked
+        found = [n for n in ast.walk(tree) if isinstance(n, ast.Lambda) and n.lineno == 1
+                 and [a.arg for a in n.args.posonlyargs + n.args.args + n.args.kwonlyargs] == args]
+        return [(start, _literals(found[0].body))] if len(found) == 1 else None
     if not tree.body or not isinstance(tree.body[0], (ast.FunctionDef, ast.AsyncFunctionDef)):
         return None
 
-    def literals(e):
-        if e is None:
-            return [None]
-        if isinstance(e, ast.Constant):
-            return [e.value]
-        if isinstance(e, ast.IfExp):
-            return literals(e.body) + literals(e.orelse)
-        return []
+    literals = _literals
     out, todo = [], list(tree.body[0].body)
     while todo:
         node = todo.pop()
@@ -488,6 +500,18 @@ def _returns(func):
             out.append((start + node.lineno - 1, literals(node.value)))
         todo.extend(ast.iter_child_nodes(node))
     return sorted(out, key=lambda t: t[0])
+
+
+def _literals(e):
+    """The literals an expression plainly is: a constant, also in the branches of `a if c else b` (None: a bare
+    `return`) → [values]; [] for anything else."""
+    if e is None:
+        return [None]
+    if isinstance(e, ast.Constant):
+        return [e.value]
+    if isinstance(e, ast.IfExp):
+        return _literals(e.body) + _literals(e.orelse)
+    return []
 
 
 def _where(func, line):
@@ -507,7 +531,11 @@ def _rules(cat, questions, rep):
         if at is None or at.kind not in ("yes_no", "choice", "ordinal", "multi") or rule.func is None \
                 or getattr(rule.func, "__solvi_decision__", None) is not None:
             continue
-        for line, vals in _returns(rule.func) or ():
+        found = _returns(rule.func)
+        if found is None:                                # no source to read: say so, not "no problems found"
+            rep.add("warning", "rule_unchecked", qn, "the rule's return values cannot be read (no source, or a lambda "
+                    "not told apart on its line), so they were not checked against the question's options")
+        for line, vals in found or ():
             for v in vals:
                 if v is None or v is Ellipsis:           # None: the rule abstains on purpose
                     continue
