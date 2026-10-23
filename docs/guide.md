@@ -2582,6 +2582,15 @@ rule over the task text cut it to 0.11 but lost 3.4 points of benign utility (95
 calls the task needed; on top of hand-declared tool effects, the same rule cut attack success from 0.022 to 0.007 at
 −1.1 points. Give it the tools you know the task needs; a guessed list costs completed tasks.
 
+**The stop button.** `guard.pause("incident 42: odd payouts", by="alice")` stops the guard: every check and call that
+starts after it is denied (`guard_not_paused`; deny, not escalate, so no approval can be queued while stopped), with a
+reason naming who paused and why, and no tool runs; `resolve(..., approve=True)` raises until `guard.resume(by="alice")`.
+With a storage, the pause and the resume are events in the store's chain (meta `"guard": {"event", "by", "reason",
+"at"}`), and a call denied while paused is a decision of a small system of its own, so `guard.replay(id)` reproduces the
+denial. The pause lives in memory: a Guard made anew (a restart) starts running, and the store keeps the events — pause
+it again at start-up if it must stay stopped. It supports the "stop button" of the EU AI Act's human-oversight
+requirement (Art. 14(4)(e)).
+
 **The store.** With `storage=`, every decision is saved with its trace and `meta["guard"]`: tool, outcome, reasons,
 whether solvi ran the tool, and its error or the hash of its result (the result itself is not stored). `guard.replay(id)`
 re-computes a stored decision with the tool's current checks (`"catalog": "changed"` when they changed since),
@@ -2982,6 +2991,18 @@ empty or null input into a value nobody gave — the answer looks decided while 
 constant table (`{...}.get(kind, 1)`) or a default on a computed value is not flagged. Say what a missing input means (check for `None` and abstain, or declare the default in
 `System(input_model=...)`), or mark the line `# solvi: ok`. **Notes** never fail: a question without a rule abstains until
 an answer head is fitted.
+
+**The wording of questions** (warnings, and one note). For a question a model answers (no rule, or a rule backed by a
+model): a choice with no catch-all option — `"other"`, `"none of these"`, `"unknown"`, or one described as "anything
+else" — and no decider `other=` or "not stated" (`Answer.maybe`) is the note `no_other_option` (a note, so `--strict`
+passes: closed label sets such as approve / reject or low / medium / high are normal; add a catch-all only when an
+input can fit none of the options, since then a model still picks one, often with high confidence); levels that are bare numbers (`"1"`..`"5"`) without a description of each are
+`numeric_levels` (give a dict `{level: description}`). For every question: a text that asks two things — two question
+marks, or "and whether" / "or whether" — is `compound_question` (split it; a plain "and" inside one judgement is not
+flagged). With `System(input_model=Model)`, a field that no part, rule, check, constraint, `uses` hint, span or
+guarantee (its `groups=`, or a `signal=` naming the field; on a System or on a part's or combiner's calibration) reads is
+`unused_given` (checked only when every question has a rule or a `uses` hint, since a learned head may read any given
+fact). Each names the question (or the field) and the fix.
 
 **Sensitive fields.** `Catalog(sensitive={"age", "sex"})` names given facts no part may read; `lint(system,
 sensitive=...)` and `solvi check ... --sensitive age,sex` add names to the catalog's own. A part that reads one — a fn,
