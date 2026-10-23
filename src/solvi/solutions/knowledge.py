@@ -121,12 +121,14 @@ class Knowledge:
         return self.store.add("fact", fact, scope, source=source, by=by, of=of, derived_from=derived_from,
                               evidence=evidence, valid=valid, consulted=consulted, inferred=inferred)
 
-    def retract(self, item, why=None, *, by=None, storage=None, decide=None):
+    def retract(self, item, why=None, *, by=None, storage=None, decide=None, only_from=None, assertion=None):
         """Take an item back with everything derived from it (nothing is deleted: the journal keeps it). → {"status":
         {id: (before, after)}, "answer_changes", "justification_only"} — the last two (with `storage=`, the decisions'
         TraceStorage, and `decide=`, a System or a function init → answers) list the stored decisions that rested on
-        it, re-run on the snapshot rebuilt without it: the answer changes (for a reviewer) or only the justification."""
-        status = self.store.retract(item, by=by, why=why)
+        it, re-run on the snapshot rebuilt without it: the answer changes (for a reviewer) or only the justification.
+        only_from (a writer, or (writer, evidence)) and assertion (a journal position): take back only those assertions
+        of the item (KnowledgeStore.retract)."""
+        status = self.store.retract(item, by=by, why=why, only_from=only_from, assertion=assertion)
         out = {"status": status, "answer_changes": None, "justification_only": None}
         if storage is not None and decide is not None:
             from ..core.store import open_storage
