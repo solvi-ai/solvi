@@ -499,7 +499,7 @@ the grid's); the same samples in the same order rebuild it exactly.
 
 The price of being valid at every time: at α = δ = 5 % a fresh certificate needs 85 clean samples (v = 1), 116 after
 one restart and 134 after two; 74 for the mixture at the full δ, against 59 for a one-shot binomial test. These are
-arithmetic from the code, not measurements.
+arithmetic from the code, not measurements (`tests/test_stream_certificate.py` checks 74 and 85 / 116 / 134 / 156).
 
 Stage 2 runs it inside the Dispatcher:
 
@@ -525,9 +525,10 @@ an accepted slow-path answer is a loss. The promise is therefore relative to the
 (bets c/α, c = 0.01 … 0.4) and alarms when the mean statistic reaches `arl`. Its statement is an expected run length —
 under a risk ≤ α the expected number of samples to a false alarm is at least `arl` — not a per-horizon probability
 like `DriftMonitor`'s: a model running exactly at α re-certifies about every `arl` samples by design
-(`alternatives=(1.5, 2.0)` moves the null to 1.5α). Arithmetic with this code, at α = 5 %, `arl` = 1000 (the
-design's script, reproduced bit for bit): at p = α a mean of 1 333 samples to a false alarm (median 982), at α/2 about
-1.5 % of streams alarm within 1 000 samples, a 2× shift is caught after 153 samples on average, 4× after 36. With
+(`alternatives=(1.5, 2.0)` moves the null to 1.5α). The bound is the Shiryaev–Roberts e-detector's (Shin, Ramdas and
+Rinaldo 2023, arXiv 2203.03532), and it counts samples, not decisions: a simulation of this code matched it, and at the
+adaptive rate one sample is many decisions (the simulated run lengths and the conversion are in
+[best practices](best_practices.md#guarantees-and-calibration)). With
 `on_drift="recertify"` an alarm restarts the certificate (the next δ_v, threshold +inf) and System 1 answers nothing
 alone for `probation` decisions and until certified again, every one of them a free sample; with the default
 `on_drift="human"` the alarm is the dispatcher's drift flag, as a `DriftMonitor`'s. Every dispatch record carries
@@ -615,7 +616,26 @@ In the tests, on a synthetic five-intent text stream of 2 000 decisions the loop
 last 500 with no wrong alone answer. Shuffled labels never promote a candidate under either promise (3 seeds each,
 the shuffled-label control). These are smoke checks, not measurements.
 
-Measured on real streams; see the documented limits. What the measurement found against these pieces:
+Measured once on real streams: three public intent sets with a TF-IDF + logistic-regression answerer, 20 seeds per
+set, a shift to held-out intents, corrupted text and noisy labels; the numbers, the setting and the prior work are in
+[best practices](best_practices.md#guarantees-and-calibration). What held:
+
+- **The promise, between change points.** No threshold a stream certificate had in force, and no version the
+  learning loop served, had a risk above the promise on the regime it was certified on. That holds under the method's
+  assumptions — the stream i.i.d. between change points with the answerer frozen, a sampling coin independent of the
+  input, the risk relative to the oracle's labels — and with the window between a change and the detector's alarm
+  exempt. It is the method's known statement (learn-then-test with betting e-processes: Bates et al. 2021,
+  Angelopoulos et al. 2021, Waudby-Smith and Ramdas 2024; with actively sampled labels, Xu, Karampatziakis and Mineiro
+  2024); the measurement checks that the implementation holds it. Inside the exempt window the share answered alone
+  and wrong exceeded the promise in many runs, up to the end of the stream where the detector never alarmed.
+- **The replay.** It rebuilt the certificate, detector, rate and coin of every decision from the stored records, and
+  every version decision of the loop, with no mismatch. The ticket path and late labels were not exercised on a
+  stream (tests only).
+- **Label noise.** A change in the labels alone is invisible to a monitor that reads only scores, by construction
+  ([best practices](best_practices.md#guarantees-and-calibration)); `RiskDetector`, which reads the sampled labels,
+  saw it on most such streams, late.
+
+What the measurement found against these pieces:
 
 - **`RiskDetector` must not be the only alarm.** It reads only the sampled decisions, so on shifts to new intents it
   alarmed far later than the confidence CUSUM that reads every decision's score, or not at all, and until its alarm
@@ -627,6 +647,10 @@ Measured on real streams; see the documented limits. What the measurement found 
 - **`TicketDesk` / `AgentOracle` are unmeasured on a stream** (tests only). The promise is relative to the agent's
   labels: a noisy agent lowers coverage, not validity.
 - The promise holds between change points: between a shift and its alarm the realised risk can exceed it.
+- **A cold start costs coverage.** From +inf the first few hundred decisions go to the slow path; where you have a
+  calibration set, the offline certificate answers more alone.
+- **The promise is relative to the oracle.** Noisy labels, or a hosted LLM as the oracle, cost coverage, not
+  validity against those labels.
 
 - **Missing:** measured once; see the documented limits in docs/experimental.md: the RiskDetector alarmed far later than the confidence CUSUM on shifts to new intents and must not be the only alarm; the LearningLoop gained nothing with gold labels and is kept only as the core of a planned adapter loop; TicketDesk is unmeasured on a stream. The loop is not wired into the Dispatcher (no loop=: it drives its own coin and oracle); the expired-share stop (max_drop) and repeated tickets for the oracle's own noise are not built; a person's audit label does not yet replace the slow path's label
 - **Script:** none yet. **Deadline:** 1.2.
