@@ -25,7 +25,7 @@ SRC = Path(__file__).resolve().parents[1] / "src"
 BASE = {"solvi.core"} | {f"solvi.core.{m}" for m in ("catalog", "types", "provenance", "primitives", "runtime", "schema",
                                                      "textin")}
 TOP = ("solvi.cli", "solvi.serve", "solvi._mcp_proxy", "solvi.experimental.hooks", "solvi.experimental.mcp", "solvi.__main__",
-       "solvi.solutions.guard")   # solvi.experimental.mcp: the old path of the proxy, re-exporting it until 1.2
+       "solvi.solutions.guard")   # solvi.experimental.mcp: the old path of the proxy, re-exporting it until a future release
 
 
 def _modules():
@@ -294,7 +294,7 @@ def test_experimental_modules_warn_on_import_and_say_their_status():
     assert names == set(experimental.STATUS) | GRADUATED, names ^ (set(experimental.STATUS) | GRADUATED)
     assert not GRADUATED & set(experimental.STATUS)
     for st in experimental.STATUS.values():
-        assert {"since", "what", "missing", "script", "deadline"} <= set(st) and st["deadline"] == "1.2"
+        assert {"since", "what", "missing", "script", "deadline"} <= set(st) and st["deadline"] == experimental.DEADLINE
     code = ("import importlib, sys, warnings\nfrom solvi.core.catalog import ExperimentalWarning\n"
             "with warnings.catch_warnings(record=True) as w:\n"
             "    warnings.simplefilter('always')\n"
