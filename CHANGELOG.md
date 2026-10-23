@@ -183,6 +183,13 @@
   `corrections["people"]`). Only person labels given before the outcome is recorded are paired (a correction made
   after the outcome was known is not a judgement); those after are counted apart. The pairs are the decisions whose
   outcome was recorded, not a random sample.
+- **A Wilson 95 % interval on every observed error in the system report** (`solvi.core.store.sysreport`,
+  `System.report`, `solvi report --overview`). Each labels block (System 1's labels, a promise's labels, the
+  dispatcher's final answers, its audited sample) gains `error_wilson95` and `risk_wilson95` (`[low, high]`, `None`
+  with no labels) beside the unchanged keys; the text appends the interval after each rate, e.g. `error among them
+  7.50% [2.6%, 19.9%] (Wilson 95 %)`. On the audited sample (`Dispatcher(audit=)`) it is the interval of the live
+  error; on labels that are not a random sample it is the interval of the labelled decisions only. `wilson(k, n)` is
+  checked against scipy's `binomtest(...).proportion_ci(method="wilson")`.
 
 ### Fixed
 - **DriftMonitor no longer flags "mean confidence up" on an unchanged stream** (`solvi.core.guarantees.drift`). The

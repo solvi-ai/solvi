@@ -27,7 +27,8 @@ What it shows, per question, from the records the library already writes:
   are the system's own answers. Labels that are not a random sample (people correct what looks wrong) overstate the
   error: the report says how many decisions are labelled. A dispatcher with `audit=` marks a random share of its
   decisions for labelling; their "audit" labels are measured apart, as the audited sample, next to every promise — the
-  unbiased reading of it;
+  unbiased reading of it. Every observed error and risk on labels carries its Wilson 95 % interval ("error_wilson95",
+  "risk_wilson95");
 - how often a person was wrong: a decision with a person's label ("human" or "audit") given before its first outcome
   label ("outcome") gives a pair; `corrections["people"]` counts the pairs where they differ, with a two-sided
   Clopper–Pearson interval, per person (`by`) and per question; a person label given only after the outcome is
@@ -41,6 +42,7 @@ recorded after the period still label its decisions."""
 from __future__ import annotations
 
 import datetime
+import math
 from dataclasses import dataclass, field
 
 from . import AUDIT, VERIFIED, _cj, _when, akey, view
@@ -98,13 +100,31 @@ def _verdict(measured, level, wrong, n):
         f"above the promised level on these labels, not significantly (p = {p:.2g})"
 
 
+def wilson(k, n, confidence=0.95):
+    """The Wilson score interval of a share with k of n → (low, high); None when n is 0.
+
+    centre (k + z²/2) / (n + z²), half-width z / (n + z²) · √(k (n − k) / n + z²/4), z the two-sided normal quantile."""
+    if n == 0:
+        return None
+    from statistics import NormalDist
+    z = NormalDist().inv_cdf(1 - (1 - confidence) / 2)
+    z2 = z * z
+    centre = (k + z2 / 2) / (n + z2)
+    half = z / (n + z2) * math.sqrt(k * (n - k) / n + z2 / 4)
+    return max(0.0, centre - half), min(1.0, centre + half)
+
+
 def _labels_block(rows, level=None, measure="error"):
-    """rows: [(alone: bool, wrong: bool | None)] of labelled decisions → counts and, against a promise, the verdict."""
+    """rows: [(alone: bool, wrong: bool | None)] of labelled decisions → counts and, against a promise, the verdict.
+    "error_wilson95" / "risk_wilson95": the Wilson 95 % interval of "error" / "risk" as [low, high] (None with no rows)."""
     n = len(rows)
     alone = [w for a, w in rows if a]
     wrong = sum(bool(w) for w in alone)
     out = {"labelled": n, "alone": len(alone), "wrong_alone": wrong,
            "error": wrong / len(alone) if alone else None, "risk": wrong / n if n else None}
+    for key, m in (("error_wilson95", len(alone)), ("risk_wilson95", n)):
+        ci = wilson(wrong, m)
+        out[key] = list(ci) if ci else None
     if level is not None:
         m = out[measure]
         out.update(measure=measure, level=level, verdict=_verdict(m, level, wrong, len(alone) if measure == "error" else n))
@@ -531,14 +551,18 @@ def _cost_line(c, what="decisions"):
     return s
 
 
+def _wilson_text(ci):
+    return f" [{ci[0]:.1%}, {ci[1]:.1%}] (Wilson 95 %)" if ci else ""
+
+
 def _labels_line(L):
     if not L["labelled"]:
         return "no labelled decisions"
     s = f"{L['labelled']} labelled; answered alone and labelled {L['alone']}, wrong {L['wrong_alone']}"
     if L["error"] is not None:
-        s += f" — error among them {L['error']:.2%}"
+        s += f" — error among them {L['error']:.2%}" + _wilson_text(L.get("error_wilson95"))
     if L["risk"] is not None:
-        s += f", alone and wrong {L['risk']:.2%} of the labelled"
+        s += f", alone and wrong {L['risk']:.2%} of the labelled" + _wilson_text(L.get("risk_wilson95"))
     return s
 
 
