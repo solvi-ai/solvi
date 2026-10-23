@@ -31,6 +31,11 @@ samples and ≥ the served version's share + margin (1 point); version 0 may be 
 RiskDetector with probation watches the served version, a resolved ticket's verdict is a label (ticket_verdict); every
 freeze / promote / discard / alarm is in the chain and `replay()` rebuilds which version served each decision. The gain is unproven; stage 4's stand measures it.
 
+The adapter (LoRA) loop, stage 1: `stream.policy` — `LoopPolicy` (the abstract class whose hooks decide what the loop
+takes, when it trains, what it freezes, promotes, discards and does on an alarm), `LoopState` (what a hook reads),
+`Budget`, and `DefaultPolicy`; `stream.gates` — the content-key split and the gate arithmetic. Not wired into a loop
+yet.
+
 Unmeasured: no stand has run yet."""
 from __future__ import annotations
 
@@ -38,6 +43,7 @@ from .. import warn_on_import
 from ._eprocess import DeltaBudget, MirrorBound, Mixture, clean_need
 from .certificate import StreamPromise, fixed_grid
 from .detector import RiskDetector
+from .policy import Budget, DefaultPolicy, LabelRow, LoopPolicy, LoopState, Paired, TrainReport, VersionInfo
 from .learner import FastHeadLearner, Frozen, FrozenError, FrozenFast, HashedTextLearner, Learner
 from .sampling import Rate, StreamDriver, coin_message
 from .tickets import AgentOracle, TicketDesk, TicketError
@@ -45,7 +51,8 @@ from .versions import LearningLoop, Verdict, ticket_verdict
 
 warn_on_import(__name__)
 
-__all__ = ["AgentOracle", "DeltaBudget", "FastHeadLearner", "Frozen", "FrozenError", "FrozenFast", "HashedTextLearner",
-           "Learner", "LearningLoop", "MirrorBound", "Mixture", "Rate", "RiskDetector", "StreamDriver",
-           "StreamPromise", "TicketDesk", "TicketError", "Verdict", "clean_need", "coin_message", "fixed_grid",
+__all__ = ["AgentOracle", "Budget", "DefaultPolicy", "DeltaBudget", "FastHeadLearner", "Frozen", "FrozenError",
+           "FrozenFast", "HashedTextLearner", "LabelRow", "Learner", "LearningLoop", "LoopPolicy", "LoopState",
+           "MirrorBound", "Mixture", "Paired", "Rate", "RiskDetector", "StreamDriver", "StreamPromise", "TicketDesk",
+           "TicketError", "TrainReport", "Verdict", "VersionInfo", "clean_need", "coin_message", "fixed_grid",
            "ticket_verdict"]
