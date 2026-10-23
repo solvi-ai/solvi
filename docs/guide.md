@@ -1003,6 +1003,11 @@ answers before the shift. After a flag, stop answering alone until the threshold
 after the shift. The same promises on a whole question —
 a fitted head, a rule, a trust score you compute — are `system.guarantee` ([below](#a-guarantee-on-any-question-systemguarantee)).
 
+The arithmetic behind these promises — the binomial tails and Bonferroni / fixed-sequence tests of learn-then-test, the
+conformal-risk-control threshold, the split-conformal quantile — is checked against values computed apart from solvi's
+code (exact fractions, the Clopper–Pearson bound, the procedures as the papers state them, the exact coverage
+⌈(n + 1)(1 − α)⌉ / (n + 1)); `tests/test_reference_values.py` names the source of each expected value.
+
 #### Keeping a calibration: save_calibration, load_calibration
 
 The thresholds live in the part. Save them once, and have the catalog load them every time it starts:

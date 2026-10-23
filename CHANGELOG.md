@@ -139,6 +139,13 @@
   or named as its `signal=` counts as read). Each names the question or field and the fix in one line; none is an
   error, so `solvi check` without `--strict` exits as before, and the examples raise no new warning under `--strict`.
   `solvi init --with-model`'s refunds and minimal templates get an `"other"` option.
+- **Known-answer tests for the guarantee arithmetic** (`tests/test_reference_values.py`, tests only). `ltt_certified` /
+  `ltt_threshold` (Bonferroni and fixed sequence), `crc_threshold` and `conformal_quantile` are checked against values
+  computed apart from solvi's code: exact rational binomial tails and scipy's `binom.cdf`; the one-sided
+  Clopper–Pearson bound (the same Bonferroni test written through the Beta quantile); the learn-then-test procedure
+  rewritten from Angelopoulos et al. (2021) with exact p-values; conformal risk control from Theorem 1 of Angelopoulos
+  et al. (2022); the split-conformal rank ⌈(n + 1)(1 − α)⌉ and its exact coverage k / (n + 1) by seeded simulation.
+  Each test names its source. All agreed; no code changed. MAPIE and confseq are not used (not dependencies).
 
 ### Fixed
 - **DriftMonitor no longer flags "mean confidence up" on an unchanged stream** (`solvi.core.guarantees.drift`). The
