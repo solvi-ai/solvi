@@ -187,8 +187,15 @@
   post-alarm samples — before, a candidate certified before the shift was promoted at the alarm (ℓ_s = 0) and served
   the moved world on its old threshold, above the promise. A retired version certified before an alarm
   restarts when it is rolled back to.
-- **Stream certificate (experimental): measured; see the documented limits** (`docs/experimental.md`, section
-  `stream`). No positive result is claimed yet. Known limits: `RiskDetector` reads only the sampled decisions and
+- **Stream certificate (experimental): measured once; what held and the documented limits** (`docs/experimental.md`,
+  section `stream`; the numbers, their setting and the prior work in best practices). What held: no threshold a stream
+  certificate had in force, and no version the learning loop served, had a risk above the promise on the regime it was
+  certified on — under the method's assumptions (the stream i.i.d. between change points with the answerer frozen, a
+  sampling coin independent of the input, the risk relative to the oracle's labels) and with the window between a
+  change and the detector's alarm exempt; this is the method's known statement, checked on the implementation. The
+  replay rebuilt the certificate, detector, rate and coin of every decision, and every version decision of the loop,
+  with no mismatch. A simulation of `RiskDetector` matched its run-length bound, which counts samples, not decisions.
+  Known limits: `RiskDetector` reads only the sampled decisions and
   alarmed far later than the confidence CUSUM on shifts to new intents, or not at all, so it must not be the only
   alarm — keep it next to the score monitor; the `LearningLoop` gained nothing with gold labels (what it promoted
   answered alone mostly on items it had been given labels for) and stays only as the core of a planned adapter (LoRA)
