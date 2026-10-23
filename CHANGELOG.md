@@ -400,6 +400,56 @@
   answers in both arms); on one machine the median ask was about 39% shorter (one run, 4,000 asks per arm).
 
 ### Changed
+- **Versions in time on a key with `valid`.** **Behaviour change**: on a key with `valid`, a later `since` on an
+  overlapping interval closes the earlier version at that `since` instead of refuting it (a bounded version gives the
+  old value back after it; a retracted version re-opens what it closed; a missing since is the beginning of time);
+  validity is per assertion, so a value told for two periods holds in both under one id (claims of one item from one
+  since are one version, and the latest claim's until is its until); the winner of a same-since
+  contest or of a person's answer takes only the overlap, and a dispute is contested only there; a derived item's
+  validity is the intersection of its premises' (refused when they never hold together or their times do not
+  compare) and it holds only where its premises hold; re-published withdrawn content waits for a re-test whatever its
+  id, and a copy admitted while another writer held the content goes pending when that holder is cut or when the
+  holder's version is refuted, disputed or closed there (a holder must hold); taking back a duplicate while the same
+  writer's other claim stands is not a withdrawal; an inferred item follows its premise after the
+  premise's re-test. New: `KnowledgeStore.pending()` (with the reason in `item(id)["pending"]`), `periods(id)`,
+  `retract(id, assertion=n)` and `retract(id, only_from=(writer, evidence))`, `item(id)["valid"]["claims"]` /
+  `["effective"]`, a snapshot row's `"periods"`, `Knowledge.tell(inferred=)`, `Knowledge.retract(only_from=,
+  assertion=)`; `datetime.date` works as a time (kept as its ISO text). Fingerprints of stores with overlapping
+  `valid` change once (an item that was refuted by a later since is active); keys without `valid` are unchanged, and
+  journals written before load, verify and replay. This supersedes the sentence of the dispute-rule fix above that "a
+  missing since against a given one ... resolve[s] as before": on a key where some assertion carries `valid`, a missing
+  since is now the beginning-of-time version and a given since closes it instead of the two contesting — so an
+  assertion told without `valid` after a dated one on that key (even a later observation) holds only before the dated
+  version's since, where it used to refute it and be read at every time (an outcome `B` from 5, then an outcome `A`
+  without `valid`: before, `A` refuted `B` and was read at 10; now `B` is read at 10 and `A` at 3). Two missing sinces
+  still dispute as that fix says, and keys whose assertions carry no `valid` at all resolve as before. Journal: taking
+  back one assertion (`retract(id, assertion=)`, `only_from=(writer, evidence)`, a failed re-test of copies) writes a
+  new op, `"retract_assertions"`; a store before 1.4 refuses such a journal ("unknown knowledge journal op") instead of
+  reading the entry as a whole retraction, so a journal that has one opens only on 1.4 or later.
+  Measured once on a pre-registered stand (script not in the repository; our own synthetic worlds, 30 seeds, and
+  one public data set, the ECB key interest rates: four series 1999–2026, 191 changes). On the ECB stream the
+  store reads the current value 6,636 of 6,636 times (before: 6,186), the value as of an earlier day 1,799 of
+  1,799 (before: 245), an announced value on its announcement day 182 of 182 (before: 182) and the old value in
+  the window between announcement and effect 855 of 855 (before: 0). On the synthetic worlds: current 7,812 of
+  7,813 (before: 7,236), as of an earlier day 7,813 of 7,813 (before: 1,580); withdrawn content served again
+  without a re-test 0 of 959 probes (before: 239; Wilson 95 % upper bound 0.004); correct derivations blocked
+  21 of 2,260 (0.9 %; before: 294), expired derivations served 0 of 7,358 (before: 50); 251 re-tests asked
+  where 248 were needed. Writing the ECB stream takes about 2.0× the time it took (medians of 5 runs, 0.129 s
+  against 0.065 s, one machine). 230 journals without overlapping `valid` are byte-identical in both versions;
+  260 journals written by the previous version open, verify and replay, and on the 30 with overlapping `valid`
+  the differences are 21 items refuted or disputed before and active now, plus 6 items of two kinds that follow
+  from the rule (a derivation over a premise that used to be refuted; withdrawn content re-told as a rule where
+  a fact was withdrawn, now pending). Caveats: one run; the ECB part and the 260 journals were read during
+  development, so they are regression checks and the confirmatory weight is on the 30 synthetic seeds, whose
+  seeds were derived from the frozen pre-registration; the simulated re-checker always answers right; the
+  synthetic gold follows the store's own convention that a writer's later value replaces its earlier one at the
+  same since (fixed on development seeds); the synthetic generator was set to produce enough probes (six
+  vendor tries per key) before any confirmatory seed existed.
+  Known limitations. A derived item is blocked where it should hold when its premise's content was told on two
+  validity periods and the premise is disputed on one of them: the check reads the premise's item-level
+  "disputed" status instead of its validity at the asked time (this is the 21 of 2,260 correct derivations
+  blocked above). Four claims at one since by two writers, each telling one value and then another, leave both
+  items disputed, so no value is read for that key at that time (the one synthetic current-value miss above).
 - **The experimental deadline reads "a future release".** The deadline set at 1.0 for every experimental piece was 1.2;
   it passed with the pieces still here, and the import warning of 1.3 and 1.4 still said "it is removed in 1.2 unless it
   graduates". `solvi.experimental.DEADLINE`, each `STATUS[...]["deadline"]`, the warning and docs/experimental.md now say
