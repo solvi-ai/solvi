@@ -157,6 +157,14 @@
   Off by default: no probe is sent unless a canary is attached (probes cost `len(probes)` calls a round). `Trace.replay`
   runs under `no_probes()`: a replay never probes, counts or marks. Not a statistical test: its false alarms come from
   the provider's own noise on the probes; tested on fake servers only (`tests/test_identity_canary.py`).
+- **A label check before calibration** (`label_check=True` on `act_guard` / `calibrate_for` of a part and of a
+  combination, and on `System.guarantee`; `solvi.core.calibration.label_issues`). Confident learning (Northcutt et al.
+  2021, cleanlab's "prune by noise rate", about 40 lines, no dependency) over the decisions the calibration already
+  made: the report's `"label_issues"` lists the examples whose label the model confidently contradicts (count, ids,
+  suggested answer) and `"warnings"` gets a line when there are any. It never changes the calibration: every label is
+  used as given. It cannot tell a wrong label from a confident model mistake, so a model with many confident mistakes
+  fills the list with them; documented in the guide. Simulated (400 examples, 12 planted flips): 8–12 flips listed and
+  0–2 others over ten seeds. Two protocol tests now ignore that warning line where they compared `"warnings"`.
 
 ### Fixed
 - **DriftMonitor no longer flags "mean confidence up" on an unchanged stream** (`solvi.core.guarantees.drift`). The
