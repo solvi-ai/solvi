@@ -656,8 +656,19 @@ bit-exact. A training runs in a separate process by default (`stream.runner.Subp
 at `Budget.cpu_threads`, a GPU only when one has `free_gpu_mb` free, else the CPU, and the CPU again when the GPU runs
 out of memory), with a heartbeat log and the adapter written to a file the loop installs; it is refused before training
 when the estimate from its first update is above `Budget.max_train_s` (recorded, counted against the budget). A process
-that dies stops the loop (status "error", replay exact). The loop still waits for a training inside `step`.
-Unmeasured: the tests run on a tiny random checkpoint; nothing here says the loop gains anything.
+that dies stops the loop (status "error", replay exact).
+
+Stage 3b applies a training's result later. The training runs in the background, and `step` and `train_now` return at
+once: decisions go on with the version that is served, and none waits for the training. When the result is in, the
+next decision applies it: the gates run, then the version is frozen or discarded, or the failure or refusal is
+recorded, or the loop stops on a runner error. The "train" event is recorded at that decision, with the decision the
+training started at, so `replay()` applies it at the same place without timing anything again. `wait=True` keeps the
+old blocking form for scripts and tests. `close()` cancels a training in flight (a subprocess is killed). The loop
+takes the part's version lock before its own, so a decision of the part that reaches the loop cannot deadlock with the
+loop's shadow scoring. `Budget.max_versions_kept` evicts the oldest retired versions and releases their adapters; the
+served version, the rollback target and version 0 are never evicted. Unmeasured: the tests run on a tiny random
+checkpoint and fake learners; nothing here says the loop gains anything, and the cost of the background training to
+live decisions was not measured.
 
 Measured once on real streams: three public intent sets with a TF-IDF + logistic-regression answerer, 20 seeds per
 set, a shift to held-out intents, corrupted text and noisy labels; the numbers, the setting and the prior work are in

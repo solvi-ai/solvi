@@ -46,7 +46,7 @@ import pickle
 from pathlib import Path
 
 from ...core.provenance import digest
-from .runner import TrainingFailed, make_runner
+from .runner import TrainingCancelled, TrainingFailed, make_runner
 
 TARGET = "solvi.experimental.stream.lora_learner:train_target"
 CALIB_FORMAT = "solvi lora version calibration v1"
@@ -325,7 +325,18 @@ class LoraLearner:
         payload = self._payload(job)
         budget = getattr(job, "budget", None) or Budget()
         status = getattr(job, "status", None)
-        out = self.runner.run(TARGET, payload, name=f"train_{job.id}", workdir=self.dir, budget=budget, status=status)
+        cancel = getattr(job, "cancel", None)
+        kw = {}
+        if cancel is not None:
+            if cancel.is_set():
+                raise TrainingCancelled(f"train_{job.id}: cancelled before it started")
+            try:
+                if "cancel" in inspect.signature(self.runner.run).parameters:
+                    kw["cancel"] = cancel                 # a runner object of the caller's may not take it
+            except (TypeError, ValueError):
+                pass
+        out = self.runner.run(TARGET, payload, name=f"train_{job.id}", workdir=self.dir, budget=budget, status=status,
+                              **kw)
         ad = L.read(out["adapter_file"])
         if ad.hash != out.get("adapter"):
             raise TrainingFailed(f"the adapter file holds #{ad.hash}, the training reported #{out.get('adapter')}")

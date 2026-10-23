@@ -47,8 +47,9 @@ Stage 3: `stream.lora_learner` — `LoraLearner` (a batch learner: a LoRA adapte
 each version, act_guard on the calib labels) and `LoraVersion` (an adapter with its calibration: scored in shadow,
 installed with `solvi.experimental.lora.swap`, which changes the adapter and its thresholds together); `stream.runner`
 — where a training runs: `SubprocessRunner` (the default: nice, capped threads, the device picked with a CPU fallback,
-the time estimate against `max_train_s`, a heartbeat log, the result file) and `ThreadRunner`. No checkpoint or attach
-yet.
+the time estimate against `max_train_s`, a heartbeat log, the result file) and `ThreadRunner`. Stage 3b: a training
+runs in the background and its result is applied on a later decision, at a recorded position (deferred apply); `close()`
+cancels it; `Budget.max_versions_kept` evicts old retired versions. No checkpoint or attach yet.
 
 Unmeasured: no stand has run yet."""
 from __future__ import annotations
@@ -62,7 +63,8 @@ from .learner import (BatchLearner, FastHeadLearner, Frozen, FrozenError, Frozen
                       HashedTextTrainer, Learner, TrainJob)
 from .loop import AdapterLoop, content_key
 from .lora_learner import LoraLearner, LoraVersion
-from .runner import RunnerError, SubprocessRunner, ThreadRunner, TrainingFailed, TrainingRefused, pick_device
+from .runner import (RunnerError, SubprocessRunner, ThreadRunner, TrainingCancelled, TrainingFailed, TrainingRefused,
+                     pick_device)
 from .serving import BaseVersion, HeadVersion, Served
 from .sampling import Rate, StreamDriver, coin_message
 from .tickets import AgentOracle, TicketDesk, TicketError
@@ -74,6 +76,6 @@ __all__ = ["AdapterLoop", "AgentOracle", "BaseVersion", "BatchLearner", "Budget"
            "FastHeadLearner", "Frozen", "FrozenError", "FrozenFast", "HashedTextLearner", "HashedTextTrainer", "HeadVersion", "LabelRow", "Learner", "LearningLoop",
            "LoopPolicy", "LoopState", "LoraLearner", "LoraVersion", "MirrorBound", "Mixture", "Paired", "Rate",
            "RiskDetector", "RunnerError", "Served", "StreamDriver", "StreamPromise", "SubprocessRunner", "ThreadRunner",
-           "TicketDesk", "TicketError", "TrainJob", "TrainReport", "TrainingFailed", "TrainingRefused", "Verdict",
+           "TicketDesk", "TicketError", "TrainJob", "TrainReport", "TrainingCancelled", "TrainingFailed", "TrainingRefused", "Verdict",
            "VersionInfo", "clean_need", "coin_message", "content_key", "fixed_grid", "lane_policy", "pick_device",
            "ticket_verdict"]

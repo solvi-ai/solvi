@@ -94,8 +94,9 @@ class Budget:
     runner stops a training at its estimate + the runner's grace_s, which must cover what the estimate leaves out:
     loading the checkpoint, calibration and saving);
     cpu_threads: torch threads of the runner on a CPU; device: "auto" (cuda when present and ≥ free_gpu_mb free, else
-    cpu), "cpu", "cuda" or "cuda:<i>"; max_examples: rows per training; max_versions_kept: adapter files kept on disk
-    (served and retired ones are never deleted). per_day=0 or max_trainings=0 means "never train"; max_trainings
+    cpu), "cpu", "cuda" or "cuda:<i>"; max_examples: rows per training; max_versions_kept: versions held in memory
+    (served and retired, version 0 counted): past it the loop evicts the oldest retired ones (released, no longer a
+    rollback target; files on disk are never deleted) — never the served version, the rollback target or version 0. per_day=0 or max_trainings=0 means "never train"; max_trainings
     counts failed trainings too."""
     max_trainings: int | None = None
     per_day: int = 24

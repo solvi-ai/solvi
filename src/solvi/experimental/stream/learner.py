@@ -73,7 +73,9 @@ class TrainJob:
     passed. What the loop also hands a batch learner (stage 3): calib — the calib labels (stream.policy.LabelRow, the
     latest per key; never trained on: the LoRA learner runs act_guard on them); budget — the policy's Budget (the
     runner's threads, device and max_train_s); alpha — the loop's promised rate; status — the dict the loop's
-    status()["job"] shows, which a runner updates in place (pid, log, device, eta, last line)."""
+    status()["job"] shows, which a runner updates in place (pid, log, device, eta, last line); cancel — a
+    threading.Event the loop sets when it drops the training (close, an error stop): a runner that takes cancel= stops
+    it."""
     id: str
     version: int
     rows: tuple = ()
@@ -89,6 +91,7 @@ class TrainJob:
     budget: Any = None
     alpha: float | None = None
     status: dict | None = None
+    cancel: Any = field(default=None, repr=False, compare=False)
 
 
 class FrozenError(TypeError):
