@@ -2,6 +2,7 @@
 solvi.core.deciders, which re-exports every name.)"""
 from __future__ import annotations
 
+import contextlib
 import dataclasses
 import json
 import os
@@ -27,6 +28,94 @@ from .gate import Facts, act_features
 from .part import DecisionPart
 
 _SHADOW = threading.local()      # per thread: {(id(model), lora_key): adapter or None} — solvi.experimental.lora.scoring
+
+
+class NetGate:
+    """The gate between plain forward passes on a scorer's network and changes to that network (an adapter installed,
+    switched on or removed: solvi.experimental.lora). Plain passes share it — several threads score at once; a change
+    holds it alone — it waits for the passes in flight and new ones wait for it. Without it a pass that started before
+    an adapter was installed (the model had none, so it took no lock) ran partly through the half-installed adapter,
+    and its scores were not the ones a replay recomputes. The holder of the exclusive side may enter either side again;
+    a thread inside the shared side must not ask for the exclusive one (RuntimeError, not a deadlock)."""
+
+    def __init__(self):
+        self._cond = threading.Condition(threading.Lock())
+        self._readers = 0
+        self._owner, self._depth, self._waiting = None, 0, 0
+        self._mine = threading.local()
+
+    def acquire_shared(self):
+        me = threading.get_ident()
+        with self._cond:
+            if self._owner == me:                       # the changing thread scores too: already alone
+                self._depth += 1
+                return
+            if not getattr(self._mine, "n", 0):         # a nested pass of a thread already inside never waits
+                while self._owner is not None or self._waiting:
+                    self._cond.wait()
+            self._readers += 1
+            self._mine.n = getattr(self._mine, "n", 0) + 1
+
+    def release_shared(self):
+        me = threading.get_ident()
+        with self._cond:
+            if self._owner == me:
+                self._depth -= 1
+                return
+            self._readers -= 1
+            self._mine.n -= 1
+            if not self._readers:
+                self._cond.notify_all()
+
+    def acquire(self):
+        me = threading.get_ident()
+        with self._cond:
+            if self._owner == me:
+                self._depth += 1
+                return
+            if getattr(self._mine, "n", 0):
+                raise RuntimeError("the network gate: a thread inside a plain forward pass asked to change the network")
+            self._waiting += 1
+            try:
+                while self._owner is not None or self._readers:
+                    self._cond.wait()
+            finally:
+                self._waiting -= 1
+            self._owner, self._depth = me, 1
+
+    def release(self):
+        with self._cond:
+            self._depth -= 1
+            if not self._depth:
+                self._owner = None
+                self._cond.notify_all()
+
+    def __enter__(self):
+        self.acquire()
+        return self
+
+    def __exit__(self, *exc):
+        self.release()
+        return False
+
+
+_GATE_LOCK = threading.Lock()
+_SHARED_GATE = NetGate()
+
+
+def net_gate(scorer) -> NetGate:
+    """The scorer's NetGate (created once, on the scorer)."""
+    g = getattr(scorer, "_solvi_net_gate", None)
+    if g is None:
+        with _GATE_LOCK:
+            g = getattr(scorer, "_solvi_net_gate", None)
+            if g is None:
+                g = NetGate()
+                try:
+                    scorer._solvi_net_gate = g
+                except (AttributeError, TypeError):    # a scorer that takes no attributes takes no adapter either
+                    return _SHARED_GATE
+    return g
 
 
 def _shadow(model, k):
@@ -444,16 +533,38 @@ class DecideModel:
         name = self._lora_name(sp) if self._has_loras() else None
         return sp.key if name is None else sp.key + (("lora", name),)
 
+    @contextlib.contextmanager
+    def _plain(self):
+        """→ whether the model has no adapter; while that is True, nothing installs or switches on an adapter on the
+        scorer's network (the shared side of its NetGate: a staging thread waits for this pass, and the check is made
+        again inside the gate, so a pass never runs through an adapter installed after the check)."""
+        if self._has_loras():
+            yield False
+            return
+        g = net_gate(self.scorer)
+        g.acquire_shared()
+        if self._has_loras():                          # an adapter came in while this thread waited for the gate
+            g.release_shared()
+            yield False
+            return
+        try:
+            yield True
+        finally:
+            g.release_shared()
+
+    @contextlib.contextmanager
     def _using(self, name):
-        """The scorer with this adapter active (None: none) while scoring — a no-op for a model without adapters. An
-        adapter does the switching itself (the Adapter protocol: using(scorer, active)), so this module imports no
-        adapter's module."""
-        if not self._has_loras():
-            import contextlib
-            return contextlib.nullcontext()
+        """The scorer with this adapter active (None: none) while scoring — for a model without adapters, a plain pass
+        inside the scorer's NetGate. An adapter does the switching itself (the Adapter protocol: using(scorer,
+        active)), so this module imports no adapter's module."""
+        with self._plain() as plain:
+            if plain:
+                yield
+                return
         ads = list(self.loras.values()) + list((getattr(self, "_lora_extra", None) or {}).values())
         ad = next((a for a in ads if a.fingerprint() == name), None) if name is not None else None
-        return (ad if ad is not None else ads[0]).using(self.scorer, active=ad is not None)
+        with (ad if ad is not None else ads[0]).using(self.scorer, active=ad is not None):
+            yield
 
     def _forget_cached(self, key):
         """Drop the cached logits of one question (every option order): its adapter changed."""
@@ -464,8 +575,9 @@ class DecideModel:
     def _score(self, pairs, read_len=0):
         """[(spec, text)] → scorer outputs, in order; the questions with a LoRA adapter (solvi.experimental.lora) are scored with it
         active, apart from the others. read_len: see _score_plain."""
-        if not self._has_loras():
-            return self._score_plain(pairs, read_len)
+        with self._plain() as plain:
+            if plain:
+                return self._score_plain(pairs, read_len)
         groups = OrderedDict()
         for i, (sp, _) in enumerate(pairs):
             groups.setdefault(self._lora_name(sp), []).append(i)

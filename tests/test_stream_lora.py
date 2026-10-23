@@ -189,6 +189,60 @@ def test_a_sibling_question_decides_unharmed_while_the_part_swaps(trained, swaps
     assert not errors and not bad and n[0] > 0, (errors[:3], bad[:3])
 
 
+def test_a_pass_in_flight_on_a_model_without_adapters_is_untouched_by_a_staging_thread(ckpt, trained, stages=40):
+    """A model with no adapter scores without the adapter lock. Another thread staging an adapter (what a training's
+    thread does when its version is bound) waits for the passes in flight at the scorer's network gate, and passes
+    that start meanwhile wait for the change: every pass gives the logits of the plain checkpoint, bit for bit (before
+    the gate, a pass that overlapped the install ran partly through the trained adapter)."""
+    import sys
+
+    import numpy as np
+    ad = trained[4].adapter
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        m, part = _part(ckpt)
+    texts = [x for x, _ in _toy(40, 43)]
+
+    def raw(x):
+        with m._lock:
+            m._cache.clear()                                # every call a real forward pass
+        z, act = part._raw([x])[0]
+        return np.asarray(z, float), act
+
+    ref = {}
+    t = threading.Thread(target=lambda: ref.update({x: raw(x) for x in texts}))   # the scoring threads' own setting
+    t.start()
+    t.join()
+    stop, errors, bad, n = threading.Event(), [], [], [0]
+
+    def score():
+        i = 0
+        try:
+            while not stop.is_set():
+                x = texts[i % len(texts)]
+                z, act = raw(x)
+                if not np.array_equal(z, ref[x][0]) or act != ref[x][1]:
+                    bad.append(x)
+                i += 1
+        except Exception as e:  # noqa: BLE001 — the failure under test is any exception in a pass
+            errors.append(repr(e))
+        n[0] += i
+
+    old = sys.getswitchinterval()
+    sys.setswitchinterval(1e-6)
+    th = threading.Thread(target=score)
+    th.start()
+    try:
+        for _ in range(stages):
+            lora.stage(part, ad)                            # installed on the scorer while a pass may be in flight
+            lora.unstage(part, ad)                          # and gone again: the next stage installs it anew
+    finally:
+        stop.set()
+        th.join()
+        sys.setswitchinterval(old)
+    assert not errors and not bad and n[0] > 0, (errors[:3], len(bad), n[0])
+
+
 def test_a_version_saves_loads_and_is_found_by_its_hash(trained, tmp_path):
     m, part, learner, v0, v1 = trained
     files = v1.save(tmp_path, 3)
@@ -373,20 +427,24 @@ def test_deferred_apply_end_to_end_with_the_subprocess_runner(ckpt, tmp_path):
             loop.step(x, lambda y=y: y)
         job = loop.train_now()
         assert job.state == "running" and loop.candidate is None
-        out = {"events": []}
-        during, worst, info = 0, 0.0, {}
-        while "train" not in out["events"]:
-            info = loop.status()["job"] or info
+        worst = 0.0
+        for _ in range(3):                                  # decisions go on while it trains (none waits for it)
             x, y = next(data)
             t0 = time.monotonic()
             out = loop.step(x, lambda y=y: y)
             worst = max(worst, time.monotonic() - t0)
-            assert out["served"] == 0 and out["candidate"] is None
-            during += 1
-        assert during > 1 and worst < 5.0, (during, worst)      # decisions went on while it trained
+            assert out["served"] == 0 and out["candidate"] is None and "train" not in out["events"]
+        info = loop.status()["job"]
+        assert info["state"] == "running" and worst < 5.0, (info, worst)   # still training after those decisions
         assert info["pid"] and info["runner"] == "subprocess" and info["started_at"] == 200
+        # the apply position pinned: wait for the result, then it is applied on the next decision (204), so the
+        # stream after it — and with it the candidate's certificate — does not depend on how long the training took
+        assert loop.wait_training(timeout=300)
+        x, y = next(data)
+        out = loop.step(x, lambda y=y: y)
+        assert "train" in out["events"] and out["n"] == 204, out
         tr = [e for k, e in loop._items() if k == "stream" and e["event"] == "train"]
-        assert len(tr) == 1 and tr[0]["state"] == "done" and tr[0]["decision"] == out["n"] > 201
+        assert len(tr) == 1 and tr[0]["state"] == "done" and tr[0]["decision"] == out["n"] == 204
         assert tr[0]["applied"] == "decision" and tr[0]["started_at"] == 200 and loop.candidate == 1
         for x, y in data:
             loop.step(x, lambda y=y: y)
