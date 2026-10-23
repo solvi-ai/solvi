@@ -38,13 +38,18 @@ intervals and `item(id)["valid"]` lists every claim. A version is one item's cla
 different untils, the latest claim's until is the version's (a correction, as one validity per item was), so (45, 55)
 then (45, None) reads open from 45 and the reverse order reads bounded at 55. The same since from two writers (two missing sinces too) is not an
 observation of a change — rank decides, equal ranks dispute; that holds while any other writer still asserts the old
-value, even when the new value's writer had asserted it too. The winner takes only the overlap: a loser whose interval
+value, even when the new value's writer had asserted it too. A writer's later value at one since replaces its own
+earlier one there (it no longer asserts the old value), so two writers who both move from one value to the same other
+value leave that value holding. The winner takes only the overlap: a loser whose interval
 reaches beyond it is closed there and holds outside (refuted only when the winner covers it whole), and a dispute is
 contested only on the overlap — outside it each side holds; a person's answer (`resolve`) closes the loser the same
 way. An item pending re-test takes no side on its key (no dispute, no refutation, no closing). `usable(id, valid_at=)`
 and `snapshot(valid_at=)` read the effective intervals (a snapshot row carries "periods" when they are not the item's
-own `valid`; `Knowledge.value(valid_at=)` reads them). Keys whose assertions carry no `valid` resolve as described
+own `valid`; `Knowledge.value(valid_at=)` reads them). An item derived from a premise disputed only on an overlap is a
+hypothesis as a whole, but at a time where every premise of one of its derivations holds it is usable and a fact. Keys whose assertions carry no `valid` resolve as described
 above.
+Known behaviour: a circular derivation (a ← p, b ← a, then a ← b) is accepted, and the items support each other —
+the status walk does not require a derivation to be well-founded.
 
 Statuses: "active" (a fact System 1 may answer on), "hypothesis" (a hint: a behaviour-changing item not yet promoted
 by the write gates, a derived item on a premise that is not active, an item under a pending flag, or one pending a
@@ -1067,16 +1072,28 @@ class KnowledgeStore:
         live = _live(it)
         return bool(it.reconfirm_after and live and self.clock - max(a["clock"] for a in live) > it.reconfirm_after)
 
-    def usable(self, iid, *, valid_at=None):
+    def usable(self, iid, *, valid_at=None, _seen=frozenset()):
         """Is the item a fact System 1 may answer on alone: active and not stale? valid_at: a world time — and does the
         item hold then: inside its effective intervals (`periods(id)`; an item without `valid` always is), and, for a
-        derived item, where its premises hold. A disputed item is usable at a time outside the contested overlap."""
+        derived item, where its premises hold. A disputed item is usable at a time outside the contested overlap; so
+        is an item derived from it, where for one of its derivations every premise is usable then (a premise met again
+        on its own derivation chain is not)."""
+        if iid in _seen:
+            return False
         if valid_at is None:
             return self.status(iid) == "active" and not self.stale(iid)
         st = self.status(iid)
+        rec = self.state.get(iid) or {}
         if st == "disputed":
-            st = "active" if "periods" in (self.state.get(iid) or {}) else st
+            st = "active" if "periods" in rec else st
+        scoped = st == "hypothesis" and rec.get("premise_scoped")
+        if scoped:
+            st = "active"
         if not (st == "active" and not self.stale(iid)):
+            return False
+        seen = _seen | {iid}
+        if scoped and not any(a["just"] and all(self.usable(p, valid_at=valid_at, _seen=seen) for p in a["just"])
+                              for a in _live(self.items[iid])):
             return False
         return self._holds_at(iid, valid_at)
 
@@ -1216,9 +1233,13 @@ class KnowledgeStore:
         """What a decision is given, as one plain fact: the items that match (`about`: a subject or a list of them;
         `relation`; `scope`; `kinds`, default every kind) — "facts" (active and not stale) and "hints" (hypotheses,
         expired or stale items, with why) — the ids they rest on, the store's fingerprint and journal position, and the
-        query (so redecide can rebuild it). Disputed, refuted and retracted items are not given. valid_at: a world time —
-        an item whose `valid` does not cover it is a hint ("not valid at ..."), not a fact. A row of an item with a `valid`
-        carries it ("valid": [since, until])."""
+        query (so redecide can rebuild it). Refuted and retracted items are not given, nor disputed ones except below.
+        valid_at: a world time — an item whose `valid` does not cover it is a hint ("not valid at ..."), not a fact. A
+        row of an item with a `valid` carries it ("valid": [since, until]). On keys with `valid`, two kinds of rows are
+        facts though their item-level status is not "active": a disputed item outside its contested overlap, and a
+        hypothesis derived from such an item where every premise of one of its derivations holds. Without valid_at
+        each is a fact row carrying "periods" (where it holds) when that is not empty, and is left out (disputed) or
+        a hint (derived) when it holds at no time."""
         self._settle()
         valid_at = _time(valid_at)
         q = {"about": about, "relation": relation, "scope": scope, "kinds": None if kinds is None else list(kinds)}
@@ -1246,6 +1267,17 @@ class KnowledgeStore:
                 any(a["just"] for a in it.asserts) else None
             if p is not None and p != [list(_interval(v))]:
                 row["periods"] = p                       # where it holds, when that is not its own `valid`
+            if st == "hypothesis" and self.state[iid].get("premise_scoped") and p is not None:
+                if self.stale(iid):                                            # derived from such a premise: a fact
+                    hints.append({**row, "why": "stale"})                      # where its premises hold
+                elif valid_at is None and p:
+                    facts.append(row if "periods" in row else {**row, "periods": p})
+                elif valid_at is not None and self.usable(iid, valid_at=valid_at):
+                    facts.append(row if "periods" in row else {**row, "periods": p})
+                else:
+                    hints.append({**row, "why": "premises hold at no time" if valid_at is None
+                                  else f"premises do not hold at {valid_at}"})
+                continue
             if st == "disputed":                         # a dispute scoped to an overlap: a fact outside it
                 if p is None or "periods" not in self.state[iid] or not p:
                     continue
@@ -1522,7 +1554,7 @@ def _resolve(items, comp, by_key, resolves, clock, flagged, max_iter=200, taints
     retest0 = set(retest)
     keys = sorted({items[i].key for i in order if items[i].key is not None})
     while True:                                         # a copy admitted as held is re-checked after the walk
-        status, live, keyed, rank, units, retest, partial = _resolve_walk(
+        status, live, keyed, rank, units, retest, partial, on_disputed = _resolve_walk(
             items, order, keys, by_key, resolves, clock, flagged, max_iter, fixed, comp, retest0, why, pclaims)
         inplay = {u[0]: u[4] for k in keys for u in units.get(k, ())}
         bad = {c: h[3] for c, h in hinfo.items()
@@ -1537,6 +1569,18 @@ def _resolve(items, comp, by_key, resolves, clock, flagged, max_iter=200, taints
     for k in keys:                                      # effective intervals on the keys with `valid`
         if units.get(k):
             eff.update(_effective(units[k]) or {})
+    scoped = set()                                      # derived items held up only by a dispute scoped to an
+    grew = True                                         # overlap: each holds where its premises hold (usable /
+    while grew:                                         # snapshot at a time read the premises' periods there)
+        grew = False
+        for i in order:
+            if i in on_disputed and i not in scoped and any(
+                    all(status.get(p) == "active" or p in scoped or (fixed[p].get("premise_scoped") if p in fixed else False)
+                        or (status.get(p) == "disputed"
+                            and bool(eff[p]["periods"] if p in eff else (fixed.get(p) or {}).get("periods")))
+                        for p in a["just"]) for a in live[i]):
+                scoped.add(i)
+                grew = True
     rec = {}
     for i, s in status.items():
         if i in fixed:
@@ -1551,6 +1595,8 @@ def _resolve(items, comp, by_key, resolves, clock, flagged, max_iter=200, taints
             rec[i]["pending_claims"] = partial[i]
         if any(j == i for j, _ in held):
             rec[i]["unchecked_claims"] = sorted(t for j, t in held if j == i)
+        if i in scoped:                                 # not in the fingerprint either
+            rec[i]["premise_scoped"] = True
         if i in eff:                                    # not in the fingerprint: a function of the assertions
             rec[i]["periods"] = eff[i]["periods"]
             if eff[i]["contested"]:
@@ -1574,7 +1620,7 @@ def _resolve_walk(items, order, keys, by_key, resolves, clock, flagged, max_iter
     live_asserts = _live
 
     status = {**{p: f["status"] for p, f in fixed.items()}, **{i: "active" for i in order if live_asserts(items[i])}}
-    live, keyed, rank, units = {}, {}, {}, {}
+    live, keyed, rank, units, on_disputed = {}, {}, {}, {}, set()
     for _ in range(max_iter):
         prev_rank = rank                                # a premise later in `order` is read from the last round
         live, rank, arank = {}, {p: f["rank"] for p, f in fixed.items()}, {}
@@ -1598,6 +1644,7 @@ def _resolve_walk(items, order, keys, by_key, resolves, clock, flagged, max_iter
             wl = live if not partial else {i: [a for a in live[i] if (i, a["t"]) not in pclaims] or live[i] for i in ids}
             keyed.update(_walk_key(ids, wl, arank, {i: items[i].value for i in ids}, resolves.get(k, ()), units[k]))
         new = {p: f["status"] for p, f in fixed.items()}
+        on_disputed = set()                             # would be active but no derivation has all premises active
         for i in order:
             if i not in live:
                 continue
@@ -1619,13 +1666,14 @@ def _resolve_walk(items, order, keys, by_key, resolves, clock, flagged, max_iter
                 s = "expired"
             if s == "active" and not any(all(status.get(p) == "active" for p in a["just"]) for a in live[i]):
                 s = "hypothesis"                        # a derived item is a fact only on active premises
+                on_disputed.add(i)
             new[i] = s
         if new == status and rank == prev_rank:
             break
         status = new
     else:
         raise RuntimeError(f"resolution did not converge on a component of {len(comp)} items")
-    return status, live, keyed, rank, units, retest, partial
+    return status, live, keyed, rank, units, retest, partial, on_disputed
 
 
 def _walk_key(ids, live, arank, values, res, units=None):
@@ -1767,6 +1815,11 @@ def _walk_key_valid(ids, live, arank, values, res, units=None):
         refuted.pop(u, None)
         lost.pop(u, None)
         sk = repr(float(iv[0])) if isinstance(iv[0], (int, float)) and not isinstance(iv[0], bool) else u[1]
+        if a.get("by") is not None:                     # a writer's later value at one since replaces its own
+            for v in by_since[sk]:                      # earlier one: it no longer holds that version
+                if v != u and values[v[0]] != values[i] and a["by"] in writers[v]:
+                    writers[v].discard(a["by"])
+                    seen[v] = (seen[v][0], seen[v][1], frozenset(writers[v]), seen[v][3])
         by_since[sk].add(u)
         cands = (holders | disputed) if mixed else [v for v in by_since[sk] if v in holders or v in disputed]
         rivals = sorted(v for v in cands if rival(u, v))
