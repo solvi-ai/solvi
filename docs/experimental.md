@@ -643,8 +643,21 @@ change the state stops the loop: the decision is recorded with an "error" event,
 the controls refuse, and the replay is exact; the served version stays installed. `status()` answers from another
 thread while a training runs in process. The RiskDetector is never the only alarm: a score monitor on the
 served version's scores (`NumericDrift` by default) is OR-ed with it. `pause`, `resume`, `train_now`, `promote`,
-`rollback`, `versions` and `status` control it in code. Unmeasured: no stand has run on the loop; the LoRA learner,
-the training runners, the checkpoint and attaching to a Dispatcher or System are later stages.
+`rollback`, `versions` and `status` control it in code. Unmeasured: no stand has run on the loop; the checkpoint and
+attaching to a Dispatcher or System are later stages.
+
+Stage 3 adds the LoRA learner. `LoraLearner` (`stream.lora_learner`) trains a LoRA adapter on the decider for each
+version from the base checkpoint (no warm start), on the rows the policy selected, then runs `act_guard` at the loop's
+α on the calib labels — labels whose keys it never trained on — and returns a `LoraVersion`: the adapter with that
+calibration. A version is scored in shadow on the scoring thread only (the served part and the fingerprints do not
+change) and installed with `solvi.experimental.lora.swap`, which changes the adapter and its thresholds together under
+the part's version lock, so no decision of the part sees an adapter without its own thresholds; a rollback is
+bit-exact. A training runs in a separate process by default (`stream.runner.SubprocessRunner`: nice 10, threads capped
+at `Budget.cpu_threads`, a GPU only when one has `free_gpu_mb` free, else the CPU, and the CPU again when the GPU runs
+out of memory), with a heartbeat log and the adapter written to a file the loop installs; it is refused before training
+when the estimate from its first update is above `Budget.max_train_s` (recorded, counted against the budget). A process
+that dies stops the loop (status "error", replay exact). The loop still waits for a training inside `step`.
+Unmeasured: the tests run on a tiny random checkpoint; nothing here says the loop gains anything.
 
 Measured once on real streams: three public intent sets with a TF-IDF + logistic-regression answerer, 20 seeds per
 set, a shift to held-out intents, corrupted text and noisy labels; the numbers, the setting and the prior work are in

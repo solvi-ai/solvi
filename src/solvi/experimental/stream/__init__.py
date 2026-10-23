@@ -41,7 +41,14 @@ learner —, the pre-freeze report on held-out labels, promotion on novel sample
 on) with the memorisation probe, two alarm sources (the RiskDetector OR-ed with a score monitor, never the detector
 alone), controls (pause / resume / train_now / promote / rollback / versions / status); `stream.serving` — `Served`,
 `HeadVersion`, `BaseVersion`. `LearningLoop` is `AdapterLoop` with `DefaultPolicy` at the lane's constants
-(`lane_policy`). No LoRA learner, runner, checkpoint or attach yet.
+(`lane_policy`).
+
+Stage 3: `stream.lora_learner` — `LoraLearner` (a batch learner: a LoRA adapter trained from the base checkpoint for
+each version, act_guard on the calib labels) and `LoraVersion` (an adapter with its calibration: scored in shadow,
+installed with `solvi.experimental.lora.swap`, which changes the adapter and its thresholds together); `stream.runner`
+— where a training runs: `SubprocessRunner` (the default: nice, capped threads, the device picked with a CPU fallback,
+the time estimate against `max_train_s`, a heartbeat log, the result file) and `ThreadRunner`. No checkpoint or attach
+yet.
 
 Unmeasured: no stand has run yet."""
 from __future__ import annotations
@@ -54,6 +61,8 @@ from .policy import Budget, DefaultPolicy, LabelRow, LoopPolicy, LoopState, Pair
 from .learner import (BatchLearner, FastHeadLearner, Frozen, FrozenError, FrozenFast, HashedTextLearner,
                       HashedTextTrainer, Learner, TrainJob)
 from .loop import AdapterLoop, content_key
+from .lora_learner import LoraLearner, LoraVersion
+from .runner import RunnerError, SubprocessRunner, ThreadRunner, TrainingFailed, TrainingRefused, pick_device
 from .serving import BaseVersion, HeadVersion, Served
 from .sampling import Rate, StreamDriver, coin_message
 from .tickets import AgentOracle, TicketDesk, TicketError
@@ -63,7 +72,8 @@ warn_on_import(__name__)
 
 __all__ = ["AdapterLoop", "AgentOracle", "BaseVersion", "BatchLearner", "Budget", "DefaultPolicy", "DeltaBudget",
            "FastHeadLearner", "Frozen", "FrozenError", "FrozenFast", "HashedTextLearner", "HashedTextTrainer", "HeadVersion", "LabelRow", "Learner", "LearningLoop",
-           "LoopPolicy", "LoopState", "MirrorBound", "Mixture", "Paired", "Rate", "RiskDetector", "Served",
-           "StreamDriver", "StreamPromise", "TicketDesk",
-           "TicketError", "TrainJob", "TrainReport", "Verdict", "VersionInfo", "clean_need", "coin_message",
-           "content_key", "fixed_grid", "lane_policy", "ticket_verdict"]
+           "LoopPolicy", "LoopState", "LoraLearner", "LoraVersion", "MirrorBound", "Mixture", "Paired", "Rate",
+           "RiskDetector", "RunnerError", "Served", "StreamDriver", "StreamPromise", "SubprocessRunner", "ThreadRunner",
+           "TicketDesk", "TicketError", "TrainJob", "TrainReport", "TrainingFailed", "TrainingRefused", "Verdict",
+           "VersionInfo", "clean_need", "coin_message", "content_key", "fixed_grid", "lane_policy", "pick_device",
+           "ticket_verdict"]

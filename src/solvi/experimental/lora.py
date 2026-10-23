@@ -401,10 +401,13 @@ def _duration(s):
     return f"{s:.0f} s" if s < 90 else f"{s / 60:.0f} min"
 
 
-def train(part, rows, *, r=8, alpha=None, epochs=6, lr=3e-4, seed=0, device=None, max_updates=400, notify=None):
+def train(part, rows, *, r=8, alpha=None, epochs=6, lr=3e-4, seed=0, device=None, max_updates=400, notify=None,
+          updates=None, log=None):
     """Train an adapter on [(text, label)] (labels as part.spec.label gives them) → LoraAdapter. notify(estimate_seconds,
-    updates, seconds_per_update, device) is called after the first update is timed, before training. Training on the
-    CPU creates no CUDA context, so it works beside a GPU that is busy or full."""
+    updates, seconds_per_update, device) is called after the first update is timed, before training (it may raise to
+    refuse the training). updates: the number of updates (None: from epochs, between 40 and max_updates); log(u,
+    updates, loss): called after every update (a heartbeat). Training on the CPU creates no CUDA context, so it works
+    beside a GPU that is busy or full."""
     need_peft("training a LoRA adapter")
     import torch
     from peft import inject_adapter_in_model
@@ -412,7 +415,9 @@ def train(part, rows, *, r=8, alpha=None, epochs=6, lr=3e-4, seed=0, device=None
     scorer = model.scorer
     dev = torch.device(device or scorer.device)
     k = len(rows)
-    U = n_updates(k, epochs, max_updates)
+    if updates is not None and (isinstance(updates, bool) or int(updates) < 1):
+        raise ValueError(f"updates is a number of updates ≥ 1, not {updates!r}")
+    U = n_updates(k, epochs, max_updates) if updates is None else int(updates)
     config = {"format": FORMAT, "r": int(r), "alpha": int(alpha if alpha is not None else 2 * r), "target": TARGET,
               "head": HEAD.rstrip("."), "question": repr(_question(part))}
     st = _state(scorer)
@@ -470,7 +475,7 @@ def train(part, rows, *, r=8, alpha=None, epochs=6, lr=3e-4, seed=0, device=None
     rng = random.Random(seed)
     order, pos, losses = [], 0, []
     t1 = time.perf_counter()
-    for _ in range(U):
+    for u in range(U):
         b = []
         while len(b) < min(BS, k):
             if pos >= len(order):
@@ -485,6 +490,8 @@ def train(part, rows, *, r=8, alpha=None, epochs=6, lr=3e-4, seed=0, device=None
         sched.step()
         opt.zero_grad(set_to_none=True)
         losses.append(float(loss.detach()))
+        if log is not None:
+            log(u + 1, U, losses[-1])
     seconds = time.perf_counter() - t1
     tensors = {}
     for n, p in net.named_parameters():
@@ -621,6 +628,147 @@ def load(part, path, strict=True, expect=None):
     return ad
 
 
+# ------------------------------------------------------------------------------------------------ versions (the adapter loop)
+def version_lock(part):
+    """The part's version lock (solvi.core.deciders.part.version_lock): each of the part's decisions holds it, and swap
+    holds it while it changes the adapter and the thresholds together."""
+    from ..core.deciders.part import version_lock as _vl
+    return _vl(part)
+
+
+def calibration(part):
+    """What a version restores besides its adapter: the question's adaptation, the escalation thresholds, the guarantee,
+    the conformal set, the thresholds per group and the part's signature (copies)."""
+    return _snapshot(part)
+
+
+def _plain(x):
+    """A value as JSON would give it back (tuples as lists, numpy scalars as numbers), so a calibration hashes the same
+    before and after a file or a process boundary."""
+    import numpy as np
+    if isinstance(x, dict):
+        return {str(k): _plain(v) for k, v in x.items()}
+    if isinstance(x, (list, tuple)):
+        return [_plain(v) for v in x]
+    if isinstance(x, np.generic):
+        return x.item()
+    return x
+
+
+def calibration_record(cal):
+    """A calibration (see calibration) as plain data: what its fingerprint covers and its file holds."""
+    a, g, sig = cal.get("adaptation"), cal.get("groups"), cal.get("signature")
+    return _plain({"adaptation": None if a is None else a.params(),
+                   "escalate_below": cal.get("escalate_below"), "act_threshold": cal.get("act_threshold"),
+                   "guarantee": cal.get("guarantee"), "conformal_set": cal.get("conformal_set"),
+                   "groups": None if g is None else {"by": g["by"].describe(), "signal": g.get("signal"),
+                                                     "nodes": sorted((list(k), v["threshold"])
+                                                                     for k, v in g["nodes"].items())},
+                   "signature": None if sig is None else list(sig.parameters)})
+
+
+def calibration_fingerprint(cal):
+    """The fingerprint of a calibration (see calibration)."""
+    from ..core.provenance import digest
+    return digest("lora calibration", calibration_record(cal))
+
+
+def stage(part, ad):
+    """Install `ad` on the part's scorer outside any slot, inactive (ahead of a swap, or to score it in shadow): the
+    model's fingerprint and every question's answers are unchanged. Idempotent."""
+    m = part.model
+    install(m.scorer, ad)
+    with _state(m.scorer)["lock"]:
+        m._lora_extra[ad.name] = ad
+
+
+def unstage(part, ad):
+    """Undo stage: the adapter leaves the scorer unless a slot holds it."""
+    m = part.model
+    with _state(m.scorer)["lock"]:
+        if m._lora_extra.pop(ad.name, None) is None:
+            return
+        if not any(x.name == ad.name for x in m.loras.values()):
+            uninstall(m.scorer, ad.name)
+
+
+@contextlib.contextmanager
+def scoring(part, ad):
+    """On this thread, score the part's question with adapter `ad` (None: with no adapter) in place of its own slot's —
+    other threads, other questions and the fingerprints are unchanged. The adapter is staged first. Holds the part's
+    version lock, so the part's own decisions wait (lock order: the part's, then the scorer's)."""
+    from ..core.deciders.model import _SHADOW
+    m, key = part.model, _lora_key(part)
+    if ad is not None:
+        stage(part, ad)
+    with version_lock(part):
+        mp = getattr(_SHADOW, "map", None)
+        if mp is None:
+            mp = _SHADOW.map = {}
+        k = (id(m), key)
+        had, prev = k in mp, mp.get(k)
+        mp[k] = ad
+        try:
+            yield
+        finally:
+            if had:
+                mp[k] = prev
+            else:
+                mp.pop(k, None)
+
+
+def swap(part, ad, cal, *, drop_old=True):
+    """Make `ad` (None: no adapter) the part's adapter and `cal` (see calibration) its calibration in one step: under
+    the part's version lock, then the scorer's lock, the slot, the cached logits and every threshold change together,
+    so no decision of the part sees the adapter without its thresholds (the window adapt_lora / load_lora leave, in
+    which the adapter is on and the thresholds are cleared). The adapter is installed inactive before the locks; the
+    replaced one is uninstalled after them (drop_old) unless a slot holds it or it is staged. A decision in flight
+    finishes with the old version. → {"from": the part's fingerprint before, "to": after, "old": the replaced adapter
+    or None}."""
+    m, key = part.model, _lora_key(part)
+    snap = {**cal, **{a: copy.deepcopy(cal.get(a)) for a in ("adaptation", "guarantee", "conformal_set")}}
+    if ad is not None:
+        install(m.scorer, ad)
+    st = _state(m.scorer) if (ad is not None or m.loras.get(key) is not None) else None
+    with version_lock(part):
+        before = part.fingerprint()
+        with st["lock"] if st is not None else contextlib.nullcontext():
+            old = m.loras.get(key)
+            if ad is None:
+                m.loras.pop(key, None)
+            else:
+                m.loras[key] = ad
+            m._forget_cached(key)
+            _restore(part, snap)
+        after = part.fingerprint()
+    if (drop_old and old is not None and (ad is None or old.name != ad.name) and not _in_use(m, old.name, key)
+            and old.name not in m._lora_extra):
+        uninstall(m.scorer, old.name)
+    return {"from": before, "to": after, "old": old}
+
+
+def adapter_by_hash(where, hash):
+    """The adapter with this hash among the .safetensors files of a folder (or one file) → LoraAdapter (its content
+    verified against its hash); FileNotFoundError when none has it. What a replay resolves a decision's extra["lora"]
+    with."""
+    from pathlib import Path
+    try:
+        from safetensors import safe_open
+    except ImportError:
+        raise ImportError('reading a LoRA adapter needs torch and safetensors: pip install "solvi[lora]"') from None
+    p = Path(where)
+    files = [p] if p.is_file() else sorted(p.glob("*.safetensors"))
+    for f in files:
+        try:
+            with safe_open(str(f), framework="pt") as fh:
+                meta = fh.metadata() or {}
+        except Exception:  # noqa: BLE001 — not a safetensors file: not this adapter
+            continue
+        if meta.get("format") == FORMAT and meta.get("hash") == hash:
+            return read(f)
+    raise FileNotFoundError(f"no LoRA adapter #{hash} in {p}")
+
+
 # ------------------------------------------------------------------------------------------------ the calls (1.0)
 @_deprecate.removed_kwargs(risk="max_risk")
 def adapt_lora(part, examples, *, r=8, epochs=6, holdout=None, seed=0, device=None, lr=3e-4, max_risk=0.10,
@@ -666,5 +814,6 @@ def remove_lora(part):
     return remove(part)
 
 
-__all__ = ["LoraAdapter", "LoraWarning", "adapt", "adapt_lora", "check", "load", "n_updates", "read", "remove", "remove_lora",
-           "save", "train"]
+__all__ = ["LoraAdapter", "LoraWarning", "adapt", "adapt_lora", "adapter_by_hash", "calibration", "calibration_fingerprint",
+           "calibration_record", "check", "load", "n_updates", "read", "remove", "remove_lora", "save", "scoring", "stage",
+           "swap", "train", "unstage", "version_lock"]

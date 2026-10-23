@@ -70,7 +70,10 @@ class TrainJob:
     policy's settings (r, lr, updates, seed, ...); trigger: "schedule" (the policy's want_train) or "train_now";
     started: the wall clock; state: "running", "done", "failed" or "refused"; why: the refusal or the error;
     fingerprint and seconds: the frozen model's and the wall time, once done; frozen: whether the pre-freeze gates
-    passed."""
+    passed. What the loop also hands a batch learner (stage 3): calib — the calib labels (stream.policy.LabelRow, the
+    latest per key; never trained on: the LoRA learner runs act_guard on them); budget — the policy's Budget (the
+    runner's threads, device and max_train_s); alpha — the loop's promised rate; status — the dict the loop's
+    status()["job"] shows, which a runner updates in place (pid, log, device, eta, last line)."""
     id: str
     version: int
     rows: tuple = ()
@@ -82,6 +85,10 @@ class TrainJob:
     fingerprint: str | None = None
     seconds: float = 0.0
     frozen: bool | None = None
+    calib: tuple = ()
+    budget: Any = None
+    alpha: float | None = None
+    status: dict | None = None
 
 
 class FrozenError(TypeError):
