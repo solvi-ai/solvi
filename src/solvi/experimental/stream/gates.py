@@ -121,8 +121,8 @@ def calib_threshold(scored, alpha: float, *, confidence: float = 0.95):
     [(score, wrong)], one per calib label (wrong: the would-be answer is not the label). From the strictest score down,
     a threshold t holds when the Wilson upper bound of the joint risk (score ≥ t and wrong, over all n labels) is ≤
     alpha; the loosest t reached before the first that fails is returned (fixed sequence), None when none holds — at
-    α = 0.05 and 95 % that needs ≥ 73 calib labels. A stand-in for `act_guard` (stage 3 uses the part's own);
-    no anytime statement."""
+    α = 0.05 and 95 % that needs ≥ 73 calib labels (`calib_min`). A stand-in for `act_guard` (stage 3 uses the part's
+    own); no anytime statement."""
     rows = sorted(((float(s), bool(w)) for s, w in scored if s is not None and s == s and abs(s) != float("inf")),
                   key=lambda r: -r[0])
     n = len(scored)
@@ -138,6 +138,18 @@ def calib_threshold(scored, alpha: float, *, confidence: float = 0.95):
             break
         best = t
     return best
+
+
+def calib_min(alpha: float, *, confidence: float = 0.95) -> int:
+    """The fewest calib labels with which `calib_threshold` can find any threshold: the smallest n whose Wilson upper
+    bound of 0 wrong in n is ≤ alpha (73 at α = 0.05 and 95 %). Fewer labels: no threshold, the act_guard gate refuses
+    every freeze."""
+    if not 0 < alpha < 1:
+        raise ValueError(f"alpha is a rate in (0, 1), not {alpha!r}")
+    n = 1
+    while _wilson(0, n, confidence)[1] > alpha:
+        n += 1
+    return n
 
 
 def incumbent_short(outcomes, alpha: float, target_share=None, *, min_n: int = 1) -> dict:
@@ -171,4 +183,4 @@ def incumbent_short(outcomes, alpha: float, target_share=None, *, min_n: int = 1
     return {"short": short, "n": n, "alone": alone, "error": err, "share": share, "why": why}
 
 
-__all__ = ["SALT", "SPLITS", "calib_threshold", "heldout_gate", "honesty_gate", "incumbent_short", "paired_gain_low", "probe", "split"]
+__all__ = ["SALT", "SPLITS", "calib_min", "calib_threshold", "heldout_gate", "honesty_gate", "incumbent_short", "paired_gain_low", "probe", "split"]

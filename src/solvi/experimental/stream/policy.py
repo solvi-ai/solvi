@@ -8,7 +8,8 @@ it, stage 2).
     policy.split(st, key)                 # "train" | "calib" | "holdout": by the content key, fixed forever
     policy.want_train(st)                 # growth, the improvement signal, the budget; why_not_train(st) says why not
     policy.freeze(st, report)             # the pre-freeze gates on held-out labels (freeze_gates(st, report): each one)
-    policy.promote(st, paired)            # certified, ≥ 100 novel samples, min_share, margin, the memorisation probe
+    policy.promote(st, paired)            # certified, ≥ 100 novel samples, min_share, margin, the memorisation probe,
+                                          # the novel-error bound
 
 `LoopPolicy` is the abstract class: every hook reads a `LoopState` (a frozen snapshot the loop rebuilds per call:
 decisions so far, the served version and the candidate, label counts by split, the versions table, the served
@@ -27,8 +28,15 @@ own counters in `self` and must pickle (the loop's checkpoint saves it).
   served version's n_train and ≥ refreeze × the train labels the loop had at the latest discard); the budget allows
   one now; and the improvement signal
   (`gates.incumbent_short`): on its last `window` (200) held-out labels the served version answers nothing alone, or
-  errs alone above the promised α, or (target_share given) answers alone less than that; with fewer than
-  `min_holdout` (100) of them it is not shown strong. A strong incumbent is not retrained for nothing.
+  errs alone above the promised α, or (target_share given) answers alone less than that. A strong incumbent is not
+  retrained for nothing. The signal is read only once the window holds min(min_holdout, window) outcomes of the
+  served version: fewer (the window restarts at a promotion or a rollback) is "no signal yet", not "short", so a new
+  served version is not retrained before it was measured (version 0 without a model fills the window with outcomes
+  answered by nobody, so it is short as soon as the window is full; with holdout=0 there is no window and the signal
+  reads short). With the pre-freeze gates on, a training also waits for the labels those gates need — ≥ min_holdout
+  held-out labels and ≥ the calib labels the calib threshold needs (`min_calib`; `gates.calib_min`, 73 at α = 0.05)
+  — since a training with fewer is refused at birth (with the default shares the first training comes at about 470
+  train labels, not 300).
 - select — one row per content key (the latest label wins), then a class-balanced sample of ≤ budget.max_examples
   of them, half from the latest 2 × the served version's n_train rows; seeded by the next version number, so the
   same rows give the same selection.
@@ -44,8 +52,15 @@ own counters in `self` and must pickle (the loop's checkpoint saves it).
   novel side is the memoriser's signature (it answers the items it trained on and abstains on the rest), so an
   unmeasured probe does not promote. The errors are compared once the seen side has ≥ probe_min alone answers too
   (fewer alone answers on seen keys is not memorising). And the candidate's error on novel samples is within the
-  promise: wrong_novel / n_novel ≤ α (st.alpha; the joint risk on keys it never trained on — a memoriser is valid on
-  the pool because its trained items dilute the risk; author's decision 2026-10-23; novel_risk=False drops it).
+  promise: the Wilson upper bound (at `wilson`, 95 %; `core.store.sysreport.wilson`) of wrong_novel / n_novel ≤ α
+  (st.alpha; the joint risk on keys it never trained on — a memoriser is valid on the pool because its trained items
+  dilute the risk; author's decisions 2026-10-23; novel_risk=False drops it). A point estimate looked at on every
+  decision passes a candidate above α by chance (at a true novel risk of 6.4 % in more than half of simulated
+  1 000-sample trials); the bound holds that near the rate the confidence names (about 5 % of candidates at 5.5 %,
+  1 % at 6.4 %) and costs some candidates just under α (at 3 % about 6 % are not promoted within 1 000 novel
+  samples). Two limits: the count is at the thresholds in force now, which loosen during a trial, and it is looked at
+  on every decision, so the bound is a stand-in for a fixed-sample test, not an anytime guarantee; the rate of false
+  promotions it allows is what the shuffled-label control of a stand reads.
   probe=False drops the probe (promotion and discard). Label
   mode (no paired samples): the pre-freeze gates decided, promote.
 - discard — (probe on) the probe shows the gap beyond noise (Wilson lower bound of the novel error − Wilson upper bound of the
@@ -224,7 +239,8 @@ class TrainReport:
     right / wrong: the candidate's answers alone and right / wrong on them, served_right / served_wrong the served
     version's; better / worse: held-out labels where the candidate's item score (+1 alone and right, −1 alone and
     wrong, 0 escalated) beats / trails the served one's; threshold: act_guard's on the calib split (None: none found
-    at the promised risk); honesty_before / honesty_after: the served version's and the candidate's
+    at the promised risk; in stage 2 a fixed-set stand-in, while the served version answers at its stream threshold,
+    so the held-out comparison sets two kinds of threshold side by side); honesty_before / honesty_after: the served version's and the candidate's
     `solvi.testing.honesty` numbers on the held-out labels; seconds: the training's wall time; n_train: rows trained;
     items: optional per-label scores ((key, candidate score, served score), each +1 / −1 / 0) for a policy that runs
     its own paired test (McNemar, bootstrap); empty when the loop does not provide them."""
@@ -355,7 +371,9 @@ class DefaultPolicy(LoopPolicy):
     two alarms closer than this roll back (0: never); r, lr, min_updates, max_updates: the training's settings;
     refreeze: the lane LearningLoop's retrain floor instead of the largest n_train (None: off); probe: the memorisation
     probe on (False: off, promotion and discard); pre_freeze: the pre-freeze gates on (False: every training is
-    frozen); novel_risk: promotion needs wrong_novel / n_novel ≤ α (False: off)."""
+    frozen); min_calib: the calib labels a training waits for (None: the fewest the calib threshold needs at α, 73 at
+    α = 0.05; 0 for a learner with its own threshold); novel_risk: promotion needs the Wilson upper bound (at
+    `wilson`) of wrong_novel / n_novel ≤ α (False: off)."""
 
     def __init__(self, budget: Budget | None = None, *, s2_labels: bool = False, calib: float = 0.15,
                  holdout: float = 0.15, first: int = 300, growth: float = 1.5, window: int = 200, target_share=None,
@@ -363,7 +381,7 @@ class DefaultPolicy(LoopPolicy):
                  min_novel: int = 100, min_share: float = 0.05, margin: float = 0.01, gap: float = 0.10,
                  probe_min: int = 30, stale: int = 1500, trial: int = 1500, probation: int = 300, r: int = 8,
                  lr: float = 3e-4, min_updates: int = 200, max_updates: int = 3000, refreeze=None, probe: bool = True,
-                 pre_freeze: bool = True, novel_risk: bool = True):
+                 pre_freeze: bool = True, novel_risk: bool = True, min_calib: int | None = None):
         super().__init__(budget)
         gates.split("", calib=calib, holdout=holdout)                     # the shares, checked once
         for name, v in (("first", first), ("window", window), ("min_holdout", min_holdout), ("min_novel", min_novel),
@@ -394,6 +412,9 @@ class DefaultPolicy(LoopPolicy):
         self.r, self.lr, self.min_updates, self.max_updates = r, float(lr), min_updates, max_updates
         self.refreeze = None if refreeze is None else float(refreeze)
         self.probe, self.pre_freeze, self.novel_risk = bool(probe), bool(pre_freeze), bool(novel_risk)
+        if min_calib is not None and (isinstance(min_calib, bool) or not isinstance(min_calib, int) or min_calib < 0):
+            raise ValueError(f"min_calib must be an integer ≥ 0 or None, not {min_calib!r}")
+        self.min_calib = min_calib
 
     # --- collecting
     def accept(self, st, x, y, source) -> bool:
@@ -424,14 +445,30 @@ class DefaultPolicy(LoopPolicy):
                    f"{self.refreeze:g} × {last} at the latest discard")
         if have < need:
             return f"{have} train label(s) < {need} ({why})"
+        if self.pre_freeze:                                    # the gates' own floors: a freeze that cannot pass
+            hold = st.labels.get("holdout", 0)
+            if hold < self.min_holdout:
+                return f"{hold} held-out label(s) < {self.min_holdout}: a freeze cannot pass yet"
+            calib, need_c = st.labels.get("calib", 0), self.calib_floor(st.alpha)
+            if calib < need_c:
+                return f"{calib} calib label(s) < {need_c}: act_guard cannot find a threshold yet"
         refused = self.budget.refuse(st.trainings, st.now)
         if refused:
             return refused
-        sig = gates.incumbent_short(list(st.holdout)[-self.window:], st.alpha, self.target_share,
-                                    min_n=min(self.min_holdout, self.window))
+        outcomes = list(st.holdout)[-self.window:]
+        need_o = min(self.min_holdout, self.window)
+        if self.holdout > 0 and len(outcomes) < need_o:
+            return (f"no improvement signal yet: {len(outcomes)} held-out outcome(s) of the served version < "
+                    f"{need_o}")
+        sig = gates.incumbent_short(outcomes, st.alpha, self.target_share, min_n=need_o)
         if not sig["short"]:
             return f"no improvement signal: {sig['why']}"
         return None
+
+    def calib_floor(self, alpha) -> int:
+        """The calib labels a freeze needs: min_calib, or (None) `gates.calib_min(alpha, wilson)`, the fewest with
+        which the calib threshold can exist (0: the learner brings its own threshold)."""
+        return gates.calib_min(alpha, confidence=self.wilson) if self.min_calib is None else self.min_calib
 
     def want_train(self, st) -> bool:
         return self.why_not_train(st) is None
@@ -460,7 +497,8 @@ class DefaultPolicy(LoopPolicy):
 
     def hyper(self, st) -> dict:
         """updates from the train label count capped at max_examples — an approximation of the rows `select` returns
-        (it does not see them, and a relabelled key counts once there)."""
+        (it does not see them, and a relabelled key counts once there). Seeded by the next version number: a retry
+        after a failed training is the same training (deterministic on purpose)."""
         n = min(st.labels.get("train", 0), self.budget.max_examples)
         updates = min(self.max_updates, max(self.min_updates, math.ceil(2 * n / 8)))
         return {"r": self.r, "lr": self.lr, "updates": updates, "seed": st.next_version, "warm_start": False}
@@ -503,10 +541,12 @@ class DefaultPolicy(LoopPolicy):
                           "share_s": paired.share_s}}
         if self.novel_risk:
             risk = paired.wrong_novel / paired.n_novel if paired.n_novel else None
-            out["novel_risk"] = {"ok": risk is not None and risk <= st.alpha, "risk": risk, "alpha": st.alpha,
+            ub = gates._wilson(paired.wrong_novel, paired.n_novel, self.wilson)[1] if paired.n_novel else None
+            out["novel_risk"] = {"ok": ub is not None and ub <= st.alpha, "risk": risk, "ub": ub,
+                                 "n_novel": paired.n_novel, "alpha": st.alpha,
                                  "why": "no novel sample yet" if risk is None else
-                                 f"wrong alone on novel samples {paired.wrong_novel} / {paired.n_novel} = {risk:.4f} "
-                                 f"(≤ α {st.alpha:g} needed)"}
+                                 f"wrong alone on novel samples {paired.wrong_novel} / {paired.n_novel} = {risk:.4f}, "
+                                 f"Wilson {self.wilson:.0%} upper bound {ub:.4f} (≤ α {st.alpha:g} needed)"}
         if self.probe:
             out["probe"] = self._probe_promote(paired)
         return out
@@ -547,7 +587,8 @@ class DefaultPolicy(LoopPolicy):
         return None
 
     def rollback_target(self, st) -> int | None:
-        """The highest retired version below the served one with no alarm on record, or None."""
+        """The highest retired version below the served one with no alarm on record, or None. Conservative: any alarm
+        on record excludes a version, also one on an earlier serving that was recertified and then served well."""
         alarmed = {a.get("version") for a in st.alarms}
         ok = [r.version for r in st.versions if r.state == "retired" and r.version < st.served
               and r.version not in alarmed]
