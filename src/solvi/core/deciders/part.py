@@ -748,7 +748,7 @@ class DecisionPart:
                                                 for f in self.facts + extra])
 
     @_deprecate.removed_kwargs(error="max_error")
-    def calibrate_for(self, examples, *, max_error=0.05, signal="auto", method="empirical", delta=0.10, label_check=True):
+    def calibrate_for(self, examples, *, max_error=0.05, signal="auto", method="empirical", delta=0.10, label_check=False):
         """Choose the escalation threshold for a target error rate among the answers given alone, on labelled examples
         [(input, correct)]. method="empirical": the lowest threshold at which the calibration decisions it lets through
         are wrong at most `error` of the time — no guarantee on new inputs (on another data set the error can be several
@@ -764,7 +764,7 @@ class DecisionPart:
         examples), "error" (among them), "n", "max_error", "method", "guarantee"}. For a guarantee on the share of all
         questions answered wrongly, see act_guard. Every option after the examples is keyword-only (error= and the
         result's keys "coverage" / "target_error", the 0.7 names, were removed in 0.9).
-        label_check (default True; no model call): "label_issues" — the examples whose label the model confidently
+        label_check (default False, opt-in; no model call): "label_issues" — the examples whose label the model confidently
         contradicts (solvi.core.calibration.label_issues), with a line in "warnings" when there are any; the
         calibration uses every label as given."""
         from ..calibration import accuracy_at, check_rate, label_warning, ltt_threshold
@@ -799,7 +799,7 @@ class DecisionPart:
 
     @_deprecate.removed_kwargs(risk="max_risk")
     def act_guard(self, examples, *, max_risk=0.10, signal="auto", groups=None, min_group=100, delta=0.10,
-                  label_check=True):
+                  label_check=False):
         """Answer alone only as far as a guarantee allows (conformal risk control), from labelled examples of your own
         stream [(input, correct)] — a few hundred is typical: the escalation threshold is set so that, for inputs like
         the examples, P(answered alone AND wrong) ≤ risk — a share of all questions (answered or escalated), not of
@@ -839,7 +839,7 @@ class DecisionPart:
         groups, min_group, delta) and returns the same keys. Every option after the examples is keyword-only; risk= is
         the 0.7 name of max_risk= (removed in 0.9).
 
-        label_check (default True; it reads the decisions already made, no model call): "label_issues" — the examples
+        label_check (default False, opt-in; it reads the decisions already made, no model call): "label_issues" — the examples
         whose label the model confidently contradicts by confident learning (solvi.core.calibration.label_issues:
         their count, ids — the examples' positions — and the suggested answers), with a line in "warnings" when there
         are any. Nothing is dropped: the threshold is calibrated on every label as given. A model's confident mistakes

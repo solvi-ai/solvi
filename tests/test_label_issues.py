@@ -84,15 +84,15 @@ def _examples(flip):
 def test_act_guard_and_calibrate_for_report_and_change_nothing():
     flip = [3, 17, 55]
     part = DecideModel(Scorer(), model_id="kw").decision("team", "Which team?", "email", TEAMS)
-    on = part.act_guard(_examples(flip), max_risk=0.10)
+    on = part.act_guard(_examples(flip), max_risk=0.10, label_check=True)
     assert on["label_issues"]["ids"] == flip and on["label_issues"]["suggested"][3] == "billing"
     assert any("3 of 80 calibration labels look wrong" in w for w in on["warnings"])
-    off = part.act_guard(_examples(flip), max_risk=0.10, label_check=False)
+    off = part.act_guard(_examples(flip), max_risk=0.10)                    # the default: off
     assert "label_issues" not in off and {k: v for k, v in on.items() if k not in ("label_issues", "warnings")} == \
         {k: v for k, v in off.items() if k != "warnings"}
-    clean = part.act_guard(_examples([]), max_risk=0.10)
+    clean = part.act_guard(_examples([]), max_risk=0.10, label_check=True)
     assert clean["label_issues"]["count"] == 0 and not any("look wrong" in w for w in clean.get("warnings", []))
-    cf = part.calibrate_for(_examples(flip), max_error=0.10, method="ltt")
+    cf = part.calibrate_for(_examples(flip), max_error=0.10, method="ltt", label_check=True)
     assert cf["label_issues"]["ids"] == flip and cf["threshold"] == \
         part.calibrate_for(_examples(flip), max_error=0.10, method="ltt", label_check=False)["threshold"]
 
@@ -104,7 +104,7 @@ def test_system_guarantee_reports_label_issues():
     part.question(cat, "route")
     s = System(cat, [Question("route", "Route", Answer.choice(TEAMS))])
     ex = [({"email": t}, y) for t, y in _examples(flip)]
-    rep = s.guarantee("route", ex, max_risk=0.10)
+    rep = s.guarantee("route", ex, max_risk=0.10, label_check=True)
     assert rep["label_issues"]["ids"] == flip
     assert any("2 of 80 calibration labels look wrong" in w for w in rep["warnings"])
     rep2 = s.guarantee("route", ex, max_risk=0.10, label_check=False)
@@ -117,7 +117,7 @@ def test_a_combination_reports_on_its_own_decisions():
     a = DecideModel(Scorer(), model_id="kw").decision("team", "Which team?", "email", TEAMS)
     b = DecideModel(Scorer(), model_id="kw2").decision("team", "Which team?", "email", TEAMS)
     v = Vote([a, b])
-    info = v.act_guard(_examples(flip), max_risk=0.10)
+    info = v.act_guard(_examples(flip), max_risk=0.10, label_check=True)
     assert info["label_issues"]["ids"] == flip
     assert "label_issues" not in v.act_guard(_examples(flip), max_risk=0.10, label_check=False)
-    assert v.calibrate_for(_examples(flip), max_error=0.1)["label_issues"]["ids"] == flip
+    assert v.calibrate_for(_examples(flip), max_error=0.1, label_check=True)["label_issues"]["ids"] == flip

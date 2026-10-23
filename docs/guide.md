@@ -1008,8 +1008,9 @@ conformal-risk-control threshold, the split-conformal quantile — is checked ag
 code (exact fractions, the Clopper–Pearson bound, the procedures as the papers state them, the exact coverage
 ⌈(n + 1)(1 − α)⌉ / (n + 1)); `tests/test_reference_values.py` names the source of each expected value.
 
-A wrong calibration label moves the threshold, so `act_guard`, `calibrate_for` (a part's and a combination's) and
-`System.guarantee` check the labels on the way — no extra model call, the decisions are already made: `info["label_issues"]`
+A wrong calibration label moves the threshold. With `label_check=True` (opt-in), `act_guard`, `calibrate_for` (a
+part's and a combination's) and `System.guarantee` check the labels on the way — no extra model call, the decisions
+are already made: `info["label_issues"]`
 lists the examples whose label the model confidently contradicts (`count`, `ids` — the examples' positions —, the
 `suggested` answer), and `info["warnings"]` gets a line when there are any. The rule is confident learning (Northcutt,
 Jiang & Chuang 2021, cleanlab's default "prune by noise rate", written out in `solvi.core.calibration.label_issues`):
@@ -1022,7 +1023,9 @@ mistakes most of the list is the model's errors — check the listed labels, fix
 simulation (400 examples, 3 answers, 12 labels flipped, a model mostly sure and right) it listed 8–12 of the 12 flips
 and 0–2 other examples over ten seeds; with no flip and a model confidently wrong on 10% of the examples it listed 36
 of them. The probabilities must be out of sample: a part fitted (`fit`, `teach`) on the same examples sees its own
-labels and lists fewer. `label_check=False` turns it off.
+labels and lists fewer. It is off by default because of those false positives: on clean labels with a model
+confidently wrong on 10% of the examples it listed 36 of 400, so on by default most users would get a warning on clean
+data, and existing calls would change their `"warnings"`.
 
 #### Keeping a calibration: save_calibration, load_calibration
 
