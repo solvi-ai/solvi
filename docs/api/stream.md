@@ -57,10 +57,31 @@ a hook reads; `Budget`; `DefaultPolicy`. Unmeasured.
 The adapter loop (stage 2): `AdapterLoop`, the lane's loop driven by a `LoopPolicy` — labels split by content key,
 online or batch learners, promotion on samples whose key the candidate never trained on with the memorisation probe
 and a Wilson bound on the error there, the RiskDetector OR-ed with a score monitor, controls; a hook that raises after
-the state changed stops the loop (status "error") with the decision recorded. No LoRA learner, runner, checkpoint or
-attach yet. Unmeasured.
+the state changed stops the loop (status "error") with the decision recorded. Stage 3: a batch learner's job also
+carries the calib labels, the budget, α and the live job status; a training refused by its time estimate is recorded
+as "refused", a runner that dies stops the loop (status "error", replay exact). No checkpoint or attach yet.
+Unmeasured.
 
 ::: solvi.experimental.stream.loop
+
+## `solvi.experimental.stream.lora_learner`
+
+The LoRA learner (stage 3): `LoraLearner`, a batch learner that trains a LoRA adapter on the decider from the base
+checkpoint for each version, in a runner, and runs `act_guard` on the calib labels; `LoraVersion`, an adapter with its
+calibration — scored in shadow on the scoring thread only, installed and rolled back with
+`solvi.experimental.lora.swap` (the adapter and its thresholds change together under the part's version lock), saved
+as `<v>.lora.safetensors` and `<v>.calib.json`. Needs `solvi[lora]`. Unmeasured.
+
+::: solvi.experimental.stream.lora_learner
+
+## `solvi.experimental.stream.runner`
+
+Where a training runs (stage 3): `SubprocessRunner` (the default — nice 10, threads capped at `Budget.cpu_threads`, the
+device picked by `pick_device` with a CPU fallback, the time estimate refused above `Budget.max_train_s`, a heartbeat
+log, the result file) and `ThreadRunner` (tests, tiny data); `TrainingRefused`, `TrainingFailed` and `RunnerError`.
+Unmeasured.
+
+::: solvi.experimental.stream.runner
 
 ## `solvi.experimental.stream.serving`
 

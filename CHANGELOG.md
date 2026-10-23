@@ -260,6 +260,34 @@
   `source=` only when its signature takes them, a `TypeError` inside it is no longer retried. A refused `train_now`
   writes its "train" event. Not built yet: the LoRA learner and swap, runners, the checkpoint, label mode and attach.
   Unmeasured.
+- **The adapter loop's LoRA learner (experimental), stage 3** (`solvi.experimental.stream.lora_learner`,
+  `solvi.experimental.stream.runner`, `solvi.experimental.lora`). `LoraLearner` is a batch learner: each version is a
+  LoRA adapter trained from the base checkpoint (a `warm_start` setting is refused) on the rows the policy selected,
+  then `act_guard` at the loop's α on the calib labels, on a copy of the part. `LoraVersion` is the adapter with that
+  calibration, both the loop's frozen model and its `Served`: `score` runs the part's question with its adapter on
+  the calling thread only (`lora.scoring`; the served part, other questions and the fingerprints are unchanged),
+  `install` / `uninstall` swap it in and out, `save` / `load` write and check `<v>.lora.safetensors` and
+  `<v>.calib.json`; `LoraVersion.of_part(part)` is version 0. `lora.swap(part, adapter, calibration)` changes the
+  adapter and its calibration together under a per-part version lock and then the scorer's lock: it closes the window
+  adapt_lora and load_lora leave open, in which the adapter is on and the thresholds are cleared. Each decision of a
+  part with a version lock holds it (`DecisionPart.__call__`, `decide`, `in_pass`; parts that never had a swap take
+  no lock); a combination over the part is not covered. Swap then rollback is bit-exact (the part's and the model's
+  fingerprints and the probabilities, tested); a test with two deciding threads and 60 swaps found no decision mixing
+  one version's adapter with the other's thresholds or probabilities, and found mixes once the part's lock was
+  removed. `lora.stage` installs an adapter inactive outside any slot (the model's fingerprint unchanged; once one is
+  staged every question is scored through the scorer's adapter switch); `lora.adapter_by_hash(folder, hash)` finds an
+  adapter file by its hash; `lora.train` takes `updates=` and a per-update `log=` callback. Runners:
+  `SubprocessRunner` (the default: a fresh process, nice 10, threads capped at `Budget.cpu_threads`, `Budget.device
+  "auto"` → a GPU with `free_gpu_mb` free, read with nvidia-smi, else the CPU, and the CPU again after a GPU
+  out-of-memory error; the training is refused before it starts when the estimate from its first update is above
+  `Budget.max_train_s`; `train_<job>.log` with a heartbeat every 30 s; killed past `max_train_s` + 120 s, or after
+  `stall_s` without a log line) and `ThreadRunner` (in process, for tests and tiny data). In the loop a batch learner's
+  `TrainJob` also carries the calib labels, the budget, α and the live `status()["job"]` dict (pid, log, device, eta,
+  last line); a training refused by its estimate is a "train" event with state "refused" (counted against the
+  budget); a `RunnerError` (the process died or went silent) stops the loop with status "error" at the hook
+  "learner.train", replay exact; `initial=` with `install` / `uninstall` is version 0's `Served`; replay takes the
+  recorded install fingerprints (it failed before whenever a loop with `system=` promoted). The loop still waits for
+  a training inside `step`. Unmeasured: tests on a tiny random checkpoint only, no stand.
 - **A secret for the supervision and audit draws: `Dispatcher(secret=)`** (`solvi.core.dispatch`; security). The
   draws were `sha256(f"{seed}|{input hash}|{n}")` with the public default `seed=0`, so whoever could vary the inputs
   could compute which decisions would be supervised or audited and avoid them. With `secret=` (bytes or str; None reads

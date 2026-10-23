@@ -2,10 +2,13 @@
 solvi.core.deciders, which re-exports every name.)"""
 from __future__ import annotations
 
+import contextlib
 import dataclasses
 import inspect
 import math
+import threading
 import warnings
+import weakref
 
 import numpy as np
 
@@ -19,6 +22,24 @@ from .wire import Logits, _respan
 from .backends import LONG_CPU_TOKENS, SECTION_TOKENS
 from .adapt import ADAPTERS, _Spec, lora_key
 from .gate import Facts, GroupBy, _group_guard, _group_promise, _shown, _threshold, _vkey, confidence_source, group_record, guard_promise, guard_rule, no_separation, one_source
+
+
+_VERSION_LOCKS: "weakref.WeakKeyDictionary" = weakref.WeakKeyDictionary()
+_VERSION_LOCKS_GUARD = threading.Lock()
+
+
+def version_lock(part, create=True):
+    """The part's version lock (an RLock), taken by each of its decisions (call, decide, in_pass) for the whole decision
+    and by solvi.experimental.lora.swap while it changes the part's adapter and thresholds together, so a decision sees
+    one version: an adapter with its own thresholds. Created on first use by the swap (create=True); None for a part
+    that never had one (its decisions take no lock). Kept outside the part, so the part copies and pickles as before."""
+    lk = _VERSION_LOCKS.get(part)
+    if lk is None and create:
+        with _VERSION_LOCKS_GUARD:
+            lk = _VERSION_LOCKS.get(part)
+            if lk is None:
+                lk = _VERSION_LOCKS[part] = threading.RLock()
+    return lk
 
 
 class DecisionPart:
@@ -168,12 +189,18 @@ class DecisionPart:
         return state_text({f: (v.value if isinstance(v, Quote) else v) for f, v in zip(self.facts, vals)},
                           self.model.state_format)
 
+    def _one_version(self):
+        """The part's version lock for one decision (a no-op unless solvi.experimental.lora.swap gave it one)."""
+        lk = _VERSION_LOCKS.get(self)
+        return contextlib.nullcontext() if lk is None else lk
+
     def __call__(self, *args, **kw):
-        vals = dict(zip(self.__signature__.parameters, args))
-        vals.update(kw)
-        text = self.text_of(vals)
-        self.asked += 1
-        return self._bind(self._one(text, self._ctx(text, vals=vals)), vals)
+        with self._one_version():
+            vals = dict(zip(self.__signature__.parameters, args))
+            vals.update(kw)
+            text = self.text_of(vals)
+            self.asked += 1
+            return self._bind(self._one(text, self._ctx(text, vals=vals)), vals)
 
     def _ctx(self, text, vals=None, raw=None):
         """What _finish needs besides the model's output: the input's text and, with thresholds per group, its group."""
@@ -206,6 +233,10 @@ class DecisionPart:
         """Called by the runtime for a part in a shared pass (flow.batches): score every sibling's question about the same
         input in one forward pass (cached, so the siblings read it) and return this part's decision; the decision's extra
         records the pass."""
+        with self._one_version():
+            return self._in_pass(siblings, args, names)
+
+    def _in_pass(self, siblings, args, names=None):
         text = self.text_of(args)
         ctx = self._ctx(text, vals=args)
         m = self.model
@@ -576,6 +607,10 @@ class DecisionPart:
     # the model's methods for this decision
     def decide(self, text):
         """An input (a text, a state, or Facts by name) → Decision; a list of inputs → a list."""
+        with self._one_version():
+            return self._decide(text)
+
+    def _decide(self, text):
         one = isinstance(text, Facts) or _single(text)
         xs = [text] if one else list(text)
         ts = [self._input_text(x) for x in xs]

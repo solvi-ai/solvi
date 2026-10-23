@@ -302,7 +302,10 @@ STATUS: dict[str, dict] = {
                "and gate arithmetic (stream.gates); the adapter loop core (stream.loop.AdapterLoop: policy hooks, "
                "novel-only promotion with the memorisation probe and the novel-risk bar, two alarm sources, "
                "pause / resume / train_now / promote / rollback; LearningLoop = AdapterLoop + DefaultPolicy at the "
-               "lane's constants; stream.serving), unmeasured; no LoRA learner, runner, checkpoint or attach yet",
+               "lane's constants; stream.serving); the LoRA learner (stream.lora_learner: LoraLearner trained from the "
+               "base for each version with act_guard on calib labels, LoraVersion installed by "
+               "solvi.experimental.lora.swap — the adapter and its thresholds together) and the training runners "
+               "(stream.runner: subprocess by default, thread), unmeasured; no checkpoint or attach yet",
                "missing": "measured once; see the documented limits in docs/experimental.md: the "
                "RiskDetector alarmed far later than the confidence CUSUM on shifts to new intents and must not "
                "be the only alarm; the LearningLoop gained nothing with gold labels and is kept only as the core "

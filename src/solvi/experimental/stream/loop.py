@@ -1,5 +1,5 @@
 """The adapter loop: frozen versions, each with its own stream certificate, promoted under δ-spending, driven by a
-`LoopPolicy` (experimental; the LoRA learning loop, stage 2 — no LoRA learner, runner, checkpoint or attach yet).
+`LoopPolicy` (experimental; the LoRA learning loop, stages 2–3 — no checkpoint or attach yet).
 
     from solvi.experimental.stream import AdapterLoop, DefaultPolicy, HashedTextTrainer
 
@@ -55,7 +55,7 @@ Serving: with `system=`, a promotion or a rollback installs the version through 
 and `replay()` checks each file through `Served.load` (rescore=True: every recorded score recomputed).
 
 Controls (each writes a "stream" event marked `control`, which `replay()` re-applies): `pause()`, `resume()`,
-`train_now(wait=False)` (in process whatever `wait` is: no runner before stage 3), `promote(v=None, force=False)`
+`train_now(wait=False)` (it returns when the training is over, whatever `wait` is), `promote(v=None, force=False)`
 (force skips the policy's promotion rule — novel count, min_share, margin, probe — never the certificate), and
 `rollback(v)`. A rollback is allowed while paused; a discard and an alarm go on while paused.
 
@@ -75,10 +75,19 @@ refused label source or a failing `policy.accept` / `split` raises before anythi
 loop. A failed training (the learner's `train` raising) is not an error: it is recorded and the served version keeps
 serving.
 
-Not built here (stages 3–5): the LoRA learner and the atomic swap, runners (thread / subprocess), the checkpoint, label
-mode and `attach`. Labels are kept in memory, inputs included (`LabelRow.x`): with dict inputs the memory grows with
-the label count until stage 3's label store. A training runs in process, inside `step` (or `train_now`): `step` waits
-for it, `status()` does not (it takes no lock). Unmeasured: no stand has run on this loop."""
+Stage 3 (the LoRA learner, `stream.lora_learner`; the runners, `stream.runner`): a batch learner's `TrainJob` also
+carries the calib labels (the latest per key), the policy's `Budget`, the loop's α and the live `status()["job"]`
+dict, which a runner fills in (runner, pid, log, device, eta, last line). What a training ends with: a frozen model
+(done), `TrainingRefused` (its time estimate is above `max_train_s`: a "train" event with state "refused", counted
+against the budget), any other exception (state "failed"), or `RunnerError` — the runner itself failed (the process
+died or went silent) — which stops the loop like a hook that raises (status "error", the hook "learner.train"; replay
+exact). `initial=` that has `install` / `uninstall` (a `LoraVersion.of_part`) is version 0's `Served` too, so a
+rollback to 0 puts the part as attached back. Replay takes the recorded install fingerprints (the System is not the
+replay's). A training still runs inside `step` (or `train_now`): the subprocess runner isolates it, but `step` waits
+for it; applying a runner's result on a later decision is not built.
+
+Not built here (stages 4–5): the checkpoint, label mode and `attach`. Labels are kept in memory, inputs included (`LabelRow.x`): with dict inputs the memory grows with
+the label count (a label store comes with the checkpoint). `status()` takes no lock: it answers while a training runs. Unmeasured: no stand has run on this loop."""
 from __future__ import annotations
 
 import copy
@@ -101,6 +110,7 @@ from .detector import RiskDetector
 from .gates import calib_threshold
 from .learner import TrainJob
 from .policy import DefaultPolicy, LabelRow, LoopPolicy, LoopState, Paired, TrainReport, VersionInfo
+from .runner import RunnerError, TrainingRefused
 from .sampling import Rate, coin_message, coin_value
 from .serving import BaseVersion, as_served
 
@@ -286,7 +296,8 @@ class AdapterLoop:
         self.budget = DeltaBudget(delta)                   # δ over every version (the training budget: policy.budget)
         self.rate = Rate(**(sampling or {}))
         self.storage, self.system = storage, system
-        self._base = BaseVersion(system, self.question)
+        self._base = (initial if initial is not None and callable(getattr(initial, "install", None))
+                      and callable(getattr(initial, "uninstall", None)) else BaseVersion(system, self.question))
         from pathlib import Path
         self.versions_dir = None if versions_dir is None else Path(versions_dir)
         if self.versions_dir is not None:
@@ -312,6 +323,7 @@ class AdapterLoop:
         self._ev_seen = {0: 0}
         self._fps = None                                   # replay: the recorded fingerprints by version
         self._replay_trains: list = []
+        self._replay_installs: list = []
         self._replay_t = 0.0
         self._step_t = None
         self._upd_kw = _update_keywords(learner.update)
@@ -688,6 +700,8 @@ class AdapterLoop:
         self._holdout.clear()                              # the new served version's own held-out outcomes
         self._rereference()                                # a new served version: its deployed risk from scratch
         self._at("install")
+        if self._fps is not None:                          # replay: the System is not the replay's; the recorded
+            return self._replay_installs.pop(0) if self._replay_installs else None   # fingerprints stand
         if self.system is None:
             return None
         srv = self._base if v == 0 else self._vs[v].get("served_as")
@@ -746,20 +760,35 @@ class AdapterLoop:
         self._attempt += 1                                 # only trainings that start get an id
         job.id = f"{k}.{self._attempt}"
         self._trainings.append(job.started)
-        self._job = {"id": job.id, "version": k, "trigger": trigger, "started": job.started, "eta": None}
+        self._job = {"id": job.id, "version": k, "trigger": trigger, "started": job.started, "eta": None,
+                     "runner": None, "pid": None, "log": None, "device": None, "last": None, "last_t": None}
+        if self._batch:                                    # what a batch learner's runner reads (stage 3)
+            latest = {}
+            for r in self._rows:
+                if self._split_of[r.key] == "calib":
+                    latest[r.key] = r
+            job.calib, job.budget, job.alpha, job.status = (tuple(latest.values()), self.policy.budget, self.alpha,
+                                                            self._job)
+        self._at("learner.train")                          # a runner that dies stops the loop here (RunnerError)
         rec = None
         if self._fps is not None:                          # replay: the recorded result (a training cut by an
             rec = self._replay_trains.pop(0) if self._replay_trains else {}   # error: what its error event kept)
         t0 = time.perf_counter()
-        frozen, error = None, None
+        frozen, error, refused = None, None, None
         try:
             if rec is not None:
                 if rec.get("state") == "failed":
                     error = rec.get("why")
+                elif rec.get("state") == "refused":
+                    refused = rec.get("why")
                 else:
                     frozen = _Recorded(rec.get("fingerprint"))
             else:
                 frozen = self.live.train(job) if self._batch else self.live.snapshot()
+        except RunnerError:
+            raise                                          # the runner itself failed: the loop stops (status "error")
+        except TrainingRefused as e:                       # the time estimate is above max_train_s: not started
+            refused = str(e)
         except Exception as e:  # noqa: BLE001 — a failed training is recorded; the served version keeps serving
             error = f"{type(e).__name__}: {e}"
         finally:
@@ -769,6 +798,10 @@ class AdapterLoop:
         base = {"job": job.id, "trigger": trigger, "rows": len(job.rows), "hyper": job.hyper, "t": job.started}
         if trigger == "train_now":
             base["control"] = True
+        if refused is not None:
+            job.state, job.why = "refused", refused
+            return job, [self._event("train", self.served, n, state="refused", why=refused, fingerprint=None,
+                                     report=None, frozen=False, **base)]
         if error is not None:
             job.state, job.why = "failed", error
             return job, [self._event("train", self.served, n, state="failed", why=error, fingerprint=None,
@@ -872,8 +905,8 @@ class AdapterLoop:
 
     def train_now(self, wait=False) -> TrainJob:
         """One training now, whatever want_train says — within the budget, never while paused or with a candidate in
-        trial. → the TrainJob (state "done", "failed" or "refused" with why). Stage 2 trains in process: `wait` is
-        accepted and the call returns when the training is over."""
+        trial. → the TrainJob (state "done", "failed" or "refused" with why). The call returns when the training
+        is over (in the learner's runner), whatever `wait` is; a RunnerError stops the loop."""
         with self._lock:
             self._refuse_if_stopped()
             k = max(self._vs) + 1
@@ -887,9 +920,9 @@ class AdapterLoop:
                 ev += self._promise_events()
                 if ev:
                     self._write(None, None, ev)
-            if job.state == "refused":                     # every control writes an event, a refused one too
-                self._control("train", state="refused", why=job.why)
-            return job
+            if job.state == "refused" and not (why is None and any(e.get("event") == "train" for e in ev)):
+                self._control("train", state="refused", why=job.why)   # every control writes an event, a refused one
+            return job                                                 # too (refused by the estimate: its own "train")
 
     def promote(self, v=None, *, force=False, by=None, why=None) -> dict:
         """Serve the candidate now: it must be certified; without force the policy's promote must agree (force skips
@@ -998,8 +1031,10 @@ class AdapterLoop:
                             detector=_fresh_detector(self.detector), monitor=copy.deepcopy(self._monitor0),
                             _detector_alone=True, _batch=self._batch)
         fresh._fps = fps
-        fresh._replay_trains = [e for e in stored_ev if e.get("event") == "train" and e.get("state") != "refused"]
+        fresh._replay_trains = [e for e in stored_ev if e.get("event") == "train"
+                                and (e.get("state") != "refused" or e.get("job") is not None)]
         fresh._replay_trains += [e["train"] for e in stored_ev if e.get("event") == "error" and e.get("train")]
+        fresh._replay_installs = [e["install"] for e in stored_ev if "install" in e]
         bad, k = [], 0
 
         def again(d):                                      # a control that stopped the loop: the same error again
@@ -1073,8 +1108,11 @@ class AdapterLoop:
             if cls is None:
                 bad.append((None, "version file", f"version {v}: no Served to load it with"))
                 continue
+            srv = (self._vs.get(v) or {}).get("served_as")
+            kw = ({"part": srv.part} if getattr(srv, "part", None) is not None
+                  and "part" in inspect.signature(cls.load).parameters else {})   # a LoRA version scores on its part
             try:
-                models[v] = cls.load(self.versions_dir, v, expect_fp=fp)
+                models[v] = cls.load(self.versions_dir, v, expect_fp=fp, **kw)
             except FileNotFoundError as e:
                 bad.append((None, "version file", f"version {v}: {e.filename} is missing"))
             except Exception as e:  # noqa: BLE001 — a tampered or foreign file

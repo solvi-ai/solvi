@@ -26,6 +26,18 @@ from .adapt import Adaptation, _Spec, _basis, _fit_shift, _fit_temperature, _fro
 from .gate import Facts, act_features
 from .part import DecisionPart
 
+_SHADOW = threading.local()      # per thread: {(id(model), lora_key): adapter or None} — solvi.experimental.lora.scoring
+
+
+def _shadow(model, k):
+    """The adapter this thread scores the slot `k` of `model` with in place of its own (solvi.experimental.lora.scoring:
+    a candidate version scored in shadow), as (found, adapter or None)."""
+    m = getattr(_SHADOW, "map", None)
+    if not m:
+        return False, None
+    key = (id(model), k)
+    return (True, m[key]) if key in m else (False, None)
+
 
 class DecideModel:
     """A decider: an input (a text or a state) + a question (task, options, kind) → a probability per option.
@@ -81,6 +93,7 @@ class DecideModel:
         self.adaptations: dict[tuple, Adaptation] = {}
         self._adapt_owner: dict = {}         # question key → the part that fitted the adaptation under it first
         self.loras: dict = {}                # lora_key → an Adapter (solvi.experimental.lora.LoraAdapter; experimental: solvi.experimental.lora.adapt_lora)
+        self._lora_extra: dict = {}          # adapter name → an Adapter installed on the scorer outside any slot (scored in shadow; not in the fingerprint)
         self._cache, self._cache_size, self._lock = OrderedDict(), cache_size, threading.Lock()
         self._pass_lock = threading.Lock()
         self._block_failed = False
@@ -390,14 +403,22 @@ class DecideModel:
             return k[:3]
         return k
 
+    def _has_loras(self):
+        """Is any adapter on the scorer (in a slot, or staged for shadow scoring)? Then every question is scored with
+        the scorer's adapter switch, so a staged adapter left active never answers another question."""
+        return bool(self.loras) or bool(getattr(self, "_lora_extra", None))
+
     def _lora_of(self, sp):
         """The adapter that scores this question: the asking part's own (its slot: lora_key(sp)); for a question asked of
         the model directly (no part), the question's adapter when exactly one part has one. A part never scores with
         another part's adapter — when another part asking the same question has one, a SharedQuestionWarning names
-        both, once."""
+        both, once. On a thread scoring a slot in shadow (solvi.experimental.lora.scoring), that thread's adapter."""
+        k = lora_key(sp)
+        found, ad = _shadow(self, k)
+        if found:
+            return ad
         if not self.loras:
             return None
-        k = lora_key(sp)
         ad = self.loras.get(k)
         others = [o for o in self.loras if o[:3] == k[:3] and o != k]
         if len(k) == 3:                                  # asked of the model directly
@@ -418,17 +439,17 @@ class DecideModel:
     def _ck(self, sp):
         """The cache key of a question: its key, and the adapter that scores it (two parts asking the same question
         with different adapters — or one with an adapter and one without — never share cached logits)."""
-        name = self._lora_name(sp) if self.loras else None
+        name = self._lora_name(sp) if self._has_loras() else None
         return sp.key if name is None else sp.key + (("lora", name),)
 
     def _using(self, name):
         """The scorer with this adapter active (None: none) while scoring — a no-op for a model without adapters. An
         adapter does the switching itself (the Adapter protocol: using(scorer, active)), so this module imports no
         adapter's module."""
-        if not self.loras:
+        if not self._has_loras():
             import contextlib
             return contextlib.nullcontext()
-        ads = list(self.loras.values())
+        ads = list(self.loras.values()) + list(getattr(self, "_lora_extra", {}).values())
         ad = next((a for a in ads if a.fingerprint() == name), None) if name is not None else None
         return (ad if ad is not None else ads[0]).using(self.scorer, active=ad is not None)
 
@@ -441,7 +462,7 @@ class DecideModel:
     def _score(self, pairs, read_len=0):
         """[(spec, text)] → scorer outputs, in order; the questions with a LoRA adapter (solvi.experimental.lora) are scored with it
         active, apart from the others. read_len: see _score_plain."""
-        if not self.loras:
+        if not self._has_loras():
             return self._score_plain(pairs, read_len)
         groups = OrderedDict()
         for i, (sp, _) in enumerate(pairs):
@@ -780,7 +801,7 @@ class DecideModel:
     def _finish(self, sp, d, act, escalate_below=None, act_threshold=None, use_act=None):
         """Act or escalate: the model's act signal (its probability is recorded; below the threshold → "model escalated"),
         else the calibrated confidence below escalate_below (→ "confidence … < …", the low-confidence safeguard)."""
-        if self.loras:
+        if self._has_loras():
             ad = self._lora_of(sp)
             if ad is not None:
                 d.extra["lora"] = {"adapter": ad.fingerprint(), "experimental": True}
