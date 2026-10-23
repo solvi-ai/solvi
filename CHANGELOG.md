@@ -321,6 +321,16 @@
   old order deadlocks); the cost is that the part's own decisions wait while a step runs (the whole training with
   `wait=True`). Unmeasured: fake learners and a tiny random checkpoint only, no stand; the background training's cost
   to live decisions is not measured.
+  Fixes after review: the served version at a training's start is recorded (`served_at_start` in "train_start" and
+  "train"); when it changed during the training (a rollback) the result is recorded with state "stale" and the
+  candidate is discarded and released, not gated on that stale comparison (chosen over recomputing the report on the
+  decision thread, which would hold the part's lock for a whole held-out pass); the report stops between labels on a
+  cancel or such a change, and scores the served side under the part's version lock, so an evicted version is never
+  staged again. The "error" event names the cancelled training (`cancelled`); `train_now(wait=False)` on an online
+  learner records the wait asked (`wait` False, `inline` True); "evicted" is in `policy.STATES`; an exception that is
+  not an `Exception` in the training's thread is a failed training. The `BatchLearner` contract says `train(job)` runs
+  on another thread than `update`, `seen` and `keys`. Records written by the stage-3 code (a "train" event marked
+  `control` with a `job` and no "train_start") do not replay with this code; nothing was released with them.
 - **A secret for the supervision and audit draws: `Dispatcher(secret=)`** (`solvi.core.dispatch`; security). The
   draws were `sha256(f"{seed}|{input hash}|{n}")` with the public default `seed=0`, so whoever could vary the inputs
   could compute which decisions would be supervised or audited and avoid them. With `secret=` (bytes or str; None reads

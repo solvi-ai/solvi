@@ -566,7 +566,8 @@ options is refused and the ticket stays open. `replay_all()` and `replay_stream(
 (the gate, rate and coin where the ticket was issued, the sample where it was completed). Not built: the expired-share
 stop, repeated tickets for the oracle's own noise, several servers on one store, a free-text input.
 
-Stage 3b closes the loop: a live learner takes the oracle's labels, and frozen copies of it are certified and served.
+The stream design's stage 3b closes the loop: a live learner takes the oracle's labels, and frozen copies of it are
+certified and served.
 
 ```python
 from solvi.experimental.stream import HashedTextLearner, LearningLoop
@@ -658,7 +659,7 @@ out of memory), with a heartbeat log and the adapter written to a file the loop 
 when the estimate from its first update is above `Budget.max_train_s` (recorded, counted against the budget). A process
 that dies stops the loop (status "error", replay exact).
 
-Stage 3b applies a training's result later. The training runs in the background, and `step` and `train_now` return at
+Stage 3b of the LoRA loop applies a training's result later. The training runs in the background, and `step` and `train_now` return at
 once: decisions go on with the version that is served, and none waits for the training. When the result is in, the
 next decision applies it: the gates run, then the version is frozen or discarded, or the failure or refusal is
 recorded, or the loop stops on a runner error. The "train" event is recorded at that decision, with the decision the
@@ -666,9 +667,12 @@ training started at, so `replay()` applies it at the same place without timing a
 old blocking form for scripts and tests. `close()` cancels a training in flight (a subprocess is killed). The loop
 takes the part's version lock before its own, so a decision of the part that reaches the loop cannot deadlock with the
 loop's shadow scoring. `Budget.max_versions_kept` evicts the oldest retired versions and releases their adapters; the
-served version, the rollback target and version 0 are never evicted. Unmeasured: the tests run on a tiny random
-checkpoint and fake learners; nothing here says the loop gains anything, and the cost of the background training to
-live decisions was not measured.
+served version, the rollback target and version 0 are never evicted. If the served version changes while a training
+runs (a rollback), the training's pre-freeze report compared the candidate with a version no longer served: the result
+is recorded with state "stale" and the candidate is discarded and released, not gated on that comparison. A batch
+learner's `train(job)` runs on another thread than its `update`, `seen` and `keys`, so it must read only the job.
+Unmeasured: the tests run on a tiny random checkpoint and fake learners; nothing here says the loop gains anything, and
+the cost of the background training to live decisions was not measured.
 
 Measured once on real streams: three public intent sets with a TF-IDF + logistic-regression answerer, 20 seeds per
 set, a shift to held-out intents, corrupted text and noisy labels; the numbers, the setting and the prior work are in
