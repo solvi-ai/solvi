@@ -1,5 +1,5 @@
-"""solvi.experimental.stream — a promise earned on the stream (experimental; stages 1–2: the certificate, its detector
-and the sampling inside the Dispatcher).
+"""solvi.experimental.stream — a promise earned on the stream (experimental; stages 1–3a: the certificate, its detector,
+the sampling inside the Dispatcher and the agent as the oracle).
 
     from solvi.experimental.stream import StreamPromise, DeltaBudget
 
@@ -21,7 +21,10 @@ on_drift="recertify", probation=300, secret=key)`: the coin draws the samples, t
 restarts the certificate and opens probation, every decision records its state and `Dispatcher.replay_stream()`
 rebuilds it. Standalone, the caller still draws the samples and calls `learn` and `restart`.
 
-Unmeasured: no stand has run yet. The agent as labeller and the learning loop are stage 3."""
+Stage 3a: `stream.tickets` — an agent outside the process as the oracle (`AgentOracle`, `TicketDesk`; `solvi serve
+--mcp --agent-oracle`): blind tickets, durable in the store, an expired ticket a recorded loss.
+
+Unmeasured: no stand has run yet. The learning loop is stage 3b."""
 from __future__ import annotations
 
 from .. import warn_on_import
@@ -29,8 +32,9 @@ from ._eprocess import DeltaBudget, MirrorBound, Mixture, clean_need
 from .certificate import StreamPromise, fixed_grid
 from .detector import RiskDetector
 from .sampling import Rate, StreamDriver, coin_message
+from .tickets import AgentOracle, TicketDesk, TicketError
 
 warn_on_import(__name__)
 
-__all__ = ["DeltaBudget", "MirrorBound", "Mixture", "Rate", "RiskDetector", "StreamDriver", "StreamPromise", "clean_need",
-           "coin_message", "fixed_grid"]
+__all__ = ["AgentOracle", "DeltaBudget", "MirrorBound", "Mixture", "Rate", "RiskDetector", "StreamDriver", "StreamPromise",
+           "TicketDesk", "TicketError", "clean_need", "coin_message", "fixed_grid"]

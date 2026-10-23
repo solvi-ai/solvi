@@ -630,7 +630,9 @@ class Dispatched:
     {"s1", "s2", "total"} Costs; n: the decision's number; draw: its supervision draw; spent_before: the dispatcher's
     total spend before it; drift: the drift flag it saw; keyed: the draws were keyed by the dispatcher's secret (stored
     as "draw_keyed": true; absent from records made without one); stream: with a stream certificate (promise=), the
-    decision's sample, certificate and detector state (stored as "stream"; absent otherwise)."""
+    decision's sample, certificate and detector state (stored as "stream"; absent otherwise); pending: the ticket a
+    deferred decision completes (`start` / `complete`: an oracle outside the process answered it; stored as "pending",
+    absent otherwise)."""
     question: str
     answer: Any
     by: str
@@ -653,6 +655,7 @@ class Dispatched:
     audit: bool = False
     keyed: bool = False
     stream: dict | None = None
+    pending: str | None = None
 
     @property
     def supervised(self):
@@ -667,7 +670,8 @@ class Dispatched:
                 "n": self.n, "draw": self.draw, "spent_before": self.spent_before.to_dict(), "drift": self.drift,
                 "expected": None if self.expected is None else self.expected.to_dict(), "over_budget": self.over_budget,
                 "config": self.config, "slice": self.slice, **({"audit": True} if self.audit else {}),
-                **({"draw_keyed": True} if self.keyed else {}), **({"stream": self.stream} if self.stream is not None else {})}
+                **({"draw_keyed": True} if self.keyed else {}), **({"stream": self.stream} if self.stream is not None else {}),
+                **({"pending": self.pending} if self.pending is not None else {})}
 
     def to_json(self, indent=None):
         return json.dumps(self.to_dict(), ensure_ascii=False, indent=indent, default=str)
@@ -685,7 +689,7 @@ class Dispatched:
                    Cost.from_dict(d.get("spent_before") or {}), d.get("drift"),
                    Cost.from_dict(d["expected"]) if d.get("expected") is not None else None, d.get("over_budget"),
                    d.get("config"), d.get("slice"), audit=bool(d.get("audit", False)),
-                   keyed=bool(d.get("draw_keyed", False)), stream=d.get("stream"))
+                   keyed=bool(d.get("draw_keyed", False)), stream=d.get("stream"), pending=d.get("pending"))
 
     def replay(self, dispatcher, trust_models=False):
         """Re-check this decision against `dispatcher` without calling a model → {"ok", "mismatches": [(what, why)]}:
@@ -694,6 +698,47 @@ class Dispatched:
 
     def __repr__(self):
         return f"Dispatched({self.question}={self.answer!r} by {self.by}, {self.action}: {'; '.join(self.reasons)[:120]})"
+
+
+@dataclass
+class Started:
+    """A decision begun (`Dispatcher.start`): System 1 has answered, the decision has its number, its draws, the spend,
+    expected cost and drift flag it saw, and its dispatch; the slow path has not run. `Dispatcher.complete(started,
+    thought)` ends it — at once (what `ask` does), or later, when an oracle outside the process gave its verdict (a
+    ticket, solvi.experimental.stream.tickets). `to_dict` / `from_dict`: what a ticket's record keeps so that a restart
+    can complete it. Stability: provisional (1.4)."""
+    state: Any
+    res: Any
+    n: int
+    draw: float
+    spent: Cost
+    expected: Cost | None
+    drift: str | None
+    action: str
+    reasons: list
+    slice: str | None
+    needs_slow: bool
+    keyed: bool = False
+    rho: float | None = None
+    probation: bool = False
+    sampled: bool = False
+
+    def to_dict(self):
+        from .store import plain
+        return {"input": plain(self.state), "s1": self.res.to_dict(), "n": self.n, "draw": self.draw,
+                "spent_before": self.spent.to_dict(), "expected": None if self.expected is None else self.expected.to_dict(),
+                "drift": self.drift, "action": self.action, "reasons": list(self.reasons), "slice": self.slice,
+                "needs_slow": self.needs_slow, "keyed": self.keyed, "rho": self.rho, "probation": self.probation,
+                "sampled": self.sampled}
+
+    @classmethod
+    def from_dict(cls, d, system=None):
+        from .response import Response
+        return cls(d["input"], Response.model_validate(d["s1"], catalog=system), d["n"], d["draw"],
+                   Cost.from_dict(d.get("spent_before") or {}),
+                   Cost.from_dict(d["expected"]) if d.get("expected") is not None else None, d.get("drift"),
+                   d["action"], list(d["reasons"]), d.get("slice"), bool(d["needs_slow"]), bool(d.get("keyed")),
+                   d.get("rho"), bool(d.get("probation")), bool(d.get("sampled")))
 
 
 # ------------------------------------------------------------------------------------------------ the dispatcher
@@ -1020,6 +1065,17 @@ class Dispatcher:
     # --- asking
     def ask(self, state):
         """One input → a Dispatched (see the class docs)."""
+        b = self.start(state)
+        th = None
+        if b.needs_slow:
+            per_round = None if b.expected is None else _per_round(b.expected, self.slow)
+            th = self.slow.run(state, self.question, price=self.price, budget=self.budget, expected_round=per_round,
+                               store=self.store_responses)
+        return self.complete(b, th)
+
+    def start(self, state):
+        """The first half of `ask`: System 1 answers, the decision gets its number, draws and dispatch → a Started
+        (`needs_slow`: the slow path is to run). Provisional (1.4): for an oracle that answers later (tickets)."""
         q = self.question
         res = self.system.ask(state, self.asked, store=self.store_responses)
         if self.monitor is not None:
@@ -1030,7 +1086,7 @@ class Dispatcher:
                     from .guarantees.guarantee import GuaranteeWarning
                     warnings.warn(f"drift flagged ({self.drift}) and no slow path checks System 1: its answers are "
                                   + ("given to a person" if self.on_drift != "accept" else "given out of its guarantee")
-                                  + " until reset_drift()", GuaranteeWarning, stacklevel=2)
+                                  + " until reset_drift()", GuaranteeWarning, stacklevel=3)
         with self._lock:
             self.n += 1
             n = self.n
@@ -1042,17 +1098,28 @@ class Dispatcher:
             rho, prob = self._stream.before()
             sampled = self.coin(n) < rho
         action, reasons = self.decide(res, draw, spent, self.drift, expected, probation=prob, sampled=sampled)
+        sl = self.slice_of(res) if action == "think" else None
+        needs = action == "check" or (action == "think" and self._needs_slow(sl))
+        return Started(state, res, n, draw, spent, expected, self.drift, action, reasons, sl, needs, self.keyed, rho,
+                       prob, sampled)
+
+    def complete(self, b, th=None, *, pending=None):
+        """The second half of `ask`: a Started and the slow path's Thought (None when it was not to run) → the
+        Dispatched, recorded. pending: the ticket it completes (recorded as "pending"). A Thought whose record is a dict
+        with "oracle": {"label_source", "label_of", "lost"} is an oracle's verdict given outside the process: its source
+        and the record holding it go to the stream sample; lost (no verdict: an expired ticket) sends the input to a
+        person and counts as a missing label. Provisional (1.4)."""
+        q = self.question
+        if b.needs_slow and th is None:
+            raise ValueError("this decision needs the slow path's Thought to complete")
+        res, action, reasons = b.res, b.action, list(b.reasons)
         paid = action == "check" and reasons[:1] == [SAMPLE_REASON]
         r1 = res[q]
         would1 = r1.answer if r1.status != "abstain" else _would(r1, res, q)
         cand = {"s1": would1}
         c1 = cost_of([res], self.price, res.ms)
-        th, over, disagreement = None, None, None
-        sl = self.slice_of(res) if action == "think" else None
-        if action == "check" or (action == "think" and self._needs_slow(sl)):
-            per_round = None if expected is None else _per_round(expected, self.slow)
-            th = self.slow.run(state, q, price=self.price, budget=self.budget, expected_round=per_round,
-                               store=self.store_responses)
+        over, disagreement = None, None
+        if th is not None:
             cand["s2"] = th.answer
             if self.budget is not None:
                 over = self.budget.over(th.cost)
@@ -1061,7 +1128,7 @@ class Dispatcher:
                 r[0], r[2], r[3] = r[0] + 1, r[2] + th.cost.calls, r[3] + th.cost.ms
                 r[1] += th.cost.usd or 0.0
                 r[4] = r[4] or th.cost.usd is None
-        answer, by = self._outcome(action, r1, would1, th, reasons, sl)
+        answer, by = self._outcome(action, r1, would1, th, reasons, b.slice)
         if th is not None and action == "check" and not self.agrees(th.answer, would1):
             disagreement = {"s1": would1, "s2": th.answer, "s2_accepted": th.accepted}
         c2 = th.cost if th is not None else Cost(0.0 if self.price is not None else None)
@@ -1069,38 +1136,45 @@ class Dispatcher:
         with self._lock:
             self.spent = self.spent + c2
             self.counts[by] += 1
-        drift_seen = self.drift
         stream, events = None, []
         if self._stream is not None:
             stream, events, why = self._stream.after(**self._stream_inputs(action, paid, r1, would1, th),
-                                                     sampled=sampled, rho=rho)
+                                                     sampled=b.sampled, rho=b.rho, probation=b.probation)
             self._stream_told(events, why)
-        d = Dispatched(q, answer, by, action, reasons, res, th, cand, disagreement, cost, n, draw, spent, drift_seen,
-                       expected, over, self.config(), slice=sl,
-                       audit=bool(self.audit) and self.audit_draw(res.trace.init_hash, n) < self.audit,
-                       keyed=self.keyed, stream=stream)
+        d = Dispatched(q, answer, by, action, reasons, res, th, cand, disagreement, cost, b.n, b.draw, b.spent, b.drift,
+                       b.expected, over, self.config(), slice=b.slice,
+                       audit=bool(self.audit) and self.audit_draw(res.trace.init_hash, b.n) < self.audit,
+                       keyed=b.keyed, stream=stream, pending=pending)
         if self.storage is not None:
             from .store import FORMAT
             rec = self.storage._append({"v": FORMAT, "kind": "dispatch", **json.loads(d.to_json())})
             d.stored_id = rec["id"]
             for e in events:
                 self.storage._append({"v": FORMAT, "kind": "stream",
-                                      "stream": json.loads(json.dumps({**e, "question": q, "decision": n}))})
+                                      "stream": json.loads(json.dumps({**e, "question": q, "decision": b.n}))})
         return d
 
     # --- the stream certificate (promise=, audit="adaptive")
     def _stream_inputs(self, action, paid, r1, would1, th):
         """What the stream step reads of one decision: the gate's signal and threshold, System 1's would-be answer,
         whether it was given alone, the slow path's accepted answer as the label (None: missing), whether the sample
-        was free (the slow path ran anyway)."""
+        was free (the slow path ran anyway); for an oracle's verdict given outside the process (`_oracle`), its source,
+        the record that holds it (label_of) and whether it was lost (no verdict)."""
         from .catalog import Unknown
         g = (r1.extra or {}).get("guarantee") or {}
+        o = _oracle(th)
+        lost = bool(o.get("lost"))
         label = None
-        if th is not None and th.accepted and not (self.unknown == "human" and th.answer is Unknown):
+        if th is not None and th.accepted and not lost and not (self.unknown == "human" and th.answer is Unknown):
             label = would1 if self.agrees(th.answer, would1) else th.answer
-        return {"score": g.get("value"), "in_force": g.get("threshold"), "would": would1,
-                "alone": r1.status == "ok" and action in ("accept", "check"), "label": label,
-                "label_source": "s2" if label is not None else None, "free": th is not None and not paid}
+        out = {"score": g.get("value"), "in_force": g.get("threshold"), "would": would1,
+               "alone": r1.status == "ok" and action in ("accept", "check"), "label": label,
+               "label_source": (o.get("label_source") or "s2") if label is not None else None,
+               "free": th is not None and not paid}
+        if o:                                          # only an oracle's verdict: the records of stage 2 are unchanged
+            out["label_of"] = o.get("label_of") if label is not None else None
+            out["lost"] = lost
+        return out
 
     def _stream_told(self, events, why):
         """An alarm: a person is told (a GuaranteeWarning); with on_drift other than "recertify" it is the latched
@@ -1127,51 +1201,138 @@ class Dispatcher:
         Starts from the state the dispatcher was built with; re-reads each decision's gate signal (the guard's
         recorded state is compared before it is observed), recomputes the calibration coin (only with the secret for
         a keyed record; else the recorded flag is taken and the coin is reported unverified), feeds the same samples
-        and compares the recorded sample, certificate and detector fields; with storage, the "stream" records too."""
+        and compares the recorded sample, certificate and detector fields; with storage, the "stream" records too.
+        A decision completed later through a ticket (`start` / `complete`) is read in two places, as it was made: its
+        gate, rate and coin where its ticket was issued (the "pending" record), its sample where it was completed — so
+        decisions with tickets are replayed from the storage (stored=None), not from a list."""
         if self._stream is None:
             raise ValueError('replay_stream needs a dispatcher with a stream certificate (promise=, audit="adaptive")')
-        drv = copy.deepcopy(self._stream0)
-        p, q = drv.promise, self.question
-        bad, events, unverified, k = [], [], 0, 0
-        for d in stored if stored is not None else self.stored():
-            k += 1
-            st = d.stream
-            if st is None:
-                bad.append((d.n, "stream", "a decision without the stream record"))
-                continue
-            r1 = d.s1[q]
-            g = (r1.extra or {}).get("guarantee") or {}
-            if g.get("method") == p.method and g.get("value") is not None:
-                if g.get("state") != _json(p.state()):
-                    bad.append((d.n, "guard state", "the gate's recorded state is not the rebuilt one"))
-                p.observe(g["value"])
-            rho, prob = drv.before()
-            sam = st.get("sample") or {}
-            if rho != sam.get("rho") or prob != sam.get("probation"):
-                bad.append((d.n, "rate", f"recorded ρ {sam.get('rho')} (probation {sam.get('probation')}), rebuilt "
-                                         f"{rho} ({prob})"))
-            sampled = bool(sam.get("sampled"))
-            if d.keyed and not self.keyed:
-                unverified += 1
-            elif (self.coin(d.n, keyed=d.keyed) < rho) != sampled:
-                bad.append((d.n, "coin", f"recorded sampled={sampled}, the coin gives {not sampled}"))
-            would1 = r1.answer if r1.status != "abstain" else _would(r1, d.s1, q)
-            paid = d.action == "check" and d.reasons[:1] == [SAMPLE_REASON]
-            rec, ev, _ = drv.after(**self._stream_inputs(d.action, paid, r1, would1, d.s2), sampled=sampled,
-                                   rho=sam.get("rho"))
-            rec = _json(rec)
-            for part in ("sample", "certificate", "detector"):
-                if rec.get(part) != st.get(part):
-                    bad.append((d.n, part, f"recorded {st.get(part)}, rebuilt {rec.get(part)}"))
-            events += [_json({**e, "question": q, "decision": d.n}) for e in ev]
+        items = self._stored_items() if stored is None else [("dispatch", d, None) for d in stored]
+        bad, events, unverified, k, _ = self._rebuild_stream(copy.deepcopy(self._stream0), items)
         if stored is None and self.storage is not None:
             got = [s.data.get("stream") for s in self.storage.iter(kind="stream")]
-            got = [e for e in got if (e or {}).get("question") == q]
+            got = [e for e in got if (e or {}).get("question") == self.question]
             if got != events:
                 bad.append((None, "stream records", f"{len(got)} stored, {len(events)} rebuilt, or they differ"))
         coin = "verified" if not unverified else (f"unverified on {unverified} keyed decision(s): this dispatcher has "
                                                   "no secret")
         return {"ok": not bad, "mismatches": bad, "coin": coin, "decisions": k}
+
+    def _stored_items(self):
+        """This question's decisions and tickets in the store's order → [("dispatch", Dispatched, None) |
+        ("pending", Started, the ticket's "pending" fields)]."""
+        if self.storage is None:
+            raise ValueError("the dispatcher has no storage: Dispatcher(..., storage=TraceStorage)")
+        slow_sys = self.slow.system if self.slow is not None else None
+        out = []
+        for s in self.storage.iter(kind=None):
+            d = s.data
+            if d.get("kind") == "dispatch" and d.get("question") == self.question:
+                x = Dispatched.from_dict(d, self.system, slow_sys)
+                x.stored_id = s.id
+                out.append(("dispatch", x, None))
+            elif d.get("kind") == "pending" and (d.get("pending") or {}).get("question") == self.question \
+                    and d.get("issue") is not None:
+                out.append(("pending", Started.from_dict(d["issue"], self.system), {**d["pending"], "id": s.id}))
+        return out
+
+    def _rebuild_stream(self, drv, items):
+        """Feed a stream driver the recorded decisions → (mismatches, the "stream" events, unverified coins, decisions,
+        the drift flag latched after the last one)."""
+        p, q = drv.promise, self.question
+        bad, events, unverified, k, latched = [], [], 0, 0, None
+        issued = {}
+
+        def gate(n, res, keyed, rho_rec, prob_rec, sampled):
+            nonlocal unverified
+            r1 = res[q]
+            g = (r1.extra or {}).get("guarantee") or {}
+            if g.get("method") == p.method and g.get("value") is not None:
+                if g.get("state") != _json(p.state()):
+                    bad.append((n, "guard state", "the gate's recorded state is not the rebuilt one"))
+                p.observe(g["value"])
+            rho, prob = drv.before()
+            if rho != rho_rec or prob != prob_rec:
+                bad.append((n, "rate", f"recorded ρ {rho_rec} (probation {prob_rec}), rebuilt {rho} ({prob})"))
+            if keyed and not self.keyed:
+                unverified += 1
+            elif (self.coin(n, keyed=keyed) < rho) != sampled:
+                bad.append((n, "coin", f"recorded sampled={sampled}, the coin gives {not sampled}"))
+
+        for kind, x, extra in items:
+            if kind == "pending":
+                gate(x.n, x.res, x.keyed, x.rho, x.probation, x.sampled)
+                issued[extra.get("ticket")] = x
+                continue
+            d = x
+            k += 1
+            st = d.stream
+            if st is None:
+                bad.append((d.n, "stream", "a decision without the stream record"))
+                continue
+            sam = st.get("sample") or {}
+            sampled = bool(sam.get("sampled"))
+            if d.pending is None:
+                gate(d.n, d.s1, d.keyed, sam.get("rho"), sam.get("probation"), sampled)
+                prob = sam.get("probation")
+            else:
+                t = issued.pop(d.pending, None)
+                if t is None or t.n != d.n:
+                    bad.append((d.n, "ticket", f"the decision completes ticket {d.pending}, which was not issued "
+                                               "before it (or for another decision)"))
+                    continue
+                if (t.rho, t.probation, t.sampled) != (sam.get("rho"), sam.get("probation"), sampled):
+                    bad.append((d.n, "ticket", "the decision's rate, probation or coin is not its ticket's"))
+                prob = t.probation
+            r1 = d.s1[q]
+            would1 = r1.answer if r1.status != "abstain" else _would(r1, d.s1, q)
+            paid = d.action == "check" and d.reasons[:1] == [SAMPLE_REASON]
+            rec, ev, why = drv.after(**self._stream_inputs(d.action, paid, r1, would1, d.s2), sampled=sampled,
+                                     rho=sam.get("rho"), probation=prob)
+            latched = d.drift or why
+            rec = _json(rec)
+            for part in ("sample", "certificate", "detector"):
+                if rec.get(part) != st.get(part):
+                    bad.append((d.n, part, f"recorded {st.get(part)}, rebuilt {rec.get(part)}"))
+            events += [_json({**e, "question": q, "decision": d.n}) for e in ev]
+        return bad, events, unverified, k, latched
+
+    def resume(self):
+        """Continue from the store after a restart: a freshly built dispatcher (configured as before, the same
+        storage, nothing asked yet) reads its question's stored decisions and tickets in order → the number of the
+        last decision. Restored: the decision count and numbers, the spend, the counts per path, the slow path's mean
+        run (the expected cost), the drift flag of the last decision (and the one a detector's alarm latched after it),
+        and — with a stream certificate — the certificate, detector, rate and probation, rebuilt and compared as
+        `replay_stream` does (a mismatch raises ValueError: the store does not continue this dispatcher). Not restored:
+        a calibrate() policy, a DriftMonitor's state, a reset_drift() made after the last decision. Tickets issued
+        and not completed keep their numbers; complete them with their Started (solvi.experimental.stream.tickets).
+        Provisional (1.4)."""
+        if self.n:
+            raise ValueError("resume() continues a fresh dispatcher from its store: this one has decided already")
+        items = self._stored_items()
+        latched = None
+        if self._stream is not None:
+            bad, _, _, _, latched = self._rebuild_stream(self._stream, items)
+            if bad:
+                raise ValueError(f"the store does not continue this dispatcher: {bad[:3]}")
+        n, last = 0, None
+        for kind, x, _ in items:
+            n = max(n, x.n)
+            if kind != "dispatch":
+                continue
+            last = x
+            self.counts[x.by] = self.counts.get(x.by, 0) + 1
+            c2 = x.cost.get("s2") or Cost(0.0 if self.price is not None else None)
+            self.spent = self.spent + c2
+            if x.s2 is not None:
+                r = self._runs
+                r[0], r[2], r[3] = r[0] + 1, r[2] + c2.calls, r[3] + c2.ms
+                r[1] += c2.usd or 0.0
+                r[4] = r[4] or c2.usd is None
+        self.n = n
+        if last is not None:
+            self.drift = last.drift if self._stream is None else latched
+        return n
 
     def _needs_slow(self, sl):
         """Does a think on this slice run the slow path? Always before calibrate(); after it, only when the slice's
@@ -1187,6 +1348,9 @@ class Dispatcher:
             return None, "human"
         if action == "accept":
             return r1.answer, "s1"
+        if _oracle(th).get("lost"):                    # no verdict (an expired ticket): a person, whatever the action
+            reasons.append(th.why or "the oracle gave no verdict: a person decides")
+            return None, "human"
         from .catalog import Unknown
         if action == "think" and self.policy is not None:
             return self._calibrated(sl, r1, would1, th, reasons)
@@ -1529,6 +1693,13 @@ class Dispatcher:
         return {"decisions": self.n, "by": dict(self.counts), "spent": self.spent.to_dict(), "slow_runs": self._runs[0]}
 
 
+def _oracle(th):
+    """An oracle's verdict given outside the process: the "oracle" dict of a Thought's dict record, else {}."""
+    rec = getattr(th, "record", None)
+    o = rec.get("oracle") if isinstance(rec, dict) else None
+    return o if isinstance(o, dict) else {}
+
+
 def _json(x):
     """As stored: JSON data (tuples → lists)."""
     return json.loads(json.dumps(x))
@@ -1598,6 +1769,6 @@ def _vh(v):
 
 
 __all__ = ["AskPath", "Budget", "BudgetStop", "Cost", "Dispatched", "Dispatcher", "PATHS", "PROBATION_REASON",
-           "PredictableDrawWarning", "SAMPLE_REASON",
+           "PredictableDrawWarning", "SAMPLE_REASON", "Started",
            "RefinePath", "SearchPath", "SECRET_ENV", "SIGNALS", "SlowPath", "Thought", "cost_of", "price_of",
            "recorded_calls"]

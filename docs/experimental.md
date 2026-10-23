@@ -491,6 +491,35 @@ and the system report has one block (samples, free and paid, alarms, alone answe
 the deployed risk estimated on the sample). A control in the tests shows why the coin covers every decision:
 calibrating on the escalated decisions only (as kadi 0.1 did) loosens the threshold past the promise on every seed.
 
-- **Missing:** unmeasured: the stand against offline calibration (stage 4) has not run; the agent as labeller (tickets) and the learning loop of frozen versions are stage 3; a person's audit label does not yet replace the slow path's label
+Stage 3a makes an agent the oracle, over MCP: its verdicts on blind tickets are the slow path.
+
+```python
+from solvi.experimental.stream import AgentOracle, TicketDesk
+
+d = Dispatcher(system, AgentOracle(system), audit="adaptive", promise=sp, detector=det, secret=key, storage=store)
+desk = TicketDesk(d, ttl=3600)
+desk.decide(x)            # {"status": "decided", ...} or {"status": "needs_verdict", "ticket", "options", "input", ...}
+desk.resolve(ticket, "billing")                         # source="human" when a person gives the verdict
+```
+
+`solvi serve module:desk --mcp --agent-oracle` serves it as two MCP tools, `decide` and `resolve`. Every decision the
+slow path would take — an escalation, an audit drawn by the coin, a supervision or drift check — becomes a ticket that
+shows the question, all its options, the input as given, the question's text and the time left: no model guess, no
+probabilities, no reason, and an audit ticket is byte for byte the shape of an escalation one (the kind is kept only
+in the record). That is the second half of the sampling assumption: the label does not depend on whether the
+decision was sampled. A ticket is a hash-chained record (kind `pending`) written at issue with the decision begun
+(its number, coin, rate, System 1's response); the dispatch record is written when the verdict comes (`"pending":
+ticket`), and the stream sample records `label_source` ("s2" for the agent, "human" for a person) and `label_of`
+(the ticket's record). A restart rebuilds it all from the store: a new desk over a freshly built dispatcher resumes
+it (`Dispatcher.resume`: numbers, spend, certificate, detector, rate) and lists the open tickets. A ticket past its
+`ttl`, or given up (`expire`), gets a `pending_expired` record and its input goes to a person; on a sampled decision
+the missing label is a loss at every grid point where System 1 would have answered alone and a loss of 1 for the
+detector — the conservative direction for both under any missingness, so an agent that skips hard tickets only lowers
+its own coverage. A verdict after expiry, on an unknown ticket or a second time is refused; a label outside the
+options is refused and the ticket stays open. `replay_all()` and `replay_stream()` replay a store with tickets exactly
+(the gate, rate and coin where the ticket was issued, the sample where it was completed). Not built: the expired-share
+stop, repeated tickets for the oracle's own noise, several servers on one store, a free-text input.
+
+- **Missing:** unmeasured: the stand against offline calibration (stage 4) has not run; the learning loop of frozen versions is stage 3b; the expired-share stop (max_drop) and repeated tickets for the oracle's own noise are not built; a person's audit label does not yet replace the slow path's label
 - **Script:** none yet. **Deadline:** 1.2.
 - API: [solvi.experimental.stream](api/stream.md).
