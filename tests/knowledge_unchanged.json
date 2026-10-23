@@ -1,0 +1,1096 @@
+{
+ "disjoint-0": {
+  "counts": {
+   "active": 10,
+   "hypothesis": 3,
+   "retracted": 3
+  },
+  "fp": "7cb927d1c8183932",
+  "journal": "13022f2a168cc997",
+  "report": "d3af1ec5b2446bf7",
+  "snapshots": "a7888be15796d88c",
+  "statuses": {
+   "18e2124dfa4e8e77": "retracted",
+   "32847f4770d5ebbe": "hypothesis",
+   "394e089131a40e7a": "active",
+   "3ff7323e88144a9f": "active",
+   "6b32b6c85e78486f": "active",
+   "6deace8c63fc7f33": "retracted",
+   "84e3bd50a5686499": "active",
+   "a53ef98e2318350e": "active",
+   "a6c04818c59dcb76": "active",
+   "a92b7d655d3f7439": "active",
+   "ab30911e18773ff4": "active",
+   "bf8c126910c85d1e": "hypothesis",
+   "cc837e60ec1ef893": "retracted",
+   "dc7dd6a177dd027f": "active",
+   "e2a58f4c099e3854": "active",
+   "ef7b166c10eae69c": "hypothesis"
+  }
+ },
+ "disjoint-1": {
+  "counts": {
+   "active": 12,
+   "hypothesis": 1,
+   "retracted": 4
+  },
+  "fp": "8352918a2cfee3ca",
+  "journal": "ef098c870a3fae5b",
+  "report": "f5de60f6f8adc938",
+  "snapshots": "ba4c1e076f725271",
+  "statuses": {
+   "18e2124dfa4e8e77": "active",
+   "3145811c7507f56a": "active",
+   "32847f4770d5ebbe": "retracted",
+   "394e089131a40e7a": "active",
+   "3ff7323e88144a9f": "hypothesis",
+   "476f1fa2d4e395f7": "active",
+   "498e96667ec0d5a6": "active",
+   "5f656ab4c76a5f02": "active",
+   "7cc8d9f9978eb72e": "active",
+   "9a7b54ecedb93e70": "active",
+   "a53ef98e2318350e": "active",
+   "a6c04818c59dcb76": "retracted",
+   "b5fac2cc1a7d8ae9": "active",
+   "bdd87a328756faa7": "retracted",
+   "bf8c126910c85d1e": "active",
+   "d841c4a0c0b2dfb4": "active",
+   "ef7b166c10eae69c": "retracted"
+  }
+ },
+ "disjoint-2": {
+  "counts": {
+   "active": 11,
+   "hypothesis": 2,
+   "retracted": 2
+  },
+  "fp": "b1d286b13c253aa4",
+  "journal": "6e2fcb3416871528",
+  "report": "79cc62f7f56a588a",
+  "snapshots": "58c8e05997af7d5c",
+  "statuses": {
+   "18e2124dfa4e8e77": "hypothesis",
+   "1b65680481923039": "retracted",
+   "32847f4770d5ebbe": "active",
+   "3ff7323e88144a9f": "hypothesis",
+   "4890742ed971e57d": "active",
+   "498e96667ec0d5a6": "active",
+   "510afcc5f236f8bf": "active",
+   "60c64157c65d7f98": "active",
+   "6b2460db809d8730": "active",
+   "7012e0c89aed988e": "active",
+   "bddb3d30a24622da": "active",
+   "cdf49ca7c17a5c3f": "active",
+   "d70942b9b0ec75d7": "active",
+   "df868c58770f287f": "active",
+   "f954c807455cbdc2": "retracted"
+  }
+ },
+ "disjoint-3": {
+  "counts": {
+   "active": 10,
+   "retracted": 3
+  },
+  "fp": "67509c529dbad38d",
+  "journal": "855a618991acf729",
+  "report": "a783380e3da8b0cb",
+  "snapshots": "38ad365aa2d951d9",
+  "statuses": {
+   "18e2124dfa4e8e77": "retracted",
+   "22be522955a7e30d": "active",
+   "32847f4770d5ebbe": "retracted",
+   "3ff7323e88144a9f": "retracted",
+   "43ff182398d6ddaf": "active",
+   "6b32b6c85e78486f": "active",
+   "84e3bd50a5686499": "active",
+   "a500b7c8e1512cdd": "active",
+   "a53ef98e2318350e": "active",
+   "b5fac2cc1a7d8ae9": "active",
+   "c5dd6d4685ea8d4f": "active",
+   "df868c58770f287f": "active",
+   "f49ccfa492e3e54d": "active"
+  }
+ },
+ "disjoint-4": {
+  "counts": {
+   "active": 7,
+   "hypothesis": 1,
+   "retracted": 3
+  },
+  "fp": "0e334d4806f3ac3e",
+  "journal": "6dce2f03b47cd3d8",
+  "report": "ff7f497b42c3a50d",
+  "snapshots": "bc5f1787f757a220",
+  "statuses": {
+   "10e8b722079a55cd": "active",
+   "18e2124dfa4e8e77": "active",
+   "3145811c7507f56a": "active",
+   "32847f4770d5ebbe": "retracted",
+   "3ff7323e88144a9f": "hypothesis",
+   "9eebb43680edbdb5": "retracted",
+   "a53ef98e2318350e": "active",
+   "af96235f68e5fc30": "active",
+   "bf8c126910c85d1e": "active",
+   "c1d5a068990e52af": "retracted",
+   "cdf49ca7c17a5c3f": "active"
+  }
+ },
+ "disjoint-5": {
+  "counts": {
+   "active": 9,
+   "retracted": 3
+  },
+  "fp": "5f66a318a965a9c6",
+  "journal": "1c85060166dc7379",
+  "report": "ea859275caf9be51",
+  "snapshots": "2984a433525eff7c",
+  "statuses": {
+   "18e2124dfa4e8e77": "active",
+   "32847f4770d5ebbe": "active",
+   "3ff7323e88144a9f": "active",
+   "63c1e005ea41af9d": "active",
+   "7012e0c89aed988e": "retracted",
+   "a500b7c8e1512cdd": "active",
+   "a53ef98e2318350e": "active",
+   "a6c04818c59dcb76": "active",
+   "bf8c126910c85d1e": "retracted",
+   "d70942b9b0ec75d7": "active",
+   "ef7b166c10eae69c": "active",
+   "efff95c7e3396c86": "retracted"
+  }
+ },
+ "disjoint-6": {
+  "counts": {
+   "active": 3,
+   "hypothesis": 2,
+   "retracted": 3
+  },
+  "fp": "05aed76fa49ed1b0",
+  "journal": "de4d549f992615b6",
+  "report": "e902673395278293",
+  "snapshots": "559e80b28fc86e6e",
+  "statuses": {
+   "18e2124dfa4e8e77": "hypothesis",
+   "32847f4770d5ebbe": "hypothesis",
+   "3ff7323e88144a9f": "retracted",
+   "a500b7c8e1512cdd": "retracted",
+   "a53ef98e2318350e": "retracted",
+   "bddb3d30a24622da": "active",
+   "dc7dd6a177dd027f": "active",
+   "f954c807455cbdc2": "active"
+  }
+ },
+ "disjoint-7": {
+  "counts": {
+   "active": 17,
+   "hypothesis": 1,
+   "retracted": 4
+  },
+  "fp": "95123ae378ab9f54",
+  "journal": "87c4602a37e4fa51",
+  "report": "8d72ea37321ec4a3",
+  "snapshots": "1614a385d70e2a48",
+  "statuses": {
+   "13743e08269f2966": "active",
+   "18e2124dfa4e8e77": "active",
+   "32847f4770d5ebbe": "active",
+   "3e2311f58765b57a": "active",
+   "3ff7323e88144a9f": "retracted",
+   "4890742ed971e57d": "hypothesis",
+   "5dc92dd73f07f71a": "active",
+   "60c64157c65d7f98": "active",
+   "6b32b6c85e78486f": "active",
+   "6deace8c63fc7f33": "retracted",
+   "6fe6a23da60c227e": "active",
+   "8622d9a39942e50e": "active",
+   "a53ef98e2318350e": "retracted",
+   "bddb3d30a24622da": "active",
+   "c5dd6d4685ea8d4f": "active",
+   "c76e2b979fb16112": "retracted",
+   "cc837e60ec1ef893": "active",
+   "d94e92320fe29bc9": "active",
+   "e2a58f4c099e3854": "active",
+   "efff95c7e3396c86": "active",
+   "f954c807455cbdc2": "active",
+   "fff745f5a61ac1ca": "active"
+  }
+ },
+ "disjoint-8": {
+  "counts": {
+   "active": 15,
+   "hypothesis": 1,
+   "retracted": 1
+  },
+  "fp": "c26cbe108f95d43b",
+  "journal": "5a1ca843bd8eeabe",
+  "report": "0c9d9aef24e39549",
+  "snapshots": "42ca2be128085d21",
+  "statuses": {
+   "12da5d9773d1ca9d": "active",
+   "18e2124dfa4e8e77": "hypothesis",
+   "32847f4770d5ebbe": "active",
+   "3c4a739a173ff927": "active",
+   "3e2311f58765b57a": "active",
+   "3ff7323e88144a9f": "active",
+   "5b92f845f7d67f58": "active",
+   "60c64157c65d7f98": "active",
+   "7e6253a689e1d4d3": "retracted",
+   "a500b7c8e1512cdd": "active",
+   "a53ef98e2318350e": "active",
+   "bb4429f730700152": "active",
+   "bf8c126910c85d1e": "active",
+   "d1465445f1582c28": "active",
+   "df868c58770f287f": "active",
+   "e642f0d500597439": "active",
+   "efff95c7e3396c86": "active"
+  }
+ },
+ "disjoint-9": {
+  "counts": {
+   "active": 6,
+   "hypothesis": 1,
+   "retracted": 2
+  },
+  "fp": "5accdda8330f71c4",
+  "journal": "d1918339ad54859a",
+  "report": "2a613e779c5c9d5d",
+  "snapshots": "4614695979542af4",
+  "statuses": {
+   "18e2124dfa4e8e77": "retracted",
+   "32847f4770d5ebbe": "hypothesis",
+   "3ff7323e88144a9f": "retracted",
+   "4890742ed971e57d": "active",
+   "498e96667ec0d5a6": "active",
+   "6b32b6c85e78486f": "active",
+   "a53ef98e2318350e": "active",
+   "bdd87a328756faa7": "active",
+   "e642f0d500597439": "active"
+  }
+ },
+ "plain-0": {
+  "counts": {
+   "active": 4,
+   "refuted": 1,
+   "retracted": 6
+  },
+  "fp": "d7cc3b6a3de449a8",
+  "journal": "4d6b904090fd8a34",
+  "report": "4d6882a895b9950f",
+  "snapshots": "c7f2b8798ef53253",
+  "statuses": {
+   "18e2124dfa4e8e77": "active",
+   "32847f4770d5ebbe": "active",
+   "3ff7323e88144a9f": "active",
+   "4e107d949946b5c4": "refuted",
+   "6ae9b82db2872da8": "retracted",
+   "6b32b6c85e78486f": "active",
+   "a53ef98e2318350e": "retracted",
+   "a56ad7f3acf8a062": "retracted",
+   "a6c04818c59dcb76": "retracted",
+   "a92b7d655d3f7439": "retracted",
+   "cdf49ca7c17a5c3f": "retracted"
+  }
+ },
+ "plain-1": {
+  "counts": {
+   "retracted": 5
+  },
+  "fp": "eeb85c2675888473",
+  "journal": "037751356862e3d3",
+  "report": "8aca0a3e69daa8b9",
+  "snapshots": "f781f4b23d524c50",
+  "statuses": {
+   "a56ad7f3acf8a062": "retracted",
+   "a6c04818c59dcb76": "retracted",
+   "a92b7d655d3f7439": "retracted",
+   "cdf49ca7c17a5c3f": "retracted",
+   "e5277e2a44cd85d8": "retracted"
+  }
+ },
+ "plain-10": {
+  "counts": {
+   "active": 2,
+   "retracted": 6
+  },
+  "fp": "cbc75fe56415bf7c",
+  "journal": "5644e330e80d104e",
+  "report": "7b6224367e634cc3",
+  "snapshots": "741256ea0b9fb3ba",
+  "statuses": {
+   "395db473cfcf9a03": "retracted",
+   "3b8126c08e8a666d": "retracted",
+   "3ff7323e88144a9f": "retracted",
+   "a53ef98e2318350e": "retracted",
+   "a80373ad19b17f9e": "retracted",
+   "a92b7d655d3f7439": "active",
+   "bb4429f730700152": "retracted",
+   "cdf49ca7c17a5c3f": "active"
+  }
+ },
+ "plain-11": {
+  "counts": {
+   "active": 1,
+   "hypothesis": 1,
+   "retracted": 5
+  },
+  "fp": "925e9e4ed1a5700e",
+  "journal": "54d08f6ba371fd7d",
+  "report": "ef79330cf2a6a9c3",
+  "snapshots": "5076a82f33843a7e",
+  "statuses": {
+   "09a5355708135c4a": "retracted",
+   "18e2124dfa4e8e77": "active",
+   "32847f4770d5ebbe": "retracted",
+   "3ff7323e88144a9f": "hypothesis",
+   "a6c04818c59dcb76": "retracted",
+   "a92b7d655d3f7439": "retracted",
+   "d1c3207e358b6dc6": "retracted"
+  }
+ },
+ "plain-12": {
+  "counts": {
+   "active": 2,
+   "hypothesis": 1,
+   "retracted": 5
+  },
+  "fp": "0bc68f0a3f8f47e2",
+  "journal": "4544890902ba8197",
+  "report": "4e41b758b6406323",
+  "snapshots": "c0c6b7d0e89723ec",
+  "statuses": {
+   "09a5355708135c4a": "retracted",
+   "32847f4770d5ebbe": "retracted",
+   "34411e8658fe6a2a": "retracted",
+   "395db473cfcf9a03": "active",
+   "6b32b6c85e78486f": "retracted",
+   "a92b7d655d3f7439": "active",
+   "bb4429f730700152": "hypothesis",
+   "d1c3207e358b6dc6": "retracted"
+  }
+ },
+ "plain-13": {
+  "counts": {
+   "active": 1,
+   "retracted": 4
+  },
+  "fp": "2f60894c0ac3f5ac",
+  "journal": "ba1ecf2b622b950b",
+  "report": "0246629a4cc1a462",
+  "snapshots": "217dbd341b925e41",
+  "statuses": {
+   "09a5355708135c4a": "active",
+   "3ff7323e88144a9f": "retracted",
+   "cdf49ca7c17a5c3f": "retracted",
+   "d1c3207e358b6dc6": "retracted",
+   "e5277e2a44cd85d8": "retracted"
+  }
+ },
+ "plain-14": {
+  "counts": {
+   "active": 2,
+   "retracted": 6
+  },
+  "fp": "ae9b9f1d3f8cd93f",
+  "journal": "1a2b3a43fa221d2e",
+  "report": "2a2b64a4b54b3268",
+  "snapshots": "2ba16eaa7c48f14d",
+  "statuses": {
+   "18e2124dfa4e8e77": "retracted",
+   "32847f4770d5ebbe": "retracted",
+   "4e107d949946b5c4": "retracted",
+   "6ae9b82db2872da8": "active",
+   "a53ef98e2318350e": "active",
+   "a6c04818c59dcb76": "retracted",
+   "a92b7d655d3f7439": "retracted",
+   "bb4429f730700152": "retracted"
+  }
+ },
+ "plain-15": {
+  "counts": {
+   "active": 1,
+   "expired": 1,
+   "hypothesis": 3,
+   "retracted": 7
+  },
+  "fp": "12fb15db14304725",
+  "journal": "9ab8e423ae52b0d2",
+  "report": "05c81019fdf490d4",
+  "snapshots": "907626afefc37db4",
+  "statuses": {
+   "18e2124dfa4e8e77": "retracted",
+   "1e26fc55f32951c5": "retracted",
+   "395db473cfcf9a03": "retracted",
+   "3b8126c08e8a666d": "expired",
+   "6b32b6c85e78486f": "hypothesis",
+   "7edd7a8140c2cdad": "retracted",
+   "a6c04818c59dcb76": "retracted",
+   "a80373ad19b17f9e": "retracted",
+   "a92b7d655d3f7439": "hypothesis",
+   "bb4429f730700152": "hypothesis",
+   "cdf49ca7c17a5c3f": "active",
+   "d1c3207e358b6dc6": "retracted"
+  }
+ },
+ "plain-16": {
+  "counts": {
+   "active": 3,
+   "refuted": 1,
+   "retracted": 6
+  },
+  "fp": "c838a58029bb84ed",
+  "journal": "4c8970fca6d63489",
+  "report": "961abfa42b590621",
+  "snapshots": "da972f3f7db8fff0",
+  "statuses": {
+   "18e2124dfa4e8e77": "retracted",
+   "34411e8658fe6a2a": "retracted",
+   "395db473cfcf9a03": "retracted",
+   "6ae9b82db2872da8": "retracted",
+   "6b32b6c85e78486f": "active",
+   "a53ef98e2318350e": "retracted",
+   "a6c04818c59dcb76": "active",
+   "a92b7d655d3f7439": "retracted",
+   "bb4429f730700152": "active",
+   "cdf49ca7c17a5c3f": "refuted"
+  }
+ },
+ "plain-17": {
+  "counts": {
+   "active": 2,
+   "hypothesis": 2,
+   "refuted": 2,
+   "retracted": 1
+  },
+  "fp": "e575e84c630083cd",
+  "journal": "e56857c796dc9932",
+  "report": "b3ca81a2c09a0c4f",
+  "snapshots": "d4ff133438875432",
+  "statuses": {
+   "18e2124dfa4e8e77": "hypothesis",
+   "395db473cfcf9a03": "refuted",
+   "6b32b6c85e78486f": "hypothesis",
+   "a53ef98e2318350e": "active",
+   "a56ad7f3acf8a062": "refuted",
+   "a6c04818c59dcb76": "retracted",
+   "bb4429f730700152": "active"
+  }
+ },
+ "plain-18": {
+  "counts": {
+   "active": 1,
+   "hypothesis": 1,
+   "retracted": 3
+  },
+  "fp": "4ab407b15e538441",
+  "journal": "0e24d06f005c00d8",
+  "report": "4105bab00aa8f8ec",
+  "snapshots": "aafaad383f0838e3",
+  "statuses": {
+   "18e2124dfa4e8e77": "hypothesis",
+   "3ff7323e88144a9f": "active",
+   "a53ef98e2318350e": "retracted",
+   "cdf49ca7c17a5c3f": "retracted",
+   "d1c3207e358b6dc6": "retracted"
+  }
+ },
+ "plain-19": {
+  "counts": {
+   "active": 1,
+   "expired": 1,
+   "hypothesis": 2,
+   "retracted": 5
+  },
+  "fp": "c8c4ba279255801d",
+  "journal": "93693afd792eafcc",
+  "report": "d1e0f24e7b1d924e",
+  "snapshots": "15bff0be0d5f66a5",
+  "statuses": {
+   "18e2124dfa4e8e77": "hypothesis",
+   "1f54242f49cbd97e": "retracted",
+   "32847f4770d5ebbe": "retracted",
+   "3ff7323e88144a9f": "active",
+   "a53ef98e2318350e": "retracted",
+   "a56ad7f3acf8a062": "expired",
+   "a6c04818c59dcb76": "hypothesis",
+   "bb4429f730700152": "retracted",
+   "d1c3207e358b6dc6": "retracted"
+  }
+ },
+ "plain-2": {
+  "counts": {
+   "active": 3,
+   "retracted": 7
+  },
+  "fp": "88db326aef867891",
+  "journal": "08f0e5d30d61a750",
+  "report": "c77cdfd1c90db016",
+  "snapshots": "00326fc3643c19dc",
+  "statuses": {
+   "18e2124dfa4e8e77": "retracted",
+   "3b8126c08e8a666d": "retracted",
+   "3ff7323e88144a9f": "retracted",
+   "a53ef98e2318350e": "retracted",
+   "a6c04818c59dcb76": "retracted",
+   "a80373ad19b17f9e": "active",
+   "a92b7d655d3f7439": "retracted",
+   "bb4429f730700152": "retracted",
+   "cdf49ca7c17a5c3f": "active",
+   "e5277e2a44cd85d8": "active"
+  }
+ },
+ "plain-20": {
+  "counts": {
+   "active": 1,
+   "hypothesis": 1,
+   "retracted": 10
+  },
+  "fp": "1e8217e831242bc4",
+  "journal": "e95ca82f406009b5",
+  "report": "f39d520071032953",
+  "snapshots": "a3d078011179ce21",
+  "statuses": {
+   "18e2124dfa4e8e77": "retracted",
+   "1e26fc55f32951c5": "retracted",
+   "395db473cfcf9a03": "retracted",
+   "3b8126c08e8a666d": "retracted",
+   "6b32b6c85e78486f": "retracted",
+   "a53ef98e2318350e": "active",
+   "a56ad7f3acf8a062": "retracted",
+   "a6c04818c59dcb76": "retracted",
+   "bb4429f730700152": "retracted",
+   "cdf49ca7c17a5c3f": "retracted",
+   "d1c3207e358b6dc6": "retracted",
+   "e5277e2a44cd85d8": "hypothesis"
+  }
+ },
+ "plain-21": {
+  "counts": {
+   "active": 1,
+   "disputed": 2,
+   "retracted": 3
+  },
+  "fp": "4f59c3727e252be6",
+  "journal": "622688bc85dafeb1",
+  "report": "063aa868e9add5eb",
+  "snapshots": "cd020b2447d86502",
+  "statuses": {
+   "32847f4770d5ebbe": "retracted",
+   "3ff7323e88144a9f": "disputed",
+   "a6c04818c59dcb76": "active",
+   "a92b7d655d3f7439": "retracted",
+   "bb4429f730700152": "retracted",
+   "d1c3207e358b6dc6": "disputed"
+  }
+ },
+ "plain-22": {
+  "counts": {
+   "active": 2,
+   "disputed": 2,
+   "hypothesis": 1,
+   "refuted": 1,
+   "retracted": 6
+  },
+  "fp": "43593e7700a9e502",
+  "journal": "0bc056cfdba503eb",
+  "report": "10c22a23199d422e",
+  "snapshots": "79e6bf6c87d56db3",
+  "statuses": {
+   "18e2124dfa4e8e77": "disputed",
+   "1c30e46760f42a34": "retracted",
+   "2168ddc4be78ebbf": "retracted",
+   "32847f4770d5ebbe": "retracted",
+   "34411e8658fe6a2a": "retracted",
+   "6b32b6c85e78486f": "hypothesis",
+   "a53ef98e2318350e": "active",
+   "a6c04818c59dcb76": "disputed",
+   "a92b7d655d3f7439": "retracted",
+   "bb4429f730700152": "retracted",
+   "cdf49ca7c17a5c3f": "active",
+   "e5277e2a44cd85d8": "refuted"
+  }
+ },
+ "plain-23": {
+  "counts": {
+   "active": 2,
+   "disputed": 2,
+   "refuted": 2,
+   "retracted": 5
+  },
+  "fp": "e9fce093dd4c4e8a",
+  "journal": "9d837d2cbedc4774",
+  "report": "6c7e92d465d3c511",
+  "snapshots": "d6d67490872e78d8",
+  "statuses": {
+   "18e2124dfa4e8e77": "active",
+   "2168ddc4be78ebbf": "disputed",
+   "32847f4770d5ebbe": "retracted",
+   "395db473cfcf9a03": "retracted",
+   "3ff7323e88144a9f": "retracted",
+   "6b32b6c85e78486f": "retracted",
+   "a53ef98e2318350e": "active",
+   "a6c04818c59dcb76": "refuted",
+   "a92b7d655d3f7439": "retracted",
+   "bb4429f730700152": "disputed",
+   "cdf49ca7c17a5c3f": "refuted"
+  }
+ },
+ "plain-24": {
+  "counts": {
+   "active": 2,
+   "retracted": 5
+  },
+  "fp": "fbbde6129ba58358",
+  "journal": "eac8bf670340dba6",
+  "report": "2af97c085ef49f15",
+  "snapshots": "12e1aedee5fc6df2",
+  "statuses": {
+   "395db473cfcf9a03": "retracted",
+   "3ff7323e88144a9f": "active",
+   "a53ef98e2318350e": "active",
+   "a92b7d655d3f7439": "retracted",
+   "bb4429f730700152": "retracted",
+   "d1c3207e358b6dc6": "retracted",
+   "e5277e2a44cd85d8": "retracted"
+  }
+ },
+ "plain-25": {
+  "counts": {
+   "active": 3,
+   "hypothesis": 1,
+   "retracted": 4
+  },
+  "fp": "6cbb290a3874cb29",
+  "journal": "6297c7939f0a599d",
+  "report": "af0fb5be3febe1a1",
+  "snapshots": "3e69afe2a0262a89",
+  "statuses": {
+   "18e2124dfa4e8e77": "retracted",
+   "1c30e46760f42a34": "retracted",
+   "3ff7323e88144a9f": "active",
+   "6b32b6c85e78486f": "retracted",
+   "a6c04818c59dcb76": "active",
+   "a92b7d655d3f7439": "hypothesis",
+   "bb4429f730700152": "active",
+   "d1c3207e358b6dc6": "retracted"
+  }
+ },
+ "plain-26": {
+  "counts": {
+   "retracted": 6
+  },
+  "fp": "eeb85c2675888473",
+  "journal": "5f7b9428917698cf",
+  "report": "658881c06305d733",
+  "snapshots": "f1b1d896578418ea",
+  "statuses": {
+   "18e2124dfa4e8e77": "retracted",
+   "1f54242f49cbd97e": "retracted",
+   "395db473cfcf9a03": "retracted",
+   "3ff7323e88144a9f": "retracted",
+   "a6c04818c59dcb76": "retracted",
+   "d1c3207e358b6dc6": "retracted"
+  }
+ },
+ "plain-27": {
+  "counts": {
+   "active": 3,
+   "retracted": 4
+  },
+  "fp": "84d506a809d8ffae",
+  "journal": "967c9e0e9d8c6d1b",
+  "report": "e5d4dabd204e8d63",
+  "snapshots": "21e6a282f8d3233e",
+  "statuses": {
+   "1e26fc55f32951c5": "active",
+   "32847f4770d5ebbe": "active",
+   "3ff7323e88144a9f": "active",
+   "a53ef98e2318350e": "retracted",
+   "a6c04818c59dcb76": "retracted",
+   "cdf49ca7c17a5c3f": "retracted",
+   "e5277e2a44cd85d8": "retracted"
+  }
+ },
+ "plain-28": {
+  "counts": {
+   "active": 1,
+   "retracted": 2
+  },
+  "fp": "510d1d48ab7a104e",
+  "journal": "e5e52a9a7b4a5cb4",
+  "report": "34b7e9cdd4a970af",
+  "snapshots": "d602e0e14d45e710",
+  "statuses": {
+   "6b32b6c85e78486f": "retracted",
+   "a56ad7f3acf8a062": "active",
+   "d1c3207e358b6dc6": "retracted"
+  }
+ },
+ "plain-29": {
+  "counts": {
+   "active": 4,
+   "refuted": 1,
+   "retracted": 3
+  },
+  "fp": "605a0b98c8a91987",
+  "journal": "5aaf3484f6b1a993",
+  "report": "5880964d130e9711",
+  "snapshots": "b6ecf69d600289c3",
+  "statuses": {
+   "09a5355708135c4a": "retracted",
+   "18e2124dfa4e8e77": "refuted",
+   "32847f4770d5ebbe": "active",
+   "395db473cfcf9a03": "active",
+   "3ff7323e88144a9f": "active",
+   "4e107d949946b5c4": "retracted",
+   "a6c04818c59dcb76": "active",
+   "d1c3207e358b6dc6": "retracted"
+  }
+ },
+ "plain-3": {
+  "counts": {
+   "active": 1,
+   "retracted": 3
+  },
+  "fp": "c4ad5f5c532e7401",
+  "journal": "b74f12d17d4622de",
+  "report": "25ffc3a5bbca2c5e",
+  "snapshots": "7a0dfd86f00df77d",
+  "statuses": {
+   "3ff7323e88144a9f": "active",
+   "a92b7d655d3f7439": "retracted",
+   "d1c3207e358b6dc6": "retracted",
+   "e5277e2a44cd85d8": "retracted"
+  }
+ },
+ "plain-30": {
+  "counts": {
+   "active": 2,
+   "expired": 1,
+   "hypothesis": 1,
+   "retracted": 6
+  },
+  "fp": "ec6d6d6bf31ded2e",
+  "journal": "5f2ea9e4ec2259c2",
+  "report": "8b1f6bdc7c17ab72",
+  "snapshots": "4cf6ca7a3ff0fc50",
+  "statuses": {
+   "18e2124dfa4e8e77": "retracted",
+   "3ff7323e88144a9f": "retracted",
+   "6ae9b82db2872da8": "active",
+   "6b32b6c85e78486f": "retracted",
+   "a53ef98e2318350e": "hypothesis",
+   "a56ad7f3acf8a062": "expired",
+   "a80373ad19b17f9e": "active",
+   "a92b7d655d3f7439": "retracted",
+   "cdf49ca7c17a5c3f": "retracted",
+   "e5277e2a44cd85d8": "retracted"
+  }
+ },
+ "plain-31": {
+  "counts": {
+   "active": 3,
+   "refuted": 1,
+   "retracted": 3
+  },
+  "fp": "47910d45c663673e",
+  "journal": "29d1f7dd7b162ac5",
+  "report": "482323a7a260a684",
+  "snapshots": "1e6d3a6f0ae1e13b",
+  "statuses": {
+   "1f54242f49cbd97e": "refuted",
+   "2168ddc4be78ebbf": "retracted",
+   "32847f4770d5ebbe": "retracted",
+   "3ff7323e88144a9f": "active",
+   "a53ef98e2318350e": "active",
+   "a6c04818c59dcb76": "active",
+   "e5277e2a44cd85d8": "retracted"
+  }
+ },
+ "plain-32": {
+  "counts": {
+   "active": 2,
+   "retracted": 4
+  },
+  "fp": "a1add4fa19038865",
+  "journal": "5109f6f29ca6595e",
+  "report": "43816608291f9a9f",
+  "snapshots": "601a0882c7278000",
+  "statuses": {
+   "18e2124dfa4e8e77": "active",
+   "32847f4770d5ebbe": "active",
+   "3ff7323e88144a9f": "retracted",
+   "6b32b6c85e78486f": "retracted",
+   "7edd7a8140c2cdad": "retracted",
+   "a6c04818c59dcb76": "retracted"
+  }
+ },
+ "plain-33": {
+  "counts": {
+   "active": 1,
+   "disputed": 2,
+   "hypothesis": 4,
+   "refuted": 2,
+   "retracted": 1
+  },
+  "fp": "9037da23cce05502",
+  "journal": "818320ab31278e4d",
+  "report": "2cb10cf2f6051fe7",
+  "snapshots": "9a595a88b7f47e43",
+  "statuses": {
+   "18e2124dfa4e8e77": "disputed",
+   "2168ddc4be78ebbf": "active",
+   "32847f4770d5ebbe": "retracted",
+   "395db473cfcf9a03": "refuted",
+   "3b8126c08e8a666d": "disputed",
+   "6b32b6c85e78486f": "hypothesis",
+   "a53ef98e2318350e": "hypothesis",
+   "a6c04818c59dcb76": "hypothesis",
+   "a92b7d655d3f7439": "hypothesis",
+   "cdf49ca7c17a5c3f": "refuted"
+  }
+ },
+ "plain-34": {
+  "counts": {
+   "active": 2,
+   "retracted": 5
+  },
+  "fp": "5ac8a922053e6f00",
+  "journal": "b203a48a4841216a",
+  "report": "ee8c36b97aa4db97",
+  "snapshots": "6dbfe524c7ca683f",
+  "statuses": {
+   "18e2124dfa4e8e77": "retracted",
+   "1f54242f49cbd97e": "active",
+   "395db473cfcf9a03": "retracted",
+   "6b32b6c85e78486f": "retracted",
+   "a53ef98e2318350e": "retracted",
+   "a6c04818c59dcb76": "active",
+   "e5277e2a44cd85d8": "retracted"
+  }
+ },
+ "plain-35": {
+  "counts": {
+   "active": 2,
+   "disputed": 2,
+   "retracted": 4
+  },
+  "fp": "d9bf1addb4cfc969",
+  "journal": "aa4be1558953e2c1",
+  "report": "c76b1a288548e265",
+  "snapshots": "6785ddc4e32cc0dc",
+  "statuses": {
+   "18e2124dfa4e8e77": "disputed",
+   "2168ddc4be78ebbf": "retracted",
+   "34411e8658fe6a2a": "retracted",
+   "4e107d949946b5c4": "disputed",
+   "6ae9b82db2872da8": "active",
+   "7edd7a8140c2cdad": "active",
+   "a92b7d655d3f7439": "retracted",
+   "d1c3207e358b6dc6": "retracted"
+  }
+ },
+ "plain-36": {
+  "counts": {
+   "retracted": 5
+  },
+  "fp": "eeb85c2675888473",
+  "journal": "b710985f7b9b90c2",
+  "report": "e01c6595810d9894",
+  "snapshots": "53ad8127a2e9468e",
+  "statuses": {
+   "18e2124dfa4e8e77": "retracted",
+   "32847f4770d5ebbe": "retracted",
+   "395db473cfcf9a03": "retracted",
+   "a92b7d655d3f7439": "retracted",
+   "bb4429f730700152": "retracted"
+  }
+ },
+ "plain-37": {
+  "counts": {
+   "active": 2,
+   "disputed": 2,
+   "hypothesis": 1,
+   "retracted": 3
+  },
+  "fp": "b9933058263c4b9f",
+  "journal": "461973d88ac4f7e4",
+  "report": "473fd1a86cfad082",
+  "snapshots": "b91bb0442ef07d95",
+  "statuses": {
+   "09a5355708135c4a": "retracted",
+   "18e2124dfa4e8e77": "active",
+   "32847f4770d5ebbe": "disputed",
+   "a6c04818c59dcb76": "retracted",
+   "a80373ad19b17f9e": "hypothesis",
+   "a92b7d655d3f7439": "active",
+   "bb4429f730700152": "retracted",
+   "cdf49ca7c17a5c3f": "disputed"
+  }
+ },
+ "plain-38": {
+  "counts": {
+   "active": 3,
+   "hypothesis": 1,
+   "retracted": 5
+  },
+  "fp": "ec921ee42fe6afe5",
+  "journal": "18c44857230ce0ff",
+  "report": "76c3da6db834f003",
+  "snapshots": "a621cfa349390d59",
+  "statuses": {
+   "09a5355708135c4a": "retracted",
+   "32847f4770d5ebbe": "active",
+   "3ff7323e88144a9f": "retracted",
+   "4e107d949946b5c4": "retracted",
+   "6b32b6c85e78486f": "active",
+   "7edd7a8140c2cdad": "active",
+   "a6c04818c59dcb76": "retracted",
+   "cdf49ca7c17a5c3f": "retracted",
+   "d1c3207e358b6dc6": "hypothesis"
+  }
+ },
+ "plain-39": {
+  "counts": {
+   "active": 1,
+   "hypothesis": 1,
+   "retracted": 1
+  },
+  "fp": "e1acdacf6954e019",
+  "journal": "3966129b8352115f",
+  "report": "0a85e595d1c32fe1",
+  "snapshots": "09ade5838f3cbd4c",
+  "statuses": {
+   "18e2124dfa4e8e77": "retracted",
+   "32847f4770d5ebbe": "active",
+   "a6c04818c59dcb76": "hypothesis"
+  }
+ },
+ "plain-4": {
+  "counts": {
+   "active": 1,
+   "disputed": 4,
+   "expired": 1,
+   "retracted": 3
+  },
+  "fp": "d86f323d6400bd23",
+  "journal": "8baad3669710ebaa",
+  "report": "07482eab8380266d",
+  "snapshots": "fde35650b485990a",
+  "statuses": {
+   "1e26fc55f32951c5": "disputed",
+   "1f54242f49cbd97e": "expired",
+   "32847f4770d5ebbe": "retracted",
+   "3b8126c08e8a666d": "disputed",
+   "6b32b6c85e78486f": "disputed",
+   "a53ef98e2318350e": "disputed",
+   "a6c04818c59dcb76": "retracted",
+   "a92b7d655d3f7439": "retracted",
+   "bb4429f730700152": "active"
+  }
+ },
+ "plain-5": {
+  "counts": {
+   "active": 4,
+   "disputed": 2,
+   "retracted": 4
+  },
+  "fp": "2ed93d374276d06e",
+  "journal": "6c2a24c6404631f3",
+  "report": "7abe9a0449e53f54",
+  "snapshots": "808bd6db531a6d5e",
+  "statuses": {
+   "18e2124dfa4e8e77": "active",
+   "2168ddc4be78ebbf": "retracted",
+   "32847f4770d5ebbe": "retracted",
+   "34411e8658fe6a2a": "retracted",
+   "395db473cfcf9a03": "disputed",
+   "6ae9b82db2872da8": "active",
+   "6b32b6c85e78486f": "disputed",
+   "a53ef98e2318350e": "retracted",
+   "a92b7d655d3f7439": "active",
+   "bb4429f730700152": "active"
+  }
+ },
+ "plain-6": {
+  "counts": {
+   "active": 3,
+   "hypothesis": 3,
+   "retracted": 3
+  },
+  "fp": "dda9fb084633289d",
+  "journal": "b1042204af8f4b1d",
+  "report": "fd3f0887918fb5f1",
+  "snapshots": "23fd66ed89cf3549",
+  "statuses": {
+   "18e2124dfa4e8e77": "retracted",
+   "32847f4770d5ebbe": "hypothesis",
+   "395db473cfcf9a03": "active",
+   "6b32b6c85e78486f": "hypothesis",
+   "a6c04818c59dcb76": "hypothesis",
+   "a92b7d655d3f7439": "retracted",
+   "bb4429f730700152": "retracted",
+   "cdf49ca7c17a5c3f": "active",
+   "d1c3207e358b6dc6": "active"
+  }
+ },
+ "plain-7": {
+  "counts": {
+   "active": 3,
+   "refuted": 1,
+   "retracted": 2
+  },
+  "fp": "601677e89943cbbf",
+  "journal": "f46ec9e21fb610e8",
+  "report": "0e1ae7516b4d41c8",
+  "snapshots": "66272164bd4ba9c4",
+  "statuses": {
+   "a53ef98e2318350e": "retracted",
+   "a92b7d655d3f7439": "retracted",
+   "bb4429f730700152": "active",
+   "cdf49ca7c17a5c3f": "refuted",
+   "d1c3207e358b6dc6": "active",
+   "e5277e2a44cd85d8": "active"
+  }
+ },
+ "plain-8": {
+  "counts": {
+   "active": 1,
+   "disputed": 2,
+   "expired": 1,
+   "refuted": 1,
+   "retracted": 3
+  },
+  "fp": "c9f0a539f8dac6c2",
+  "journal": "fde7b205d3c3f4e9",
+  "report": "a58a80de1caac14f",
+  "snapshots": "592652c331c6d98c",
+  "statuses": {
+   "2168ddc4be78ebbf": "refuted",
+   "395db473cfcf9a03": "disputed",
+   "3ff7323e88144a9f": "retracted",
+   "6ae9b82db2872da8": "expired",
+   "6b32b6c85e78486f": "disputed",
+   "a6c04818c59dcb76": "retracted",
+   "a92b7d655d3f7439": "retracted",
+   "d1c3207e358b6dc6": "active"
+  }
+ },
+ "plain-9": {
+  "counts": {
+   "hypothesis": 2,
+   "retracted": 4
+  },
+  "fp": "e0f8fb39ee3728e7",
+  "journal": "67a4b855d7abb225",
+  "report": "10452dd454d6516b",
+  "snapshots": "e2e6a08a49a8799c",
+  "statuses": {
+   "09a5355708135c4a": "hypothesis",
+   "18e2124dfa4e8e77": "hypothesis",
+   "3b8126c08e8a666d": "retracted",
+   "a92b7d655d3f7439": "retracted",
+   "cdf49ca7c17a5c3f": "retracted",
+   "d1c3207e358b6dc6": "retracted"
+  }
+ }
+}

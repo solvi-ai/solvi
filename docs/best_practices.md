@@ -1004,8 +1004,8 @@ Recalibrate on a few of your own labelled cases; watch the agreement rate when l
 **Drift on numbers:** `NumericDrift` with a reference of at least ~50 values from calibration data, not the stream's
 start; under 20 values the false-alarm bound does not hold (it warns). Whiten autocorrelated residuals first.
 
-**Facts with `valid=`:** ask with `snapshot(valid_at=<the decision's world time>)`; without it every interval's
-value is a fact at once, and `Knowledge.value(snapshot, s, r)` reads whichever comes first — in a rule, read
+**Facts with `valid=`:** ask with `snapshot(valid_at=<the decision's world time>)`; without it every version's
+value is a fact at once (a version closed by a later since too: its row's `"periods"` says where it holds), and `Knowledge.value(snapshot, s, r)` reads whichever comes first — in a rule, read
 `Knowledge.value(snapshot, s, r, valid_at=<the same time>)`. After retracting a wrong item and telling the correction, `redecide(..., upto="now")` gives
 the corrected answers; the default answers «what would the decision have been without the bad item at the time».
 
