@@ -491,7 +491,10 @@ class DriftMonitor:
                         "or the part's Decision)"
                 continue
             a, b = ref[name], cur[name]
-            se = math.sqrt(max(a["std"] ** 2 / a["n"] + b["std"] ** 2 / b["n"], 1e-12))
+            # the window's spread is at least the reference's: a window that by chance misses the long tail of a
+            # skewed signal (confidence near 1, a few low values) has a higher mean AND a smaller spread, and its own
+            # spread alone makes z far heavier-tailed than normal at the levels used here (false flags "confidence up")
+            se = math.sqrt(max(a["std"] ** 2 / a["n"] + max(b["std"], a["std"]) ** 2 / b["n"], 1e-12))
             p = _p_two_sided((b["mean"] - a["mean"]) / se)
             rep["tests"][name] = {"reference": a["mean"], "window": b["mean"], "p": p}
             found.append((name, p, abs(b["mean"] - a["mean"]),

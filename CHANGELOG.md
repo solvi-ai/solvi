@@ -141,6 +141,12 @@
   `solvi init --with-model`'s refunds and minimal templates get an `"other"` option.
 
 ### Fixed
+- **DriftMonitor no longer flags "mean confidence up" on an unchanged stream** (`solvi.core.guarantees.drift`). The
+  window z test of the mean confidence (and act probability) used the window's own spread; on a skewed signal
+  (confidence near 1 with a few low values) a window that by chance misses the low tail has a higher mean and a much
+  smaller spread, so z was far heavier-tailed than normal at the test's level (up-tail ~95× nominal at z = 4.8). The
+  window's spread is now at least the reference's. Stationary streams like `solvi.build(monitor="auto")` sees (reference
+  2,000, 200 streams × 5,000 decisions): 13 flagged before (10 by confidence), 3 after (none by confidence).
 - **A skill certificate spends δ over its restarts** (`solvi.experimental.skills.Certificate`). After an alarm, or a
   skill condition widened by the condition rule, the process restarted and certified again at the full δ, so after k restarts the chance that
   some certificate it issued was wrong was bounded only by k·δ, not by the δ the promise states. The v-th
