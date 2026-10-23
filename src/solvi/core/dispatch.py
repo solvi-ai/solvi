@@ -67,8 +67,8 @@ went over the per-decision budget keeps its answer and records how far over it w
 The record. `ask` returns a `Dispatched`: the answer, who gave it, the action and its reasons, System 1's response,
 the slow path's record (its responses, rounds or search, each a replayable trace), the cost of both and what had been
 spent before. `replay(dispatcher)` re-checks all of it without calling a model: System 1's trace replays, the dispatch
-follows from that response, the recorded supervision draw (a hash of the seed, the input and the decision's number),
-the recorded budget and drift state; the slow path's record replays (the LLM outputs re-read through their schemas, as
+follows from that response, the recorded supervision draw (a hash of the seed, the input and the decision's number;
+an HMAC with `secret=`, recomputed on replay only where the secret is given), the recorded budget and drift state; the slow path's record replays (the LLM outputs re-read through their schemas, as
 `solvi.core.slow.generate` and `solvi.core.deciders.llm` replay them); the cost recomputes; the answer follows. With `storage=` every decision
 is one hash-chained record of kind "dispatch" in a TraceStorage (`stored()`, `replay_all()`), and `calibrate` adds one
 of kind "policy" (the policy and the config fingerprint the later decisions record), so that a report read from the
@@ -83,8 +83,10 @@ from __future__ import annotations
 import abc
 import dataclasses
 import hashlib
+import hmac
 import json
 import math
+import os
 import threading
 import time
 import warnings
@@ -97,6 +99,31 @@ from .costs import Budget, BudgetStop, Cost, _usages, cost_of, price_of, recorde
 SIGNALS = ("guarantee", "openset", "abstain", "constraint", "agreement", "drift", "supervise")
 THINK = ("guarantee", "openset", "abstain", "constraint", "agreement")
 PATHS = ("s1", "s2", "human")
+SECRET_ENV = "SOLVI_AUDIT_SECRET"   # noqa: S105 — the name of the variable read for Dispatcher(secret=None)
+
+
+class PredictableDrawWarning(UserWarning):
+    """A Dispatcher samples decisions for supervision or audit without a secret: the draw is a public hash of the seed,
+    the input and the decision's number, so whoever can vary the inputs can predict which decisions are checked and
+    steer around them. Give `secret=` (or set SOLVI_AUDIT_SECRET); filter this class where the draw need not be
+    hidden (tests, offline backtests)."""
+
+
+_predictable_warned = False          # the warning above is given once per process
+
+
+class _Secret:
+    """The draw key: kept out of repr, the config fingerprint, the records and the logs."""
+    __slots__ = ("_key",)
+
+    def __init__(self, key: bytes):
+        self._key = key
+
+    def mac(self, msg: str) -> str:
+        return hmac.new(self._key, msg.encode(), hashlib.sha256).hexdigest()
+
+    def __repr__(self):
+        return "<secret>"
 
 
 # ------------------------------------------------------------------------------------------------ the slow path
@@ -598,7 +625,8 @@ class Dispatched:
     s1: System 1's Response; s2: the slow path's Thought (None when it did not run); candidates: what each path would
     have answered, for the person; disagreement: System 1's and the slow path's answers when they differ; cost:
     {"s1", "s2", "total"} Costs; n: the decision's number; draw: its supervision draw; spent_before: the dispatcher's
-    total spend before it; drift: the drift flag it saw."""
+    total spend before it; drift: the drift flag it saw; keyed: the draws were keyed by the dispatcher's secret (stored
+    as "draw_keyed": true; absent from records made without one)."""
     question: str
     answer: Any
     by: str
@@ -619,6 +647,7 @@ class Dispatched:
     slice: str | None = None
     stored_id: str | None = None
     audit: bool = False
+    keyed: bool = False
 
     @property
     def supervised(self):
@@ -632,7 +661,8 @@ class Dispatched:
                 "disagreement": _stored(self.disagreement), "cost": {k: v.to_dict() for k, v in self.cost.items()},
                 "n": self.n, "draw": self.draw, "spent_before": self.spent_before.to_dict(), "drift": self.drift,
                 "expected": None if self.expected is None else self.expected.to_dict(), "over_budget": self.over_budget,
-                "config": self.config, "slice": self.slice, **({"audit": True} if self.audit else {})}
+                "config": self.config, "slice": self.slice, **({"audit": True} if self.audit else {}),
+                **({"draw_keyed": True} if self.keyed else {})}
 
     def to_json(self, indent=None):
         return json.dumps(self.to_dict(), ensure_ascii=False, indent=indent, default=str)
@@ -649,7 +679,8 @@ class Dispatched:
                    {k: Cost.from_dict(v) for k, v in (d.get("cost") or {}).items()}, d.get("n", 0), d.get("draw", 1.0),
                    Cost.from_dict(d.get("spent_before") or {}), d.get("drift"),
                    Cost.from_dict(d["expected"]) if d.get("expected") is not None else None, d.get("over_budget"),
-                   d.get("config"), d.get("slice"), audit=bool(d.get("audit", False)))
+                   d.get("config"), d.get("slice"), audit=bool(d.get("audit", False)),
+                   keyed=bool(d.get("draw_keyed", False)))
 
     def replay(self, dispatcher, trust_models=False):
         """Re-check this decision against `dispatcher` without calling a model → {"ok", "mismatches": [(what, why)]}:
@@ -689,11 +720,20 @@ class Dispatcher:
     for labelling — `Dispatched.audit` and "audit": true in the stored record; label them with
     `teach(..., label_source="audit", of=<stored id>)` (the store refuses an audit label of an unmarked decision), and the
     system report measures the promise on that random sample, which corrections made where an answer looked wrong do
-    not give. Default 0: nothing is marked and the records are as before."""
+    not give. Default 0: nothing is marked and the records are as before. secret: a key (bytes or str; None reads the
+    environment variable SOLVI_AUDIT_SECRET, unset or empty: no key) for the supervision and audit draws — with one
+    they are HMAC-SHA256(secret, seed | input | decision number) instead of the plain SHA-256 of the same, so a caller
+    who can vary the inputs cannot predict which decisions get supervised or audited. The secret enters no record, no
+    config fingerprint and no repr; a record says only "draw_keyed": true. Replay takes the recorded draw: it needs the
+    secret only to recompute and check it (a dispatcher without the secret replays a keyed record and does not
+    recompute its draw). Without a secret the draws are as before (bit for bit), and a dispatcher that samples (supervise
+    or audit strictly between 0 and 1; at 1 every decision is checked) gives a PredictableDrawWarning once per
+    process."""
 
     def __init__(self, system, slow=None, *, question=None, budget=None, total=None, price=None, wake=SIGNALS,
                  agreement=None, monitor=None, supervise=0.0, seed=0, think="s2", on_disagree="record", storage=None,
-                 store_responses=True, asked=None, same=None, unknown="answer", on_drift="human", audit=0.0):
+                 store_responses=True, asked=None, same=None, unknown="answer", on_drift="human", audit=0.0,
+                 secret: bytes | str | None = None):
         if question is None:
             if len(system.questions) != 1:
                 raise ValueError(f"the System asks {sorted(system.questions)}: say which with question=")
@@ -708,6 +748,15 @@ class Dispatcher:
         if not 0.0 <= float(audit) <= 1.0:
             raise ValueError("audit is a share between 0 and 1 (the decisions marked for labelling)")
         self.audit = float(audit)
+        if secret is None:
+            secret = os.environ.get(SECRET_ENV) or None
+        if secret is not None:
+            if isinstance(secret, str):
+                secret = secret.encode()
+            if not isinstance(secret, (bytes, bytearray)) or not secret:
+                raise TypeError("secret is a non-empty bytes or str (the key of the supervision and audit draws)")
+            secret = _Secret(bytes(secret))
+        self._secret = secret
         if think not in ("s2", "agree"):
             raise ValueError('think must be "s2" or "agree"')
         if on_disagree not in ("record", "human", "s2"):
@@ -757,6 +806,12 @@ class Dispatcher:
         self.drift = None
         self.policy = None                # calibrate(): who answers on each slice System 1 hands over
         self._lock = threading.Lock()
+        global _predictable_warned
+        if secret is None and any(0 < x < 1 for x in (self.supervise, self.audit)) and not _predictable_warned:
+            _predictable_warned = True
+            warnings.warn("Dispatcher: the supervision / audit draw is a public hash of the seed, the input and the "
+                          "decision's number, so whoever can vary the inputs can predict which decisions are checked; "
+                          f"give secret= (or set {SECRET_ENV}) to key it", PredictableDrawWarning, stacklevel=2)
 
     def _require(self, facts):
         """Facts the dispatch reads (agreement shares) that the catalog computes become required parts of the
@@ -787,14 +842,29 @@ class Dispatcher:
                         if self.slow is not None and getattr(self.slow, "contract", None) is not None else []))
 
     # --- the decision
-    def draw(self, init_hash, n):
-        """The supervision draw of decision n on this input: a number in [0, 1) from a hash (reproducible)."""
-        h = hashlib.sha256(f"{self.seed}|{init_hash}|{n}".encode()).hexdigest()
+    @property
+    def keyed(self) -> bool:
+        """Are the draws keyed by a secret?"""
+        return self._secret is not None
+
+    def _hash(self, msg, keyed):
+        if keyed:
+            if self._secret is None:
+                raise ValueError("a keyed draw needs the dispatcher's secret")
+            return self._secret.mac(msg)
+        return hashlib.sha256(msg.encode()).hexdigest()
+
+    def draw(self, init_hash, n, *, keyed=None):
+        """The supervision draw of decision n on this input: a number in [0, 1) from a hash (reproducible) — HMAC with
+        the secret when the dispatcher has one. keyed: force the plain (False) or keyed (True) hash (default: keyed
+        when there is a secret)."""
+        h = self._hash(f"{self.seed}|{init_hash}|{n}", self.keyed if keyed is None else keyed)
         return int(h[:13], 16) / 16 ** 13
 
-    def audit_draw(self, init_hash, n):
-        """The audit draw of decision n on this input: a number in [0, 1) from a hash, independent of `draw`."""
-        h = hashlib.sha256(f"audit|{self.seed}|{init_hash}|{n}".encode()).hexdigest()
+    def audit_draw(self, init_hash, n, *, keyed=None):
+        """The audit draw of decision n on this input: a number in [0, 1) from a hash, independent of `draw` (keyed
+        as `draw`)."""
+        h = self._hash(f"audit|{self.seed}|{init_hash}|{n}", self.keyed if keyed is None else keyed)
         return int(h[:13], 16) / 16 ** 13
 
     def expected(self):
@@ -940,7 +1010,8 @@ class Dispatcher:
             self.counts[by] += 1
         d = Dispatched(q, answer, by, action, reasons, res, th, cand, disagreement, cost, n, draw, spent, self.drift,
                        expected, over, self.config(), slice=sl,
-                       audit=bool(self.audit) and self.audit_draw(res.trace.init_hash, n) < self.audit)
+                       audit=bool(self.audit) and self.audit_draw(res.trace.init_hash, n) < self.audit,
+                       keyed=self.keyed)
         if self.storage is not None:
             from .store import FORMAT
             rec = self.storage._append({"v": FORMAT, "kind": "dispatch", **json.loads(d.to_json())})
@@ -1232,7 +1303,8 @@ class Dispatcher:
     def replay(self, d, trust_models=False):
         """Re-check a decision without calling a model → {"ok", "mismatches": [(what, why)], "s1": the trace replay,
         "s2": the slow path's replay}. Checked: the dispatcher is configured as it was (config); System 1's trace
-        replays; the draw recomputes; the dispatch follows from the response, the draw and the recorded spend, drift
+        replays; the draw recomputes (a keyed draw only when this dispatcher has the secret; without it the recorded
+        draw is taken); the dispatch follows from the response, the recorded draw and the recorded spend, drift
         flag and expected cost of a run; the slow path's record replays and its cost recomputes; the answer and who
         gave it follow."""
         bad = []
@@ -1242,9 +1314,10 @@ class Dispatcher:
         bad += [("s1", f"{m[1]}: {m[2]}") for m in rep1["mismatches"]]
         if d.s1._system is None:
             d.s1._system = self.system
-        draw = self.draw(d.s1.trace.init_hash, d.n)
-        if abs(draw - d.draw) > 1e-12:
-            bad.append(("draw", f"recorded {d.draw}, recomputed {draw}"))
+        if not d.keyed or self.keyed:     # a keyed draw is recomputed only with the secret; else the record stands
+            draw = self.draw(d.s1.trace.init_hash, d.n, keyed=d.keyed)
+            if abs(draw - d.draw) > 1e-12:
+                bad.append(("draw", f"recorded {d.draw}, recomputed {draw}"))
         action, reasons = self.decide(d.s1, d.draw, d.spent_before, d.drift, d.expected)
         if action != d.action:
             bad.append(("dispatch", f"recorded {d.action}, the response gives {action}"))
@@ -1354,5 +1427,6 @@ def _vh(v):
     return vhash(plain(v))
 
 
-__all__ = ["AskPath", "Budget", "BudgetStop", "Cost", "Dispatched", "Dispatcher", "PATHS", "RefinePath", "SearchPath",
-           "SIGNALS", "SlowPath", "Thought", "cost_of", "price_of", "recorded_calls"]
+__all__ = ["AskPath", "Budget", "BudgetStop", "Cost", "Dispatched", "Dispatcher", "PATHS", "PredictableDrawWarning",
+           "RefinePath", "SearchPath", "SECRET_ENV", "SIGNALS", "SlowPath", "Thought", "cost_of", "price_of",
+           "recorded_calls"]
