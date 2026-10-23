@@ -3,6 +3,12 @@
 ## 1.4.0 — unreleased
 
 ### Added
+- **`DefaultPolicy(novel_only=...)`: the promotion's novel-only paired comparison can be switched off, for controls**
+  (`solvi.experimental.stream`). Default `True`, unchanged: the comparison counts only post-freeze samples on keys the
+  candidate never trained on. With `False` it counts every sample, the candidate's train keys too (the seen fields
+  are still counted for the probe); with `probe=False, novel_risk=False` too, a memoriser that the defaults refuse is
+  promoted on its trained items. For controls; it weakens the guarantee. The policy is pickled, so replay and the
+  checkpoint carry the setting; a policy pickled before the switch reads as `True`.
 - **Process (experimental): a process of several solvi systems as data** (`solvi.experimental.process`, stage 0 of
   `solvi.Process`). Nodes (a `solvi.build` result, a System, a Guard or a question to a person), edges with predicates
   written as data (a closed language: `answer` with eq / in / lt / gt, `status`, `by`, `confidence_below`,
@@ -533,6 +539,13 @@ labels, 10 % of the labels discordant) rolled back in 10 / 28 / 70 % of runs by 
   a fixed-time reading: not a running bound over the stream.
 
 ### Fixed
+- **The adapter loop's first training is no longer refused at the freeze for repeated held-out labels**
+  (`solvi.experimental.stream`). `DefaultPolicy.want_train` checked the pre-freeze floors (100 held-out labels, the
+  calib labels the threshold needs) on label counts with repeats, while the freeze report scores the latest label per
+  content key, so a stream that relabels inputs started a training the freeze then refused ("98 held-out label(s) <
+  100"), wasting it and raising the retrain floor. `LoopState.keys` now carries the distinct labelled keys by split
+  (rebuilt from the label store on a checkpoint load) and the floors read it; a state built without it falls back to
+  `labels`.
 - **A pass in flight is no longer touched by an adapter being installed on its network** (`solvi.core.deciders`,
   `solvi.experimental.lora`). A model with no adapter scored without the adapter lock, so when another thread staged
   one (the adapter loop's training thread binding its version, or a shadow score) the network changed under a pass

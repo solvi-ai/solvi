@@ -42,7 +42,8 @@ What the policy decides, per decision:
 - promote(st, paired) / discard(st, paired) — every decision while a candidate is in trial. `Paired` counts only the
   candidate's post-freeze coin samples since its last restart, at the thresholds in force now: novel ones (key not in
   the candidate's `train_keys`, a frozenset of the keys it was trained on, snapshotted at the freeze) for the
-  comparison, seen ones for the memorisation probe. A missing label counts as wrong.
+  comparison, seen ones for the memorisation probe (`DefaultPolicy(novel_only=False)`, for controls: every sample in
+  the comparison; it weakens the guarantee). A missing label counts as wrong.
 - alarm(st, who, report) — two sources, OR-ed: the `RiskDetector` (as the lane's) and a score monitor (a solvi
   `Monitor`, `observe(score) → {"drift", "why"}`, fed the served version's finite score on every decision outside
   probation; default `NumericDrift`). With a detector and no monitor the loop refuses (`monitor=None`): never the
@@ -457,6 +458,8 @@ class AdapterLoop:
         self._rows: list = []                              # every accepted label (LabelRow)
         self._split_of: dict = {}                          # key → the split it first got (never changes)
         self._split_n = {"train": 0, "calib": 0, "holdout": 0}
+        self._split_keys = {"train": 0, "calib": 0, "holdout": 0}   # distinct labelled keys by split (as the report)
+        self._labelled: set = set()                        # the keys with at least one accepted label
         self._fed_keys: set = set()                        # keys of the train labels the learner took
         self._holdout: deque = deque(maxlen=10_000)        # the served version's (alone, wrong) on held-out labels
         self._watch = None                                 # label mode after a promotion: the Watch counts (a dict)
@@ -540,6 +543,7 @@ class AdapterLoop:
         promises = {v: self._vs[v]["promise"].state() for v in (self.served, self.candidate)
                     if v is not None and self._vs[v]["promise"] is not None}
         return LoopState(n=self.n, served=self.served, candidate=self.candidate, labels=dict(self._split_n),
+                         keys=dict(self._split_keys),
                          versions=tuple(vs), holdout=tuple(self._holdout), alpha=self.alpha,
                          alarms=tuple(dict(a) for a in self._alarms), served_history=tuple(self._history),
                          served_since=self._served_since, trainings=tuple(self._trainings),
@@ -548,8 +552,11 @@ class AdapterLoop:
                          detector=None if self.detector is None else self.detector.state())
 
     def _paired(self, c) -> Paired:
-        """The candidate's Paired at the thresholds in force now (see the module docstring)."""
+        """The candidate's Paired at the thresholds in force now (see the module docstring). A policy with
+        `novel_only` False (`DefaultPolicy(novel_only=False)`, a control) gets every sample, seen ones too, in the
+        comparison fields; the seen fields are counted as always."""
         thr_k, thr_s = self._threshold(c), self._threshold(self.served)
+        novel_only = bool(getattr(self.policy, "novel_only", True))   # a policy pickled before the switch: on
         n_nov = a_nov = w_nov = a_srv = w_srv = n_seen = a_seen = w_seen = 0
         for sk, ss, wk, ws, seen in self._vs[c]["samples"]:
             ak = _alone(sk, thr_k)
@@ -557,7 +564,7 @@ class AdapterLoop:
                 n_seen += 1
                 a_seen += ak
                 w_seen += ak and wk
-            else:
+            if not seen or not novel_only:
                 n_nov += 1
                 a_nov += ak
                 w_nov += ak and wk
@@ -1000,6 +1007,9 @@ class AdapterLoop:
             if label is not None:
                 self._rows.append(LabelRow(key, x, label, lsrc, n))
                 self._split_n[split] += 1
+                if key not in self._labelled:
+                    self._labelled.add(key)
+                    self._split_keys[split] += 1
                 if split == "train":
                     self._feed(x, label, key, lsrc)
                 elif split == "holdout":

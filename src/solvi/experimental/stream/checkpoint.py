@@ -595,6 +595,10 @@ def _restore(loop, m, st, data, vdir, groups):
     if n_split != st["split_n"]:
         raise ValueError(f"the label store has {n_split} labels by split, the state {st['split_n']}")
     loop._split_n = dict(st["split_n"])
+    loop._labelled = {r.key for r in rows}
+    loop._split_keys = {"train": 0, "calib": 0, "holdout": 0}
+    for k in loop._labelled:
+        loop._split_keys[split_of[k]] += 1
     want = int(st["seen"])
     fed = set()
     for r in rows:

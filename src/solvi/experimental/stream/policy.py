@@ -191,7 +191,8 @@ class LoopState:
     promotion or a rollback sets it); trainings: the wall-clock start times of the trainings so far; job: the training
     in flight ({"id", "started", "eta"}) or None; now: the wall clock; paused; mode: "stream" (a Dispatcher, the stream
     promise) or "label" (a System alone: the pre-freeze gates only); promises, detector: their state dumps, for a
-    policy that reads them.
+    policy that reads them; keys: the distinct content keys with a label, by split (a relabelled key counts once, as
+    the pre-freeze report's latest label per key; None: a state built without them, `labels` stands in).
 
     `stream.loop.AdapterLoop` passes copies of the dict fields and resets `holdout` at a promotion or a rollback (the
     new served version does not inherit the old one's errors). The state has dict fields, so `hash(st)` raises: do not
@@ -213,6 +214,7 @@ class LoopState:
     mode: str = "stream"
     promises: dict = field(default_factory=dict)
     detector: dict | None = None
+    keys: dict | None = None
 
     def __post_init__(self):
         if self.mode not in ("stream", "label"):
@@ -420,8 +422,10 @@ class DefaultPolicy(LoopPolicy):
     frozen); min_calib: the calib labels a training waits for (None: the fewest the calib threshold needs at α, 73 at
     α = 0.05; 0 for a learner with its own threshold); novel_risk: promotion needs the Wilson upper bound (at
     `wilson`) of wrong_novel / n_novel ≤ α (False: off); watch, watch_min: label mode's watch after a promotion (False:
-    off; the labels it needs before it may roll back). In label mode pre_freeze=False is refused by the loop: there
-    the pre-freeze gates are the only measurement before a version is served."""
+    off; the labels it needs before it may roll back); novel_only: the promotion's paired comparison counts only samples
+    on keys the candidate never trained on (False: every sample, its train keys too — for controls; weakens the
+    guarantee: a memoriser's trained items then count for it). In label mode pre_freeze=False is refused by the loop:
+    there the pre-freeze gates are the only measurement before a version is served."""
 
     def __init__(self, budget: Budget | None = None, *, s2_labels: bool = False, calib: float = 0.15,
                  holdout: float = 0.15, first: int = 300, growth: float = 1.5, window: int = 200, target_share=None,
@@ -430,7 +434,7 @@ class DefaultPolicy(LoopPolicy):
                  probe_min: int = 30, stale: int = 1500, trial: int = 1500, probation: int = 300, r: int = 8,
                  lr: float = 3e-4, min_updates: int = 200, max_updates: int = 3000, refreeze=None, probe: bool = True,
                  pre_freeze: bool = True, novel_risk: bool = True, min_calib: int | None = None, watch: bool = True,
-                 watch_min: int = 100):
+                 watch_min: int = 100, novel_only: bool = True):
         super().__init__(budget)
         gates.split("", calib=calib, holdout=holdout)                     # the shares, checked once
         for name, v in (("first", first), ("window", window), ("min_holdout", min_holdout), ("min_novel", min_novel),
@@ -466,6 +470,7 @@ class DefaultPolicy(LoopPolicy):
             raise ValueError(f"min_calib must be an integer ≥ 0 or None, not {min_calib!r}")
         self.min_calib = min_calib
         self.watch_on, self.watch_min = bool(watch), watch_min
+        self.novel_only = bool(novel_only)
 
     # --- collecting
     def accept(self, st, x, y, source) -> bool:
@@ -497,10 +502,12 @@ class DefaultPolicy(LoopPolicy):
         if have < need:
             return f"{have} train label(s) < {need} ({why})"
         if self.pre_freeze:                                    # the gates' own floors: a freeze that cannot pass
-            hold = st.labels.get("holdout", 0)
+            # distinct keys, as the report counts them (latest label per key): a repeated label is not a new one
+            distinct = st.labels if st.keys is None else st.keys
+            hold = distinct.get("holdout", 0)
             if hold < self.min_holdout:
                 return f"{hold} held-out label(s) < {self.min_holdout}: a freeze cannot pass yet"
-            calib, need_c = st.labels.get("calib", 0), self.calib_floor(st.alpha)
+            calib, need_c = distinct.get("calib", 0), self.calib_floor(st.alpha)
             if calib < need_c:
                 return f"{calib} calib label(s) < {need_c}: act_guard cannot find a threshold yet"
         refused = self.budget.refuse(st.trainings, st.now)

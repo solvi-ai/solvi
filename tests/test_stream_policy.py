@@ -94,6 +94,18 @@ def test_want_train_waits_for_first_then_for_growth_over_the_served_version():
     assert p.want_train(_ready(versions=vs, served=1, labels={"train": 600}, holdout=weak))
 
 
+def test_the_pre_freeze_floor_counts_distinct_keys_as_the_report_does():
+    """The report scores the latest label per key, so a repeated held-out or calib label is not a new one: 150 held-out
+    labels on 98 keys is 98 for the floor (the freeze would refuse "98 held-out label(s) < 100")."""
+    p = DefaultPolicy()
+    st = _ready(labels={"holdout": 150, "calib": 150}, keys={"train": 300, "calib": 100, "holdout": 98})
+    assert not p.want_train(st) and p.why_not_train(st) == "98 held-out label(s) < 100: a freeze cannot pass yet"
+    st = _ready(labels={"holdout": 150, "calib": 150}, keys={"train": 300, "calib": 72, "holdout": 100})
+    assert not p.want_train(st) and p.why_not_train(st).startswith("72 calib label(s) < 73")
+    assert p.want_train(_ready(keys={"train": 300, "calib": 73, "holdout": 100}))
+    assert p.want_train(_ready())                     # a state built without keys: the label counts stand in
+
+
 def test_no_training_before_the_pre_freeze_gates_can_pass():
     """Stage-2 review S2: with the default shares, 300 train labels come with about 64 held-out and 64 calib labels —
     a freeze needs 100 and 73 — so the first training would be refused at birth."""

@@ -189,6 +189,72 @@ def test_a_memoriser_is_refused_by_the_probe_and_promoted_with_it_off():
     assert on.replay()["ok"]
 
 
+def test_repeated_held_out_labels_do_not_start_a_training_the_freeze_refuses():
+    """Each key labelled twice: the label counts run at twice the distinct keys. The training waits for 100 distinct
+    held-out keys (the report's count), so the first one is not refused at the freeze for "< 100 held-out label(s)"."""
+    loop = AdapterLoop(_Hand([_Model(f"v{i}", 0.9) for i in range(1, 9)]), question="q", wait=True, max_risk=0.05,
+                       secret=KEY, key=lambda x: f"k{x[2]}",
+                       policy=DefaultPolicy(Budget(min_interval_s=0.0, per_day=10 ** 6), probe=False, first=50))
+    r = random.Random(5)
+    for kid in range(900):
+        x = (r.choice("ab"), r.random(), kid)
+        for _ in range(2):
+            loop.step(x, lambda x=x: x[0])
+    st = loop._state()
+    assert st.labels["holdout"] > st.keys["holdout"] >= 100        # repeats counted in labels, once in keys
+    trains = [e for e in _events(loop, "train") if e.get("state") == "done"]
+    assert trains, "no training started"
+    assert trains[0]["report"]["n_holdout"] >= 100 and trains[0]["frozen"], trains[0]["why"]
+    assert not any("held-out label(s) <" in (e.get("why") or "") for e in _events(loop, "discard"))
+    assert loop.replay()["ok"]
+
+
+class _PureMemoLearner:
+    """Freezes a pure memoriser: right with score 0.99 on its trained keys, score 0.1 (never alone) on every other key —
+    on novel keys alone on none, on the pool alone on every repeat of a trained key."""
+
+    def __init__(self):
+        self._seen = 0
+
+    def update(self, x, y, **_):
+        self._seen += 1
+
+    def seen(self):
+        return self._seen
+
+    def train(self, job):
+        return _Risky({r.key: r.y for r in job.rows}, 0.0, 0.5)
+
+
+def _thin_run(seed=21, **policy):
+    return _memo_run(seed, _PureMemoLearner(), **policy)
+
+
+def test_novel_only_off_promotes_a_memoriser_the_defaults_refuse():
+    """C-probe control: the memorisation probe, the novel-error bound and the novel-only comparison all off promote a
+    memoriser on its trained items; the defaults refuse it, and probe / novel_risk off alone still refuse it (the
+    novel-only comparison holds share_k at 0)."""
+    on = _thin_run()
+    assert _events(on, "freeze") and not _events(on, "promote") and on.served == 0
+    half = _thin_run(probe=False, novel_risk=False)
+    assert not _events(half, "promote") and half.served == 0
+    off = _thin_run(probe=False, novel_risk=False, novel_only=False)
+    promo = _events(off, "promote")
+    assert promo and off.served >= 1 and promo[0]["n_seen"] > 0
+    assert promo[0]["n_novel"] >= promo[0]["n_seen"]              # the comparison counted the seen samples too
+    assert off.policy.novel_only is False and DefaultPolicy().novel_only is True
+    assert off.replay()["ok"]
+
+
+def test_novel_only_is_carried_by_the_checkpoint(tmp_path):
+    a = _thin_run(n=1200, probe=False, novel_risk=False, novel_only=False)
+    a.save(tmp_path / "ck")
+    b = AdapterLoop.load(tmp_path / "ck", _PureMemoLearner(), secret=KEY, key=lambda x: f"k{x[0]}")
+    assert b.policy.novel_only is False and b.status() == a.status()
+    if a.candidate is not None:
+        assert b._paired(b.candidate) == a._paired(a.candidate)
+
+
 class _Risky:
     """Frozen: right with score 0.99 on its trained keys; on a novel key alone (0.99) on a share `alone` of keys, and
     there wrong on a share `wrong` of them (two key hashes), else score 0.1 — a true novel risk of alone × wrong."""
