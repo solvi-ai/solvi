@@ -367,6 +367,12 @@
   abstained with "no data for hard check chk: missing _lim". Registering such a part (fn, rule, check, extract) now
   warns and shows how to bind the value without a default. Behaviour change by design: the two warnings only — how
   arguments are read, and every answer, are unchanged.
+- **`KnowledgeStore.forget(writer, storage=<path>)` no longer fails after a partial write.** A path was not opened: the
+  source's retraction was already journaled when re-deciding the stored decisions failed (`AttributeError: 'str'
+  object has no attribute 'iter'`), so the journal changed and nothing was re-decided. `forget` and `redecide` now
+  open a path as `System(storage=)` does (`open_storage`), before anything is written; a storage that cannot be opened
+  raises with the journal unchanged. `Knowledge.forget(writer, by=, why=, storage=, decide=)` is the facade, beside
+  `Knowledge.retract`. With a TraceStorage nothing changes.
 
 ### Docs
 - **Drift and audit: measured caveats** (best practices; the `ShiftWatch.shift`, `DriftMonitor` and `sysreport`
