@@ -2160,7 +2160,7 @@ class Guard:
         at = _utc_now()
         with self._pause_lock:                         # every call that starts after this line sees the pause
             self._pause = {"by": None if by is None else str(by), "reason": reason, "since": at}
-        return self._event("pause", by, reason, at)
+            return self._event("pause", by, reason, at)   # under the lock, as resume: the chain keeps the true order
 
     def resume(self, by=None):
         """Let calls through again after `pause`: written to the store as an event (meta "guard": {"event": "resume",

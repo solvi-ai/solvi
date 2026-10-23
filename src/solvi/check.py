@@ -594,9 +594,9 @@ def _wording(cat, system, questions, rep):
             desc = at.descriptions or {}
             if at.kind == "choice" and not at.unknown and len(opts) > 1 and getattr(spec, "other", None) is None \
                     and not any(_catch_all(o, desc.get(o)) for o in opts):
-                rep.add("warning", "no_other_option", qn,
-                        f"the choice {opts} has no catch-all: add an option \"other\" (or \"none of these\", \"unknown\"), "
-                        "or Answer.maybe(...) for \"not stated\"")
+                rep.add("note", "no_other_option", qn,         # a note: a closed label set is often right
+                        f"the choice {opts} has no catch-all: if an input can fit none of them, add an option \"other\" "
+                        "(or \"none of these\", \"unknown\"), or Answer.maybe(...) for \"not stated\"")
             if at.kind in ("choice", "ordinal") and len(opts) > 1 and all(_numeric(o) for o in opts) \
                     and any(not (at.descriptions or {}).get(o) for o in opts):
                 rep.add("warning", "numeric_levels", qn,
@@ -619,7 +619,7 @@ def _unused_given(cat, system, questions, rep):
     rules = set(cat.rules)
     if any(qn not in rules and not q.uses for qn, q in questions.items()):
         return                                        # a learned head may read any given fact
-    read = {x for _, _, inputs, _ in _readers(cat) for x in inputs}
+    read = {x for _, _, inputs, _ in _readers(cat) for x in inputs} | _group_reads(cat, system)
     for q in questions.values():
         read.update(q.uses or ())
         read.update(q.requires or ())
@@ -630,6 +630,28 @@ def _unused_given(cat, system, questions, rep):
             rep.add("warning", "unused_given", x,
                     f"System(input_model={m.__name__}) declares {x!r}, which nothing reads: read it where it matters, "
                     "or remove it from the model (a field kept only for the record may stay)")
+
+
+def _group_reads(cat, system):
+    """The facts read by calibrations rather than by a function: a guarantee's groups= (System.guarantee, a part's or a
+    combiner's calibration per group) and a guarantee's signal= when it names a fact."""
+    out = set()
+
+    def by_names(g):
+        g = g.get("by") if isinstance(g, dict) else g
+        return list(getattr(g, "names", None) or ())
+    for g in (getattr(system, "guards", None) or {}).values():
+        out.update(by_names(getattr(g, "_by", None)))
+        sig = getattr(g, "signal", None)
+        if isinstance(sig, str) and sig not in ("confidence", "probability") and not sig.startswith("extra:"):
+            out.add(sig)
+    for p in cat.parts.values():
+        for a in list(p.alternatives or ()) + [p]:
+            out.update(by_names(getattr(a, "groups", None)))
+    for r in cat.rules.values():
+        for o in (r, getattr(r, "func", None), getattr(getattr(r, "func", None), "spec", None)):
+            out.update(by_names(getattr(o, "groups", None)))
+    return out
 
 
 # --- types

@@ -74,6 +74,33 @@ def test_an_escalation_is_not_approved_while_paused(tmp_path):
     assert g.resolve(e, approve=True, reviewer="alice").executed and made == ["eve@x.example"]
 
 
+def test_a_resume_racing_a_pause_is_written_after_it(tmp_path, monkeypatch):
+    """pause() writes its event under the pause lock, as resume() does: a resume that starts while the pause's event is
+    still being written waits for it, so the chain reads pause → resume and the guard ends running."""
+    g, _ = guard(tmp_path / "g.jsonl")
+    save, entered, gate = g.storage.save, threading.Event(), threading.Event()
+
+    def slow_save(res, meta=None, **kw):
+        if (meta or {}).get("guard", {}).get("event") == "pause":
+            entered.set()
+            gate.wait(5)                                   # the pause's write is in flight
+        return save(res, meta=meta, **kw)
+    monkeypatch.setattr(g.storage, "save", slow_save)
+    pauser = threading.Thread(target=g.pause, args=("incident 7",), kwargs={"by": "alice"})
+    pauser.start()
+    assert entered.wait(5)
+    resumer = threading.Thread(target=g.resume, kwargs={"by": "bob"})
+    resumer.start()
+    resumer.join(0.3)
+    assert resumer.is_alive()                              # blocked on the lock until the pause is written
+    gate.set()
+    pauser.join(5)
+    resumer.join(5)
+    assert not pauser.is_alive() and not resumer.is_alive()
+    ev = [(s.meta or {}).get("guard", {}).get("event") for s in g.storage.iter()]
+    assert ev == ["pause", "resume"] and g.paused is None and g.storage.verify()["ok"]
+
+
 def test_pause_and_resume_are_events_in_the_chain_and_paused_calls_replay(tmp_path):
     g, _ = guard(tmp_path / "g.jsonl")
     g.call(CALL)

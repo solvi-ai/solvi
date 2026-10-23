@@ -2977,13 +2977,15 @@ constant table (`{...}.get(kind, 1)`) or a default on a computed value is not fl
 `System(input_model=...)`), or mark the line `# solvi: ok`. **Notes** never fail: a question without a rule abstains until
 an answer head is fitted.
 
-**The wording of questions** (warnings). For a question a model answers (no rule, or a rule backed by a model): a choice
-with no catch-all option — `"other"`, `"none of these"`, `"unknown"`, or one described as "anything else" — and no
-decider `other=` or "not stated" (`Answer.maybe`) is `no_other_option`: when no option fits, a model still picks one,
-often with high confidence; levels that are bare numbers (`"1"`..`"5"`) without a description of each are
+**The wording of questions** (warnings, and one note). For a question a model answers (no rule, or a rule backed by a
+model): a choice with no catch-all option — `"other"`, `"none of these"`, `"unknown"`, or one described as "anything
+else" — and no decider `other=` or "not stated" (`Answer.maybe`) is the note `no_other_option` (a note, so `--strict`
+passes: closed label sets such as approve / reject or low / medium / high are normal; add a catch-all only when an
+input can fit none of the options, since then a model still picks one, often with high confidence); levels that are bare numbers (`"1"`..`"5"`) without a description of each are
 `numeric_levels` (give a dict `{level: description}`). For every question: a text that asks two things — two question
 marks, or "and whether" / "or whether" — is `compound_question` (split it; a plain "and" inside one judgement is not
-flagged). With `System(input_model=Model)`, a field that no part, rule, check, constraint, `uses` hint or span reads is
+flagged). With `System(input_model=Model)`, a field that no part, rule, check, constraint, `uses` hint, span or
+guarantee (its `groups=`, or a `signal=` naming the field; on a System or on a part's or combiner's calibration) reads is
 `unused_given` (checked only when every question has a rule or a `uses` hint, since a learned head may read any given
 fact). Each names the question (or the field) and the fix.
 
