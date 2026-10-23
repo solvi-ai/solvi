@@ -20,8 +20,9 @@ estimate of the training's time before training; above `budget.max_train_s` it r
 runner returns as a refusal.
 
 What a run can end with, as the caller sees it: the target's dict (done); `TrainingRefused` (the estimate is above
-`max_train_s`); `TrainingFailed` (the target raised, or ran past `max_train_s` + `grace_s` and was stopped — a
-subprocess is killed, a thread cannot be and is reported when it ends); `RunnerError` (the runner itself failed: the
+`max_train_s`); `TrainingFailed` (the target raised, or ran past its estimate + `grace_s`, counted from the estimate
+— before the target estimates, `max_train_s` + `grace_s` from the start — and was stopped: a subprocess is killed, a
+thread cannot be and is reported when it ends); `RunnerError` (the runner itself failed: the
 process died — a signal, the memory cap, an exit without a result — or wrote no log line for `stall_s`). The adapter
 loop records the first three in its "train" event (the served version keeps serving) and stops on a `RunnerError`
 (status "error", replay exact).
@@ -87,23 +88,62 @@ def _cuda_available():
         return False
 
 
-def pick_device(device="auto", free_gpu_mb=3000, *, probe=None, cuda=None) -> tuple:
+def _visible(env=None):
+    """CUDA_VISIBLE_DEVICES as nvidia-smi indices in torch's ordinal order → None (not set: torch's ordinal i is
+    nvidia-smi's GPU i), [] (no GPU visible) or [smi index, ...]; "uuid" when it names GPUs another way (UUIDs, MIG)."""
+    raw = (os.environ if env is None else env).get("CUDA_VISIBLE_DEVICES")
+    if raw is None:
+        return None
+    got = []
+    for tok in (t.strip() for t in raw.split(",")):
+        if not tok:
+            break
+        try:
+            i = int(tok)
+        except ValueError:
+            return "uuid"
+        if i < 0:                                   # CUDA stops at the first invalid entry
+            break
+        got.append(i)
+    return got
+
+
+def _torch_free_mb():
+    """Free memory of each GPU torch sees, in torch's ordinals (creates a CUDA context) → [mb, ...]."""
+    import torch
+    return [int(torch.cuda.mem_get_info(i)[0] // 2 ** 20) for i in range(torch.cuda.device_count())]
+
+
+def pick_device(device="auto", free_gpu_mb=3000, *, probe=None, cuda=None, env=None, torch_probe=None) -> tuple:
     """The device a training runs on → (device, why). "cpu": the CPU; "cuda" / "cuda:<i>": that GPU (as asked);
     "auto": the first GPU with at least free_gpu_mb MB free when torch sees CUDA, else the CPU (the reason is said).
-    probe: () → free MB per GPU (default gpu_free_mb); cuda: () → whether torch sees CUDA (default: torch's)."""
+    The device is torch's ordinal: under CUDA_VISIBLE_DEVICES nvidia-smi's index is mapped to it (when that variable
+    names GPUs by UUID, torch is asked for the free memory instead). probe: () → free MB per GPU by nvidia-smi's index
+    (default gpu_free_mb); cuda: () → whether torch sees CUDA (default: torch's); env: the environment (default
+    os.environ); torch_probe: () → free MB per torch ordinal (default: torch.cuda.mem_get_info)."""
     if device == "cpu" or (isinstance(device, str) and device.startswith("cuda")):
         return device, "asked"
     if device != "auto":
         raise ValueError(f"device is 'auto', 'cpu', 'cuda' or 'cuda:<i>', not {device!r}")
     if not (cuda or _cuda_available)():
         return "cpu", "auto: no CUDA device"
-    free = (probe or gpu_free_mb)()
-    for i, mb in enumerate(free):
+    vis = _visible(env)
+    if vis == "uuid":
+        free = (torch_probe or _torch_free_mb)()
+        cands = list(enumerate(free))
+    else:
+        smi = (probe or gpu_free_mb)()
+        order = range(len(smi)) if vis is None else [i for i in vis if i < len(smi)]
+        cands = [(smi_i, smi[smi_i]) for smi_i in order]
+        free = [mb for _, mb in cands]
+    for ordinal, (idx, mb) in enumerate(cands):
         if mb >= free_gpu_mb:
-            return f"cuda:{i}", f"auto: GPU {i} has {mb} MB free (≥ {free_gpu_mb})"
+            where = f"GPU {idx}" if vis in (None, "uuid") else f"GPU {idx} (nvidia-smi; torch's cuda:{ordinal})"
+            return f"cuda:{ordinal}", f"auto: {where} has {mb} MB free (≥ {free_gpu_mb})"
     best = max(free) if free else None
     return "cpu", (f"auto: no GPU with {free_gpu_mb} MB free (most: {best} MB)" if best is not None
-                   else "auto: GPU memory unknown (no nvidia-smi)")
+                   else "auto: GPU memory unknown (no nvidia-smi)" if vis is None or vis == "uuid" or smi == []
+                   else "auto: no GPU visible (CUDA_VISIBLE_DEVICES)")
 
 
 # ───────────────────────────────────────────────────────────── the context a target gets
@@ -118,7 +158,7 @@ class RunContext:
         self.heartbeat_s = float(heartbeat_s)
         self.in_process = False                    # True in a ThreadRunner: process-wide settings are not the target's
         self.phase, self.done, self.total, self.extra = "start", 0, None, {}
-        self.estimate_s = None
+        self.estimate_s = self.estimate_t = None
         self._lock = threading.Lock()
         self._stop = threading.Event()
         self._beat = None
@@ -138,7 +178,7 @@ class RunContext:
 
     def estimate(self, seconds):
         """The training's estimated time, before it trains: logged; above budget.max_train_s → TrainingRefused."""
-        self.estimate_s = float(seconds)
+        self.estimate_s, self.estimate_t = float(seconds), time.monotonic()
         self.status["eta"] = time.time() + self.estimate_s
         self.log(f"estimate {self.estimate_s:.1f} s")
         cap = float(getattr(self.budget, "max_train_s", float("inf")))
@@ -198,8 +238,8 @@ def _result(out):
 
 # ───────────────────────────────────────────────────────────── runners
 class ThreadRunner:
-    """See the module docstring. heartbeat_s: seconds between heartbeat lines; grace_s: past max_train_s before a
-    training is reported as over its time."""
+    """See the module docstring. heartbeat_s: seconds between heartbeat lines; grace_s: past the estimate (max_train_s
+    before one) before a training is reported as over its time."""
     kind = "thread"
 
     def __init__(self, *, heartbeat_s=30.0, grace_s=120.0):
@@ -221,19 +261,24 @@ class ThreadRunner:
         th.start()
         th.join()
         out = box.get("out") or {"state": "failed", "why": "the training thread ended without a result"}
-        over = time.monotonic() - t0 - float(budget.max_train_s) - self.grace_s
+        if ctx.estimate_s is not None:             # the same deadline as the subprocess runner's
+            over = time.monotonic() - ctx.estimate_t - ctx.estimate_s - self.grace_s
+        else:
+            over = time.monotonic() - t0 - float(budget.max_train_s) - self.grace_s
         if out.get("state") == "done" and over > 0:
-            raise TrainingFailed(f"ran {over:.0f} s past max_train_s {budget.max_train_s:g} + grace {self.grace_s:g} "
+            raise TrainingFailed(f"ran {over:.0f} s past its time limit (estimate or max_train_s) + grace "
+                                 f"{self.grace_s:g} s "
                                  "(a thread cannot be stopped; use the subprocess runner)")
         return _result(out)
 
 
 class SubprocessRunner:
-    """See the module docstring. nice: the process's niceness; heartbeat_s: seconds between heartbeat lines; grace_s:
-    past max_train_s (start-up, loading the checkpoint, calibration) before the process is killed; stall_s: no log line
-    for this long → killed, a RunnerError (None: max(10 heartbeats, 300 s)); python: the interpreter (default this
-    one); pythonpath: extra import paths for the target's module (the folder solvi is imported from always comes first);
-    poll_s: how often the process is checked."""
+    """See the module docstring. nice: the process's niceness; heartbeat_s: seconds between heartbeat lines; grace_s: on
+    top of the target's estimate (counted from the estimate line; before it, on top of max_train_s from the start)
+    before the process is killed — it must cover what the estimate does not: loading the checkpoint, calibration,
+    saving; stall_s: no log line for this long → killed, a RunnerError (None: max(10 heartbeats, 300 s)); python: the
+    interpreter (default this one); pythonpath: extra import paths for the target's module (the folder solvi is imported
+    from always comes first); poll_s: how often the process is checked."""
     kind = "subprocess"
 
     def __init__(self, *, nice=10, heartbeat_s=30.0, grace_s=120.0, stall_s=None, python=None, pythonpath=(),
@@ -270,7 +315,12 @@ class SubprocessRunner:
                                  stdout=ef, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, start_new_session=True)
         status["pid"] = p.pid
         t0 = time.monotonic()
-        deadline = float(budget.max_train_s) + self.grace_s
+        # The kill deadline: max_train_s + grace from the start until the target logs its estimate; from then on the
+        # estimate + grace from the moment the estimate line is seen (a later estimate, e.g. after a GPU → CPU
+        # fallback, moves it again). So a training that stays within its estimate is never killed for the loading
+        # and calibration the estimate does not cover; grace_s covers those.
+        deadline_at = t0 + float(budget.max_train_s) + self.grace_s
+        n_est = 0
         why = None
         while True:
             code = p.poll()
@@ -282,16 +332,19 @@ class SubprocessRunner:
                 age = time.time() - seen
                 status["last_t"] = seen
                 status["last"] = _last_line(log)
-                if status.get("eta") is None:
-                    est = _estimate(log)
-                    if est is not None:
-                        status["eta"] = seen + est
+                ests = _estimates(log)
+                if len(ests) > n_est:
+                    n_est, est = len(ests), ests[-1]
+                    status["eta"] = seen + est
+                    deadline_at = now + est + self.grace_s
                 if status.get("device") is None:
                     status["device"] = _device(log)
             except FileNotFoundError:
                 age = now - t0
-            if now - t0 > deadline:
-                why = ("over", f"ran past max_train_s {budget.max_train_s:g} + grace {self.grace_s:g} s: stopped")
+            if now > deadline_at:
+                why = ("over", (f"ran past its estimate + grace {self.grace_s:g} s: stopped" if n_est else
+                                f"ran past max_train_s {budget.max_train_s:g} + grace {self.grace_s:g} s with no "
+                                "estimate: stopped"))
             elif age > self.stall_s:
                 why = ("stall", f"no log line for {age:.0f} s (stall_s {self.stall_s:g}): stopped")
             if why is not None:
@@ -343,12 +396,21 @@ def _scan(path, word):
     return None
 
 
-def _estimate(path):
-    got = _scan(path, "estimate")
+def _estimates(path):
+    """Every estimate line's seconds, in order → [s, ...]."""
+    got = []
     try:
-        return float(got[0]) if got else None
-    except ValueError:
-        return None
+        with open(path) as f:
+            for line in f:
+                parts = line.split()
+                if len(parts) > 2 and parts[1] == "estimate":
+                    try:
+                        got.append(float(parts[2]))
+                    except ValueError:
+                        continue
+    except FileNotFoundError:
+        pass
+    return got
 
 
 def _device(path):

@@ -27,14 +27,15 @@ questions and the fingerprints are untouched); `install(system)` is `solvi.exper
 thresholds change together under the part's version lock, so no decision of the part sees one without the other —
 and `uninstall` swaps back what it replaced. `fingerprint()` = digest(adapter hash, calibration fingerprint).
 `LoraVersion.of_part(part)` is version 0: the part as attached, its adapter (or none) and its thresholds. `save(dir,
-v)` writes `<v>.lora.safetensors` and `<v>.calib.json`; `load(dir, v, expect_fp=, part=)` reads them back (the
+v)` writes `<v>.lora.safetensors` and `<v>.calib.json`; `load(dir, v, expect_fp=, part=, groups=)` reads them back (the
 adapter's content against its hash, the version against `expect_fp`).
 
 Limits: determinism holds for a fixed device and thread count (the adapter file is bf16 either way, so a GPU-trained
 adapter loads bit-exact on a CPU); a combination over the part (Cascade, Vote, Route) reads the part's internals
 without its version lock — the swap's atomicity covers the part's own decisions (call, decide, in_pass); a part's
-correction memory is not consulted while calibrating; trained versions stay staged on the scorer (about 3 MB each for
-solvi-base) for the loop's life. Unmeasured: no stand has run on the LoRA loop."""
+correction memory is not consulted while calibrating; a trained version stays staged on the scorer (about 3 MB for
+solvi-base) until the loop releases it (`release()`: a discarded candidate, a retired version past
+`max_versions_kept`, the versions a rescore bound again). Unmeasured: no stand has run on the LoRA loop."""
 from __future__ import annotations
 
 import copy
@@ -60,14 +61,40 @@ def _signature(names):
     return inspect.Signature([inspect.Parameter(f, inspect.Parameter.POSITIONAL_OR_KEYWORD) for f in names])
 
 
-def calibration_from(rec) -> dict:
-    """A calibration record (solvi.experimental.lora.calibration_record) → the calibration a swap restores. A version
-    the learner trained has no adaptation and no thresholds per group; a record with either is refused."""
-    if rec.get("adaptation") is not None or rec.get("groups") is not None:
-        raise ValueError("a LoRA version's calibration has no adaptation and no thresholds per group")
-    return {"adaptation": None, "escalate_below": rec.get("escalate_below"), "act_threshold": rec.get("act_threshold"),
+def _groups_from(g, *, groups=None, nodes=None):
+    """A calibration record's thresholds per group → the part's groups dict. g["by"]: fact names (rebuilt) or a
+    function's description (then pass the function again as groups=; refused otherwise or when it is another one);
+    nodes: the full node records [[path, {...}], ...] that save writes beside the record (else threshold only)."""
+    from ...core.calibration import GroupBy
+    by = g["by"]
+    if isinstance(by, list) and groups is None:
+        gb = GroupBy(by)
+    elif groups is None:
+        raise ValueError("the version's calibration has thresholds per group by a function: pass it again "
+                         "(LoraVersion.load(..., groups=that_function))")
+    else:
+        gb = GroupBy(groups)
+    if _lora()._plain(gb.describe()) != by:
+        raise ValueError(f"groups= {gb.label()} is not the grouping the version was calibrated with ({by})")
+    if nodes is not None:
+        nd = {tuple(k): dict(v) for k, v in nodes}
+    else:
+        nd = {tuple(k): {"threshold": t} for k, t in g["nodes"]}
+    return {"by": gb, "nodes": nd, "signal": g.get("signal")}
+
+
+def calibration_from(rec, *, groups=None, nodes=None) -> dict:
+    """A calibration record (solvi.experimental.lora.calibration_record) → the calibration a swap restores. The
+    question's adaptation is rebuilt from its parameters (its kept examples are not in the record: a later teach or
+    refit starts without them); thresholds per group are rebuilt as _groups_from says (groups=, nodes= go there). A
+    version the learner trained has neither; version 0 of a part that was fitted or calibrated per group has them."""
+    from ...core.deciders.adapt import Adaptation
+    a, g = rec.get("adaptation"), rec.get("groups")
+    return {"adaptation": None if a is None else Adaptation(**a),
+            "escalate_below": rec.get("escalate_below"), "act_threshold": rec.get("act_threshold"),
             "guarantee": copy.deepcopy(rec.get("guarantee")), "conformal_set": copy.deepcopy(rec.get("conformal_set")),
-            "groups": None, "signature": None if rec.get("signature") is None else _signature(rec["signature"])}
+            "groups": None if g is None else _groups_from(g, groups=groups, nodes=nodes),
+            "signature": None if rec.get("signature") is None else _signature(rec["signature"])}
 
 
 class LoraVersion:
@@ -98,6 +125,12 @@ class LoraVersion:
             L.stage(part, self.adapter)
         self.part = part
         return self
+
+    def release(self):
+        """Unstage the adapter from the scorer (a discarded or retired version; idempotent). It stays when a slot holds
+        it (the version is served); a later bind or score stages it again."""
+        if self.adapter is not None and self.part is not None:
+            _lora().unstage(self.part, self.adapter)
 
     def _bound(self):
         if self.part is None:
@@ -180,14 +213,18 @@ class LoraVersion:
         rec = {"format": CALIB_FORMAT, "adapter": None if self.adapter is None else self.adapter.hash,
                "calibration": L.calibration_record(self.calibration), "fingerprint": self._fp, "signal": self.signal,
                "info": self.info}
+        g = self.calibration.get("groups")
+        if g is not None:                          # every node's record (n, index), beside the fingerprinted thresholds
+            rec["group_nodes"] = L._plain([[list(k), v] for k, v in g["nodes"].items()])
         p = d / f"{int(version)}.calib.json"
         p.write_text(json.dumps(rec, default=str, sort_keys=True))
         return out + [p]
 
     @classmethod
-    def load(cls, dir, version: int, *, expect_fp: str, part=None) -> "LoraVersion":
+    def load(cls, dir, version: int, *, expect_fp: str, part=None, groups=None) -> "LoraVersion":
         """The version saved by save; ValueError when a file is not the recorded one (the adapter's content against its
-        hash, the calibration's adapter, the version's fingerprint against expect_fp)."""
+        hash, the calibration's adapter, the version's fingerprint against expect_fp). groups: the grouping function of
+        thresholds per group by a function (version 0 calibrated with act_guard(groups=fn))."""
         L = _lora()
         d = Path(dir)
         rec = json.loads((d / f"{int(version)}.calib.json").read_text())
@@ -198,7 +235,8 @@ class LoraVersion:
             ad = L.read(d / f"{int(version)}.lora.safetensors")
             if ad.hash != rec["adapter"]:
                 raise ValueError(f"version {version}: adapter #{ad.hash}, the calibration names #{rec['adapter']}")
-        v = cls(None, ad, calibration_from(rec["calibration"]), info=rec.get("info"), signal=rec.get("signal", "auto"))
+        cal = calibration_from(rec["calibration"], groups=groups, nodes=rec.get("group_nodes"))
+        v = cls(None, ad, cal, info=rec.get("info"), signal=rec.get("signal", "auto"))
         if v.fingerprint() != expect_fp:
             raise ValueError(f"version {version}: fingerprint {v.fingerprint()[:12]}, recorded {str(expect_fp)[:12]}")
         return v if part is None else v.bind(part)

@@ -322,7 +322,7 @@ def _snapshot(part):
     return {"adaptation": copy.deepcopy(part.model.adaptations.get(_akey(part))),
             "escalate_below": part.escalate_below, "act_threshold": part.act_threshold,
             "guarantee": copy.deepcopy(part.guarantee), "conformal_set": copy.deepcopy(part.conformal_set),
-            "groups": part.groups, "signature": part.__signature__}
+            "groups": copy.deepcopy(part.groups), "signature": part.__signature__}
 
 
 def _restore(part, snap):
@@ -357,7 +357,7 @@ def _set(part, ad):
     key, m = _lora_key(part), part.model
     old = m.loras.get(key)
     install(m.scorer, ad)
-    m.loras[key] = ad
+    m.loras = {**m.loras, key: ad}       # copy-on-write: a decision iterating the slots reads a whole snapshot
     if old is not None and old.name != ad.name and not _in_use(m, old.name, key):
         uninstall(m.scorer, old.name)
     m._forget_cached(key)
@@ -370,7 +370,7 @@ def remove(part):
     if ad is None:
         return None
     key, m = _lora_key(part), part.model
-    m.loras.pop(key, None)
+    m.loras = {k: v for k, v in m.loras.items() if k != key}      # copy-on-write (see _set)
     if not _in_use(m, ad.name, key):
         uninstall(m.scorer, ad.name)
     m._forget_cached(key)
@@ -675,19 +675,24 @@ def calibration_fingerprint(cal):
 
 def stage(part, ad):
     """Install `ad` on the part's scorer outside any slot, inactive (ahead of a swap, or to score it in shadow): the
-    model's fingerprint and every question's answers are unchanged. Idempotent."""
+    model's fingerprint and every question's answers are unchanged. From then on every question on the model is scored
+    through the scorer's adapter switch, so the model's scoring is serialised by the scorer's lock. Idempotent."""
     m = part.model
     install(m.scorer, ad)
     with _state(m.scorer)["lock"]:
-        m._lora_extra[ad.name] = ad
+        extra = getattr(m, "_lora_extra", None) or {}
+        if extra.get(ad.name) is not ad:
+            m._lora_extra = {**extra, ad.name: ad}           # copy-on-write: readers iterate a snapshot
 
 
 def unstage(part, ad):
     """Undo stage: the adapter leaves the scorer unless a slot holds it."""
     m = part.model
     with _state(m.scorer)["lock"]:
-        if m._lora_extra.pop(ad.name, None) is None:
+        extra = getattr(m, "_lora_extra", None) or {}
+        if ad.name not in extra:
             return
+        m._lora_extra = {k: v for k, v in extra.items() if k != ad.name}     # copy-on-write
         if not any(x.name == ad.name for x in m.loras.values()):
             uninstall(m.scorer, ad.name)
 
@@ -726,7 +731,7 @@ def swap(part, ad, cal, *, drop_old=True):
     finishes with the old version. → {"from": the part's fingerprint before, "to": after, "old": the replaced adapter
     or None}."""
     m, key = part.model, _lora_key(part)
-    snap = {**cal, **{a: copy.deepcopy(cal.get(a)) for a in ("adaptation", "guarantee", "conformal_set")}}
+    snap = {**cal, **{a: copy.deepcopy(cal.get(a)) for a in ("adaptation", "guarantee", "conformal_set", "groups")}}
     if ad is not None:
         install(m.scorer, ad)
     st = _state(m.scorer) if (ad is not None or m.loras.get(key) is not None) else None
@@ -734,15 +739,17 @@ def swap(part, ad, cal, *, drop_old=True):
         before = part.fingerprint()
         with st["lock"] if st is not None else contextlib.nullcontext():
             old = m.loras.get(key)
+            # copy-on-write: a decision on another question iterates the slots without these locks, so it must
+            # read a whole old or a whole new dict, never one changing size
             if ad is None:
-                m.loras.pop(key, None)
+                m.loras = {k: v for k, v in m.loras.items() if k != key}
             else:
-                m.loras[key] = ad
+                m.loras = {**m.loras, key: ad}
             m._forget_cached(key)
             _restore(part, snap)
         after = part.fingerprint()
     if (drop_old and old is not None and (ad is None or old.name != ad.name) and not _in_use(m, old.name, key)
-            and old.name not in m._lora_extra):
+            and old.name not in getattr(m, "_lora_extra", {})):
         uninstall(m.scorer, old.name)
     return {"from": before, "to": after, "old": old}
 

@@ -144,6 +144,51 @@ def test_a_concurrent_scorer_never_sees_an_adapter_without_its_thresholds(traine
     assert len(seen) > 20 and {None, v1.adapter.hash} <= set(seen), set(seen)
 
 
+def test_a_sibling_question_decides_unharmed_while_the_part_swaps(trained, swaps=400):
+    """Part B (another question on the same model, never an adapter) decides in two threads while part A swaps
+    versions 0 and 1: B never raises (the slots are copy-on-write, so no reader sees a dict change size), its
+    probabilities equal the reference and no adapter answers it."""
+    import sys
+    m, part, learner, v0, v1 = trained
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        b = m.decision("mood", "Is the writer angry?", "email", ["yes", "no"])
+    texts = [x for x, _ in _toy(10, 41)]
+    v0.install()
+    ref = {x: b.decide(x).probs for x in texts}
+    stop, errors, bad, n = threading.Event(), [], [], [0]
+
+    def score():
+        i = 0
+        try:
+            while not stop.is_set():
+                x = texts[i % len(texts)]
+                d = b.decide(x)
+                i += 1
+                if d.probs != ref[x] or d.extra.get("lora"):
+                    bad.append((x, d.extra.get("lora")))
+        except Exception as e:  # noqa: BLE001 — the failure under test is any exception in a decision
+            errors.append(repr(e))
+        n[0] += i
+
+    old = sys.getswitchinterval()
+    sys.setswitchinterval(1e-6)
+    th = [threading.Thread(target=score) for _ in range(2)]
+    for x in th:
+        x.start()
+    try:
+        for _ in range(swaps):
+            v1.install()
+            v0.install()
+    finally:
+        stop.set()
+        for x in th:
+            x.join()
+        sys.setswitchinterval(old)
+        v0.install()
+    assert not errors and not bad and n[0] > 0, (errors[:3], bad[:3])
+
+
 def test_a_version_saves_loads_and_is_found_by_its_hash(trained, tmp_path):
     m, part, learner, v0, v1 = trained
     files = v1.save(tmp_path, 3)
@@ -161,6 +206,79 @@ def test_a_version_saves_loads_and_is_found_by_its_hash(trained, tmp_path):
     unbound = LoraVersion.load(tmp_path, 3, expect_fp=v1.fingerprint())
     with pytest.raises(ValueError, match="not bound"):
         unbound.score(x)
+
+
+def test_version0_with_an_adaptation_and_thresholds_per_group_round_trips_its_files(ckpt, tmp_path):
+    """Version 0 of a part that was fitted (an adaptation) and calibrated per group saves and loads with the same
+    fingerprint and answers; grouped by a function, load needs the function again."""
+    from solvi.core.deciders import Facts
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        m, part = _part(ckpt)
+        part.fit(_toy(40, 3))
+        ex = [(Facts(email=t, domain="a" if i % 3 else "b"), y) for i, (t, y) in enumerate(_toy(120, 7))]
+        part.act_guard(ex, max_risk=0.3, groups="domain", min_group=30)
+        v0 = LoraVersion.of_part(part)
+        assert v0.calibration["adaptation"] is not None and v0.calibration["groups"] is not None
+        v0.save(tmp_path, 0)
+        back = LoraVersion.load(tmp_path, 0, expect_fp=v0.fingerprint(), part=part)
+        assert back.fingerprint() == v0.fingerprint()
+        assert back.calibration["groups"]["nodes"] == v0.calibration["groups"]["nodes"]
+        fp = part.fingerprint()
+        x = Facts(email=_toy(1, 17)[0][0], domain="a")
+        d0 = part.decide(x)
+        back.install()                                    # the loaded calibration serves exactly as the live one
+        assert part.fingerprint() == fp and part.decide(x).probs == d0.probs
+        assert list(part.__signature__.parameters) == ["email", "domain"]
+
+        def dom(email):
+            return "long" if len(email) > 45 else "short"
+        part.act_guard([(t, y) for t, y in _toy(120, 7)], max_risk=0.3, groups=dom, min_group=30)
+        vf = LoraVersion.of_part(part)
+        vf.save(tmp_path, 1)
+        with pytest.raises(ValueError, match="pass it again"):
+            LoraVersion.load(tmp_path, 1, expect_fp=vf.fingerprint())
+        assert LoraVersion.load(tmp_path, 1, expect_fp=vf.fingerprint(), groups=dom).fingerprint() == vf.fingerprint()
+
+
+def test_a_released_version_leaves_the_scorer_and_staged_adapters_stay_bounded(ckpt, tmp_path):
+    """Each trained version is staged on the scorer; the loop releases a discarded candidate (here by hand: release),
+    so after N trainings and N discards the scorer holds no extra adapter."""
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        m, part = _part(ckpt)
+        learner = LoraLearner(part, tmp_path, runner=ThreadRunner(heartbeat_s=0.5))
+        st = lora._state(m.scorer)
+        base = len(st["heads"])
+        for i in range(1, 4):
+            v = learner.train(_job(i=i, updates=10, n=40 + i))
+            assert v.adapter.name in m._lora_extra and len(st["heads"]) == base + 1
+            v.release()
+            v.release()                                   # idempotent
+            assert v.adapter.name not in m._lora_extra and len(st["heads"]) == base
+        assert not m._lora_extra and not m._has_loras()
+        v.install()                                       # a released version can still be served: swap installs it
+        assert part.lora.hash == v.adapter.hash
+        v.release()                                       # a slot holds it: unstaged, not uninstalled
+        assert part.lora.hash == v.adapter.hash and v.adapter.name in st["heads"]
+
+
+def test_the_loop_releases_a_discarded_candidate(trained):
+    """AdapterLoop._discard calls Served.release: the discarded version's adapter leaves the scorer."""
+    m, part, learner, v0, v1 = trained
+
+    class FakeLoop:
+        _release = staticmethod(AdapterLoop._release)
+        _event = staticmethod(lambda *a, **k: {"event": a[0]})
+        _split_n = {"train": 0}
+
+    v2 = learner.train(_job(i=9, updates=10, n=50))
+    fake = FakeLoop()
+    fake._vs = {2: {"state": "candidate", "model": v2, "served_as": v2, "samples": []}}
+    fake.candidate = 2
+    assert v2.adapter.name in m._lora_extra
+    AdapterLoop._discard(fake, 2, 5, "test")
+    assert v2.adapter.name not in m._lora_extra and fake._vs[2]["model"] is None
 
 
 def test_the_time_estimate_refuses_a_training_above_max_train_s(trained):

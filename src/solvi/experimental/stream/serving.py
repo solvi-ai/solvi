@@ -13,7 +13,9 @@ System had when the loop was built).
 The loop never touches a System except through `Served.install`: a promotion or a rollback installs the version it
 serves (version 0 is a `BaseVersion`, which puts back the head the System had, or removes it). `uninstall` is for
 detaching (stage 5). A frozen model that already has `install` / `uninstall` (the LoRA version of stage 3) is its own
-`Served`; any other one is wrapped in a `HeadVersion` (`solvi.core.versions.serve_head`). Unmeasured."""
+`Served`; any other one is wrapped in a `HeadVersion` (`solvi.core.versions.serve_head`). Optional: `release()` — free
+what the version holds outside the loop (a LoRA version unstages its adapter); the loop calls it on a discarded
+candidate and on the copies it loads to check the version files. Unmeasured."""
 from __future__ import annotations
 
 import pickle
