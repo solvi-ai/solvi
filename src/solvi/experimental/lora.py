@@ -236,6 +236,18 @@ def _state(scorer):
     return st
 
 
+def _net(scorer, st=None):
+    """A change to the scorer's network (an adapter installed, switched on or off, removed): the scorer's NetGate held
+    alone — plain passes of a model without adapters in flight finish first and new ones wait — then its adapter lock
+    (always in this order)."""
+    from ..core.deciders.model import net_gate
+    st = _state(scorer) if st is None else st
+    stack = contextlib.ExitStack()
+    stack.enter_context(net_gate(scorer))
+    stack.enter_context(st["lock"])
+    return stack
+
+
 def _layers(model):
     from peft.tuners.tuners_utils import BaseTunerLayer
     return [m for m in model.modules() if isinstance(m, BaseTunerLayer)]
@@ -261,7 +273,7 @@ def _activate(scorer, st, name, force=False):
 def using(scorer, name):
     """Score with adapter `name` active (None: without any); one thread at a time."""
     st = _state(scorer)
-    with st["lock"]:
+    with _net(scorer, st):
         _activate(scorer, st, name)
         yield
 
@@ -272,7 +284,7 @@ def install(scorer, ad):
     import torch
     from peft import inject_adapter_in_model
     st = _state(scorer)
-    with st["lock"]:
+    with _net(scorer, st):
         if ad.name in st["heads"]:
             return
         _activate(scorer, st, None)
@@ -309,7 +321,7 @@ def _delete(scorer, name):
 
 def uninstall(scorer, name):
     st = _state(scorer)
-    with st["lock"]:
+    with _net(scorer, st):
         if st["active"] == name:
             _activate(scorer, st, None)
         _delete(scorer, name)
@@ -421,7 +433,7 @@ def train(part, rows, *, r=8, alpha=None, epochs=6, lr=3e-4, seed=0, device=None
     config = {"format": FORMAT, "r": int(r), "alpha": int(alpha if alpha is not None else 2 * r), "target": TARGET,
               "head": HEAD.rstrip("."), "question": repr(_question(part))}
     st = _state(scorer)
-    with st["lock"]:                               # a copy of the checkpoint as it is: scoring goes on meanwhile
+    with _net(scorer, st):                         # a copy of the checkpoint as it is: scoring goes on meanwhile
         _activate(scorer, st, None)
         net = copy.deepcopy(scorer.model)
     net.to("cpu")
@@ -679,7 +691,7 @@ def stage(part, ad):
     through the scorer's adapter switch, so the model's scoring is serialised by the scorer's lock. Idempotent."""
     m = part.model
     install(m.scorer, ad)
-    with _state(m.scorer)["lock"]:
+    with _net(m.scorer):
         extra = getattr(m, "_lora_extra", None) or {}
         if extra.get(ad.name) is not ad:
             m._lora_extra = {**extra, ad.name: ad}           # copy-on-write: readers iterate a snapshot
@@ -688,7 +700,7 @@ def stage(part, ad):
 def unstage(part, ad):
     """Undo stage: the adapter leaves the scorer unless a slot holds it."""
     m = part.model
-    with _state(m.scorer)["lock"]:
+    with _net(m.scorer):
         extra = getattr(m, "_lora_extra", None) or {}
         if ad.name not in extra:
             return
@@ -737,7 +749,7 @@ def swap(part, ad, cal, *, drop_old=True):
     st = _state(m.scorer) if (ad is not None or m.loras.get(key) is not None) else None
     with version_lock(part):
         before = part.fingerprint()
-        with st["lock"] if st is not None else contextlib.nullcontext():
+        with _net(m.scorer, st) if st is not None else contextlib.nullcontext():
             old = m.loras.get(key)
             # copy-on-write: a decision on another question iterates the slots without these locks, so it must
             # read a whole old or a whole new dict, never one changing size
