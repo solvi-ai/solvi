@@ -368,7 +368,8 @@ data (`{"answer": "kind", "in": ["auto", "property"]}`, `{"status": "abstain"}`,
 `{"confidence_below": 0.5}`, `{"drift": true}`, `and` / `or` / `not`), never a Python function; a node with several
 inputs merges `all` or `any`; an edge that goes back is `loop=True` with `max_iter`, and a cycle without one is a
 `ValueError`. `p.promise(mode="union" | "end_to_end" | "per_node", ...)` records the declared promise (risk, split,
-threshold family, delta); `union` and `per_node` are computed by `p.guarantee()` (below), `end_to_end` comes later. `p.spec()` is JSON with a SHA-256 `hash` of its canonical form
+threshold family, delta); `union` and `per_node` are computed by `p.guarantee()` (below), `end_to_end` after
+`p.calibrate(...)` on end-labelled runs (below). `p.spec()` is JSON with a SHA-256 `hash` of its canonical form
 (stable to the order of keys; the order of edges counts), `Process.from_spec(spec, systems=...)` reads it back byte
 for byte and refuses a system whose fingerprint is not the recorded one (`strict=False` loads it and lists it in
 `mismatched`), `p.diff(other)` names every change by node and edge (down to the part whose fingerprint changed), and
