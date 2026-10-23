@@ -209,3 +209,22 @@ def test_an_inferred_item_follows_its_premise_after_the_premise_passes_its_retes
     km2.tell({"s": "A", "r": "p", "o": 1}, source="outcome", by="sync")
     s2.retest(a2, ok=True)
     assert s2.status(d2) == "hypothesis" and s2.pending_retest(d2)
+
+
+# --- the items waiting for a re-test
+def test_pending_lists_the_items_waiting_for_a_retest_with_the_reason():
+    # before: there was no list; a re-told retracted fact was a hypothesis with no reason given
+    km = solvi.Knowledge()
+    st = km.store
+    f = km.tell({"s": "R", "r": "rule", "o": "x"}, source="spec", by="reg")
+    d = st.add("fact", {"s": "R2", "r": "uses", "o": "x"}, source="spec", by="reg", derived_from=[f])
+    assert st.pending() == []
+    st.retract(f, why="forged")
+    g = km.tell({"s": "R", "r": "rule", "o": "x"}, source="spec", by="reg")
+    assert g == f and st.pending() == sorted([f, d])
+    assert st.item(f)["pending"].startswith("written again after its retraction")
+    assert st.item(d)["pending"].startswith(f"rests on {f}")
+    st.retest(f, ok=True)
+    assert st.pending() == [d] and "pending" not in st.item(f)
+    st.retest(d, ok=True)
+    assert st.pending() == []
