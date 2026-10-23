@@ -245,7 +245,10 @@ def _result(out):
 # ───────────────────────────────────────────────────────────── runners
 class ThreadRunner:
     """See the module docstring. heartbeat_s: seconds between heartbeat lines; grace_s: past the estimate (max_train_s
-    before one) before a training is reported as over its time."""
+    before one) before a training is reported as over its time. In this runner the LoRA trainer copies the network in
+    the loop's process while holding the scorer's network gate alone, so every decision on that model (every question,
+    not only the loop's) waits while the copy is made; unmeasured. `SubprocessRunner`, the default, copies in the
+    child and is unaffected."""
     kind = "thread"
 
     def __init__(self, *, heartbeat_s=30.0, grace_s=120.0):

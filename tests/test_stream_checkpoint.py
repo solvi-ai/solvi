@@ -204,7 +204,7 @@ def test_a_tampered_or_foreign_checkpoint_is_refused(tmp_path):
     info = a.save(tmp_path / "ck")
     folder = info["path"]
     assert any(f.startswith("versions/") for f in info["files"])
-    with pytest.raises(ValueError, match="secret"):
+    with pytest.warns(ckpt_mod.CheckpointTrustWarning), pytest.raises(ValueError, match="saved with a secret"):
         _load(tmp_path / "ck", secret=None)
     with pytest.raises(ValueError, match="signature"):
         _load(tmp_path / "ck", secret=b"another key")
@@ -292,3 +292,185 @@ def test_a_training_in_flight_refuses_the_save_unless_cancelled(tmp_path):
     for lp in (a, b):
         r = lp.replay()
         assert r["ok"], r["mismatches"][:5]
+
+
+# ───────────────────────────── held-out and calib labels, an alarm after the load
+def _shifted(seed, n, lo, hi=1.0):
+    r = random.Random(seed)
+    return [(r.choice("ab"), lo + (hi - lo) * r.random()) for _ in range(n)]
+
+
+def test_a_loop_with_held_out_and_calib_labels_continues_through_an_alarm_after_the_load(tmp_path):
+    """holdout and calib shares, the pre-freeze gates on: at the save a promoted version is served with a held-out
+    window of its own; after the load the scores shift, the served version alarms and is recertified. The state the
+    policy reads (held-out window, served_since, alarms, ...) equals the saved loop's, and so does everything after."""
+    pol = _plain(keep=3, growth=1.0, trial=300, first=200, calib=0.2, holdout=0.3, pre_freeze=True)
+    a = _loop(policy=pol)
+    save_at = 5300
+    data = _fake(21, 1500) + _shifted(22, 4000, 0.7) + _shifted(23, 400, 0.0, 0.3) + _shifted(24, 2600, 0.7)
+    _run(a, data[:save_at])
+    assert a.served != 0 and a._served_since > 0 and len(a._holdout) > 0, (a.served, a._served_since)
+    assert a.status()["labels"]["calib"] > 0 and a.status()["labels"]["holdout"] > 0, a.status()["labels"]
+    served = a.served
+    a.save(tmp_path / "ck")
+    b = _load(tmp_path / "ck")
+    assert b._state() == a._state()                  # everything the policy reads, the held-out window included
+    for i, x in enumerate(data[save_at:], start=save_at + 1):
+        assert a.step(x, lambda x=x: x[0]) == b.step(x, lambda x=x: x[0]), i
+    assert _norm(a.log) == _norm(b.log) and a.versions() == b.versions() and a._state() == b._state()
+    after = [e for e in _events(b) if e["decision"] > save_at]
+    alarms = [e for e in after if e["event"] == "alarm"]
+    assert alarms and alarms[0]["version"] == served, [e["event"] for e in after]
+    assert {"alarm", "recertify"} <= {e["event"] for e in after}, {e["event"] for e in after}
+    r = b.replay()
+    assert r["ok"] and r["decisions"] == len(data), r["mismatches"][:5]
+
+
+# ───────────────────────────── trust: unlisted files, the secret
+_PLANTED = []
+
+
+def _planted_ran():
+    _PLANTED.append(1)
+
+
+class _Boom:
+    def __reduce__(self):
+        return (_planted_ran, ())
+
+
+def test_an_unlisted_file_in_the_checkpoint_is_refused_and_never_run(tmp_path):
+    import pickle
+    a = _loop(policy=_plain(keep=1, growth=1.0, trial=300, first=200))   # no versions_dir: an evicted version has no file
+    _run(a, _fake(31, 9000))
+    info = a.save(tmp_path / "ck")
+    listed = {f for f in info["files"] if f.startswith("versions/")}
+    gone = [v["version"] for v in a.versions() if not any(f.startswith(f"versions/{v['version']}.") for f in listed)]
+    assert gone, (a.versions(), listed)
+    planted = info["path"] / "versions" / f"{gone[0]}.pkl"
+    planted.write_bytes(pickle.dumps(_Boom()))
+    _PLANTED.clear()
+    with pytest.raises(ValueError, match="unlisted"):
+        _load(tmp_path / "ck", versions_dir=tmp_path / "vb")
+    assert not _PLANTED
+    planted.unlink()
+    (info["path"] / "notes.txt").write_text("x")      # anywhere in the folder
+    with pytest.raises(ValueError, match="unlisted"):
+        _load(tmp_path / "ck")
+    (info["path"] / "notes.txt").unlink()
+    b = _load(tmp_path / "ck", versions_dir=tmp_path / "vb")   # versions_dir gets the listed files only, verified bytes
+    got = sorted(p.name for p in (tmp_path / "vb").iterdir())
+    assert got == sorted(f[len("versions/"):] for f in listed if not f.startswith("versions/0."))
+    for name in got:
+        assert (tmp_path / "vb" / name).read_bytes() == (info["path"] / "versions" / name).read_bytes()
+    r = b.replay(rescore=True)
+    assert not _PLANTED and r["decisions"] == 9000
+
+
+def _resign(folder, secret=None, **changes):
+    """Rewrite the manifest with changes and sign it as a writer of the folder would (secret: an HMAC, else SHA-256)."""
+    m = json.loads((folder / "manifest.json").read_bytes())
+    m.update(changes)
+    mb = ckpt_mod._dumps(m)
+    (folder / "manifest.json").write_bytes(mb)
+    (folder / "manifest.sig").write_bytes(ckpt_mod._dumps(ckpt_mod._sig(secret, mb)))
+
+
+def test_a_keyed_checkpoint_needs_its_secret_and_a_load_without_one_warns(tmp_path):
+    a = _loop()
+    _run(a, _fake(12, 1200))
+    folder = a.save(tmp_path / "ck")["path"]
+    m = json.loads((folder / "manifest.json").read_bytes())
+    assert m["keyed"] is True and json.loads((folder / "manifest.sig").read_bytes())["kind"] == "hmac-sha256"
+    with pytest.warns(ckpt_mod.CheckpointTrustWarning), pytest.raises(ValueError, match="saved with a secret"):
+        _load(tmp_path / "ck", secret=None)
+    good_m, good_s = (folder / "manifest.json").read_bytes(), (folder / "manifest.sig").read_bytes()
+    _resign(folder, None, keyed=True)                  # keyed kept, a plain SHA-256 signature: still needs the secret
+    with pytest.warns(ckpt_mod.CheckpointTrustWarning), pytest.raises(ValueError, match="saved with a secret"):
+        _load(tmp_path / "ck", secret=None)
+    with pytest.raises(ValueError, match="signature"):
+        _load(tmp_path / "ck")
+    _resign(folder, None, keyed=False)                 # a downgrade by a writer of the folder: the secret's holder
+    with pytest.raises(ValueError, match="without a secret"):   # refuses it
+        _load(tmp_path / "ck")
+    with pytest.warns(ckpt_mod.CheckpointTrustWarning):   # without the secret it is indistinguishable from an unkeyed
+        with warnings.catch_warnings():                    # checkpoint: the documented limit, hence the warning
+            warnings.filterwarnings("ignore", message=".*calibration coin")
+            _load(tmp_path / "ck", secret=None)
+    (folder / "manifest.json").write_bytes(good_m)
+    (folder / "manifest.sig").write_bytes(good_s)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", ckpt_mod.CheckpointTrustWarning)
+        _load(tmp_path / "ck")                         # with the secret: no warning
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        u = _loop(secret=None)
+    _run(u, _fake(13, 600))
+    u.save(tmp_path / "cu")
+    with pytest.warns(ckpt_mod.CheckpointTrustWarning, match="not tampering"):
+        b = _load(tmp_path / "cu", secret=None)
+    assert b.versions() == u.versions()
+
+
+# ───────────────────────────── concurrent saves
+def _current_ok(root):
+    name = (root / "CURRENT").read_text().strip()
+    return (root / name / "manifest.json").is_file(), name
+
+
+def test_two_saves_of_one_loop_never_leave_current_naming_a_removed_folder(tmp_path, monkeypatch):
+    a = _loop()
+    _run(a, _fake(16, 800))
+    root = tmp_path / "ck"
+    # forced interleaving: save A pauses in its cleanup while save B is started; B must wait for A (the cleanup is
+    # under the loop's lock), else A's cleanup would remove B's folder after B switched CURRENT to it
+    real, in_cleanup, b_done, first = ckpt_mod._cleanup, threading.Event(), threading.Event(), []
+
+    def slow(r, name):
+        if not first and threading.current_thread().name == "save-a":
+            first.append(1)
+            in_cleanup.set()
+            b_done.wait(1.0)
+        real(r, name)
+    monkeypatch.setattr(ckpt_mod, "_cleanup", slow)
+    errs = []
+
+    def save_b():
+        try:
+            in_cleanup.wait(10)
+            a.save(root)
+        except Exception as e:  # noqa: BLE001
+            errs.append(repr(e))
+        finally:
+            b_done.set()
+    ta = threading.Thread(target=lambda: a.save(root), name="save-a")
+    tb = threading.Thread(target=save_b)
+    ta.start(), tb.start()
+    ta.join(), tb.join()
+    assert not errs, errs
+    ok, name = _current_ok(root)
+    assert ok, (name, sorted(p.name for p in root.iterdir()))
+    monkeypatch.setattr(ckpt_mod, "_cleanup", real)
+    # and free-running: two threads, many saves; after every round CURRENT names a complete folder
+    bar = threading.Barrier(2)
+
+    def many():
+        try:
+            for _ in range(40):
+                a.save(root)
+                bar.wait()
+                ok, name = _current_ok(root)
+                if not ok:
+                    errs.append(name)
+                bar.wait()
+        except Exception as e:  # noqa: BLE001
+            errs.append(repr(e))
+            bar.abort()
+    th = [threading.Thread(target=many) for _ in range(2)]
+    for t in th:
+        t.start()
+    for t in th:
+        t.join()
+    assert not errs, errs[:3]
+    assert _load(root).n == 800
+    assert [p.name for p in root.iterdir() if p.name.startswith("ckpt-")] == [_current_ok(root)[1]]
