@@ -40,6 +40,13 @@ def die(payload, ctx):
 def killed(payload, ctx):
     os.kill(os.getpid(), signal.SIGKILL)
 
+def late(payload, ctx):
+    """Loads for `pre` s, estimates, trains for `post` s: the overhead before the estimate is not in it."""
+    time.sleep(payload["pre"])
+    ctx.estimate(payload["estimate"])
+    time.sleep(payload["post"])
+    return {"ok": True}
+
 def silent(payload, ctx):
     time.sleep(30)
 
@@ -95,6 +102,23 @@ def test_auto_picks_a_gpu_with_enough_free_memory_and_falls_back_to_the_cpu():
         pick_device("tpu")
 
 
+def test_auto_returns_torchs_ordinal_under_cuda_visible_devices():
+    yes = lambda: True                                                       # noqa: E731
+    smi = lambda: [100, 5000]                                                # noqa: E731 — nvidia-smi sees both GPUs
+    assert pick_device("auto", 3000, cuda=yes, probe=smi, env={"CUDA_VISIBLE_DEVICES": "1"})[0] == "cuda:0"
+    assert pick_device("auto", 3000, cuda=yes, probe=smi, env={"CUDA_VISIBLE_DEVICES": "1,0"})[0] == "cuda:0"
+    dev, why = pick_device("auto", 3000, cuda=yes, probe=smi, env={"CUDA_VISIBLE_DEVICES": "0"})
+    assert dev == "cpu" and "100 MB" in why                                  # GPU 1 is hidden from torch
+    assert pick_device("auto", 3000, cuda=yes, probe=lambda: [5000, 100], env={"CUDA_VISIBLE_DEVICES": "0,1"})[0] \
+        == "cuda:0"
+    assert pick_device("auto", 3000, cuda=yes, probe=lambda: [100, 100, 5000],
+                       env={"CUDA_VISIBLE_DEVICES": "0,2"})[0] == "cuda:1"
+    assert pick_device("auto", 3000, cuda=yes, probe=smi, env={"CUDA_VISIBLE_DEVICES": ""})[0] == "cpu"
+    assert pick_device("auto", 3000, cuda=yes, probe=smi, env={})[0] == "cuda:1"           # not set: the same index
+    uuid = {"CUDA_VISIBLE_DEVICES": "GPU-8f2a"}                              # by UUID: torch's own free memory
+    assert pick_device("auto", 3000, cuda=yes, probe=smi, env=uuid, torch_probe=lambda: [6000])[0] == "cuda:0"
+
+
 def test_a_subprocess_with_auto_and_too_little_gpu_memory_trains_on_the_cpu(helper, tmp_path):
     out = _sub(helper).run("lt_runner_helper:echo", {"out": str(tmp_path / "m.txt")}, name="t_auto", workdir=tmp_path,
                            budget=_budget(device="auto", free_gpu_mb=10 ** 9))
@@ -139,6 +163,20 @@ def test_a_silent_process_is_killed_and_one_past_its_time_is_stopped(helper, tmp
     with pytest.raises(TrainingFailed, match="ran past max_train_s"):
         _sub(helper, grace_s=0.5).run("lt_runner_helper:silent", {}, name="t_over", workdir=tmp_path,
                                       budget=_budget(max_train_s=0.5))
+
+
+def test_a_training_within_its_estimate_is_not_killed_for_the_time_before_the_estimate(helper, tmp_path):
+    """The deadline runs from the estimate line: 1 s of loading + 2 s of training against an estimate of 2 s and
+    max_train_s 2.5 + grace 0.3 is done (from the start it would be 3 s > 2.8 s); 3 s against an estimate of 2 s is
+    stopped."""
+    late = {"pre": 1.0, "estimate": 2.0, "post": 2.0}
+    for runner in (_sub(helper, grace_s=0.3), ThreadRunner(heartbeat_s=0.2, grace_s=0.3)):
+        out = runner.run("lt_runner_helper:late", late, name=f"t_late_{runner.kind}", workdir=tmp_path,
+                         budget=_budget(max_train_s=2.5))
+        assert out["state"] == "done" and out["ok"]
+    with pytest.raises(TrainingFailed, match="past its estimate"):
+        _sub(helper, grace_s=0.3).run("lt_runner_helper:late", {**late, "post": 3.0}, name="t_late_over",
+                                      workdir=tmp_path, budget=_budget(max_train_s=2.5))
 
 
 def test_the_thread_runner_runs_the_same_target_in_this_process(helper, tmp_path):

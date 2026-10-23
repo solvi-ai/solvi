@@ -232,9 +232,10 @@ class DecideModel:
         """The checkpoint plus every adaptation (so a replay knows the calibration a decision used)."""
         from ..provenance import digest
         ads = {repr(k): a.params() for k, a in sorted(self.adaptations.items(), key=repr)}
-        if self.loras:                       # a model without adapters hashes as before
+        loras = self.loras                   # one snapshot (copy-on-write, see solvi.experimental.lora.swap)
+        if loras:                            # a model without adapters hashes as before
             return digest(self.weights_fingerprint(), ads, {repr(self._lora_fp_key(k)): ad.fingerprint()
-                                                             for k, ad in sorted(self.loras.items(), key=repr)})
+                                                             for k, ad in sorted(loras.items(), key=repr)})
         return digest(self.weights_fingerprint(), ads)
 
     def metadata(self):
@@ -399,7 +400,7 @@ class DecideModel:
     def _lora_fp_key(self, k):
         """An adapter slot as the model's fingerprint names it: the question alone while one part has an adapter for
         it (the fingerprint 1.1.0 gave), the question and the part when several parts asking it have one."""
-        if len(k) > 3 and sum(1 for o in self.loras if o[:3] == k[:3]) == 1:
+        if len(k) > 3 and sum(1 for o in list(self.loras) if o[:3] == k[:3]) == 1:
             return k[:3]
         return k
 
@@ -417,12 +418,13 @@ class DecideModel:
         found, ad = _shadow(self, k)
         if found:
             return ad
-        if not self.loras:
+        loras = self.loras               # one snapshot: a swap replaces the dict (copy-on-write), never resizes it
+        if not loras:
             return None
-        ad = self.loras.get(k)
-        others = [o for o in self.loras if o[:3] == k[:3] and o != k]
+        ad = loras.get(k)
+        others = [o for o in list(loras) if o[:3] == k[:3] and o != k]
         if len(k) == 3:                                  # asked of the model directly
-            return ad if ad is not None or len(others) != 1 else self.loras[others[0]]
+            return ad if ad is not None or len(others) != 1 else loras[others[0]]
         for o in others:
             mine = "its own adapter" if ad is not None else "no adapter"
             self._warn_once(("lora-shared", k[3], o[3] if len(o) > 3 else None), (
@@ -449,7 +451,7 @@ class DecideModel:
         if not self._has_loras():
             import contextlib
             return contextlib.nullcontext()
-        ads = list(self.loras.values()) + list(getattr(self, "_lora_extra", {}).values())
+        ads = list(self.loras.values()) + list((getattr(self, "_lora_extra", None) or {}).values())
         ad = next((a for a in ads if a.fingerprint() == name), None) if name is not None else None
         return (ad if ad is not None else ads[0]).using(self.scorer, active=ad is not None)
 

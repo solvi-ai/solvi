@@ -90,7 +90,9 @@ STATES = ("served", "candidate", "retired", "discarded")
 @dataclass
 class Budget:
     """What trainings may cost. max_trainings: over the loop's life (None: no cap); per_day: trainings per 24 h;
-    min_interval_s: between two trainings; max_train_s: one training (estimated before it starts; refused if above);
+    min_interval_s: between two trainings; max_train_s: one training (estimated before it starts; refused if above; the
+    runner stops a training at its estimate + the runner's grace_s, which must cover what the estimate leaves out:
+    loading the checkpoint, calibration and saving);
     cpu_threads: torch threads of the runner on a CPU; device: "auto" (cuda when present and ≥ free_gpu_mb free, else
     cpu), "cpu", "cuda" or "cuda:<i>"; max_examples: rows per training; max_versions_kept: adapter files kept on disk
     (served and retired ones are never deleted). per_day=0 or max_trainings=0 means "never train"; max_trainings

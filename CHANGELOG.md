@@ -271,23 +271,32 @@
   adapter and its calibration together under a per-part version lock and then the scorer's lock: it closes the window
   adapt_lora and load_lora leave open, in which the adapter is on and the thresholds are cleared. Each decision of a
   part with a version lock holds it (`DecisionPart.__call__`, `decide`, `in_pass`; parts that never had a swap take
-  no lock); a combination over the part is not covered. Swap then rollback is bit-exact (the part's and the model's
+  no lock); a combination over the part is not covered. The model's adapter slots (and the staged adapters) are
+  replaced on every change, never changed in place, so a decision on another question of the same model reads a
+  whole old or new set during a swap (it raised "dictionary changed size during iteration" before; tested with two
+  threads deciding another question through 400 swap pairs). Swap then rollback is bit-exact (the part's and the model's
   fingerprints and the probabilities, tested); a test with two deciding threads and 60 swaps found no decision mixing
   one version's adapter with the other's thresholds or probabilities, and found mixes once the part's lock was
   removed. `lora.stage` installs an adapter inactive outside any slot (the model's fingerprint unchanged; once one is
   staged every question is scored through the scorer's adapter switch); `lora.adapter_by_hash(folder, hash)` finds an
-  adapter file by its hash; `lora.train` takes `updates=` and a per-update `log=` callback. Runners:
-  `SubprocessRunner` (the default: a fresh process, nice 10, threads capped at `Budget.cpu_threads`, `Budget.device
-  "auto"` → a GPU with `free_gpu_mb` free, read with nvidia-smi, else the CPU, and the CPU again after a GPU
-  out-of-memory error; the training is refused before it starts when the estimate from its first update is above
-  `Budget.max_train_s`; `train_<job>.log` with a heartbeat every 30 s; killed past `max_train_s` + 120 s, or after
-  `stall_s` without a log line) and `ThreadRunner` (in process, for tests and tiny data). In the loop a batch learner's
+  adapter file by its hash; `lora.train` takes `updates=` and a per-update `log=` callback. Runners: `SubprocessRunner`
+  (the default: a fresh process, nice 10, threads capped at `Budget.cpu_threads`, `Budget.device "auto"` → a GPU with
+  `free_gpu_mb` free, read with nvidia-smi, else the CPU, and the CPU again after a GPU out-of-memory error; the
+  training is refused before it starts when the estimate from its first update is above `Budget.max_train_s`;
+  `train_<job>.log` with a heartbeat every 30 s; killed past its estimate + `grace_s` (120 s) counted from the estimate
+  line — before it, `max_train_s` + `grace_s` from the start — so a training within its estimate is not killed for
+  loading and calibration, or after `stall_s` without a log line; under `CUDA_VISIBLE_DEVICES` nvidia-smi's GPU index is
+  mapped to torch's ordinal) and `ThreadRunner` (in process, for tests and tiny data). In the loop a batch learner's
   `TrainJob` also carries the calib labels, the budget, α and the live `status()["job"]` dict (pid, log, device, eta,
-  last line); a training refused by its estimate is a "train" event with state "refused" (counted against the
-  budget); a `RunnerError` (the process died or went silent) stops the loop with status "error" at the hook
-  "learner.train", replay exact; `initial=` with `install` / `uninstall` is version 0's `Served`; replay takes the
-  recorded install fingerprints (it failed before whenever a loop with `system=` promoted). The loop still waits for
-  a training inside `step`. Unmeasured: tests on a tiny random checkpoint only, no stand.
+  last line); a training refused by its estimate is a "train" event with state "refused" (counted against the budget); a
+  `RunnerError` (the process died or went silent) stops the loop with status "error" at the hook "learner.train", replay
+  exact; `initial=` with `install` / `uninstall` is version 0's `Served`; replay takes the recorded install fingerprints
+  (it failed before whenever a loop with `system=` promoted). `Served.release()` (optional; `LoraVersion` unstages its
+  adapter) is called on a discarded candidate and on the version copies a replay loads to check the files, so staged
+  adapters do not pile up; retired versions stay staged (they are rollback targets). `LoraVersion.save` / `load`
+  round-trip version 0 with an adaptation (its parameters; the kept examples are not saved) or thresholds per group (by
+  fact names; by a function: `load(..., groups=fn)`). `train_now` lost its unused `wait=` parameter. The loop still
+  waits for a training inside `step`. Unmeasured: tests on a tiny random checkpoint only, no stand.
 - **A secret for the supervision and audit draws: `Dispatcher(secret=)`** (`solvi.core.dispatch`; security). The
   draws were `sha256(f"{seed}|{input hash}|{n}")` with the public default `seed=0`, so whoever could vary the inputs
   could compute which decisions would be supervised or audited and avoid them. With `secret=` (bytes or str; None reads

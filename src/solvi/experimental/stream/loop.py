@@ -55,7 +55,7 @@ Serving: with `system=`, a promotion or a rollback installs the version through 
 and `replay()` checks each file through `Served.load` (rescore=True: every recorded score recomputed).
 
 Controls (each writes a "stream" event marked `control`, which `replay()` re-applies): `pause()`, `resume()`,
-`train_now(wait=False)` (it returns when the training is over, whatever `wait` is), `promote(v=None, force=False)`
+`train_now()` (it returns when the training is over), `promote(v=None, force=False)`
 (force skips the policy's promotion rule — novel count, min_share, margin, probe — never the certificate), and
 `rollback(v)`. A rollback is allowed while paused; a discard and an alarm go on while paused.
 
@@ -679,9 +679,23 @@ class AdapterLoop:
         ev = self._promise_events()
         return ev + [self._event("restart", v, n, why=why)]
 
+    @staticmethod
+    def _release(*objs):
+        """Free what a version holds outside the loop (a LoRA version's adapter staged on the scorer): Served.release,
+        optional, called once per object."""
+        seen = set()
+        for o in objs:
+            if o is None or id(o) in seen:
+                continue
+            seen.add(id(o))
+            rel = getattr(o, "release", None)
+            if callable(rel):
+                rel()
+
     def _discard(self, c, n, why):
         ver = self._vs[c]
         ver["state"] = "discarded"
+        self._release(ver.get("served_as"), ver["model"])
         ver["model"] = None                                # never served: its file (versions_dir) remains
         ver["discarded_at"] = self._split_n["train"]
         self.candidate = None
@@ -903,10 +917,10 @@ class AdapterLoop:
             self.paused = False
             return self._control("resume", by=None if by is None else str(by), why=why)
 
-    def train_now(self, wait=False) -> TrainJob:
+    def train_now(self) -> TrainJob:
         """One training now, whatever want_train says — within the budget, never while paused or with a candidate in
         trial. → the TrainJob (state "done", "failed" or "refused" with why). The call returns when the training
-        is over (in the learner's runner), whatever `wait` is; a RunnerError stops the loop."""
+        is over (in the learner's runner); a RunnerError stops the loop."""
         with self._lock:
             self._refuse_if_stopped()
             k = max(self._vs) + 1
@@ -1129,6 +1143,11 @@ class AdapterLoop:
                         got = models[v].score(lp.get("input"))[1]
                         if _num(got) != st.get(key):
                             bad.append((st["n"], "rescore", f"version {v}: recorded {st.get(key)}, scores {got}"))
+        live = {id(x) for ver in self._vs.values() for x in (ver.get("model"), ver.get("served_as")) if x is not None}
+        live_fp = {ver["model"].fingerprint() for ver in self._vs.values() if ver.get("model") is not None}
+        for v, mdl in models.items():                      # the copies loaded for the check: unstaged again, unless
+            if id(mdl) not in live and mdl.fingerprint() not in live_fp:   # a live version shares their adapter
+                self._release(mdl)
         return bad
 
     # --- what it says
