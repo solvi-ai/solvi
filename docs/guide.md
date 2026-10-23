@@ -3089,8 +3089,11 @@ tried by brute force over the answers' finite domains (yes/no, choice, ordinal, 
 a question (it never applies); a rule with a `return <literal>` that is not one of its question's options
 (`rule_returns_non_option`: `return "aprove"` — on that path the question abstains); a hard check without `-> bool`
 with a `return` that is plainly not `True` or `False` (`hard_check_untyped`: `return 0`, `return None`, a bare
-`return` — on that path the check is rejected and the questions it governs abstain). Both read the function's source:
-only literals in `return` statements (also in `a if c else b`) are judged, a returned variable or call is not.
+`return` — on that path the check is rejected and the questions it governs abstain); a hard check with no `then=` that
+no question requires and no part reads (`hard_check_never_runs`: no flow reaches it, so it never stops an answer —
+`System(...)` warns about it too). Both `return` checks read the function's source: only literals in `return`
+statements (also in `a if c else b`, and a lambda's body) are judged, a returned variable or call is not; a rule whose
+source cannot be read (made by `exec`, a callable object) is the warning `rule_unchecked`.
 **Warnings**: a rule registered for a question the system does not ask (`unused_rule`); with `System(input_model=Model)`, an
 argument that no part computes and the model does not declare (`input_not_declared`: `amout` for `amount` — it could
 only arrive as an extra key, and never when the model forbids extra keys), and a `uses` hint naming neither a part nor
@@ -4864,17 +4867,33 @@ under its guarantee, named by `of=<stored decision>` and checked in the store. A
 is journaled: the system's own answers never become knowledge, by construction. `ks.item(id)` is the full record:
 kind, body, scope, source, who, evidence, `derived_from`, confidence counts (confirmations, refutations, uses, uses
 that were wrong, a guarantee level), status, version and `supersedes`, and two time ranges — when it held in the world
-(`valid=(since, until)`, as you give it) and when the store learned and invalidated it (journal positions). Values on
-validity intervals that do not overlap are facts together; `snapshot(valid_at=t)` keeps as facts only those valid at
-`t`, a snapshot row carries its item's `valid`, and a rule reads the value at a world time with
+(`valid=(since, until)`, as you give it; ints, ISO date strings or `datetime.date`) and when the store learned and
+invalidated it (journal positions). Values on validity intervals that do not overlap are facts together. Versions with
+different sinces are versions in time, not a contradiction: a later since closes the earlier version there, and the
+earlier one stays a fact for its own time (a price of 100 from day 0 and a promotion of 80 on days 50–80 give 100,
+then 80, then 100 again; a value announced ahead does not end the current one before its date; retracting the later
+version re-opens the earlier). Validity is per assertion: a value told for two periods holds in both under one id
+(`ks.item(id)["valid"]["claims"]` lists them, `ks.periods(id)` gives where the item holds). Claims of one item from
+one since are one version: when they give different untils, the latest claim's until decides (a correction of the
+until). A missing since is the beginning of time: an assertion without `valid` on a key where others carry one is the
+version that holds from the beginning until the first later since. Two values from the same
+since compete by rank as below, and the winner takes only the overlap. A fact derived from others (`derived_from=`)
+without its own `valid` gets the intersection of its premises' validity and holds only where they hold.
+`snapshot(valid_at=t)` keeps as facts only those that hold at `t`, a snapshot row carries its item's `valid` (and
+`"periods"` when it holds on other spans), and a rule reads the value at a world time with
 `solvi.Knowledge.value(snapshot, s, r, valid_at=t)` (without `valid_at` it reads the first matching row).
+Two kinds of rows are facts though the item's own status is not "active": an item disputed only on an overlap is a
+fact outside it, and an item derived from such a premise is a fact where every premise of one of its derivations
+holds (its status stays "hypothesis", `usable(id)` without a time is False). Without `valid_at` such a row carries
+`"periods"`; an item that holds at no time (a premise disputed on its whole validity, or a derived item whose own
+`valid` misses every period where its premises hold) is not a fact.
 
 Contradictions resolve by rank: an observation refutes whatever it contradicts (the world changed), a higher-ranked
 source (outcome > person > spec > verified) refutes a lower one, a producer's new version (`supersedes=`) refutes the
 one it names. A consequence computed from premises (`add(..., derived_from=[...], inferred=True)`, as a rule engine
 writes it) is not an observation: it competes by rank only, so two inferences of different values from equal-rank
-premises are a dispute. Anything else is a dispute: every side is `disputed`, none is given to System 1 as a fact, and one
-person question is opened per dispute event — the same two items disputed again after a resolution are asked again;
+premises are a dispute. Anything else is a dispute: every side is `disputed`, none is given to System 1 as a fact (on
+a key with `valid`: none on the overlapping span, each outside it), and one person question is opened per dispute event — the same two items disputed again after a resolution are asked again;
 `ks.disputes()` lists the open ones and `ks.resolve(key, value, by=...)` is the answer.
 
 A retraction is exact: the store after `retract(x)` has the fingerprint of the store rebuilt from its journal as if x
@@ -4890,6 +4909,14 @@ retract the conclusion (its premises stand) but marks it for review: a hypothesi
 `retest(id, ok=True)`; `ks.item(id)["consulted"]` lists them. A conclusion whose margin over the losing alternative
 rested on a retracted source is then reviewed instead of staying a fact unnoticed. Such a retraction is not exact in
 the sense above until the re-test: the rebuilt store has no review mark.
+
+Withdrawn content is not served again without a re-test. Content told again after its retraction waits for a re-test
+(`ks.pending()` lists what waits, `ks.item(id)["pending"]` says why; `retest(id, ok=)` decides). On facts told with
+`valid`, this holds whatever the item id and on any overlapping validity: every retraction (`retract`, `only_from=`,
+`retract_source`, a failed re-test, a rollback) withdraws its content on its validity; a later assertion of it waits
+for a re-test unless writers it was not withdrawn from still hold it — and then it waits from the moment they are taken
+back. One publication among identical ones is taken back with `retract(id, assertion=n)` (its journal position, listed
+in `item(id)["valid"]["claims"]`) or `retract(id, only_from=(writer, evidence))`.
 
 A decision is given `ks.snapshot(...)` as a fact: the active items that match (`facts`), the hints (hypotheses, expired
 or stale items, with why), the ids they rest on, the store's fingerprint and its journal position — so the trace shows

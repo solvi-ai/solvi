@@ -1,6 +1,6 @@
 """Graduated in 1.1: the specialist contract is the stable solvi.core.specialist (its runs on the core TraceStorage).
-This path re-exports every name, as the same objects, with the experimental warning, for one release: it is removed in
-1.2. Import solvi.core.specialist."""
+This path re-exports every name, as the same objects, with the experimental warning (its removal, planned for 1.2,
+is now in a future release). Import solvi.core.specialist."""
 # ruff: noqa: F405 — __all__ names what the star import re-exports
 from __future__ import annotations
 
@@ -13,4 +13,4 @@ __all__ = ["Agreed", "align", "Alignment", "BLOCKED", "box_iou", "canonical", "C
            "Specialist", "Trace", "WARNING"]   # the stable module's names
 
 _warn_from_caller(f"{__name__} is experimental and graduated in 1.1: import solvi.core.specialist; this path is "
-                  "removed in 1.2", ExperimentalWarning, skip=1)
+                  "removed in a future release", ExperimentalWarning, skip=1)

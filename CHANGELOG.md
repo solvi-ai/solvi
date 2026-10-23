@@ -537,6 +537,28 @@ labels, 10 % of the labels discordant) rolled back in 10 / 28 / 70 % of runs by 
   error; on labels that are not a random sample it is the interval of the labelled decisions only. `wilson(k, n)` is
   checked against scipy's `binomtest(...).proportion_ci(method="wilson")`. The interval is for a random-audit sample,
   a fixed-time reading: not a running bound over the stream.
+- **Laws (experimental): `admit_by_probes(..., falsify="leftover")`, default off.** Once the split phase would accept,
+  the leftover budget is spent on safe pool probes not yet asked where the accepted law would be the applied law,
+  drawn at random with `seed`; any answer other than the law's effect makes the admission "undetermined" and commits
+  nothing. The falsification probes are in `asked` (ids `falsify-…`) and `cost["probes"]`, never above `budget`;
+  `noise=` and `max_new=2` refuse it (`ValueError`), as does any value other than None and `"leftover"`. With the
+  option unset the admission is unchanged. Measured on synthetic boolean worlds in two pre-registered runs (the
+  reproduction gate was revised after the first run failed it, disclosed before the second): at budget 20, 1 wrong law
+  admitted against 131 for the default where the grammar cannot express the true law — the one survivor was
+  probe-starved, with no leftover probe in its wrong region; no loss in sound admissions (124 vs 123 at budget 8,
+  251 vs 236 at budget 20); little effect at budget 8; the price is asks. Covered by
+  [tests/test_laws_falsify.py](tests/test_laws_falsify.py).
+- **Laws (experimental): `residual_check(refit, level=0.995)`, an opt-in χ² check on a fitted numeric law**
+  (`solvi.experimental.laws`; default off, nothing changes unless it is passed). It returns a `confirm=` closure: the
+  caller's `refit(candidate)` fits the law's constants on the design and held-out rows together and returns the
+  residuals in σ units and the number of constants k; the law is kept only while Σ r² ≤ χ²_0.995(n − k). Used with
+  `tol=math.inf` (the row band off; under it the sized bound is vacuous and the χ² level, which has no term for the
+  number of candidates, is the only false-accept control). Measured once on synthetic physics worlds re-created from
+  another group's description: wrong pendulum laws at 1–2σ bias accepted 0.60 → 0.14 (70 worlds), Kepler at Tycho's
+  precision 4 → 12 of 12, no loss where the truth is in the list (179 of 200 right, 0 wrong). A flexible wrong model
+  can pass (a 25-constant epicycle system on 1 of 12 extra skies): the refit χ² checks goodness of fit, not
+  prediction. The sign test and the fit-variance-widened tolerance were measured and are not shipped. A default change
+  waits for a second task outside physics.
 
 ### Fixed
 - **The adapter loop's first training is no longer refused at the freeze for repeated held-out labels**
@@ -609,6 +631,145 @@ labels, 10 % of the labels discordant) rolled back in 10 / 28 / 70 % of runs by 
 - **`Guard.replay(id)` of a call denied outside a session's allowed tools** replayed it with the tool's own checks and
   reported a mismatch (`in_session_tools` "not in the catalog"); a stored decision is now replayed with the system that
   made it, read from its recorded steps (also in the process replay of a guard node).
+- **A hard check that no question's flow reaches is no longer silent.** A hard check with no `then=`, that no question
+  requires and no part reads, is never planned, so it never ran and never stopped an answer, and nothing said so (`solvi
+  check` listed it as an ordinary `unused_part` warning). `System(...)` now warns about it, naming the check and the
+  two ways to wire it (`requires=[...]` on the questions it guards, or `then=`), and `solvi check` reports it as the
+  error `hard_check_never_runs`, so `rep.ok` is False for such a system. Behaviour change by design: the new warning and
+  the lint error; answers are unchanged.
+- **The `Fail` reason of a hard check reached through `requires=` is kept in `why`.** A hard check without a `then=`
+  answer for the question that failed with `Fail("...")` gave `why` = "hard check X is false and no answer is set for
+  it"; the reason now follows, as it does when `then=` sets the answer ("hard check adult is false: age 9 < 18 and no
+  answer is set for it"). Only the text of `why` changes.
+- **`solvi check` reads lambda rules and says when it cannot read a rule.** `rule_returns_non_option` skipped a lambda
+  (`cat.rule("q")(lambda x: "aprove")`) and a rule without source (made by `exec`, a callable object) without a word,
+  so a misspelled option passed as "no problems found". A lambda's body is now checked as its return value (found on
+  its line by its arguments); a rule whose return values cannot be read is the new warning `rule_unchecked`. Behaviour
+  change by design: new findings from `solvi check`; `ask` is unchanged.
+- **Two silent ways a part never runs now warn.** A rule or part argument named like a question of the system is read
+  from the given facts, never from that question's answer (answers are not facts), so without it in the input the
+  reader could not run and its question abstained ("cannot compute: a"); `System(...)` now warns about it (`solvi
+  check` already listed it as `question_as_fact`). An argument with a default value is a fact the part reads like any
+  other, so its default is never used: `def chk(n, _lim=lim)` waits for a fact `_lim`, and a hard check written so
+  abstained with "no data for hard check chk: missing _lim". Registering such a part (fn, rule, check, extract) now
+  warns and shows how to bind the value without a default. Behaviour change by design: the two warnings only — how
+  arguments are read, and every answer, are unchanged.
+- **`KnowledgeStore.forget(writer, storage=<path>)` no longer fails after a partial write.** A path was not opened: the
+  source's retraction was already journaled when re-deciding the stored decisions failed (`AttributeError: 'str'
+  object has no attribute 'iter'`), so the journal changed and nothing was re-decided. `forget` and `redecide` now
+  open a path as `System(storage=)` does (`open_storage`), before anything is written; a storage that cannot be opened
+  raises with the journal unchanged. `Knowledge.forget(writer, by=, why=, storage=, decide=)` is the facade, beside
+  `Knowledge.retract`. With a TraceStorage nothing changes.
+- **`NumericDrift` warns on a degenerate reference.** On a stream that is mostly one exact value with rare spikes (a
+  cost that is 0 on most decisions) the reference's spread is near zero, the values are far from Gaussian, and an
+  unchanged stream was flagged far more often than alpha with no word (the reference warning fired only below 20
+  values, and not at all for a reference collected from the stream). When half of the reference's values or more are
+  one and the same value, `set_reference` and the reference collected from the stream now warn, `NumericDrift.degenerate`
+  says why (None otherwise), and an alarm's `why` repeats it. A robust scale (MAD, quantiles) would not help here: it
+  is zero on such a reference too; watch an aggregate over a window instead. Behaviour change by design: the warning
+  and the longer `why`; the test and its flags are unchanged.
+- **Knowledge: three narrow fixes to the two-writer dispute on a key with `valid`.** (1) A value another writer still
+  asserts is disputed, not refuted, when a writer that had confirmed it tells a new value from the same since: the
+  rule judged "another writer" by the last assertion only, so the regulator's 23 followed by a wiki's confirming 23 and
+  then the wiki's 21 refuted the regulator's value, while without the wiki's confirmation the two disputed. Every
+  writer seen asserting the value now counts; one writer changing its own value still refutes it. (2) Two unbounded
+  sinces (`valid=(None, None)` from two writers) are the same since, so the two values dispute as two equal given
+  sinces do; the later writer refuted the earlier one silently. A missing since against a given one, and keys whose
+  assertions carry no `valid` at all, resolve as before. (3) An item pending re-test (content told again after a
+  retraction) takes no side on its key: it was a hypothesis and still made the other value `disputed` and opened a
+  dispute; after `retest(id, ok=True)` it takes its side again. Behaviour change by design in these three cases (item
+  statuses, `disputes()` and the snapshots built from them); every other key resolves as before.
+- **A contract's fingerprint reads `applicable`'s source once per code object.** A System's questions fingerprint,
+  built on every `ask`, took each contract's fingerprint, which ran `inspect.getsource` on `applicable` each time (the
+  dispatcher's fingerprint of a slow path's contract too). The text hashed is now kept per function and read again when
+  its code changes (a new `__code__` or qualified name, or another function); the fingerprint itself is unchanged.
+  `benchmarks/contract_fingerprint.py` measures the `ask` time with and without the memo on a one-rule system (same
+  answers in both arms); on one machine the median ask was about 39% shorter (one run, 4,000 asks per arm).
+
+### Changed
+- **Versions in time on a key with `valid`.** **Behaviour change**: on a key with `valid`, a later `since` on an
+  overlapping interval closes the earlier version at that `since` instead of refuting it (a bounded version gives the
+  old value back after it; a retracted version re-opens what it closed; a missing since is the beginning of time);
+  validity is per assertion, so a value told for two periods holds in both under one id (claims of one item from one
+  since are one version, and the latest claim's until is its until); the winner of a same-since
+  contest or of a person's answer takes only the overlap, and a dispute is contested only there; a derived item's
+  validity is the intersection of its premises' (refused when they never hold together or their times do not
+  compare) and it holds only where its premises hold; re-published withdrawn content waits for a re-test whatever its
+  id, and a copy admitted while another writer held the content goes pending when that holder is cut or when the
+  holder's version is refuted, disputed or closed there (a holder must hold); taking back a duplicate while the same
+  writer's other claim stands is not a withdrawal; an inferred item follows its premise after the
+  premise's re-test. New: `KnowledgeStore.pending()` (with the reason in `item(id)["pending"]`), `periods(id)`,
+  `retract(id, assertion=n)` and `retract(id, only_from=(writer, evidence))`, `item(id)["valid"]["claims"]` /
+  `["effective"]`, a snapshot row's `"periods"`, `Knowledge.tell(inferred=)`, `Knowledge.retract(only_from=,
+  assertion=)`; `datetime.date` works as a time (kept as its ISO text). Fingerprints of stores with overlapping
+  `valid` change once (an item that was refuted by a later since is active); keys without `valid` are unchanged, and
+  journals written before load, verify and replay. This supersedes the sentence of the dispute-rule fix above that "a
+  missing since against a given one ... resolve[s] as before": on a key where some assertion carries `valid`, a missing
+  since is now the beginning-of-time version and a given since closes it instead of the two contesting — so an
+  assertion told without `valid` after a dated one on that key (even a later observation) holds only before the dated
+  version's since, where it used to refute it and be read at every time (an outcome `B` from 5, then an outcome `A`
+  without `valid`: before, `A` refuted `B` and was read at 10; now `B` is read at 10 and `A` at 3). Two missing sinces
+  still dispute as that fix says, and keys whose assertions carry no `valid` at all resolve as before. Journal: taking
+  back one assertion (`retract(id, assertion=)`, `only_from=(writer, evidence)`, a failed re-test of copies) writes a
+  new op, `"retract_assertions"`; a store before 1.4 refuses such a journal ("unknown knowledge journal op") instead of
+  reading the entry as a whole retraction, so a journal that has one opens only on 1.4 or later.
+  Measured once on a pre-registered stand (script not in the repository; our own synthetic worlds, 30 seeds, and
+  one public data set, the ECB key interest rates: four series 1999–2026, 191 changes). On the ECB stream the
+  store reads the current value 6,636 of 6,636 times (before: 6,186), the value as of an earlier day 1,799 of
+  1,799 (before: 245), an announced value on its announcement day 182 of 182 (before: 182) and the old value in
+  the window between announcement and effect 855 of 855 (before: 0). On the synthetic worlds: current 7,812 of
+  7,813 (before: 7,236), as of an earlier day 7,813 of 7,813 (before: 1,580); withdrawn content served again
+  without a re-test 0 of 959 probes (before: 239; Wilson 95 % upper bound 0.004); correct derivations blocked
+  21 of 2,260 (0.9 %; before: 294), expired derivations served 0 of 7,358 (before: 50); 251 re-tests asked
+  where 248 were needed. Writing the ECB stream takes about 2.0× the time it took (medians of 5 runs, 0.129 s
+  against 0.065 s, one machine). 230 journals without overlapping `valid` are byte-identical in both versions;
+  260 journals written by the previous version open, verify and replay, and on the 30 with overlapping `valid`
+  the differences are 21 items refuted or disputed before and active now, plus 6 items of two kinds that follow
+  from the rule (a derivation over a premise that used to be refuted; withdrawn content re-told as a rule where
+  a fact was withdrawn, now pending). Caveats: one run; the ECB part and the 260 journals were read during
+  development, so they are regression checks and the confirmatory weight is on the 30 synthetic seeds, whose
+  seeds were derived from the frozen pre-registration; the simulated re-checker always answers right; the
+  synthetic gold follows the store's own convention that a writer's later value replaces its earlier one at the
+  same since (fixed on development seeds); the synthetic generator was set to produce enough probes (six
+  vendor tries per key) before any confirmatory seed existed.
+  Known limitations, both fixed after the measurement; the fixes were regression-checked on development seeds
+  only (the numbers above are as measured, before the fixes). A derived item was blocked where it should hold
+  when its premise's content was told on two validity periods and the premise was disputed on one of them: the
+  check read the premise's item-level "disputed" status instead of its validity at the asked time (this is the
+  21 of 2,260 correct derivations blocked above). Fixed: such a derived item stays a hypothesis as a whole, but
+  `usable(id, valid_at=)` and `snapshot(valid_at=)` give it as a fact at a time where every premise of one of
+  its derivations is usable, and a snapshot without a time carries the periods where it holds. Four claims at
+  one since by two writers, each telling one value and then another, left both items disputed, so no value was
+  read for that key at that time (the one synthetic current-value miss above). Fixed: a writer's later value at
+  one since replaces its own earlier one before the writers are compared, so when both writers end on the same
+  value that value holds and the other is refuted; while any writer still asserts the old value the two still
+  dispute.
+- **The experimental deadline reads "a future release".** The deadline set at 1.0 for every experimental piece was 1.2;
+  it passed with the pieces still here, and the import warning of 1.3 and 1.4 still said "it is removed in 1.2 unless it
+  graduates". `solvi.experimental.DEADLINE`, each `STATUS[...]["deadline"]`, the warning and docs/experimental.md now say
+  "a future release": no release is named until one is decided. The old paths of the pieces that graduated in 1.1
+  (`solvi.experimental.specialist`, `.mcp`, `.counterfactual`) say the same in their warning. Only text changes.
+
+
+### Upgrading from 1.1: behaviour changes of 1.2 outside its Breaking list
+1.2.0 changed the behaviour of some experimental modules, and of the knowledge store's re-told content, under its
+"Fixed" heading only; its headline "Breaking" list did not name them. A pipeline or simulation written for 1.1 can
+score differently on 1.2 and later with no code change. Each one, with the switch that restores 1.1 where there is one:
+- **Knowledge (stable): content told again after a retraction waits for a re-test.** It is a hypothesis until
+  `retest(id, ok=True)`, and so is every item that rested on it; under 1.1 the new assertion revived it at once. No
+  switch: call `retest` where the content was checked again.
+- **`solvi.experimental.changes`: a rollback with a reason is a failure.** `Pipeline.rollback(v, why=...)` records the
+  undone changes as failed, and the failure memory (`KnownFailures`) then refuses the same proposal again.
+  `rollback(..., failed=False)` per call, or `KnownFailures(rollbacks=False)`, keeps 1.1's behaviour.
+- **`solvi.experimental.changes`: a stage that raises gives status `"error"`**, not a rejection remembered for ever; the
+  candidate runs again once the stage is fixed. `Pipeline(raise_stage_errors=True)` re-raises after journaling.
+- **`solvi.experimental.laws`: support and precision are counted where the candidate would be the applied law.**
+  `LawSet(support_on="matched")` restores 1.1's count.
+- **`solvi.experimental.laws`: the sized acceptance's N counts distinct candidates**, so re-scoring the same candidates
+  no longer raises the bar. No switch.
+- **`solvi.experimental.laws`: `admit_by_probes` keeps witnesses** when more than one law may be missing, and a lone
+  survivor waits for them. `assume_one_law=True` keeps 1.1's rule. The noisy admission's fit check (`fit_level`,
+  default on) refuses a law that does not fit the noise; `fit_level=None` turns it off.
 
 ### Docs
 - **Drift and audit: measured caveats** (best practices; the `ShiftWatch.shift`, `DriftMonitor` and `sysreport`

@@ -63,4 +63,6 @@ input rather than a knowledge item.
 - It does not decide for you which decisions to reverse: `changed` goes to a person; nothing is re-sent or undone.
 - An item the source told that someone else also told stays: it is no longer the source's, but it is still known.
 - A knowledge item told again after its retraction is a hypothesis waiting for a re-test (`pending_retest`) until it is
-  confirmed.
+  confirmed; `store.pending()` lists them. On facts told with `valid=`, the same content told again by anyone on an
+  overlapping validity waits too, and a copy accepted while another writer still held the content waits from the
+  moment that writer is taken back.

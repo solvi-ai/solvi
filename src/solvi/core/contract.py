@@ -34,6 +34,7 @@ checked against the contract."""
 from __future__ import annotations
 
 import dataclasses
+import weakref
 from typing import Any, Callable
 
 CODES = ("wrong_type", "echo", "not_applicable")
@@ -212,22 +213,42 @@ class Contract:
         or its bytecode when there is none) → a short hash. Changing any of them changes the fingerprint of the
         System or slow path that carries the contract, so a decision made under another contract does not replay."""
         import hashlib
-        import inspect
         r = self.returns
         rt = repr(r) if _is_answer_type(r) else _type_name(r) if r is not None else None
-        code = None
-        f = self.applicable
-        if f is not None:
-            f = inspect.unwrap(f)
-            try:
-                code = inspect.getsource(f)
-            except (OSError, TypeError):
-                co = getattr(f, "__code__", None)
-                code = co.co_code.hex() + repr(co.co_consts) if co is not None else type(f).__qualname__
-            code = f"{getattr(f, '__qualname__', type(f).__qualname__)}\n{code}"
+        code = None if self.applicable is None else _code_text(self.applicable)
         echo = list(self.echo) if isinstance(self.echo, tuple) else "auto" if self.echo is None else self.echo
         blob = repr((rt, echo, code))
         return hashlib.sha256(blob.encode()).hexdigest()[:16]
+
+
+_CODE: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()   # function → (code object, qualname, text hashed)
+
+
+def _code_text(f):
+    """The text a contract's fingerprint hashes for `applicable`: its qualified name and source (its bytecode when there
+    is none). The source is read once per code object — a System's questions fingerprint asks for it on every `ask` —
+    and read again when the function's code changes (a new `__code__`, or another function)."""
+    import inspect
+    f = inspect.unwrap(f)
+    co = getattr(f, "__code__", None)
+    try:
+        hit = _CODE.get(f) if co is not None else None
+    except TypeError:                                   # not weak-referenceable: no memo
+        hit = None
+    qn = getattr(f, "__qualname__", type(f).__qualname__)
+    if hit is not None and hit[0] is co and hit[1] == qn:
+        return hit[2]
+    try:
+        code = inspect.getsource(f)
+    except (OSError, TypeError):
+        code = co.co_code.hex() + repr(co.co_consts) if co is not None else type(f).__qualname__
+    code = f"{qn}\n{code}"
+    if co is not None:
+        try:
+            _CODE[f] = (co, qn, code)
+        except TypeError:
+            pass
+    return code
 
 
 def refusal(violations, answer):

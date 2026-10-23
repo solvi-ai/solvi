@@ -3,7 +3,7 @@ the rest of solvi promises. Their API may change in any release, and each one ei
 deadline.
 
     from solvi.experimental import STATUS
-    STATUS["lora"]       # {"since": "0.7", "missing": "...", "script": None, "deadline": "1.2"}
+    STATUS["lora"]       # {"since": "0.7", "missing": "...", "script": None, "deadline": "a future release"}
 
 What marks them:
 
@@ -16,13 +16,14 @@ What marks them:
 
 Graduating needs a pre-registered bar, a script in `benchmarks/` that measures it, the bar met and reviewed, no import
 of anything experimental, a conformance check and a docs move; the old path is then kept for one release. A piece that
-does not graduate by its deadline (two minor releases after 1.0), or that measures negative, is removed and the negative
-result published.
+does not graduate by its deadline, or that measures negative, is removed and the negative result published. The
+deadline set at 1.0 was 1.2; it passed with the pieces still here, so it now reads "a future release": no release is
+named until one is decided.
 
 This package itself imports none of them: `import solvi.experimental` does not warn."""
 from __future__ import annotations
 
-DEADLINE = "1.2"
+DEADLINE = "a future release"    # was "1.2" (set at 1.0); no release is named until one is decided
 
 STATUS: dict[str, dict] = {
     "lora": {"since": "0.7", "what": "a LoRA adapter on the decider for one question (adapt_lora)", "missing": "a "
@@ -224,7 +225,8 @@ STATUS: dict[str, dict] = {
     "injection": {"since": "1.2", "what": "a detector of instruction-like text in tool outputs, fitted and thresholded on your own texts: a "
                   "per-sentence logistic score over the fixed detector's rule families and hashed word n-grams, "
                   "fitted on labelled texts, its threshold set on ordinary texts to a chosen false-flag rate",
-                  "missing": "measured once on injected tool outputs of one public benchmark (InjecAgent): on 248 "
+                  "missing": "measured once (the script is not in the repository) on injected tool outputs of one public "
+                  "benchmark (InjecAgent): on 248 "
                   "held-out injections (attacker instructions and tools not used in fitting) a detector fitted on 279 "
                   "other cases and 865 ordinary texts found 76% against the fixed rules' 23%, flagging fewer "
                   "ordinary texts (1.8% against 4.2%); but a plain TF-IDF classifier did the same, half of the gain "
@@ -305,12 +307,14 @@ STATUS: dict[str, dict] = {
                "lane's constants; stream.serving); the LoRA learner (stream.lora_learner: LoraLearner trained from the "
                "base for each version with act_guard on calib labels, LoraVersion installed by "
                "solvi.experimental.lora.swap — the adapter and its thresholds together) and the training runners "
-               "(stream.runner: subprocess by default, thread), unmeasured; no checkpoint or attach yet",
-               "missing": "measured once; see the documented limits in docs/experimental.md: the "
-               "RiskDetector alarmed far later than the confidence CUSUM on shifts to new intents and must not "
+               "(stream.runner: subprocess by default, thread); the checkpoint (save / load with a signed manifest) and "
+               "attach to a Dispatcher (loop=) or a System, with a rollback watch in label mode; unmeasured",
+               "missing": "measured once (the stand's script is not in the repository); see the documented limits "
+               "in docs/experimental.md: the RiskDetector alarmed far later than the confidence CUSUM (DriftMonitor "
+               "before its 1.4.0 window z-test change) on shifts to new intents and must not "
                "be the only alarm; the LearningLoop gained nothing with gold labels and is kept only as the core "
-               "of a planned adapter loop; TicketDesk is unmeasured on a stream. The loop is not wired "
-               "into the Dispatcher (no loop=: it drives its own coin and oracle); the expired-share stop "
+               "of a planned adapter loop; TicketDesk is unmeasured on a stream. LearningLoop on its own is not "
+               "wired into the Dispatcher (it drives its own coin and oracle; AdapterLoop attaches); the expired-share stop "
                "(max_drop) and repeated tickets for the "
                "oracle's own noise are not built; a person's audit label does not yet replace the slow path's label",
                "script": None},

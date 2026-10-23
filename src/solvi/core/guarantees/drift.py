@@ -603,7 +603,7 @@ class NumericDrift:
             raise TypeError("value= is a function decision → number")
         self.alpha, self.horizon, self.allowance = float(alpha), int(horizon), float(allowance)
         self.ref_n, self.settle, self.min_sd, self.value, self.seed = int(ref_n), int(settle), float(min_sd), value, seed
-        self.mean = self.sd = self.n_ref = None
+        self.mean = self.sd = self.n_ref = self.degenerate = None
         self.cusum, self.h = None, None
         self._ref, self._skip = [], self.settle
         self._flagged, self._why = False, []
@@ -614,13 +614,27 @@ class NumericDrift:
         return self._flagged
 
     def set_reference(self, values):
-        """The reference: these values' mean and spread (and their number, for the threshold) → self."""
+        """The reference: these values' mean and spread (and their number, for the threshold) → self. A degenerate
+        reference — half of its values or more one and the same value (mostly exact zeros with rare spikes) — warns:
+        such a stream is far from Gaussian, its spread says little, and an unchanged stream can be flagged far more
+        often than alpha; `degenerate` holds why (None otherwise) and an alarm's `why` repeats it."""
+        return self._set_reference(values, stacklevel=3)
+
+    def _set_reference(self, values, small=True, stacklevel=2):
         vals = [float(v) for v in values if math.isfinite(float(v))]
         if len(vals) < 2:
             raise ValueError("a reference needs at least two finite values")
-        if len(vals) < 20:
+        if small and len(vals) < 20:
             warnings.warn(f"a reference of {len(vals)} values: its spread is too noisy for the false-alarm bound to "
-                          "hold (20 or more)", UserWarning, stacklevel=2)
+                          "hold (20 or more)", UserWarning, stacklevel=stacklevel)
+        top, k = Counter(vals).most_common(1)[0]
+        self.degenerate = None
+        if 2 * k >= len(vals):
+            self.degenerate = (f"degenerate reference: {k} of its {len(vals)} values are {top:.4g}, so the values are "
+                               "far from Gaussian and the false-alarm bound does not hold")
+            warnings.warn(f"NumericDrift: {self.degenerate} — an unchanged stream can be flagged far more often than "
+                          "alpha; watch a smoother number (an aggregate over a window, or the share of non-zero values "
+                          "with DriftMonitor)", UserWarning, stacklevel=stacklevel)
         self.mean, self.sd, self.n_ref = float(np.mean(vals)), max(self.min_sd, float(np.std(vals))), len(vals)
         self.cusum = Cusum.calibrate(["up", "down"], alpha=self.alpha, horizon=self.horizon, seed=self.seed,
                                      ref_n=len(vals), allowance=self.allowance)
@@ -631,7 +645,7 @@ class NumericDrift:
 
     def adapted(self):
         """The system changed (retrained, re-tuned): the next ref_n values (after `settle`) become the new reference."""
-        self.mean = self.sd = self.n_ref = self.cusum = self.h = None
+        self.mean = self.sd = self.n_ref = self.cusum = self.h = self.degenerate = None
         self._ref, self._skip = [], self.settle
         self._flagged, self._why = False, []
 
@@ -662,9 +676,7 @@ class NumericDrift:
                 return rep
             self._ref.append(x)
             if len(self._ref) >= self.ref_n:
-                with warnings.catch_warnings():
-                    warnings.simplefilter("ignore")
-                    self.set_reference(self._ref)
+                self._set_reference(self._ref, small=False, stacklevel=3)   # a short ref_n is the caller's choice
             rep.update(state="collecting", h=self.h)
             return rep
         rep["state"] = "watching"
@@ -677,7 +689,8 @@ class NumericDrift:
         if S >= self.h:
             self._flagged = True
             self._why = [f"the numeric stream moved {name}: CUSUM {S:.3g} ≥ h {self.h:.3g} over the last {since} values "
-                         f"(reference mean {self.mean:.4g}, sd {self.sd:.4g}, {self.n_ref} values)"]
+                         f"(reference mean {self.mean:.4g}, sd {self.sd:.4g}, {self.n_ref} values)"
+                         + (f"; {self.degenerate}" if self.degenerate else "")]
             self.alarms.append({"at": self.seen, "direction": name, "S": S, "since": since})
             rep.update(drift=True, why=list(self._why))
         return rep

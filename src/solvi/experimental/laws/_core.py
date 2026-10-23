@@ -1121,7 +1121,9 @@ class LawSet:
     binomial bound, so nothing bounds the false accepts over many candidates (with min_support=2 the same few-shot task
     learned the law in 20 of 20) — give it an independent check through `confirm`. Overrides `sized`.
     confirm: `confirm(candidate)` → bool, an external check (a probe, a person, a second data set) asked about each
-    candidate that passed, best first, before it is accepted; a refusal sets the candidate aside for this test.
+    candidate that passed, best first, before it is accepted; a refusal sets the candidate aside for this test. For a
+    fitted numeric law, `residual_check(refit)` builds one: the χ² of the residuals after a refit on all rows (opt-in,
+    used with `tol=math.inf`; its docstring has the measurement and the cautions).
 
     ties: the order between laws of equal length — "earlier" (the default: the earlier accepted law speaks) or "newer"
     (the later one does: a law learned after the world changed is not hidden behind an older one of the same length).
@@ -1760,7 +1762,7 @@ class LawSet:
                         rtol: float | None = None, coverage: str = "warn", max_new: int | None = None,
                         noise: float | None = None, level: float = 0.95, fit_level: float | None = 0.01,
                         fit_support: int = 1, commit: bool = True, siblings: str = "shortest",
-                        coverage_on: Buffer | Iterable[Buffer] | None = None
+                        coverage_on: Buffer | Iterable[Buffer] | None = None, falsify: str | None = None
                         ) -> Admission:
         """Admit one of `candidates` by asking the world where they disagree (CEGIS-style), not by a random held-out
         sample. ask(state, action) → the observation (the environment, or an exact model of it); probes: the (state,
@@ -1874,7 +1876,48 @@ class LawSet:
 
         ask may return `Unknown` (from solvi.experimental.laws) when the probe's situation turned out not to be the
         one asked about: the answer refutes nothing and supports nothing, the probe counts as spent (budget,
-        `cost["probes"]`) and is listed in `Admission.unknown`, not in `asked`."""
+        `cost["probes"]`) and is listed in `Admission.unknown`, not in `asked`.
+
+        falsify="leftover" (opt-in, experimental; None, the default, leaves the admission as it was): the split phase
+        stops once one class is left and leaves the rest of the budget unspent, so when the grammar cannot express the
+        true law the accepted survivor is the shortest wrong law and no probe has tried to refute it where it fires.
+        With "leftover", once the admission would accept, the safe pool probes not yet asked where the accepted law
+        would be the applied law (its condition holds and no more specific active law shadows it — not merely where
+        its condition holds) are drawn uniformly at random with `seed`, up to the leftover `budget` − probes asked; the
+        first answer other than the law's effect makes the admission "undetermined" (reason: refuted where it applies,
+        with the probe) and commits nothing. Otherwise the law is committed as without the option (its support counts
+        the rows before the falsification probes) and the reason says how many of the eligible pool probes were asked.
+        The falsification probes are spent: they are in `asked` (ids "falsify-…"; an `Unknown` answer in `unknown`)
+        and in `cost["probes"]`, never above `budget`. No probe is held back from the split phase (a reserve was
+        measured too costly at a small budget). noise= and max_new=2 raise ValueError with it (under noise one answer
+        refutes nothing).
+
+        Measured on a synthetic boolean world (8 bits and a counter, 2,560 states, six rules, two grammars — a
+        benchmark re-created from a published description —, a pool of 200 states, 20 seeds, budgets 8 and 20, exact
+        answers; a wrong law is one false on some state where it applies). On the cells whose law needs a negation the
+        grammar lacks, at budget 20 the default admitted 131 wrong laws and "leftover" 1. That one survivor was
+        probe-starved: a narrow law with only 3 eligible pool states for a leftover of 13, all asked, none where it
+        is wrong — the leftover probes cannot refute a law when none of them falls in its wrong region; give the pool
+        states where the law applies (drawing them from the whole state space where it applies let 0 of 131 through,
+        measured once, reported, not an option). No loss in sound admissions on the cells whose law the grammar can
+        express: 124 against 123 at budget 8, 251 against 236 at budget 20 (wrong 5 against 69 there, final accuracy
+        0.987 against 0.972), because a right law is never refuted. At budget 8 it does little where the law is
+        inexpressible: the leftover was 0–1 probe in 105 of 140 rounds and 83 of 83 wrong laws survived — give a
+        larger budget. The price is asks: a right law spends its whole leftover (about 10 of 20 probes at budget 20;
+        7.9 → 10.0 asks per round over the grid). n probes without a refutation bound the law's miss rate on its own
+        domain at about 3/n at 95 % (0.24 at the 12.5 probes available on average at budget 20): the wrong laws there
+        were wrong on about half their domain and fell after 1.9 probes on average; a law wrong on a few percent of its
+        domain survives. Two missing laws (a disjunction) are not fixed (19 of 51 wrong against 26 of 57 at budget 8;
+        use max_new=2). Not measured with siblings="undetermined", coverage="undetermined", noisy answers or a real
+        environment. Two pre-registered runs of one stand: the first run's reproduction gate was sized below the
+        ≈ 6 % wrong this method documents on a two-law cell, failed there, and was revised — disclosed — before the
+        second run; the numbers above are the second run's, and the first run's agree (2 wrong against 120 at budget
+        20; sound 254 against 242). Default off: one synthetic world, two runs, no effect at a small budget and a cost
+        in asks on every right law."""
+        if falsify not in (None, "leftover"):
+            raise ValueError(f"falsify is None or 'leftover', not {falsify!r}")
+        if falsify is not None and (noise is not None or max_new == 2):
+            raise ValueError("falsify='leftover' takes noise=None and max_new=None or 1")
         if not commit:
             kw = {k: v for k, v in locals().items() if k not in ("self", "candidates", "ask", "commit")}
             return self._dry_run(lambda: self.admit_by_probes(candidates, ask, **kw))
@@ -2212,6 +2255,30 @@ class LawSet:
             return undetermined("the cap of active laws is reached")
         c = cands[j]
         rows = list(asked)
+        if falsify == "leftover":
+            left = int(budget) - len(asked) - len(unknown)
+            elig = [i for i in range(len(pool)) if i not in done and ok_safe(i)
+                    and pred(c, pool[i][0], pool[i][1], pinfo(i))[1]]
+            pick = random.Random(seed).sample(elig, min(max(left, 0), len(elig)))
+            n_fals = 0
+            hit = None
+            for i in pick:
+                x, a = pool[i]
+                obs = ask(x, a)
+                n_fals += 1
+                if obs is Unknown:
+                    unknown.append(Transition(x, a, obs, group="probe", id=f"unknown-{len(unknown) + 1}-{i}"))
+                    continue
+                asked.append(Transition(x, a, obs, group="probe", id=f"falsify-{n_fals}-{i}"))
+                if not E(self.apply(c.effect, x), obs):
+                    hit = (i, obs)
+                    break
+            self.cost["probes"] += n_fals
+            if hit is not None:
+                return undetermined(f"falsified by probe {hit[0]} ({hit[1]!r}): the accepted law {c.condition} is "
+                                    f"refuted where it applies ({n_fals} of {len(elig)} eligible pool probes asked)")
+            why = (f"{why or 'one class left'}; falsify: {n_fals} of {len(elig)} eligible pool probes asked "
+                   f"(leftover {max(left, 0)}), none refuted")
         if buffer is not None:
             rows = [r for a in acts.values() for r in buffer.rows(a, exclude)] + rows
         sup = [r for r in rows if pred(c, r.state, r.action, info(r.state, r.action))[1]]
