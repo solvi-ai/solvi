@@ -526,5 +526,26 @@ class Versions:
         return bad
 
 
+def serve_head(system, question, head) -> dict:
+    """Install `head` as the answer head of `question` — the hook through which a learned version is served (the
+    closed learning loop, solvi.experimental.stream.versions, installs each promoted or rolled-back frozen version
+    here). The head is `system.heads[question]`, so the System's fingerprint ("models": "answer:<question>") changes
+    with it and every trace records which model answered, as for any fitted head. head: the Head protocol (options,
+    features, predict, contributions, fingerprint); a question a rule answers is refused (the rule would answer and
+    the head would never be asked) → {"question", "from": the previous head's fingerprint or None, "to": the new one}.
+    Experimental (1.4): the loop that calls it is unmeasured."""
+    from ..provenance import fingerprint
+    if question not in system.questions:
+        raise KeyError(f"no question {question!r} in the System")
+    if question in system.catalog.rules:
+        raise ValueError(f"a rule answers {question!r}: a served head would never be asked")
+    lacks = [a for a in ("options", "features", "predict", "contributions", "fingerprint") if not hasattr(head, a)]
+    if lacks:
+        raise TypeError(f"a served head has the Head protocol: missing {lacks}")
+    old = system.heads.get(question)
+    system.heads[question] = head
+    return {"question": question, "from": None if old is None else fingerprint(old), "to": fingerprint(head)}
+
+
 __all__ = ["CatalogVersion", "Clause", "DecisionDiff", "Rejected", "Spec", "Versions", "build_catalog", "decision_diff",
-           "split_clauses"]
+           "serve_head", "split_clauses"]

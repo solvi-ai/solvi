@@ -22,6 +22,10 @@ Every stored decision is one record (a dict of plain JSON):
                   the decision begun (Dispatcher.start: the input, System 1's response, the draws)}; its dispatch record,
                   written when the ticket is resolved or expires, carries "pending": the ticket. kind "pending_expired":
                   {"pending": {"ticket", "question", "n", "at", "why"}} — no verdict came. "pending" is KEPT;
+  kind "loop"     one decision of the closed learning loop (solvi.experimental.stream.versions): "question", "stream"
+                  (KEPT: the served and candidate versions, the coin, the scores, both certificates' states) and "loop"
+                  (the input, the would-be answers, the label: not kept); its freeze / promote / discard / rollback are
+                  records of kind "stream";
   every record    seq (0, 1, 2, ...), time (seconds since the epoch), meta (optional, yours; a decision made with
                   solvi.experimental pieces has meta["experimental"]: their names), prev and hash.
 
