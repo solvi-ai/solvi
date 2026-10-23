@@ -283,9 +283,13 @@ STATUS: dict[str, dict] = {
                "what": "StreamPromise: an anytime-valid learn-then-test certificate on a threshold grid, earned on "
                "the stream (an e-process per grid point — a mixture of constant bets or the aGRAPA bet — "
                "fixed-sequence from strict to loose, the threshold only loosens, a missing label counted as a loss, "
-               "δ spent over restarts by DeltaBudget), installed with System.guarantee(promise=) (stage 1 of 4)",
-               "missing": "unmeasured: the stand against offline calibration (stage 4) has not run; the sampling "
-               "coin, the change detector, the Dispatcher wiring and the store records are later stages",
+               "δ spent over restarts by DeltaBudget), installed with System.guarantee(promise=); RiskDetector "
+               "(a Shiryaev–Roberts e-detector on the deployed risk) and the calibration coin wired into the "
+               "Dispatcher (audit=\"adaptive\", promise=, detector=, on_drift=\"recertify\", probation=), recorded "
+               "in the chain and rebuilt by Dispatcher.replay_stream (stages 1–2 of 4)",
+               "missing": "unmeasured: the stand against offline calibration (stage 4) has not run; the agent as "
+               "labeller (tickets) and the learning loop of frozen versions are stage 3; a person's audit label does "
+               "not yet replace the slow path's label",
                "script": None},
 }
 for _s in STATUS.values():

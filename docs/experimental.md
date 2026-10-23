@@ -427,7 +427,8 @@ candidate to freeze.
 
 A promise earned on the stream instead of on a fixed calibration set: `StreamPromise` starts at +inf (nothing
 answered alone) and loosens its threshold as labelled samples arrive, with a statement that holds at every point in
-time, not only at the end of a calibration. Stage 1 of 4: the certificate alone. Since 1.4.
+time, not only at the end of a calibration. Stages 1–2 of 4: the certificate, its change detector and the sampling
+wired into the Dispatcher. Since 1.4.
 
 ```python
 from solvi.experimental.stream import StreamPromise
@@ -455,6 +456,41 @@ The price of being valid at every time: at α = δ = 5 % a fresh certificate nee
 one restart and 134 after two; 74 for the mixture at the full δ, against 59 for a one-shot binomial test. These are
 arithmetic, not measurements: no stand has run.
 
-- **Missing:** unmeasured: the stand against offline calibration (stage 4) has not run; the sampling coin, the change detector, the Dispatcher wiring and the store records are later stages
+Stage 2 runs it inside the Dispatcher:
+
+```python
+from solvi.experimental.stream import RiskDetector
+
+det = RiskDetector(alpha=0.05, arl=1000)                # E[samples to a false alarm] ≥ 1000 at the promise
+d = Dispatcher(system, slow, question="intent", audit="adaptive", promise=sp, detector=det,
+               on_drift="recertify", probation=300, secret=key)
+d.ask(x).stream                                         # the decision's sample, certificate and detector state
+d.replay_stream()                                       # the certificate, detector and rate rebuilt from the records
+```
+
+The calibration coin is HMAC-SHA256(secret, "sample|question|seed|n"): it reads no input bytes, so which decisions
+are sampled is independent of the input (without `secret=` it is a plain hash, predictable, with a warning). Its rate
+comes from the past only: 1 until something is certified and during probation, else min(1, max(0.05, 0.05 / the
+share answered alone over the last 500 decisions)) — `sampling={"floor", "budget", "window"}`. A sampled decision
+that System 1 hands over anyway is a free sample (the slow path answers it; its accepted answer is the label); a
+sampled decision System 1 would answer alone is checked by the slow path (an audit, one extra call); a sample without
+an accepted slow-path answer is a loss. The promise is therefore relative to the slow path's labels.
+
+`RiskDetector` watches the deployed loss of the samples, 1{answered alone and wrong}, with a Shiryaev–Roberts mixture
+(bets c/α, c = 0.01 … 0.4) and alarms when the mean statistic reaches `arl`. Its statement is an expected run length —
+under a risk ≤ α the expected number of samples to a false alarm is at least `arl` — not a per-horizon probability
+like `DriftMonitor`'s: a model running exactly at α re-certifies about every `arl` samples by design
+(`alternatives=(1.5, 2.0)` moves the null to 1.5α). Arithmetic with this code, at α = 5 %, `arl` = 1000 (the
+design's script, reproduced bit for bit): at p = α a mean of 1 333 samples to a false alarm (median 982), at α/2 about
+1.5 % of streams alarm within 1 000 samples, a 2× shift is caught after 153 samples on average, 4× after 36. With
+`on_drift="recertify"` an alarm restarts the certificate (the next δ_v, threshold +inf) and System 1 answers nothing
+alone for `probation` decisions and until certified again, every one of them a free sample; with the default
+`on_drift="human"` the alarm is the dispatcher's drift flag, as a `DriftMonitor`'s. Every dispatch record carries
+`stream` (sample, certificate, detector), each state change is a record of kind `stream`, both kept by a redaction,
+and the system report has one block (samples, free and paid, alarms, alone answers covered by the threshold in force,
+the deployed risk estimated on the sample). A control in the tests shows why the coin covers every decision:
+calibrating on the escalated decisions only (as kadi 0.1 did) loosens the threshold past the promise on every seed.
+
+- **Missing:** unmeasured: the stand against offline calibration (stage 4) has not run; the agent as labeller (tickets) and the learning loop of frozen versions are stage 3; a person's audit label does not yet replace the slow path's label
 - **Script:** none yet. **Deadline:** 1.2.
 - API: [solvi.experimental.stream](api/stream.md).
