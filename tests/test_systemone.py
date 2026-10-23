@@ -371,22 +371,26 @@ def choice_reply(probs, **more):
 
 def test_a_reply_rounded_to_a_grid_is_floored_at_half_its_step_not_at_1e_6():
     """Jev rounds to 0.01: an exact 0 on the right option was log(1e-6) ≈ −13.8, which drags fit / calibration (their
-    refit choice temperature 3.29 with a 1e-6 floor, 1.30 with 0.005). Auto: half the grid step, recorded."""
-    m = systemone("http://localhost:8009", "jev", opener=choice_reply({"billing": 0.99, "shipping": 0.0}))
+    refit choice temperature 3.29 with a 1e-6 floor, 1.30 with 0.005). Auto (opt-in): half the grid step, recorded."""
+    m = systemone("http://localhost:8009", "jev", opener=choice_reply({"billing": 0.99, "shipping": 0.0}),
+                  prob_floor="auto")
     d = m.decision("team", "Which team?", "email", TEAMS).decide("hello")
     assert d.extra["systemone"]["prob_floor"] == pytest.approx(0.005)
     assert d.probs["shipping"] == pytest.approx(0.005 / 0.995, rel=1e-6)
-    old = systemone("http://localhost:8009", "jev", opener=choice_reply({"billing": 0.99, "shipping": 0.0}),
-                    prob_floor=None).decision("team", "Which team?", "email", TEAMS).decide("hello")
+    old = systemone("http://localhost:8009", "jev", opener=choice_reply({"billing": 0.99, "shipping": 0.0})
+                    ).decision("team", "Which team?", "email", TEAMS).decide("hello")          # the default: None
     assert "prob_floor" not in old.extra["systemone"] and old.probs["shipping"] == pytest.approx(1e-6 / 0.990001)
-    tenth = systemone("http://localhost:8009", "jev", opener=choice_reply({"a": 0.9, "b": 0.1, "c": 0.0}))
+    tenth = systemone("http://localhost:8009", "jev", opener=choice_reply({"a": 0.9, "b": 0.1, "c": 0.0}),
+                      prob_floor="auto")
     got = tenth.scorer.logits([Item("Which?", ("a", "b", "c"), None, "x")])[0]          # a 0.1 grid reads as 0.01
     assert got["info"]["systemone"]["prob_floor"] == pytest.approx(0.005)
     assert np.allclose(got["logits"], np.log([0.9, 0.1, 0.005]))
-    u = systemone("http://localhost:8009", "jev", opener=Scripted(lambda q: {"type": "noul", "noul": 0.9})).decision(
+    u = systemone("http://localhost:8009", "jev", opener=Scripted(lambda q: {"type": "noul", "noul": 0.9}),
+                  prob_floor="auto").decision(
         "urgent", "Urgent?", "email", type=bool).decide("hello")
     assert u.extra["systemone"]["prob_floor"] == pytest.approx(0.005) and u.probs["yes"] == pytest.approx(0.9)
-    multi = systemone("http://localhost:8009", "jev", opener=Scripted(lambda q: {"type": "noul", "noul": 0.03}))
+    multi = systemone("http://localhost:8009", "jev", opener=Scripted(lambda q: {"type": "noul", "noul": 0.03}),
+                      prob_floor="auto")
     z = multi.scorer.logits([Item("Which?", ("a", "b"), None, "x", True)])[0]["logits"]
     assert np.allclose(z, np.log(0.03 / 0.97))
 
@@ -394,12 +398,13 @@ def test_a_reply_rounded_to_a_grid_is_floored_at_half_its_step_not_at_1e_6():
 def test_a_reply_of_exact_zeros_and_ones_shows_no_grid_and_reads_as_before():
     """A confident 0 / 1 reply keeps its log(1e-6) gap: a floor taken from no evidence of a grid would shrink it."""
     probs = {"billing": 1.0, "shipping": 0.0}
-    got = systemone("http://localhost:8009", "jev", opener=choice_reply(probs)).scorer.logits(
+    got = systemone("http://localhost:8009", "jev", opener=choice_reply(probs), prob_floor="auto").scorer.logits(
         [Item("Which team?", tuple(TEAMS), tuple(TEAMS.values()), "hello")])[0]
     assert np.array_equal(got["logits"], np.log(np.clip(np.array([1.0, 0.0]), 1e-6, None)))
     assert "prob_floor" not in got["info"]["systemone"]
     for p in (0.0, 1.0):
-        m = systemone("http://localhost:8009", "jev", opener=Scripted(lambda q, p=p: {"type": "noul", "noul": p}))
+        m = systemone("http://localhost:8009", "jev", opener=Scripted(lambda q, p=p: {"type": "noul", "noul": p}),
+                      prob_floor="auto")
         assert np.array_equal(m.scorer.logits([Item("Urgent?", ("yes", "no"), None, "x")])[0]["logits"],
                               np.log(np.array([min(max(p, 1e-6), 1 - 1e-6), 1 - min(max(p, 1e-6), 1 - 1e-6)])))
         z = m.scorer.logits([Item("Which?", ("a", "b"), None, "x", True)])[0]["logits"]
@@ -410,29 +415,53 @@ def test_a_reply_of_exact_zeros_and_ones_shows_no_grid_and_reads_as_before():
 def test_a_reply_on_no_grid_reads_bit_for_bit_as_before():
     probs = {"billing": 0.8123456789, "shipping": 0.0}
     it = Item("Which team?", tuple(TEAMS), tuple(TEAMS.values()), "hello")
-    auto = systemone("http://localhost:8009", "jev", opener=choice_reply(probs)).scorer.logits([it])[0]
-    none = systemone("http://localhost:8009", "jev", opener=choice_reply(probs), prob_floor=None).scorer.logits([it])[0]
+    auto = systemone("http://localhost:8009", "jev", opener=choice_reply(probs), prob_floor="auto").scorer.logits([it])[0]
+    none = systemone("http://localhost:8009", "jev", opener=choice_reply(probs)).scorer.logits([it])[0]
     before = np.log(np.clip(np.array([probs["billing"], probs["shipping"]]), 1e-6, None))      # 1.3's reading
     assert np.array_equal(auto["logits"], before) and np.array_equal(none["logits"], before)
     assert "prob_floor" not in auto["info"]["systemone"]
     noul = Scripted(lambda q: {"type": "noul", "noul": 0.123456789})
-    m = systemone("http://localhost:8009", "jev", opener=noul)
+    m = systemone("http://localhost:8009", "jev", opener=noul, prob_floor="auto")
     assert np.array_equal(m.scorer.logits([Item("Urgent?", ("yes", "no"), None, "x")])[0]["logits"],
                           np.log(np.array([0.123456789, 1 - 0.123456789])))
 
 
 def test_an_explicit_floor_is_used_fingerprinted_and_checked_the_default_hashes_as_before():
-    auto = systemone("https://router.example/api", "vendor/model")
-    assert auto.scorer.fingerprint() == "systemone|https://router.example/api/v1/systemone|vendor/model"   # as in 0.7.0
-    fps = {systemone("https://router.example/api", "vendor/model", prob_floor=f).fingerprint() for f in (0.01, 0.02, None)}
-    assert len(fps) == 3 and auto.fingerprint() not in fps
+    """The default (None) reads and hashes as before 1.4; "auto" and a float change the numbers, so the fingerprint."""
+    default = systemone("https://router.example/api", "vendor/model")
+    assert default.scorer.fingerprint() == "systemone|https://router.example/api/v1/systemone|vendor/model"  # as in 0.7.0
+    assert systemone("https://router.example/api", "vendor/model", prob_floor=None).fingerprint() == default.fingerprint()
+    fps = {systemone("https://router.example/api", "vendor/model", prob_floor=f).fingerprint()
+           for f in (0.01, 0.02, "auto")}
+    assert len(fps) == 3 and default.fingerprint() not in fps
     m = systemone("http://localhost:8009", "jev", opener=choice_reply({"billing": 0.8123456789, "shipping": 0.0}),
                   prob_floor=0.01)
     d = m.decision("team", "Which team?", "email", TEAMS).decide("hello")
     assert d.extra["systemone"]["prob_floor"] == 0.01 and d.probs["shipping"] == pytest.approx(0.01 / 0.8223456789)
-    for bad in (0, 0.5, -1, "0.01", True, float("nan"), "Auto"):
+    for bad in (0, 0.5, -1, "0.01", True, float("nan"), "Auto", np.array([0.01, 0.02]), np.array("auto")):
         with pytest.raises(ValueError):
             systemone("http://localhost:8009", "jev", prob_floor=bad)
+
+
+def test_the_auto_floor_is_taken_per_question_never_from_the_questions_asked_with_it():
+    """Two questions on one text share a request: q0's answer is on a 0.01 grid, q1's is not. q0 reads 0.005 whether
+    asked alone or with q1, and q1 keeps 1e-6 — a question's logits never depend on what was asked with it."""
+    def reply(q):
+        if "Which team?" in json.dumps(q):
+            return {"type": "choice", "probabilities": {"billing": 0.9, "shipping": 0.1, "other": 0.0}}
+        return {"type": "choice", "probabilities": {"a": 0.123456, "b": 0.876544, "c": 0.0}}
+    q0 = Item("Which team?", ("billing", "shipping", "other"), None, "hello")
+    q1 = Item("Which letter?", ("a", "b", "c"), None, "hello")
+    m = systemone("http://localhost:8009", "jev", opener=Scripted(reply), prob_floor="auto")
+    alone0, = m.scorer.logits([q0])
+    alone1, = m.scorer.logits([q1])
+    both = m.scorer.logits([q0, q1])
+    assert m.scorer.requests == 3                    # the pair went in one request
+    assert both[0]["info"]["systemone"]["prob_floor"] == pytest.approx(0.005)
+    assert "prob_floor" not in both[1]["info"]["systemone"]
+    assert np.array_equal(both[0]["logits"], alone0["logits"]) and np.array_equal(both[1]["logits"], alone1["logits"])
+    assert np.allclose(both[0]["logits"], np.log([0.9, 0.1, 0.005]))
+    assert np.allclose(both[1]["logits"], np.log(np.clip([0.123456, 0.876544, 0.0], 1e-6, None)))
 
 
 def test_the_services_confidence_is_recorded_per_decision_and_only_when_it_is_a_number():
