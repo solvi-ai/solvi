@@ -90,8 +90,10 @@ class SkillSet:
     A later verified plan of the same goal with the same actions from another start widens it to the atoms both
     starts share (anti-unification over atoms: an atom that differed between two verified starts was shown not to be
     needed for this sequence) — unless the widened condition would hold on a state where the skill is recorded to
-    have failed; then the plan becomes a skill of its own. Nothing else widens a condition. Widening restarts the
-    skill's own certificate (its evidence was gathered on a narrower condition).
+    have failed; then the plan becomes a skill of its own. Widening by this rule restarts the skill's own certificate
+    (its evidence was gathered on a narrower condition). The learner's lattice generalization (a footprint and
+    template; the condition becomes () when no context is needed) also widens a skill, without a restart: its
+    certificate keeps its wealth and its v.
 
     No abstention between skills: two certified skills of one goal are both verified plans, and a different action
     sequence is not a disagreement about the world (laws abstain where they predict different outcomes:

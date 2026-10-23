@@ -85,8 +85,37 @@
   docs); a question with more is refused when it is built, with a `ValueError` that names the limit, instead of
   escalating on every request. A scorer can declare such limits with `check_item(name, item)`, called by
   `DecideModel.decision`.
+- **A secret for the supervision and audit draws: `Dispatcher(secret=)`** (`solvi.core.dispatch`; security). The
+  draws were `sha256(f"{seed}|{input hash}|{n}")` with the public default `seed=0`, so whoever could vary the inputs
+  could compute which decisions would be supervised or audited and avoid them. With `secret=` (bytes or str; None reads
+  the environment variable `SOLVI_AUDIT_SECRET`) both draws are HMAC-SHA256(secret, …) of the same message. The secret
+  enters no record, config fingerprint or repr; a record made with it carries `"draw_keyed": true`
+  (`Dispatched.keyed`). Replay takes the recorded draw: a dispatcher without the secret replays a keyed record (that
+  draw is not recomputed), one with the secret recomputes and checks it, and a wrong secret is a `draw` mismatch.
+  Without a secret the draws, records and config fingerprints are unchanged bit for bit; a dispatcher that samples
+  (`supervise` or `audit` strictly between 0 and 1) then gives a `PredictableDrawWarning` once per process (a class
+  of its own, so it can be filtered). `solvi.experimental.audit.AuditWatch`'s own draw (used when a decision carries no audit mark) is still
+  a hash of its seed.
 
 ### Fixed
+- **A skill certificate spends δ over its restarts** (`solvi.experimental.skills.Certificate`). After an alarm, or a
+  skill condition widened by the condition rule, the process restarted and certified again at the full δ, so after k restarts the chance that
+  some certificate it issued was wrong was bounded only by k·δ, not by the δ the promise states. The v-th
+  certification of a process (v = 1 for a fresh one, one more after each restart) now bets against
+  δ_v = 6δ/(π²v²); Σ_v δ_v = δ, so every certificate a process ever issues holds together with probability ≥ 1 − δ.
+  Only an alarm and the condition rule restart a process: a lattice generalization (`footprint`, a condition widened
+  to `()`) widens a skill without a restart, so its certificate keeps its wealth and its `v` (as before 1.4).
+  The process records `v`, `delta_v` and `delta_spent` (Σ δ_u for u ≤ v) in `EProcess.to_dict()` (so in the skill
+  set's report and the evidence written by `to_knowledge`), and `Certificate.to_dict()` records `delta_split`;
+  `Certificate.delta_at(v)` and `need_at(v)` give the numbers. The price: more clean outcomes per certification — at
+  5% and δ 0.1, 61 / 91 / 108 for v = 1 / 2 / 3 against 50 at every restart before; 30 at 10% and 14 at 20% for a
+  fresh process (25 and 12 before). `Certificate(delta_split=False)` keeps the old behaviour number for number (each
+  certificate holds alone, not together). A Certificate or EProcess pickled before this change has no `delta_split`
+  / `v` and keeps the full δ, so it replays as it ran; the old keys of `to_dict()` are unchanged. The skills numbers
+  in docs/best_practices.md and docs/experimental.md (the gridworld toy, Crafter: "fifty clean uses") were measured
+  before this change, with the full δ at each restart; they were not re-measured, and with the split a certificate
+  takes longer to reach, so System 1's shares there may be lower. The toy tests that count outcomes pass
+  `delta_split=False`.
 - **Process (experimental): a `solvi.build` node that sends its decision to a person is handed over.** A node whose
   dispatcher answers `by="human"` (status `"human"`) with no edge for it stopped the run `"abstain"` instead of putting
   its question to the channel (`on_human="handoff"`): the hand-off skipped every result by a person, the dispatcher's

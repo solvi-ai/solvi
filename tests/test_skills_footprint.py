@@ -341,7 +341,7 @@ def grammar():
 
 def learner(env, **kw):
     return SkillLearner(env, grammar(), {"wood": lambda s: s["inv"]["wood"] >= 1}, horizon=4, budget=2000,
-                        certificate=Certificate(promise=0.2, delta=0.1, scope="set"),
+                        certificate=Certificate(promise=0.2, delta=0.1, scope="set", delta_split=False),
                         clone=lambda e, s: world_at(s, e.blind),
                         **kw)
 

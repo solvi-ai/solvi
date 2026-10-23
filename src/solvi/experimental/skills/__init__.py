@@ -40,12 +40,16 @@ whose condition and certificate hold), `observe(skill, ok, alone=)` (its outcome
 hash and the outcomes as evidence; retired skills retired in the store; unverified skills never written).
 
 The certificate. `Certificate(promise=0.05, delta=0.1, bet=0.9, scope="skill")`: an anytime-valid e-process per skill
-(or pooled per goal / over the set) on its outcomes — certified once its wealth reaches 1/delta, which takes `need`
-clean outcomes (50 at 5%, 25 at 10%, 12 at 20%) and then stays certified; an e-detector on the outcomes of alone
-decisions restarts it (at 5% one failure alone does). Every use of a skill has an outcome: before certification
-System 2 re-verifies the skill on the exact model from the current state (the outcome is the code's answer, and the
-step is System 2's); after it the real episode's (did the goal hold when the skill's actions ran out). So outcomes do
-not come only from where the system acted alone — a certificate fed only by those can certify what it never tested.
+(or pooled per goal / over the set) on its outcomes — certified once its wealth reaches 1/delta_v, which takes `need`
+clean outcomes (61 at 5%, 30 at 10%, 14 at 20%) and then stays certified; an e-detector on the outcomes of alone
+decisions restarts it (at 5% one failure alone does). Since 1.4 delta is spent over the restarts: the v-th
+certification bets against delta_v = 6·delta/(π²·v²), so every certificate a process ever issues holds together with
+probability ≥ 1 − delta (61 / 91 / 108 clean outcomes for v = 1 / 2 / 3 at 5%); `delta_split=False` is the old full
+delta at every restart (50, 25, 12), under which each certificate holds alone, not together. Every use of a skill
+has an outcome: before certification System 2 re-verifies the skill on the exact model from the current state (the
+outcome is the code's answer, and the step is System 2's); after it the real episode's (did the goal hold when the
+skill's actions ran out). So outcomes do not come only from where the system acted alone — a certificate fed only
+by those can certify what it never tested.
 
 The loop. `SkillLearner(env, grammar, goals, planner=plan, horizon, budget, promise, delta)`: per step a running skill
 takes its next action; else for the first open goal a certified skill runs alone (System 1); else the top matching
@@ -90,8 +94,9 @@ What is not done:
 - skills are admitted by the certificate on their outcomes, not by discriminating probes (laws have
   `LawSet.admit_by_probes`); a skill set does not abstain — two certified skills of one goal are both verified plans,
   and abstaining would need conflicting predicted end states, which skills do not carry;
-- the certificate needs its clean outcomes per certified unit: a skill used once per episode needs about fifty episodes
-  at 5% before it acts alone; pool by goal or over the set (then the promise is the pool's) or loosen the promise;
+- the certificate needs its clean outcomes per certified unit: a skill used once per episode needs about sixty episodes
+  at 5% before it acts alone (more after each restart); pool by goal or over the set (then the promise is the pool's)
+  or loosen the promise;
 - the condition rule only widens by shared atoms; the lattice (lift="lattice") searches a bounded set of wider
   footprints, most general first, judged on the copy — it is not the smallest sufficient condition, its verification
   cases are a sample (a candidate wrong on a rare state can pass; the certificate is what catches it), and neither
