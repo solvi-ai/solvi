@@ -370,6 +370,40 @@
   decisions wait for it (unmeasured). The version loaders read the verified bytes, not the folder: they are written to
   a private temporary folder first, so a version file swapped in the checkpoint after its hash was checked is never
   read (before, `load` read `versions/` again after the check; tested with a swap between the check and the load).
+- **The adapter loop: attach (experimental), stage 5** (`solvi.experimental.stream.loop`, `solvi.core.dispatch`,
+  `solvi.core.system`, `solvi.core.deciders.combine`). `AdapterLoop.attach(host, learner=None, *, question=, dir=,
+  policy=, initial="auto", part=, **kw)` attaches a learning loop to a running system: to a `Dispatcher` (stream mode:
+  every `ask` is one decision of the loop, each version under its own stream certificate) or to a `System` alone (label
+  mode, `AdapterLoop(..., mode="label")`: the corrections of `teach` and `outcome` are the loop's labels, through
+  `loop.label(x, y)`; no coin, no promise, no alarm; a version serves at its own act_guard threshold on the calib
+  labels; `status()["guarantee"]` says "fixed-set (act_guard on calib labels); no anytime certificate"). Without a
+  learner it is a `LoraLearner` on the question's decision part. `loop.attach_to(host)` / `Dispatcher(..., loop=)`
+  attach a loop built by hand (any `LoopPolicy` subclass, any learner); `loop.detach()` cancels a training in flight,
+  puts version 0 back, removes the hooks and closes the loop (a "detach" event, replayed). In stream mode the loop
+  reads a decision before the dispatch (the served and candidate scores, the coin, whether its rule answers alone) and
+  takes its step after it, with the slow path's accepted answer as the label; neither runs inside the part's call, and
+  a Dispatcher's loop decisions run one at a time under a lock taken before the part's and the loop's (order:
+  dispatcher → part → loop). The dispatch escalates what the loop's rule does not answer alone and checks what its coin
+  draws. Every `Dispatched` records `learning` (the loop's decision number, the version served and its fingerprint,
+  the candidate, the coin, the label it took, its events); System 1's trace records the part's fingerprint, which
+  changes with the version; `Dispatcher.replay` / `replay_all` replay each decision with its version installed for the
+  duration (`loop.serving(v)`). With a loop attached `System.teach` changes nothing at once (the loop owns the part):
+  label mode feeds the loop (a source its policy refuses raises `UntrustedLabel` before anything is stored), stream
+  mode only stores the correction. A label whose source the policy refuses is a missing label for the loop (the default
+  policy takes the slow path's "s2" only with `s2_labels=True`). Refused: a question answered by a combination, a part
+  that is a member of one (new: `solvi.core.deciders.combine.combinations_of(part)`, a weak registry filled when a
+  Cascade, Vote or Route is built), a Dispatcher with its own `promise=`, a second loop on a System, `start` /
+  `complete` with a loop attached (tickets with a loop are not built; use `ask`). The checkpoint saves the mode and
+  label mode's thresholds. Tested without torch through a real System and Dispatcher with a stand-in learner (3 000
+  decisions with promotions: System 1 decided with the version the loop recorded on every decision, `replay_all`
+  exact across the versions and a rollback; a background training while decisions go on; controls through the
+  handle; save, load on a new System and Dispatcher, the same decisions; detach; label mode from `teach` and
+  `outcome`; a custom `LoopPolicy`; the refusals; three deciding threads, the part's own calls, controls and a
+  background training with no deadlock under a timeout); a test on the tiny LoRA checkpoint covers attach, a
+  background training, promotion, the trace's fingerprint and `extra["lora"]`, a rollback, save and load on a fresh
+  model, the same decisions and an exact replay. Unmeasured: no stand has run; nothing here says the loop improves a system. Costs:
+  each decision with a loop attached scores the served version once more (and the candidate in shadow while one is in
+  trial), and the loop's decisions of one Dispatcher do not run in parallel.
 - **A secret for the supervision and audit draws: `Dispatcher(secret=)`** (`solvi.core.dispatch`; security). The
   draws were `sha256(f"{seed}|{input hash}|{n}")` with the public default `seed=0`, so whoever could vary the inputs
   could compute which decisions would be supervised or audited and avoid them. With `secret=` (bytes or str; None reads

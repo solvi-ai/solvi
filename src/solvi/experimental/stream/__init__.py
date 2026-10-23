@@ -52,7 +52,9 @@ runs in the background and its result is applied on a later decision, at a recor
 cancels it; `Budget.max_versions_kept` evicts old retired versions. Stage 4: `stream.checkpoint` —
 `AdapterLoop.save(dir)` / `AdapterLoop.load(dir, learner, ...)`, the loop's whole state (versions and their files,
 promises and the detector through `dump` / `restore`, policy, budget, the label store, the records) in a signed,
-hashed, atomically switched folder. No attach yet.
+hashed, atomically switched folder. Stage 5: `AdapterLoop.attach(dispatcher_or_system, learner, ...)` — the loop on a
+Dispatcher (stream mode: every decision through it, the version recorded per decision, `replay_all` under each
+decision's version) or a System alone (label mode: `teach` / `outcome` labels, the pre-freeze gates only); `detach()`.
 
 Unmeasured: no stand has run yet."""
 from __future__ import annotations

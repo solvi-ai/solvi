@@ -599,3 +599,98 @@ def test_checkpoint_end_to_end_train_promote_save_load_in_a_new_process_continue
     assert got["outs"] == json.loads(json.dumps(outs))
     assert got["log"] == json.loads(json.dumps(loop.log))
     assert got["ok"] and got["decisions"] == n + 300, got["mm"]
+
+
+def test_attach_end_to_end_dispatcher_background_training_promote_rollback_save_load_replay(ckpt, tmp_path):
+    """Stage 5 on the tiny checkpoint: a loop attached to a Dispatcher over a System whose question is the LoRA part.
+    The slow path's labels flow into the loop; a training runs in the background (thread runner) while decisions go
+    on; the candidate is promoted; System 1's trace records the served adapter (the part's fingerprint, extra["lora"]);
+    a rollback through the handle puts version 0 back; the loop is saved, loaded on a new System and Dispatcher over a
+    fresh copy of the model, continues with the same decisions; every decision replays exactly, each under its own
+    version, and the loop's rescored replay is exact."""
+    from solvi import Answer, Catalog, Decision, Question, System
+    from solvi.core.dispatch import AskPath, Dispatcher
+    from solvi.core.store import JSONLStorage
+    data = _toy(1800, 43)
+    gold = {x: y for x, y in data}
+
+    def s2():
+        cat = Catalog()
+
+        @cat.rule("team")
+        def team(email):
+            return Decision(gold[email], {gold[email]: 1.0})
+        return System(cat, [Question("team", "Which team?", Answer.choice(TEAMS))])
+
+    def host(storage=None):
+        m, part = _part(ckpt)
+        cat = Catalog()
+        sysm = System(cat, [part.question(cat)])
+        return part, sysm, Dispatcher(sysm, AskPath(s2()), secret=KEY, storage=storage)
+
+    def policy():
+        return DefaultPolicy(_budget(), calib=0.3, holdout=0.0, pre_freeze=False, probe=False, novel_risk=False,
+                             first=10 ** 6, lr=1e-2, min_updates=60, max_updates=60, s2_labels=True)
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        part, sysm, disp = host(JSONLStorage(tmp_path / "d.jsonl"))
+        fp0 = part.fingerprint()
+        loop = AdapterLoop.attach(disp, LoraLearner(part, tmp_path / "loop", runner=ThreadRunner(heartbeat_s=0.5)),
+                                  question="team", dir=tmp_path / "loop", policy=policy(), max_risk=0.2, secret=KEY,
+                                  clock=lambda: 1000.0)
+        assert loop.part is part and loop.mode == "stream" and disp.loop is loop
+        xs = [{"email": x} for x, _ in data]
+        out = [disp.ask(x) for x in xs[:200]]
+        assert loop.status()["labels"]["train"] > 0
+        job = disp.loop.train_now()                  # in the background: the call returns at once
+        assert job.state == "running" and loop.status()["job"] is not None
+        during = disp.ask(xs[200])                   # a decision while the training runs
+        assert during.learning["served"] == 0
+        assert loop.wait_training(240)
+        i = 201
+        while loop.candidate is None and i < 260:
+            out.append(disp.ask(xs[i]))
+            i += 1
+        k = loop.candidate
+        assert k is not None, loop.versions()
+        while loop.served != k and i < 1500:
+            out.append(disp.ask(xs[i]))
+            i += 1
+            if loop.served != k and loop.versions()[k]["certified"] and i % 50 == 0:
+                loop.promote(k, force=True)
+        assert loop.served == k and part.fingerprint() != fp0, loop.versions()
+        d = disp.ask(xs[i])
+        i += 1
+        adapter = loop._vs[k]["served_as"].adapter.hash
+        rec = [r for r in d.s1.trace.records if r.model is not None]
+        assert rec and rec[-1].model["fp"] == part.fingerprint()            # the trace records the served version
+        assert d.s1["team"].extra.get("lora") == adapter and d.learning["served"] == k
+        for x in xs[i:i + 100]:
+            disp.ask(x)
+        i += 100
+        disp.loop.rollback(0, by="test")
+        assert part.fingerprint() == fp0
+        d0 = disp.ask(xs[i])
+        i += 1
+        assert d0.learning["served"] == 0 and [r for r in d0.s1.trace.records if r.model][-1].model["fp"] == fp0
+        disp.loop.rollback(k, by="test")             # k is retired now: served again
+        assert loop.served == k and part.fingerprint() != fp0
+        info = loop.save(tmp_path / "ck")
+        assert any(f.startswith(f"versions/{k}.lora") for f in info["files"])
+        # a new System and Dispatcher over a fresh copy of the model; the loaded loop installs version k on it
+        part2, sysm2, disp2 = host()
+        loop2 = AdapterLoop.load(tmp_path / "ck", LoraLearner(part2, tmp_path / "loop2", runner=ThreadRunner()),
+                                 system=sysm2, part=part2, secret=KEY, clock=lambda: 1000.0)
+        assert part2.fingerprint() == part.fingerprint()
+        loop2.attach_to(disp2)
+        for x in xs[i:i + 150]:
+            a, b = disp.ask(x), disp2.ask(x)
+            assert (a.answer, a.by, a.action) == (b.answer, b.by, b.action) and a.learning == b.learning
+        assert disp.replay_all() == []             # every decision under its own version: 0, k, 0 again, k
+        r = loop.replay(rescore=True)
+        assert r["ok"], r["mismatches"][:5]
+        assert loop2.replay()["ok"]
+        loop.detach()
+        assert part.fingerprint() == fp0 and disp.loop is None
+        loop2.detach()

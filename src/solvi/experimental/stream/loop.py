@@ -1,5 +1,5 @@
 """The adapter loop: frozen versions, each with its own stream certificate, promoted under δ-spending, driven by a
-`LoopPolicy` (experimental; the LoRA learning loop, stages 2–4 — no attach yet).
+`LoopPolicy` (experimental; the LoRA learning loop, stages 2–5).
 
     from solvi.experimental.stream import AdapterLoop, DefaultPolicy, HashedTextTrainer
 
@@ -123,7 +123,24 @@ manifest and every file's hash, rebuilds the loop, installs the served version a
 labels again. A training in flight refuses the save unless `cancel=True` (`cancel_training()`, a "cancel" control
 event). A loaded loop continues with the same decisions and records as the loop it was saved from, and replays exactly.
 
-Not built here (stage 5): label mode and `attach`. Labels are kept in memory, inputs included (`LabelRow.x`): with dict
+Attach (stage 5): `AdapterLoop.attach(dispatcher, learner, ...)` (stream mode) or `AdapterLoop.attach(system, ...)`
+(label mode; `mode="label"`), or `Dispatcher(..., loop=loop)` / `loop.attach_to(host)` for a loop built by hand, and
+`detach()`. Stream mode: every `dispatcher.ask` is one decision of the loop, split around the dispatch — `_pre` (the
+served and candidate scores, the coin, whether the loop's rule answers alone) before System 1 is asked, `_post` (the
+step, with the slow path's accepted answer as the label) after; the dispatch escalates what the loop's rule does not
+answer alone and checks what its coin draws; the Dispatched records `learning` (the version served, its fingerprint,
+the coin, the loop's events); `Dispatcher.replay` installs each decision's version for its replay (`serving(v)`).
+Neither hook runs inside the part's call, and a Dispatcher's loop decisions run one at a time under its `_learn_lock`,
+taken before the part's lock and the loop's and never while either is held: the order is learn → part → loop. A label
+the policy refuses (the slow path's "s2" under the default policy) is a missing label for the loop. `System.teach` and
+`outcome` with a loop attached learn nothing at once (the part is the loop's): in label mode they are the loop's
+labels (`label(x, y)`), in stream mode they are only stored. Label mode has no coin, no promise and no alarm: every
+call is a labelled step, a version serves at its own act_guard threshold on the calib labels, and a frozen candidate
+is promoted on the next label when `policy.promote(st, None)` says so (the default: the pre-freeze gates decided;
+`status()["guarantee"]` names the fixed-set guarantee). Refused: a question answered by a combination or a part that
+is a member of one (`combinations_of`), a Dispatcher with its own `promise=`, a second loop on a System.
+
+Labels are kept in memory, inputs included (`LabelRow.x`): with dict
 inputs the memory grows with the label count (the checkpoint writes them to `labels.jsonl`). `status()` takes no lock.
 Unmeasured: no stand has run on this loop."""
 from __future__ import annotations
@@ -156,6 +173,7 @@ from .serving import BaseVersion, as_served
 S2_SOURCES = ("s2", "verified")
 ACTIONS = ("recertify", "ignore")
 KEPT = ("served", "retired")                       # the states max_versions_kept counts
+MODES = ("stream", "label")
 _warned = False
 
 
@@ -266,6 +284,35 @@ class _Counting:
         raise RuntimeError("replay takes the recorded fingerprints")
 
 
+def _host_system(host):
+    """A Dispatcher's System 1, or the System itself."""
+    from ...core.dispatch import Dispatcher
+    from ...core.system import System
+    if isinstance(host, Dispatcher):
+        return host.system
+    if isinstance(host, System):
+        return host
+    raise TypeError(f"attach to a Dispatcher (stream mode) or a System (label mode), not {type(host).__name__}")
+
+
+def _decision_part(system, question, part=None):
+    """The model-backed decision part that answers `question` (None: a rule without one). Refused: a combination, and
+    a part that is a member of one (it reads the part's internals without its version lock)."""
+    from ...core.deciders.combine import Combination, combinations_of
+    from ...core.deciders.gate import decision_of
+    found = decision_of(system.catalog, question) if part is None else part
+    if isinstance(found, Combination):
+        raise ValueError(f"{question!r} is answered by a combination ({type(found).__name__}): a loop serves one "
+                         "decision part; attach to a part that is in no combination")
+    if found is not None:
+        combos = combinations_of(found)
+        if combos:
+            raise ValueError(f"the part {getattr(found, '__name__', found)!r} is a member of a combination "
+                             f"({', '.join(sorted({type(c).__name__ for c in combos}))}), which reads it without its "
+                             "version lock: a loop cannot serve it")
+    return found
+
+
 class AdapterLoop:
     """See the module docstring. learner: an online Learner (snapshot) or a batch one (train(job)); question: the
     question's name (in the coin, the content key and the records); policy: a LoopPolicy (None: DefaultPolicy());
@@ -283,8 +330,14 @@ class AdapterLoop:
     def __init__(self, learner, *, question, policy=None, max_risk=None, max_error=None, delta=0.05, initial=None,
                  detector=None, monitor="auto", probation=300, source="human", secret=None, seed=0, sampling=None,
                  promise_options=None, storage=None, versions_dir=None, system=None, feature="text", key=None,
-                 served=None, clock=None, wait=False, part=None, _detector_alone=False, _batch=None):
+                 served=None, clock=None, wait=False, part=None, mode="stream", _detector_alone=False, _batch=None):
         global _warned
+        if mode not in MODES:
+            raise ValueError(f"mode is 'stream' (decisions through step, a promise per version) or 'label' (labels "
+                             f"only, the pre-freeze gates decide), not {mode!r}")
+        if mode == "label" and (detector is not None or (monitor is not None and monitor != "auto")):
+            raise ValueError("label mode has no coin samples: no detector and no score monitor (its guarantee is "
+                             "act_guard's fixed-set one on the calib labels)")
         policy = DefaultPolicy() if policy is None else policy
         if not isinstance(policy, LoopPolicy):
             raise TypeError(f"policy is a LoopPolicy (stream.policy), not {type(policy).__name__}")
@@ -294,7 +347,8 @@ class AdapterLoop:
             raise TypeError(f"the policy must pickle (the loop's replay and checkpoint keep it): {e}") from e
         self._kw = dict(question=question, max_risk=max_risk, max_error=max_error, delta=delta, initial=initial,
                         probation=probation, source=source, seed=seed, sampling=sampling,
-                        promise_options=promise_options, feature=feature, key=key, served=served, wait=wait)
+                        promise_options=promise_options, feature=feature, key=key, served=served, wait=wait,
+                        mode=mode)
         self._pkw = {"max_risk": max_risk, "max_error": max_error, **(promise_options or {})}
         for k in ("delta", "budget"):
             if k in self._pkw:
@@ -328,6 +382,8 @@ class AdapterLoop:
             if initial is not None and not hasattr(initial, a):
                 raise TypeError(f"initial is a frozen model (score, fingerprint): missing {a}")
         self.policy, self.live, self.question = policy, learner, str(question)
+        self.mode = mode
+        self.host = None                                   # the Dispatcher or System it is attached to (attach)
         self.detector, self.monitor, self.probation, self.left = detector, monitor, int(probation), 0
         self._monitor0 = copy.deepcopy(monitor)
         self._detector_alone = bool(_detector_alone)
@@ -356,9 +412,10 @@ class AdapterLoop:
             self.versions_dir.mkdir(parents=True, exist_ok=True)
         self.n = 0
         self.served, self.candidate = 0, None
-        p0 = None if initial is None else StreamPromise(**self._pkw, budget=self.budget)
+        p0 = None if initial is None or mode == "label" else StreamPromise(**self._pkw, budget=self.budget)
         self._vs = {0: self._row(0, "served", initial, p0, 0, 0, 0, frozenset(),
                                  None if initial is None else initial.fingerprint())}
+        self._vs[0]["fixed"] = getattr(initial, "act_threshold", None)
         self._rows: list = []                              # every accepted label (LabelRow)
         self._split_of: dict = {}                          # key → the split it first got (never changes)
         self._split_n = {"train": 0, "calib": 0, "holdout": 0}
@@ -387,6 +444,8 @@ class AdapterLoop:
         self.wait = bool(wait)                             # True: a training runs inside the step / train_now
         self._run = None                                   # the training in flight: job, thread, result
         self.closed = False
+        self.detached = False
+        self._detach_run = None
         if part is None:
             part = getattr(learner, "part", None) or getattr(initial, "part", None)
         self.part = part
@@ -420,6 +479,9 @@ class AdapterLoop:
         return self._step_t if self._step_t is not None else float(self._clock())
 
     def _threshold(self, v):
+        if self.mode == "label":                           # label mode: the version's own fixed-set threshold
+            t = self._vs[v].get("fixed")
+            return math.inf if t is None else float(t)
         p = self._vs[v]["promise"]
         return math.inf if p is None else p.threshold
 
@@ -438,7 +500,7 @@ class AdapterLoop:
                          alarms=tuple(dict(a) for a in self._alarms), served_history=tuple(self._history),
                          served_since=self._served_since, trainings=tuple(self._trainings),
                          job=None if self._job is None else dict(self._job), now=self._now(), paused=self.paused,
-                         mode="stream", promises=promises,
+                         mode=self.mode, promises=promises,
                          detector=None if self.detector is None else self.detector.state())
 
     def _paired(self, c) -> Paired:
@@ -479,6 +541,244 @@ class AdapterLoop:
             return self._advance(x, k, would_s, score_s, would_k, score_k, oracle,
                                  self.source if source is None else source)
 
+    def label(self, x, y, *, source=None, key=None) -> dict:
+        """Label mode: one label (x, y) → as `step` (by "oracle"). The served version is scored on it (the held-out
+        window), a train label reaches the learner, and the policy may start a training, freeze or promote here. An
+        attached System calls it from `teach` / `outcome`."""
+        if self.mode != "label":
+            raise ValueError("label() is label mode's (a System alone); in stream mode labels come with the decisions "
+                             "(step, or the Dispatcher's slow path)")
+        return self.step(x, lambda: y, source=source, key=key)
+
+    def _input(self, system, state):
+        """What the loop scores for an input of the System: the decision part's input text (as `System.teach` gives
+        it to the part), or the input itself when the question has no decision part."""
+        vals = system._state(state)[0]
+        if self.part is None:
+            return vals
+        if not all(f in vals for f in self.part.facts):
+            vals = system.facts_for(vals)
+        return self.part.text_of(vals)
+
+    def _taught(self, system, state, correct, source):
+        """A label from the attached System (`teach`, `outcome`): label mode — one `label` call; stream mode — not
+        taken (the loop's labels come with its decisions, after the promises read them) → the label's step or None."""
+        if self.mode != "label":
+            return None
+        return self.label(self._input(system, state), correct, source=source)
+
+    # --- attached to a Dispatcher (stream mode): the decision is split around the dispatch, outside the part's call
+    def _pre(self, x) -> dict:
+        """Before the Dispatcher decides: the scores of the served version (and the candidate's, in shadow), the next
+        decision's number, coin and whether the loop's rule answers alone — read under the part's lock then the
+        loop's, nothing changed."""
+        with self._locked():
+            self._refuse_if_stopped()
+            if self.mode != "stream":
+                raise ValueError("a label-mode loop takes no decisions")
+            s, c = self._vs[self.served], self._vs.get(self.candidate)
+            would_s, score_s = s["model"].score(x) if s["model"] is not None else (None, None)
+            would_k, score_k = c["model"].score(x) if c is not None else (None, None)
+            n = self.n + 1
+            prob, rho, sampled, alone = self._draw(n, score_s, self._threshold(self.served))
+            return {"n": n, "served": self.served, "candidate": self.candidate, "hist": len(self._history),
+                    "scores": (would_s, score_s, would_k, score_k), "key": self._key(x), "sampled": sampled,
+                    "alone": alone, "probation": prob, "rho": rho, "fingerprint": s["fingerprint"]}
+
+    def _post(self, pre, x, label, source, label_of=None) -> dict:
+        """After the Dispatcher decided: the decision's step with the label it got (None: none — a decision the loop
+        needed a label for and the dispatch did not label is a missing label). When a control changed the loop between
+        `_pre` and here, the scores are read again (the step is the loop's record of the decision either way)."""
+        with self._locked():
+            self._refuse_if_stopped()
+            same = ((self.n + 1, self.served, self.candidate, len(self._history))
+                    == (pre["n"], pre["served"], pre["candidate"], pre["hist"]))
+            if same:
+                would_s, score_s, would_k, score_k = pre["scores"]
+            else:
+                s, c = self._vs[self.served], self._vs.get(self.candidate)
+                would_s, score_s = s["model"].score(x) if s["model"] is not None else (None, None)
+                would_k, score_k = c["model"].score(x) if c is not None else (None, None)
+            src = self.source if source is None else source
+            out = self._advance(x, pre["key"], would_s, score_s, would_k, score_k,
+                                lambda: Verdict(label, source, label_of), src, lenient=True)
+            out["same"] = same
+            return out
+
+    # --- attach / detach (stage 5)
+    @classmethod
+    def attach(cls, host, learner=None, *, question=None, dir=None, policy=None, initial="auto", part=None,
+               **kw) -> "AdapterLoop":
+        """Build a loop for `question` and attach it to `host`: a Dispatcher (stream mode: every decision of
+        `dispatcher.ask` goes through the loop) or a System alone (label mode: the labels of `teach` / `outcome` are the
+        loop's; no coin, no stream promise). learner: None — a `LoraLearner` on the question's model-backed decision
+        part (needs torch and dir=); any Learner (online or batch) otherwise. initial: version 0's model ("auto": the
+        learner's `version0()` when it has one, else none). part: the decision part (None: found from the question).
+        dir: the loop's folder (the default learner's and versions_dir). The other keywords are the constructor's.
+        Refused: a question answered by a combination (Cascade, Vote, Route) or by a part that is a member of one, a
+        rule with no decision part when no learner is given, a Dispatcher with its own stream certificate."""
+        system = _host_system(host)
+        mode = "stream" if system is not host else "label"
+        if question is None:
+            question = getattr(host, "question", None)
+            if question is None:
+                if len(system.questions) != 1:
+                    raise ValueError(f"the System asks {sorted(system.questions)}: say which with question=")
+                question = next(iter(system.questions))
+        found = _decision_part(system, question, part)
+        if learner is None:
+            if found is None:
+                raise ValueError(f"{question!r} is not answered by a model-backed decision part (a rule): give a "
+                                 "learner= that serves on the System")
+            if dir is None:
+                raise ValueError("the default LoRA learner keeps its files in dir=")
+            from .lora_learner import LoraLearner
+            learner = LoraLearner(found, dir)
+        if isinstance(initial, str) and initial == "auto":
+            v0 = getattr(learner, "version0", None)
+            initial = v0() if callable(v0) else None
+        if dir is not None:
+            kw.setdefault("versions_dir", dir)
+        loop = cls(learner, question=question, policy=policy, initial=initial, system=system, part=found, mode=mode,
+                   **kw)
+        loop.attach_to(host)
+        return loop
+
+    def attach_to(self, host) -> "AdapterLoop":
+        """Attach this loop to a Dispatcher (stream mode) or a System (label mode) → self. The checks of `attach`;
+        also refused: a loop already attached, closed or stopped, a host that has a loop (or, a System, an update
+        target), a loop that serves on another System. `Dispatcher(..., loop=)` calls it."""
+        from ...core.dispatch import Dispatcher
+        system = _host_system(host)
+        with self._locked():
+            self._refuse_if_stopped()
+            if self.host is not None:
+                raise ValueError("this loop is attached already: detach() first")
+            if isinstance(host, Dispatcher):
+                if self.mode != "stream":
+                    raise ValueError("a Dispatcher's decisions go through a stream-mode loop (mode='stream')")
+                if host.question != self.question:
+                    raise ValueError(f"the dispatcher asks {host.question!r}, the loop learns {self.question!r}")
+                if host._stream is not None:
+                    raise ValueError("the dispatcher has its own stream certificate (promise=): with a loop the "
+                                     "loop's per-version promises are the certificate — build it without promise=")
+                if getattr(host, "loop", None) is not None:
+                    raise ValueError("the dispatcher has a loop attached already")
+            else:
+                if self.mode != "label":
+                    raise ValueError("a System alone gives labels, not decisions: a label-mode loop (mode='label'; "
+                                     "AdapterLoop.attach builds one)")
+                if self.question not in system.questions:
+                    raise ValueError(f"no question {self.question!r} in the System")
+            if getattr(system, "adapter_loop", None) is not None:
+                raise ValueError("the System has a loop attached already (directly or through a Dispatcher)")
+            if getattr(system, "_learning", None) is not None:
+                raise ValueError("the System has an update target (LearningTarget) attached: one learner at a time")
+            if self.system is not None and self.system is not system and self.system is not self.part:
+                raise ValueError("the loop serves its versions on another System")
+            found = _decision_part(system, self.question, self.part)
+            if found is not None and self.part is not None and found is not self.part:
+                raise ValueError("the loop's part is not the one that answers the question in this System")
+            if found is not None and self.part is None:
+                if self.n or self._run is not None or self.served != 0:
+                    raise ValueError("the question has a decision part the loop has no lock for: attach before the "
+                                     "first decision, or build the loop with part=")
+                from ...core.deciders.part import version_lock
+                self.part, self._part_lock = found, version_lock(found)
+            if self.system is None:
+                self.system = system
+                if isinstance(self._base, BaseVersion) and self.served == 0:
+                    self._base = BaseVersion(system, self.question)
+            if isinstance(host, Dispatcher):
+                host.loop = self
+            system.adapter_loop = self                      # System.teach / outcome read it
+            self.host = host
+            return self
+
+    def detach(self, *, by=None, why=None, timeout=30.0) -> dict | None:
+        """Take the loop off its host: a training in flight is cancelled, version 0 (the part as attached) is put back
+        on the System when another version serves, the host's hook is removed and the loop is closed (its records,
+        `replay()`, `versions()`, `status()` and `save` stay). → the "detach" event (None when not attached)."""
+        with self._locked():
+            host = self.host
+            if host is None:
+                return None
+            e = self._detach(by=by, why=why)
+            run, self._detach_run = self._detach_run, None
+            if getattr(host, "loop", None) is self:
+                host.loop = None
+            sysm = _host_system(host)
+            if getattr(sysm, "adapter_loop", None) is self:
+                sysm.adapter_loop = None
+            self.host = None
+        th = None if run is None else run.get("thread")
+        if th is not None:
+            th.join(timeout)
+        return e
+
+    def _detach(self, *, by=None, why=None, record=None):
+        """The detach's state change and event (replay: `record` is the recorded event; nothing is installed)."""
+        run = self._cancel()
+        self._detach_run = run
+        uninstall = None
+        if record is not None:
+            uninstall = record.get("uninstall")
+        elif self.served != 0 and self.system is not None:
+            uninstall = self._base.install(self.system)        # version 0 back: the part as attached
+        e = self._control("detach", **{"from": self.served, "cancelled": None if run is None else run["job"].id,
+                                       "uninstall": uninstall, "by": None if by is None else str(by), "why": why})
+        self.paused, self.closed, self.detached = True, True, True
+        return e
+
+    def _served_obj(self, v):
+        """Version v's Served: version 0's, the one the loop holds, or (evicted) loaded from versions_dir."""
+        if v == 0:
+            return self._base, False
+        ver = self._vs.get(v)
+        if ver is None:
+            raise ValueError(f"no version {v}")
+        if ver.get("served_as") is not None:
+            return ver["served_as"], False
+        cls = ver.get("served_cls")
+        if cls is None or self.versions_dir is None:
+            raise ValueError(f"version {v} is not held and has no file to load (versions_dir=)")
+        kw = ({"part": self.part} if self.part is not None
+              and "part" in inspect.signature(cls.load).parameters else {})
+        return cls.load(self.versions_dir, v, expect_fp=ver["fingerprint"], **kw), True
+
+    @contextlib.contextmanager
+    def serving(self, v):
+        """Version v installed on the System for the duration (the Dispatcher's replay of a decision made under it),
+        then the served version again. Holds the part's lock and the loop's for the whole block: the part's decisions
+        and the loop's controls wait."""
+        with self._locked():
+            if v == self.served or self.system is None:
+                yield
+                return
+            srv, loaded = self._served_obj(v)
+            cur, _ = self._served_obj(self.served)
+            saved = [(o, o.__dict__.get("_replaced")) for o in (srv, cur) if hasattr(o, "__dict__")]
+            srv.install(self.system)
+            try:
+                yield
+            finally:
+                cur.install(self.system)
+                for o, r in saved:
+                    o._replaced = r
+                if loaded:
+                    self._release(srv)
+
+    def _draw(self, n, score_s, thr_s):
+        """Decision n's (probation, rate, sampled, alone) from the state before it (no state change). Label mode: no
+        coin and nothing alone — every call is a label."""
+        if self.mode == "label":
+            return False, 0.0, False, False
+        prob = self.left > 0
+        rho = self.rate.rate(full=math.isinf(thr_s) or prob)
+        sampled = self._coin(n) < rho
+        alone = not prob and score_s is not None and math.isfinite(thr_s) and score_s >= thr_s
+        return prob, rho, sampled, alone
+
     def _coin(self, n) -> float:
         msg = coin_message(self.question, self.seed, n).encode()
         h = hmac.new(self._secret, msg, hashlib.sha256).hexdigest() if self._secret else hashlib.sha256(msg).hexdigest()
@@ -502,14 +802,12 @@ class AdapterLoop:
             self._split_of[key] = sp                       # the first state change, before the decision's own
         return sp
 
-    def _advance(self, x, key, would_s, score_s, would_k, score_k, oracle, src):
+    def _advance(self, x, key, would_s, score_s, would_k, score_k, oracle, src, lenient=False):
+        from ...core.sources import UntrustedLabel
         n = self.n + 1
         sv, c = self.served, self.candidate
         thr_s = self._threshold(sv)
-        prob = self.left > 0
-        rho = self.rate.rate(full=math.isinf(thr_s) or prob)
-        sampled = self._coin(n) < rho
-        alone = not prob and score_s is not None and math.isfinite(thr_s) and score_s >= thr_s
+        prob, rho, sampled, alone = self._draw(n, score_s, thr_s)
         label, lsrc, lof, split = None, None, None, None
         if sampled or not alone:
             got = oracle()
@@ -519,7 +817,13 @@ class AdapterLoop:
             else:
                 label = got
             if label is not None:
-                lsrc = self._check(src, x, label)          # a refused source: nothing has changed yet
+                try:
+                    lsrc = self._check(src, x, label)      # a refused source: nothing has changed yet
+                except UntrustedLabel:
+                    if not lenient:
+                        raise
+                    label, lof = None, None                # attached: a label the policy refuses is a missing one
+            if label is not None:
                 split = self._split(key)
             else:
                 lof = None
@@ -652,6 +956,8 @@ class AdapterLoop:
         return run
 
     def _refuse_if_stopped(self):
+        if self.detached:
+            raise RuntimeError("the loop is detached; version 0 serves again")
         if self.closed:
             raise RuntimeError("the loop is closed; the served version keeps serving")
         if self.error is not None:
@@ -734,14 +1040,15 @@ class AdapterLoop:
         ev = []
         c = self.candidate
         if c is not None:
-            paired = self._paired(c)
+            paired = None if self.mode == "label" else self._paired(c)    # label mode: the pre-freeze gates decided
+            pz = paired if paired is not None else Paired(0, 0, 0, 0)
             st = self._state()
             if not self.paused:
                 self._at("policy.promote")
             if not self.paused and self.policy.promote(st, paired):
-                ev.append(self._event("promote", c, n, **{"from": self.served, "to": c, "l_k": paired.share_k,
-                                                         "l_s": paired.share_s, "samples": len(self._vs[c]["samples"]),
-                                                         "n_novel": paired.n_novel, "n_seen": paired.n_seen,
+                ev.append(self._event("promote", c, n, **{"from": self.served, "to": c, "l_k": pz.share_k,
+                                                         "l_s": pz.share_s, "samples": len(self._vs[c]["samples"]),
+                                                         "n_novel": pz.n_novel, "n_seen": pz.n_seen,
                                                          "why": None}))
                 ev[-1]["install"] = self._serve(c, n)
                 ev += self._evict(n)
@@ -1041,6 +1348,7 @@ class AdapterLoop:
                           report=dataclasses.asdict(report), frozen=ok, **base)]
         if ok:
             ev.append(self._freeze(k, n, frozen, keys, n_train))
+            self._vs[k]["fixed"] = report.threshold        # label mode serves at it (act_guard's on the calib labels)
         else:
             self._release(frozen)                          # never served: unstaged at once
             row = self._row(k, "discarded", None, None, n, self.live.seen(), n_train, keys, fp)
@@ -1113,7 +1421,7 @@ class AdapterLoop:
         self._at("save")
         if self.versions_dir is not None and srv is not None:
             srv.save(self.versions_dir, k)
-        p = StreamPromise(**self._pkw, budget=self.budget)
+        p = None if self.mode == "label" else StreamPromise(**self._pkw, budget=self.budget)
         self._ev_seen[k] = 0
         row = self._row(k, "candidate", model, p, n, self.live.seen(), n_train, keys, fp)
         row["served_as"], row["served_cls"] = srv, None if srv is None else type(srv)
@@ -1269,7 +1577,7 @@ class AdapterLoop:
         paired = self._paired(c)
         if not force:
             self._at("policy.promote")
-        if not force and not self.policy.promote(self._state(), paired):
+        if not force and not self.policy.promote(self._state(), None if self.mode == "label" else paired):
             raise ValueError(f"the policy does not promote version {c} now (force=True skips its rule)")
         self._changing = True
         e = self._event("promote", c, self.n, **{"from": self.served, "to": c, "l_k": paired.share_k,
@@ -1387,7 +1695,8 @@ class AdapterLoop:
                                                        why=d.get("why")),
                     "train": lambda d: fresh.train_now(), "error": again,
                     "train_start": lambda d: fresh.train_now(wait=d.get("wait")), "close": lambda d: fresh.close(),
-                    "cancel": lambda d: fresh.cancel_training(by=d.get("by"), why=d.get("why"))}
+                    "cancel": lambda d: fresh.cancel_training(by=d.get("by"), why=d.get("why")),
+                    "detach": lambda d: fresh._detach(by=d.get("by"), why=d.get("why"), record=d)}
         for kind, d in items:
             if kind == "stream":
                 if d.get("control") and d.get("event") in controls:
@@ -1491,8 +1800,8 @@ class AdapterLoop:
 
     def status(self) -> dict:
         """{"state", "error", "served", "candidate", "n", "labels": {"train", "calib", "holdout"}, "trainings",
-        "budget": {...}, "job", "paused", "alarms", "mode", "guarantee", "delta_spent", "versions_kept"}. state:
-        "closed", "error" (a hook raised: the loop stopped; error: {"n", "where", "why"}), "training", "paused" or
+        "budget": {...}, "job", "paused", "alarms", "mode", "attached", "guarantee", "delta_spent", "versions_kept"}.
+        attached: "dispatcher", "system" or None. state: "detached", "closed", "error" (a hook raised: the loop stopped; error: {"n", "where", "why"}), "training", "paused" or
         "running". job: the training in flight — id, version, trigger, started (wall clock), started_at (its decision),
         inline, state ("running"; "ready": its result waits for the next decision), and what the runner fills in
         (runner, pid, log, device, eta, last, last_t: a heartbeat line's age says whether it is alive).
@@ -1500,16 +1809,20 @@ class AdapterLoop:
         Takes no lock: it answers while a step (or an inline training inside it) runs on another thread. Its fields
         are read one by one, so two of them may straddle a decision."""
         b, job, err = self.policy.budget, self._job, self.error
-        state = ("closed" if self.closed else "error" if err is not None else "training" if job is not None
-                 else "paused" if self.paused else "running")
+        state = ("detached" if self.detached else "closed" if self.closed else "error" if err is not None
+                 else "training" if job is not None else "paused" if self.paused else "running")
+        host = self.host
+        attached = (None if host is None else "dispatcher" if hasattr(host, "slow") else "system")
         return {"state": state, "error": None if err is None else dict(err), "served": self.served,
                 "candidate": self.candidate, "n": self.n, "labels": dict(self._split_n),
                 "trainings": len(self._trainings),
                 "budget": {"max_trainings": b.max_trainings, "per_day": b.per_day,
                            "refuse": b.refuse(list(self._trainings), self._now())},
                 "job": None if job is None else dict(job), "paused": self.paused,
-                "alarms": len(self._alarms), "mode": "stream",
-                "guarantee": "anytime stream certificate per version (StreamPromise on post-freeze coin samples)",
+                "alarms": len(self._alarms), "mode": self.mode, "attached": attached,
+                "guarantee": ("anytime stream certificate per version (StreamPromise on post-freeze coin samples)"
+                              if self.mode == "stream" else
+                              "fixed-set (act_guard on calib labels); no anytime certificate"),
                 "delta_spent": self.budget.spent,
                 "versions_kept": sum(1 for ver in list(self._vs.values()) if ver["state"] in KEPT)}
 

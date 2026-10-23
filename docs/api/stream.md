@@ -71,7 +71,27 @@ never the served one, the rollback target or version 0. A result whose training 
 rollback) is recorded "stale" and discarded, not gated on a comparison with a version no longer served
 (`served_at_start` in "train_start" and "train"). A batch learner's `train(job)` runs on another thread than
 `update`, `seen` and `keys`: it must read the job only (or its own state under its own lock). Stage 4: `save(dir)` /
-`AdapterLoop.load(dir, learner, ...)` and `cancel_training()` (see `stream.checkpoint`). No attach yet. Unmeasured.
+`AdapterLoop.load(dir, learner, ...)` and `cancel_training()` (see `stream.checkpoint`). Stage 5: attach.
+`AdapterLoop.attach(host, learner=None, *, question=None, dir=None, policy=None, initial="auto", part=None, **kw)`
+builds a loop and attaches it — to a `Dispatcher` (stream mode: every `ask` is one decision of the loop) or to a
+`System` alone (label mode, `mode="label"`: `teach` / `outcome` call `label(x, y)`; no coin, no promise, no alarm; a
+version serves at its own act_guard threshold; a frozen candidate is promoted when `policy.promote(st, None)` says so;
+`status()["guarantee"]` is "fixed-set (act_guard on calib labels); no anytime certificate"). Without a learner it is a
+`LoraLearner` on the question's decision part (dir= required). `loop.attach_to(host)` attaches a loop built by hand;
+`Dispatcher(..., loop=loop)` calls it. `detach()` cancels a training in flight, puts version 0 back on the System,
+removes the hooks and closes the loop ("detach" event, replayed). `serving(v)`: version v installed for the duration
+(the Dispatcher's replay). Refused: a question answered by a combination or a part that is a member of one, a
+Dispatcher with its own `promise=`, a second loop on a System or a Dispatcher, `start` / `complete` with a loop (use
+`ask`). In stream mode the decision is split around the dispatch: the loop reads it (scores, coin, whether its rule
+answers alone) before System 1 is asked and takes its step after, with the slow path's accepted answer as the label —
+neither inside the part's call. A Dispatcher's loop decisions run one at a time under its own lock, taken before the
+part's and the loop's and never while either is held (order: dispatcher → part → loop). The dispatch escalates what the
+loop's rule does not answer alone and checks what its coin draws; each `Dispatched` records `learning` (the loop's
+decision number, the version served and its fingerprint, the candidate, the coin, whether the loop's rule answered
+alone, the label it took, its events); `Dispatcher.replay` / `replay_all` replay each decision with its version
+installed. A label whose source the policy refuses is a missing label for the loop (the default policy refuses the
+slow path's "s2" unless `s2_labels=True`). A loop that stops or fails leaves the dispatch as it would be without it
+(`learning: {"stopped": ...}` or `"error"`). Unmeasured.
 
 ::: solvi.experimental.stream.loop
 

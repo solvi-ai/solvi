@@ -472,8 +472,9 @@ label). Which mode gives more coverage at the same r is measured by the stand be
 
 A promise earned on the stream instead of on a fixed calibration set: `StreamPromise` starts at +inf (nothing
 answered alone) and loosens its threshold as labelled samples arrive, with a statement that holds at every point in
-time, not only at the end of a calibration. Stages 1–3b of 4: the certificate, its change detector, the sampling
-wired into the Dispatcher, the agent as the oracle and the closed learning loop. Since 1.4.
+time, not only at the end of a calibration. The certificate, its change detector, the sampling wired into the
+Dispatcher, the agent as the oracle, the closed learning loop and the adapter (LoRA) loop attached to a Dispatcher or a
+System. Since 1.4.
 
 ```python
 from solvi.experimental.stream import StreamPromise
@@ -690,6 +691,26 @@ run only after HMAC verification (the signature and every file's hash; a file th
 and without a secret there is no tamper protection against a writer of the folder — the check is a plain SHA-256 that
 anyone can recompute, and `load` warns. A checkpoint saved with a secret is refused without one. A save holds the
 part's lock for all its writes, so the part's decisions wait for it (unmeasured).
+
+Stage 5 of the LoRA loop attaches it to a running system. `AdapterLoop.attach(dispatcher, dir="loop/", max_risk=0.05,
+secret=key)` puts a LoRA learner on the question's decision part and routes every `dispatcher.ask` through the loop:
+before the dispatch the loop reads the decision (the served version's score, the candidate's in shadow, the
+calibration coin, whether its rule answers alone), the dispatch escalates what its rule does not answer alone and
+checks what its coin draws, and after it the loop takes its step with the slow path's accepted answer as the label.
+Neither runs inside the part's call, and one Dispatcher's loop decisions run one at a time under a lock taken before
+the part's and the loop's, so the lock order is dispatcher → part → loop on every path. System 1 decides with the
+served version (the part's fingerprint and `extra["lora"]` in its trace change with it); each `Dispatched` records
+`learning` — the version, its fingerprint, the coin, the loop's events — and `replay_all` replays each decision with
+its own version installed. `AdapterLoop.attach(system, learner)` on a System alone is label mode: the corrections of
+`teach` and `outcome` are the loop's labels, there is no coin and no stream promise, and a version is promoted on the
+pre-freeze gates alone (`status()["guarantee"]` names the weaker, fixed-set guarantee). Controls go through the
+handle (`dispatcher.loop.pause()`, `rollback`, `train_now`, `status`, `save`), `detach()` puts version 0 back, and
+any `LoopPolicy` subclass and any learner attach the same way. A question answered by a Cascade, Vote or Route, or by
+a part that is a member of one, is refused: a combination reads its members without their version lock. The labels
+the default policy takes are a person's, an outcome's, a rule's or an audit's; the slow path's only with
+`DefaultPolicy(s2_labels=True)`, so with the defaults and an LLM slow path the loop gets no labels. Unmeasured: the
+tests run on a stand-in learner and the tiny random checkpoint; nothing here says the loop improves a system, and the
+cost to live decisions (one more scoring per decision, decisions of one Dispatcher serialized) was not measured.
 
 Measured once on real streams: three public intent sets with a TF-IDF + logistic-regression answerer, 20 seeds per
 set, a shift to held-out intents, corrupted text and noisy labels; the numbers, the setting and the prior work are in

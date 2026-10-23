@@ -1299,7 +1299,10 @@ class System:
         System.guarantee(..., corrections=, sources=); no head or decision learns from it (a head fed such labels gained
         on one task of three), and a system without storage raises ValueError. With an update target attached (solvi.experimental.changes.LearningTarget(system, ...,
         gate_teach=True)) nothing learns at once: the correction is only stored, and the update's gates decide whether it
-        is learned.
+        is learned. With an adapter loop attached for the question (solvi.experimental.stream.AdapterLoop.attach) nothing
+        learns at once either: on a System alone (label mode) the correction is the loop's label (a source its policy
+        refuses raises UntrustedLabel before anything is stored), through a Dispatcher (stream mode) it is only stored —
+        the loop's labels come with its decisions.
         An unknown question raises KeyError and an answer that is not one of the question's options ValueError, before
         anything is learned or stored; the answer is stored normalized (True → "yes"). When nothing learned at once and
         there is no storage, the correction is lost: a UserWarning says so."""
@@ -1318,6 +1321,13 @@ class System:
                 raise ValueError("teach(label_source='verified') stores the label for System.guarantee(corrections=): "
                                  "the system has no storage, and no head or decision learns from a verified label")
             self.storage.save_correction(question, init_state, correct, label_source=source, by=by, of=of)
+            return None
+        al = getattr(self, "adapter_loop", None)
+        if al is not None and al.question == question:   # an adapter loop owns the part: nothing learns at once
+            if al.mode == "label":
+                al._taught(self, init_state, correct, source)   # a source its policy refuses raises before storing
+            if self.storage is not None:
+                self.storage.save_correction(question, init_state, correct, label_source=source, by=by, of=of)
             return None
         loop = getattr(self, "_learning", None)
         if loop is not None and loop.gate_teach:
@@ -1389,6 +1399,9 @@ class System:
         correct = self.questions[question].answer.normalize(value)       # ValueError: not one of the options
         from .schema import untag_floats
         init = untag_floats((v.get("trace") or {}).get("init") or {})
+        al = getattr(self, "adapter_loop", None)
+        if al is not None and al.question == question and al.mode == "label":
+            al._taught(self, init, correct, "outcome")      # the attached loop's label (refused: raises, not stored)
         return self.storage.save_correction(question, init, correct, label_source="outcome", by=by, of=sid, note=note)
 
 

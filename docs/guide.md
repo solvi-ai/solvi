@@ -2148,6 +2148,51 @@ Feed the calibration **every** answer System 2 vouched for, not only the cases w
 threshold calibrated on disagreements alone sees only System 1's mistakes, and the verified disagreements were too few
 to move anything. The report's `labels` lists the stored ids it read; calibrating again without them undoes it.
 
+### Attaching a learner (experimental, unmeasured)
+
+A learner can be attached to a running system and replace the model it decides with only when a measured comparison
+says the new version is better (`solvi.experimental.stream`; no gain is claimed: no stand has run). On a Dispatcher
+every decision goes through the loop and each version serves under its own stream certificate; on a System alone the
+corrections are the loop's labels and only the pre-freeze gates decide.
+
+```python
+from solvi.experimental.stream import AdapterLoop, DefaultPolicy
+
+loop = AdapterLoop.attach(dispatcher, dir="loop/", max_risk=0.05, secret=key,       # a LoRA learner on the part
+                          policy=DefaultPolicy(s2_labels=True))                     # the slow path's labels count
+dispatcher.ask(x).learning          # the version that decided, its fingerprint, the loop's coin and events
+loop.pause(); loop.resume(); loop.train_now(); loop.rollback(0); loop.status()
+loop.save("ckpt/")                  # AdapterLoop.load("ckpt/", learner, system=..., secret=key).attach_to(dispatcher)
+dispatcher.replay_all()             # each decision replayed under the version it was made with
+loop.detach()                       # version 0 back, hooks removed
+
+loop = AdapterLoop.attach(system, learner, initial=v0)   # a System alone: system.teach(...) feeds it (label mode)
+```
+
+The control is a `LoopPolicy` subclass: give each hook, and the loop calls them.
+
+```python
+from solvi.experimental.stream import LoopPolicy
+
+class OnlyHuman(LoopPolicy):
+    def accept(self, st, x, y, source): return source == "human"
+    def split(self, st, key): return "holdout" if hash(key) % 3 == 0 else "train"   # use a stable hash in practice
+    def want_train(self, st): return st.labels["train"] >= 100 and st.served == 0
+    def select(self, st, rows): return list(rows)
+    def hyper(self, st): return {"seed": st.next_version}
+    def freeze(self, st, report): return report.right - report.wrong > report.served_right - report.served_wrong
+    def promote(self, st, paired): return True
+    def discard(self, st, paired): return None
+    def alarm(self, st, who, report): return "recertify"
+```
+
+A learner is any object with `update`, `seen` and either `snapshot` (online) or `train(job)` (batch); its versions
+score (`score(x) → (answer, signal)`, `fingerprint()`) and, to serve, `install(system)` / `uninstall(system)`. Refused:
+a question answered by a Cascade, Vote or Route, or by a part that is a member of one. With a loop attached
+`System.teach` changes nothing at once (the loop owns the part). The labels the default policy takes are a person's,
+an outcome's, a rule's or an audit's; the slow path's only with `s2_labels=True`. See
+[experimental](experimental.md#stream).
+
 ## Guarding an agent's tool calls
 
 > **Stable since 1.0** (`solvi.Guard`; a preview in 0.7–0.9). Its hard line is provenance: a value found only in a tool's output never
