@@ -584,8 +584,31 @@ class Combination:
             return False
         return (Unknown if v is Unknown else sp.label(v)) == (Unknown if y is Unknown else sp.label(y))
 
+    def _label_report(self, states, gold, rk):
+        """Confident learning over the combination's own decisions on the calibration examples (every one answered, as
+        for "base_error") → solvi.core.calibration.label_issues' result, or None for a ranking or a span question."""
+        from ..calibration import label_issues
+        from ..catalog import AnyOf
+        sp = self.spec
+        if sp.kind in ("rank", "span") or sp.multi:
+            return None
+
+        def key(v):
+            return Unknown if v is Unknown else sp.label(v)
+        probs, labels = [], []
+        for st, y in zip(states, gold):
+            d = self.final(st, -math.inf, rk)
+            try:
+                probs.append({key(k): float(v) for k, v in (getattr(d, "probs", None) or {}).items()})
+                labels.append(None if isinstance(y, AnyOf) else key(y))
+            except (ValueError, TypeError):
+                probs.append({})
+                labels.append(None)
+        return label_issues(probs, labels)
+
     @_deprecate.removed_kwargs(risk="max_risk")
-    def act_guard(self, examples, *, max_risk=0.10, signal="auto", groups=None, min_group=100, delta=0.10, scale="raw"):
+    def act_guard(self, examples, *, max_risk=0.10, signal="auto", groups=None, min_group=100, delta=0.10,
+                  label_check=False, scale="raw"):
         """Answer alone only as far as a guarantee allows, for the combination as a whole: on labelled examples of your
         stream [(input, correct)] (an input is what every part reads, or Facts(...) by name) every part is asked, and
         one threshold t shared by every part is chosen by conformal risk control so that P(answered alone AND wrong)
@@ -619,8 +642,9 @@ class Combination:
         "guarantee", "promise", "base_error", "must_escalate_at_least", "warnings", "groups" — plus "calls_per_question"
         (models called per question; "calls" in 0.7, removed in 0.9), "cost", "scale", "answered_by". signal: "auto" only (each part
         brings its own; `scale` says how they share one threshold). Every option after the examples is keyword-only
-        (risk=, the 0.7 name of max_risk=, was removed in 0.9)."""
-        from ..calibration import certify_groups, check_rate
+        (risk=, the 0.7 name of max_risk=, was removed in 0.9). label_check: as DecisionPart.act_guard, on the
+        combination's own decisions ("label_issues")."""
+        from ..calibration import certify_groups, check_rate, label_warning
         risk = max_risk
         check_rate("max_risk", risk)
         if signal != "auto":
@@ -703,6 +727,12 @@ class Combination:
             for w in flat:
                 warnings.warn(w, UserWarning, stacklevel=2)
         out.update(extra)
+        issues = self._label_report(states, gold, rk) if label_check else None
+        if issues is not None:
+            out["label_issues"] = issues
+            lw = label_warning(issues, n)
+            if lw:
+                out["warnings"] = out.get("warnings", []) + [lw]
         return out
 
     def _sweep(self, examples, scale, grid_of=None):
@@ -740,7 +770,8 @@ class Combination:
         return srcs, gold, states, ranks, rk, grid, loss, auto_all, cost, calls, who
 
     @_deprecate.removed_kwargs(error="max_error")
-    def calibrate_for(self, examples, *, max_error=0.05, signal="auto", method="empirical", delta=0.10, scale="raw"):
+    def calibrate_for(self, examples, *, max_error=0.05, signal="auto", method="empirical", delta=0.10, label_check=False,
+                      scale="raw"):
         """Choose the shared threshold for a target error rate among the answers the combination gives alone, on
         labelled examples [(input, correct)] — as DecisionPart.calibrate_for, with one threshold t for every part's
         signal (on `scale`, as in act_guard). method="empirical": the lowest threshold at which the calibration
@@ -754,8 +785,9 @@ class Combination:
         The decider protocol: the signature and the keys of DecisionPart.calibrate_for — "signal" ("shared" or
         "shared-rank"), "threshold", "answered", "error", "n", "max_error", "method", "guarantee" — plus
         "calls_per_question" and "scale". signal: "auto" only (each part brings its own). Every option after the
-        examples is keyword-only (error=, the 0.7 name of max_error=, was removed in 0.9)."""
-        from ..calibration import _binom_cdf, check_rate, ltt_grid
+        examples is keyword-only (error=, the 0.7 name of max_error=, was removed in 0.9). label_check: as
+        DecisionPart.calibrate_for ("label_issues")."""
+        from ..calibration import _binom_cdf, check_rate, label_warning, ltt_grid
         error = max_error
         if method not in ("empirical", "ltt"):
             raise ValueError('method must be "empirical" or "ltt"')
@@ -765,7 +797,7 @@ class Combination:
         if signal != "auto":
             raise ValueError(f"signal={signal!r}: a combination's signal is each part's own (signal=\"auto\"); "
                              "scale=\"raw\" or \"rank\" says how they share one threshold")
-        _, _, states, ranks, _, grid, loss, auto_all, _, calls, _ = self._sweep(
+        _, gold, states, ranks, rk, grid, loss, auto_all, _, calls, _ = self._sweep(
             examples, scale, ltt_grid if method == "ltt" else None)
         n, G = len(states), len(grid)
         answered, wrong = auto_all[:, :G - 1].sum(0), loss[:, :G - 1].sum(0)
@@ -794,10 +826,17 @@ class Combination:
         self.conformal_set = None
         self._setup()
         a, lo = auto_all[:, j], loss[:, j]
-        return {"signal": _SIGNAL[scale], "threshold": t, "answered": float(a.mean()) if n else 0.0,
-                "error": float(lo[a].sum() / a.sum()) if a.any() else 0.0, "n": n, "max_error": error,
-                "method": method, "guarantee": g["promise"],
-                "calls_per_question": float(calls[:, j].mean()) if n else 0.0, "scale": scale}
+        out = {"signal": _SIGNAL[scale], "threshold": t, "answered": float(a.mean()) if n else 0.0,
+               "error": float(lo[a].sum() / a.sum()) if a.any() else 0.0, "n": n, "max_error": error,
+               "method": method, "guarantee": g["promise"],
+               "calls_per_question": float(calls[:, j].mean()) if n else 0.0, "scale": scale}
+        issues = self._label_report(states, gold, rk) if label_check else None
+        if issues is not None:
+            out["label_issues"] = issues
+            lw = label_warning(issues, n)
+            if lw:
+                out["warnings"] = [lw]
+        return out
 
     # --- the calibration file's state of the combination (solvi.core.calibfile reads and writes only the file format)
     @property

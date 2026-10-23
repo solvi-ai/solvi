@@ -139,6 +139,50 @@
   or named as its `signal=` counts as read). Each names the question or field and the fix in one line; none is an
   error, so `solvi check` without `--strict` exits as before, and the examples raise no new warning under `--strict`.
   `solvi init --with-model`'s refunds and minimal templates get an `"other"` option.
+- **Known-answer tests for the guarantee arithmetic** (`tests/test_reference_values.py`, tests only). `ltt_certified` /
+  `ltt_threshold` (Bonferroni and fixed sequence), `crc_threshold` and `conformal_quantile` are checked against values
+  computed apart from solvi's code: exact rational binomial tails and scipy's `binom.cdf`; the one-sided
+  Clopper–Pearson bound (the same Bonferroni test written through the Beta quantile); the learn-then-test procedure
+  rewritten from Angelopoulos et al. (2021) with exact p-values (the fixed-sequence start is solvi's own documented
+  rule, not from the paper, so that one is a regression check); conformal risk control from Theorem 1 of Angelopoulos
+  et al. (2022); the split-conformal rank ⌈(n + 1)(1 − α)⌉ and its exact coverage k / (n + 1) by seeded simulation.
+  Each test names its source. All agreed; no code changed. MAPIE and confseq are not used (not dependencies).
+- **An identity canary for remote deciders** (`solvi.core.guarantees.canary.IdentityCanary`). A hosted model can
+  change behind its name (other weights, another provider or quantisation) while the decider's fingerprint, which
+  hashes the configuration asked for, stays the same. `IdentityCanary(probes, every=N).attach(model)` asks a small
+  fixed probe set of an `llm(...)` or `systemone(...)` decider — on demand (`probe()`) or every N decisions of the
+  model — and compares the answers, the probabilities (mean total-variation distance above `tol`) and the model name
+  the server reports with the reference round; a difference is asked once more before it counts (`confirm=True`).
+  After a change every decision of the model carries `extra["canary"]["changed"]` in its trace until `accept()`;
+  `DriftMonitor.observe` flags such a decision — a Decision, or the Response of a System ask, whose
+  `answer:<question>` trace record holds the mark, so a Dispatcher with that monitor treats it as drift — as the
+  signal `"identity"`, and keeps it out of its reference; `on_change="escalate"` escalates them. Off by default: no
+  probe is sent unless a canary is attached (probes cost `len(probes)` calls a round). A scheduled round runs on the
+  thread of the decision that made it due (that decision waits), outside the canary's lock (other decisions go on, one
+  round at a time); a round that raises is recorded as an `"error"` event and the decision is returned untouched.
+  `Trace.replay` runs under `no_probes()`: a replay never probes, counts or marks; under `on_change="escalate"` a
+  recorded escalation of a deterministic remote decider replays as a mismatch (the canary's state is not replayed). Not a statistical test: its false alarms come from
+  the provider's own noise on the probes; tested on fake servers only (`tests/test_identity_canary.py`).
+- **A label check before calibration, opt-in** (`label_check=True` on `act_guard` / `calibrate_for` of a part and of
+  a combination, and on `System.guarantee`; default `False`; `solvi.core.calibration.label_issues`). Confident learning
+  (Northcutt et al. 2021, cleanlab's "prune by noise rate", about 40 lines, no dependency) over the decisions the
+  calibration already made: the report's `"label_issues"` lists the examples whose label the model confidently
+  contradicts (count, ids, suggested answer) and `"warnings"` gets a line when there are any. It never changes the
+  calibration: every label is used as given. It needs out-of-sample probabilities: on a `FastHead` fitted on the same
+  examples, `System.guarantee(label_check=True)` without `folds=` adds a warning to pass `folds=` (cross-fitted heads). Simulated (400 examples, 3 answers): with 12 planted flips it listed 8–12
+  of them and 0–2 other examples over ten seeds; with no flip and a model confidently wrong on 10% of the examples it
+  listed 36 — it cannot tell a wrong label from a confident model mistake. That false-positive rate is why it is
+  opt-in: on by default most users would see a warning on clean data and existing calls would change their
+  `"warnings"`.
+- **How often a person was wrong, in the system report** (`corrections["people"]`, a "People:" line in the text
+  report; `solvi.core.store.sysreport.clopper_pearson`). The store already kept a person's label of a decision
+  (`teach`, source "human" or "audit", `of=`, `by=`) and its outcome (`System.outcome`, source "outcome") but never
+  paired them. Now every decision with both gives a pair — the person's last answer against the last outcome — and the
+  report gives the pairs, the wrong ones, the error with a two-sided 95% Clopper–Pearson interval, per person and per
+  question. Only existing store fields are read; no new record kind (the JSON report gains the key
+  `corrections["people"]`). Only person labels given before the outcome is recorded are paired (a correction made
+  after the outcome was known is not a judgement); those after are counted apart. The pairs are the decisions whose
+  outcome was recorded, not a random sample.
 
 ### Fixed
 - **DriftMonitor no longer flags "mean confidence up" on an unchanged stream** (`solvi.core.guarantees.drift`). The

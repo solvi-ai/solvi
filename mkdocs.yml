@@ -108,6 +108,7 @@ nav:
           - solvi.core.calibfile: api/calibfile.md
           - solvi.core.guarantees.guarantee: api/guarantee.md
           - solvi.core.guarantees.openset: api/openset.md
+          - solvi.core.guarantees.canary: api/canary.md
           - solvi.core.guarantees.drift: api/drift.md
           - solvi.core.guarantees.monitor: api/monitor.md
           - solvi.core.store: api/storage.md

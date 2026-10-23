@@ -708,6 +708,20 @@ class DecisionPart:
             conf = [c if a >= gate else -1.0 for c, a in zip(conf, act)]
         return (act if use_act else conf), ok, ("act" if use_act else "confidence"), ds
 
+    def _label_report(self, ds, examples):
+        """Confident learning over the calibration decisions (solvi.core.calibration.label_issues) → its result, or None
+        for a question with several answers per input (multi-label, ranking, span)."""
+        from ..calibration import label_issues
+        from ..catalog import label_options
+        if self.spec.multi or self.kind in ("rank", "span"):
+            return None
+        probs, labels = [], []
+        for d, (_, y) in zip(ds, examples):
+            opts = label_options(y)
+            probs.append({self._answer_key(k): float(v) for k, v in (d.probs or {}).items()})
+            labels.append(self._answer_key(opts[0]) if len(opts) == 1 else None)
+        return label_issues(probs, labels)
+
     def _sourced(self, g):
         """A guarantee record with the source of the calibration's probabilities when the model names one (an LLM:
         "logprobs" or "stated"): a decision whose probabilities come from the other source escalates."""
@@ -734,7 +748,7 @@ class DecisionPart:
                                                 for f in self.facts + extra])
 
     @_deprecate.removed_kwargs(error="max_error")
-    def calibrate_for(self, examples, *, max_error=0.05, signal="auto", method="empirical", delta=0.10):
+    def calibrate_for(self, examples, *, max_error=0.05, signal="auto", method="empirical", delta=0.10, label_check=False):
         """Choose the escalation threshold for a target error rate among the answers given alone, on labelled examples
         [(input, correct)]. method="empirical": the lowest threshold at which the calibration decisions it lets through
         are wrong at most `error` of the time — no guarantee on new inputs (on another data set the error can be several
@@ -749,8 +763,11 @@ class DecisionPart:
         Changes the part's fingerprint. → {"signal", "threshold", "answered" (the share answered alone on the
         examples), "error" (among them), "n", "max_error", "method", "guarantee"}. For a guarantee on the share of all
         questions answered wrongly, see act_guard. Every option after the examples is keyword-only (error= and the
-        result's keys "coverage" / "target_error", the 0.7 names, were removed in 0.9)."""
-        from ..calibration import accuracy_at, check_rate, ltt_threshold
+        result's keys "coverage" / "target_error", the 0.7 names, were removed in 0.9).
+        label_check (default False, opt-in; no model call): "label_issues" — the examples whose label the model confidently
+        contradicts (solvi.core.calibration.label_issues), with a line in "warnings" when there are any; the
+        calibration uses every label as given."""
+        from ..calibration import accuracy_at, check_rate, label_warning, ltt_threshold
         error = max_error
         examples = list(examples)
         if method not in ("empirical", "ltt"):
@@ -758,7 +775,7 @@ class DecisionPart:
         check_rate("error", error, zero=method == "empirical")     # ltt cannot certify 0 (math domain error before)
         if method == "ltt":
             check_rate("delta", delta)
-        sig, ok, name, _ = self._labelled(examples, signal)
+        sig, ok, name, ds = self._labelled(examples, signal)
         if method == "ltt":
             thr = ltt_threshold(sig, [1 - o for o in ok], error, delta)
             g = {"method": "ltt", "error": error, "delta": delta, "n": len(ok), "signal": name,
@@ -771,11 +788,19 @@ class DecisionPart:
         thr = max(thr, 0.0) if name == "confidence" else thr      # −1 marks an example the act gate escalates
         self._set_threshold(name, thr, self._sourced(g))
         acc, cov = accuracy_at(sig, ok, thr)
-        return {"signal": name, "threshold": thr, "answered": cov, "error": (1 - acc) if cov else 0.0,
-                "n": len(ok), "max_error": error, "method": method, "guarantee": g["promise"]}
+        out = {"signal": name, "threshold": thr, "answered": cov, "error": (1 - acc) if cov else 0.0,
+               "n": len(ok), "max_error": error, "method": method, "guarantee": g["promise"]}
+        issues = self._label_report(ds, examples) if label_check else None
+        if issues is not None:
+            out["label_issues"] = issues
+            lw = label_warning(issues, len(ok))
+            if lw:
+                out["warnings"] = [lw]
+        return out
 
     @_deprecate.removed_kwargs(risk="max_risk")
-    def act_guard(self, examples, *, max_risk=0.10, signal="auto", groups=None, min_group=100, delta=0.10):
+    def act_guard(self, examples, *, max_risk=0.10, signal="auto", groups=None, min_group=100, delta=0.10,
+                  label_check=False):
         """Answer alone only as far as a guarantee allows (conformal risk control), from labelled examples of your own
         stream [(input, correct)] — a few hundred is typical: the escalation threshold is set so that, for inputs like
         the examples, P(answered alone AND wrong) ≤ risk — a share of all questions (answered or escalated), not of
@@ -813,14 +838,20 @@ class DecisionPart:
 
         The decider protocol: a combination (solvi.core.deciders.combine) takes the same act_guard(examples, *, max_risk, signal,
         groups, min_group, delta) and returns the same keys. Every option after the examples is keyword-only; risk= is
-        the 0.7 name of max_risk= (removed in 0.9)."""
-        from ..calibration import check_rate, crc_threshold
+        the 0.7 name of max_risk= (removed in 0.9).
+
+        label_check (default False, opt-in; it reads the decisions already made, no model call): "label_issues" — the examples
+        whose label the model confidently contradicts by confident learning (solvi.core.calibration.label_issues:
+        their count, ids — the examples' positions — and the suggested answers), with a line in "warnings" when there
+        are any. Nothing is dropped: the threshold is calibrated on every label as given. A model's confident mistakes
+        are flagged too, so read it as a list to check, not as label errors found."""
+        from ..calibration import check_rate, crc_threshold, label_warning
         risk = max_risk
         check_rate("max_risk", risk)                      # risk=10 (a percent) or 1.5 would be recorded as a promise
         if groups is not None and delta is not None:
             check_rate("delta", delta)
         examples = list(examples)
-        sig, ok, name, _ = self._labelled(examples, signal)
+        sig, ok, name, ds = self._labelled(examples, signal)
         s, o = np.asarray(sig, float), np.asarray(ok, float)
         base = float(1 - o.mean())
         if groups is None:
@@ -855,6 +886,12 @@ class DecisionPart:
         if warn:
             out["warnings"] = [warn]
             warnings.warn(warn, UserWarning, stacklevel=2)
+        issues = self._label_report(ds, examples) if label_check else None
+        if issues is not None:
+            out["label_issues"] = issues
+            lw = label_warning(issues, len(ok))
+            if lw:
+                out.setdefault("warnings", []).append(lw)
         return out
 
     def conformal(self, examples, coverage=0.90):
