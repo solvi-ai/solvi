@@ -445,11 +445,18 @@
   synthetic gold follows the store's own convention that a writer's later value replaces its earlier one at the
   same since (fixed on development seeds); the synthetic generator was set to produce enough probes (six
   vendor tries per key) before any confirmatory seed existed.
-  Known limitations. A derived item is blocked where it should hold when its premise's content was told on two
-  validity periods and the premise is disputed on one of them: the check reads the premise's item-level
-  "disputed" status instead of its validity at the asked time (this is the 21 of 2,260 correct derivations
-  blocked above). Four claims at one since by two writers, each telling one value and then another, leave both
-  items disputed, so no value is read for that key at that time (the one synthetic current-value miss above).
+  Known limitations, both fixed after the measurement; the fixes were regression-checked on development seeds
+  only (the numbers above are as measured, before the fixes). A derived item was blocked where it should hold
+  when its premise's content was told on two validity periods and the premise was disputed on one of them: the
+  check read the premise's item-level "disputed" status instead of its validity at the asked time (this is the
+  21 of 2,260 correct derivations blocked above). Fixed: such a derived item stays a hypothesis as a whole, but
+  `usable(id, valid_at=)` and `snapshot(valid_at=)` give it as a fact at a time where every premise of one of
+  its derivations is usable, and a snapshot without a time carries the periods where it holds. Four claims at
+  one since by two writers, each telling one value and then another, left both items disputed, so no value was
+  read for that key at that time (the one synthetic current-value miss above). Fixed: a writer's later value at
+  one since replaces its own earlier one before the writers are compared, so when both writers end on the same
+  value that value holds and the other is refuted; while any writer still asserts the old value the two still
+  dispute.
 - **The experimental deadline reads "a future release".** The deadline set at 1.0 for every experimental piece was 1.2;
   it passed with the pieces still here, and the import warning of 1.3 and 1.4 still said "it is removed in 1.2 unless it
   graduates". `solvi.experimental.DEADLINE`, each `STATUS[...]["deadline"]`, the warning and docs/experimental.md now say
