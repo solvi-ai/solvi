@@ -29,12 +29,12 @@ the share answered alone))); a decision the served version does not answer alone
 label trains the live learner, but it reaches a promise only when the coin drew it (escalation-only calibration
 breaks the promise: the stage-2 control).
 
-Promotion. Once the candidate is certified, on the candidate's own samples (all after its freeze): ℓ_k = the share with
-the candidate's score ≥ its threshold, ℓ_s = the share with the served version's score ≥ the served threshold now — a
-paired comparison on the same samples. Promote when ℓ_k ≥ `min_share` (0.05) AND ℓ_k ≥ ℓ_s + `margin` (0.01: one point)
-— the author's rule (2026-10-23): under the joint promise a model of noise certifies at a strict threshold that almost
-nothing passes, and with margin 0 over a version that answers nothing it was promoted; the floor keeps such a version
-out (control C3: shuffled labels never promote, both kinds). Discard a candidate not certified after `stale` samples
+Promotion. Once the candidate is certified, on the candidate's own samples (all after its freeze and after the last
+alarm): ℓ_k = the share with the candidate's score ≥ its threshold, ℓ_s = the share with the served version's score
+≥ the served threshold now — a paired comparison on the same samples. Promote when ℓ_k ≥ `min_share` (0.05) AND
+ℓ_k ≥ ℓ_s + `margin` (0.01: one point) — the author's rule (2026-10-23): under the joint promise a model of noise
+certifies at a strict threshold that almost nothing passes, and with margin 0 over a version that answers nothing it
+was promoted; the floor keeps such a version out (control C3: shuffled labels never promote, both kinds). Discard a candidate not certified after `stale` samples
 (1 500) or certified and not better after `trial` samples (default: stale); the refreeze floor becomes `refreeze` × the
 live learner's labels (1.5). A discarded version's δ_v stays spent. Every version's certificate holds together under the
 budget, so the rule only affects utility, not validity.
@@ -43,7 +43,12 @@ The detector (opt-in, `detector=RiskDetector(alpha=<the promised rate>)`, stage 
 whose served version had a threshold in force, outside probation, feeds it the deployed loss as the Dispatcher's
 driver does (joint: answered alone and wrong; selective: wrong, fed only when answered alone; a missing label is
 wrong). On an alarm: a "stream" event "alarm" (R, the detector's n, why), the detector is reset, the served
-version's promise restarts (the next (v, δ_v) from the loop's budget, threshold +inf) and probation opens: the next
+version's promise restarts (the next (v, δ_v) from the loop's budget, threshold +inf), and so does the candidate's,
+certified or not, its paired samples dropped: the alarm is evidence that the conditional loss moved, so a certificate
+earned before it is about another regime (seen in the stage-4 smoke: a candidate certified before a shift was promoted
+at the alarm, ℓ_s being 0, and served the moved world at a true risk above α). Each restart is a "restart" event (why
+"alarm"). A retired version keeps its certificate until it is rolled back to; a rollback after an alarm restarts it
+(a retired version reads no samples, so restarting it earlier would only spend δ). Probation opens: the next
 `probation` (300) decisions are not answered alone whatever the threshold (ρ = 1), and after that until the served
 version is certified again — the stricter of the two. Probation belongs to the question, not the version: a certified
 candidate is promoted at once (ℓ_s is 0 under +inf) but answers alone only after probation. A promotion or a rollback
@@ -61,10 +66,10 @@ In the chain. Each decision is a record of kind "loop": "stream" (kept by a reda
 versions, ρ, sampled, alone, by, label_source, label_of, probation (at issue) and the decisions of it left, the served
 score and threshold, the candidate's shadow score, both promises' states, the detector's state and the live learner's
 labels; "loop" (not kept) holds the input, the would-be answers, the label and the answer. Each state change is a record
-of kind "stream" ({"event": "freeze" | "promote" | "discard" | "rollback" | "start" | "alarm" | the promises' "grid" /
-"certified" / "loosened" / "recertify", "question", "version", "v_index", "delta_v", ...}); a freeze carries the frozen
-model's fingerprint, its decision and the labels it had seen. With `versions_dir=`, each frozen model is pickled as
-`<versions_dir>/<version>.pkl`. `replay()` re-runs the protocol from the records alone (the coin recomputed with the
+of kind "stream" ({"event": "freeze" | "promote" | "discard" | "rollback" | "start" | "alarm" | "restart" | the
+promises' "grid" / "certified" / "loosened" / "recertify", "question", "version", "v_index", "delta_v", ...}); a freeze
+carries the frozen model's fingerprint, its decision and the labels it had seen. With `versions_dir=`, each frozen
+model is pickled as `<versions_dir>/<version>.pkl`. `replay()` re-runs the protocol from the records alone (the coin recomputed with the
 secret, the scores read from the records, the live learner replaced by its label count) and compares every decision —
 which version served it and the certificates' states — and every event; with `versions_dir` each pickle's fingerprint is
 checked and, with `rescore=True`, every recorded score is recomputed by the frozen model that gave it.
@@ -331,9 +336,14 @@ class LearningLoop:
         if alarm is not None:
             events.append(self._event("alarm", sv, n, R=alarm["R"], detector_n=alarm["n"], why=alarm["why"][0]))
             det.reset()
-            ps.restart("alarm")
             self.left = self.probation
             events += self._promise_events()
+            events += self._restart(sv, n)
+            if c is not None and self._vs[c]["promise"] is not None:
+                events += self._restart(c, n)              # its certificate is about the old regime too
+            for v, ver in self._vs.items():                # rollback targets: restarted when rolled back to
+                if ver["state"] == "retired" and ver["promise"] is not None:
+                    ver["stale"] = True
         events += self._protocol(n)
         events += self._promise_events()
         st = lambda v: None if v is None or self._vs[v]["promise"] is None else self._vs[v]["promise"].state()  # noqa: E731
@@ -385,6 +395,16 @@ class LearningLoop:
         if self.candidate is None and self.live.seen() >= need:
             ev.append(self._freeze(n))
         return ev
+
+    def _restart(self, v, n, why="alarm") -> list:
+        """Version v's promise from scratch (the next (v, δ_v), threshold +inf, wealth 1) and, for a candidate, its
+        paired samples dropped: what it certifies and the promotion rule read only samples after the restart. → its
+        "recertify" and a "restart" event."""
+        ver = self._vs[v]
+        ver["promise"].restart(why)
+        ver["samples"], ver["stale"] = [], False
+        ev = self._promise_events()
+        return ev + [self._event("restart", v, n, why=why)]
 
     def _discard(self, c, n, why):
         self._vs[c]["state"] = "discarded"
@@ -440,9 +460,10 @@ class LearningLoop:
 
     # --- a person's call
     def rollback(self, v, *, by=None, why=None) -> dict:
-        """Serve an earlier version again (its certificate and threshold as it left them; version 0: nothing alone).
-        A candidate in trial is discarded (its δ_v stays spent): its paired comparison was against the version that
-        served → the "rollback" event."""
+        """Serve an earlier version again (its certificate and threshold as it left them, unless an alarm came after it
+        retired: then its promise restarts → "restart"; version 0 without a model: nothing alone). A candidate in trial
+        is discarded (its δ_v stays spent): its paired comparison was against the version that served → the "rollback"
+        event."""
         if v not in self._vs or self._vs[v]["state"] not in ("retired", "served") or v == self.served:
             raise ValueError(f"version {v} is not a retired version (served: {self.served}; "
                              f"{[x for x, ver in self._vs.items() if ver['state'] == 'retired']} retired)")
@@ -451,10 +472,13 @@ class LearningLoop:
             ev.append(self._discard(self.candidate, self.n, "rollback"))
         frm = self.served
         self._serve(v)
-        ev.append(self._event("rollback", v, self.n, **{"from": frm, "to": v, "by": None if by is None else str(by),
-                                                        "why": why}))
+        rb = self._event("rollback", v, self.n, **{"from": frm, "to": v, "by": None if by is None else str(by),
+                                                   "why": why})
+        ev.append(rb)
+        if self._vs[v].get("stale"):                       # certified before an alarm: starts over
+            ev += self._restart(v, self.n)
         self._write(None, None, ev)
-        return ev[-1]
+        return rb
 
     # --- the records
     def _write(self, rec, payload, events):
