@@ -147,6 +147,10 @@ correct answer given the input moved (real drift with no virtual drift: Hinder, 
 the correct answers moved to another option from decision 2,001, inputs and scores unchanged, the sequential detectors
 — `DriftMonitor` and a conformal test martingale with simple-jumper bets on the answers' confidence features — flagged
 0 of 60 streams each. Read such changes from the audit labels (`Dispatcher(audit=)`, `AuditWatch`).
+A loss detector that reads the audit labels can see them, late: on Banking77 streams with 10 % of the oracle's labels
+randomly wrong after decision 2,000 (20 seeds), the stream certificate's `RiskDetector` ([experimental](experimental.md#stream))
+alarmed on 14 of 20 at a median 1,488 decisions after the change with "never" counted as infinite (1,330 over the 14
+that alarmed); the confidence CUSUM on scores, on 0 of 20. One set, one noise level.
 
 **`ShiftWatch.shift` is a batch test at alpha per call, not a running test.** Called every 50 decisions on a sliding
 window of the last 200 answers (alpha 0.01, a reference of 1,393–2,400 answers drawn from the stream's own population),
@@ -154,6 +158,46 @@ it flagged 97 of 300 unchanged 4,000-decision streams (32 %) on the same three d
 of 300 (12 %). Call it once per disjoint batch and budget alpha over the calls (twenty calls spend up to twenty alpha),
 or use `DriftMonitor` for a false-alarm level over the stream. This is the known cost of repeated tests on overlapping
 windows (Armitage, McPherson and Rowe 1969).
+
+**A stream certificate (`StreamPromise`, [experimental](experimental.md#stream)) held its promise between change
+points; where you have a calibration set, start with the offline certificate.** Checked once on Banking77, CLINC150 and
+HWU64 with a TF-IDF + logistic-regression answerer: 4,000-decision streams drawn from the test split, 40 % of the
+requests from held-out intents after decision 2,000, 20 seeds per set, plus Banking77 streams with 15 % of the
+characters corrupted after the change or with 10 % of the oracle's labels randomly wrong; the default detector and two
+variants. No threshold a stream certificate had in force had a risk above the promise on the regime it was certified
+on: 0 of 397 versions over 300 runs (two-sided 95 % Clopper–Pearson upper bound 0.9 %; the versions of one run share
+its stream, so the bound is nominal — per run, 0 of 300). On 12,000-decision streams with the change at 6,001, 0 of 244
+versions served by the learning loop (upper bound 1.5 %). The risk is exact over the pool each regime is drawn from.
+This is the statement the method makes under its assumptions — the stream i.i.d. between change points with the
+answerer frozen, a sampling coin independent of the input, the risk relative to the oracle's labels — and a known
+result: Bates et al. 2021 (arXiv 2101.02703), Angelopoulos et al. 2021 (Learn then Test, arXiv 2110.01052),
+Waudby-Smith and Ramdas 2024 (arXiv 2010.09686); the closest precedent, an anytime-valid certificate with actively
+sampled labels, is Xu, Karampatziakis and Mineiro 2024 (arXiv 2406.10490). The measurement checks that the
+implementation holds it. It exempts the window between a change and the detector's alarm: there the pre-shift
+threshold's risk on the new regime was a median 6–10 % on the intent streams, and it stayed in force to the end where
+the detector never alarmed (14 of 20 HWU64 streams, every corrupted-text stream). The share answered alone and wrong
+exceeded the promise over the post-shift half in 39 of 100 runs with the default detector, and over the whole stream
+in 9 of 100. The replay rebuilt the certificate, detector, rate and coin of every decision from the stored records,
+matching the recorded fingerprints (rounded to 1e-9) in all 465 dispatcher runs, with 200 sampled decisions per run
+re-checked in full, and every version decision of the loop in 180 runs; tickets and late labels were not exercised on
+a stream. The price of a cold start: from +inf the first certification came at decision 284, and the whole stream was
+answered alone 3–6.5 points less than with the offline learn-then-test certificate. The promise is relative to the
+oracle: with 10 % of its labels wrong the certificate answered 20 points less alone after the change (18 over the
+whole stream) than the offline certificate calibrated on clean labels, which never flagged and ran at a median realised risk
+of 6.5 % against the noisy labels; with a hosted LLM as the oracle (agreeing with the gold label 79–82 % of the time)
+it answered 17 % alone against 55 % with gold labels (one Banking77 stream, one seed). Noise in the oracle lowers
+coverage, not validity against its labels.
+
+**`RiskDetector` counts samples, not decisions: keep the score monitor beside it.** Its bound is an expected run
+length in samples (Shin, Ramdas and Rinaldo 2023, arXiv 2203.03532). A simulation of this code at α = 5 % and
+`arl` = 1000 matched it: at the promise the mean time to a false alarm was 1,333 samples (the median 982; the bound is
+on the mean); at half the promise 46 of 3,000 streams alarmed within 1,000 samples (an expectation, not a per-horizon
+probability); a doubling of the risk was caught after a mean of 152 samples, a quadrupling after 36. At the adaptive
+rate, once half or more of the decisions are answered alone, one sample is 12–20 decisions. On the intent streams
+above it alarmed a median 1,005 (Banking77) and 1,410 (CLINC150) decisions after the change and never within 2,000 on
+14 of 20 HWU64 streams and on every corrupted-text stream, against 43–68 decisions (12 on corrupted text) for the
+confidence CUSUM, which reads every decision's score. Use it next to `DriftMonitor` / `OpenSetGate`, not instead of
+them.
 
 **`fit` and `teach` move the scores, not the reading.** They shift and scale the logits of one question; they help
 calibration and the mix of answers, and level off within a few dozen examples. When a question needs the model to read
