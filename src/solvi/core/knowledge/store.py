@@ -50,7 +50,16 @@ re-test), "disputed",
 Re-test. Content written again after it was retracted — the same item id, since an id is its content — is not revived
 by the new assertion: it is a hypothesis "pending re-test" until `retest(id, ok=True)` (a person or a test confirms
 it; ok=False retracts it again), and so is every item that rested on it when it was retracted, each until its own
-re-test. `pending()` lists the items waiting, `item(id)["pending"]` says why. Items derived after the re-test are fresh; an item a rule only re-infers (`inferred=True`) follows its
+re-test. `pending()` lists the items waiting, `item(id)["pending"]` says why.
+
+The guard on content told with `valid`. Every retraction (plain, `only_from`, `assertion=`, `retract_source`, a failed
+re-test, a rollback) withdraws its assertions' content (the key's value) on their validity. A later assertion of the
+same content on an overlapping validity, whatever its item id, is a copy: it waits for a re-test (the item is pending;
+when the item has other claims they still hold, and a failed re-test takes back only the copies) — unless writers it
+was not withdrawn from still hold that content wherever the copy could hold; such a copy is admitted and marked
+"unchecked" in `item(id)["valid"]["claims"]`, and it goes pending once those holders are cut. A passed re-test vouches
+for the item's assertions before it and clears the withdrawals of its content. Derived and inferred assertions follow
+their premises instead. Items derived after the re-test are fresh; an item a rule only re-infers (`inferred=True`) follows its
 premises, and so does an inferred item that rested on one: once the premise passes its re-test it is a fact again
 without a re-test of its own. `pending_retest(id)` reads it.
 
@@ -730,12 +739,18 @@ class KnowledgeStore:
                 "changed": changed, "same": same, "entry": rec["n"]}
 
     def retest(self, iid, *, ok, by=None, why=None):
-        """The re-test of an item pending one (re-asserted after a retraction, or resting on one that was): ok=True — it
-        is a fact again (a "promote" entry; its premises must be active too); ok=False — it is retracted again."""
+        """The re-test of an item pending one (re-asserted after a retraction, resting on one that was, or a copy of
+        withdrawn content): ok=True — it is a fact again (a "promote" entry; its premises must be active too); ok=False —
+        it is retracted again (only its pending copies when other claims of it hold)."""
         with self._lock:
             if iid not in self.items:
                 raise KeyError(f"no item {iid!r}")
             if not ok:
+                self._settle()
+                st = self.state.get(iid) or {}
+                copies = st.get("pending_claims") or []
+                if copies and any(a["t"] not in copies for a in _live(self.items[iid])):
+                    return self.retract(iid, by=by, why=why or "failed re-test", assertion=copies)  # only the copies
                 return self.retract(iid, by=by, why=why or "failed re-test")
             rec = self._write("promote", item=iid, measured=None, retest=True, by=None if by is None else str(by),
                               why=why)
@@ -1122,7 +1137,11 @@ class KnowledgeStore:
             eff = self._periods(it.id, set())
         except TypeError:
             eff = None
-        return {"claims": [{"valid": a["valid"], "by": a["by"], "at": a["t"]} for a in claims], "effective": eff}
+        st = self.state.get(it.id) or {}
+        pend, unch = set(st.get("pending_claims") or ()), set(st.get("unchecked_claims") or ())
+        return {"claims": [{"valid": a["valid"], "by": a["by"], "at": a["t"],
+                            **({"pending": True} if a["t"] in pend else {}),
+                            **({"unchecked": True} if a["t"] in unch else {})} for a in claims], "effective": eff}
 
     def find(self, *, kind=None, s=None, r=None, scope=None, status=None):
         """Records of the items that match every filter given (status: one or a tuple of STATUSES)."""
@@ -1333,6 +1352,80 @@ def _taint(items, iid, memo):
     return memo[iid]
 
 
+def _guard(items, ids):
+    """The revival guard on one key: a later assertion with `valid` of content (the key's value) that was withdrawn
+    from a writer on an overlapping validity — by any retraction (plain, only_from, an assertion, retract_source, a
+    failed re-test, a rollback), on any item — is a copy. A copy is pending a re-test unless writers the content was
+    not withdrawn from still hold it, in their uncopied assertions, wherever the copy could hold (outside the spans
+    where a later version holds anyway); once they no longer do, it is pending then. A passed re-test of an item vouches
+    for its assertions written before it and clears the withdrawals of its content before it. Derived and inferred
+    assertions are not copies (they follow their premises). → ({(id, assertion position): why} pending,
+    {(id, assertion position)} copies admitted while held)."""
+    wd = []
+    for i in ids:
+        it = items[i]
+        for a in it.asserts:
+            if a.get("valid") is None or a["just"]:
+                continue
+            tc = min([x for x in it.retracted if x > a["t"]], default=None)
+            x = _acut(it, a)
+            if x is not None and (tc is None or x < tc):
+                tc = x
+            if tc is not None:
+                wd.append((tc, i, a))
+    if not wd:
+        return {}, set()
+    vj = {i: json.dumps(items[i].value, sort_keys=True) for i in ids}
+    clears = defaultdict(list)
+    for i in ids:
+        clears[vj[i]] += items[i].rechecked
+    clean, copies = [], []
+    for i in ids:
+        for a in _live(items[i]):
+            if a.get("valid") is None or a["just"]:
+                continue
+            iv = _interval(a["valid"])
+            w = [(tc, b) for tc, j, b in wd if vj[j] == vj[i] and tc < a["t"] and _overlap(_interval(b["valid"]), iv)
+                 and not any(tc < tp <= a["t"] for tp in clears[vj[i]])]
+            if not w or any(tp > a["t"] for tp in items[i].rechecked):
+                clean.append((i, a))
+            else:
+                copies.append((i, a, w))
+    pending, held = {}, set()
+    for i, a, w in copies:
+        ws = sorted({str(b["by"]) for _, b in w})
+        base = [(vj[j], _interval(b["valid"])) for j, b in clean if not (vj[j] == vj[i] and str(b["by"]) in ws)]
+        if _held(_interval(a["valid"]), vj[i], base):
+            held.add((i, a["t"]))
+        else:
+            pending[(i, a["t"])] = (f"re-published content withdrawn from {', '.join(ws)} (journal entry "
+                                    f"{max(tc for tc, _ in w)}) and held by no other writer")
+    return pending, held
+
+
+def _held(iv, value, base):
+    """Do the uncopied assertions `base` ([(value, interval)]) hold `value` wherever an assertion of it on `iv` could
+    hold (not where a version with a later since holds)?"""
+    try:
+        for seg in _segments([iv] + [b[1] for b in base]):
+            if not _covers_seg(iv, seg):
+                continue
+            cov = [b for b in base if _covers_seg(b[1], seg)]
+            if not cov:
+                return False
+            top = cov[0][1][0]
+            for b in cov[1:]:
+                if _lo_lt(top, b[1][0]):
+                    top = b[1][0]
+            if _lo_lt(iv[0], top):
+                continue                                # a later version holds here: the copy could not
+            if value not in {b[0] for b in cov if not _lo_lt(b[1][0], top)}:
+                return False
+        return True
+    except TypeError:
+        return False
+
+
 def _retest_why(items, iid, t, memo):
     """Why an item waits for a re-test (its support cut at journal entry t) → a sentence for item(id)["pending"]."""
     it = items[iid]
@@ -1362,6 +1455,19 @@ def _resolve(items, comp, by_key, resolves, clock, flagged, max_iter=200, taints
         if t is not None and not any(p > t for p in items[i].promoted):
             retest.add(i)
             why[i] = _retest_why(items, i, t, taints)
+    pclaims, held = {}, set()                           # the revival guard: copies of withdrawn content
+    for k in sorted({items[i].key for i in order if items[i].key is not None}):
+        p, h = _guard(items, sorted(by_key[k]))
+        pclaims.update(p)
+        held |= h
+    partial = defaultdict(list)
+    for (i, t), w in sorted(pclaims.items()):
+        if i in items and i not in retest:
+            partial[i].append(t)
+            why.setdefault(i, w)
+    for i in list(partial):
+        if not any((i, a["t"]) not in pclaims for a in _live(items[i])):
+            retest.add(i)                               # nothing but pending copies: the item waits as a whole
 
     live_asserts = _live
 
@@ -1388,7 +1494,8 @@ def _resolve(items, comp, by_key, resolves, clock, flagged, max_iter=200, taints
         for k in keys:                                  # an item pending re-test is a hint: it takes no side on its key
             ids = [i for i in by_key[k] if i in live and i not in retest]
             units[k] = []
-            keyed.update(_walk_key(ids, live, arank, {i: items[i].value for i in ids}, resolves.get(k, ()), units[k]))
+            wl = live if not partial else {i: [a for a in live[i] if (i, a["t"]) not in pclaims] or live[i] for i in ids}
+            keyed.update(_walk_key(ids, wl, arank, {i: items[i].value for i in ids}, resolves.get(k, ()), units[k]))
         new = {p: f["status"] for p, f in fixed.items()}
         for i in order:
             if i not in live:
@@ -1430,7 +1537,11 @@ def _resolve(items, comp, by_key, resolves, clock, flagged, max_iter=200, taints
         rec[i] = {"status": s, "rank": rank[i], "n_confirm": len(la) - 1, "refuted_by": kr[2],
                   "learned_at": min(a["t"] for a in la), "invalidated_at": kr[1] if s == "refuted" else None,
                   "last_support": max(a["t"] for a in la), "dispute_at": kr[3] if s == "disputed" else None,
-                  **({"pending_retest": True, "pending_why": why[i]} if i in retest else {})}
+                  **({"pending_retest": True, "pending_why": why[i]} if i in retest or i in partial else {})}
+        if i in partial:                                # copies waiting for a re-test; the item's other claims hold
+            rec[i]["pending_claims"] = partial[i]
+        if any(j == i for j, _ in held):
+            rec[i]["unchecked_claims"] = sorted(t for j, t in held if j == i)
         if i in eff:                                    # not in the fingerprint: a function of the assertions
             rec[i]["periods"] = eff[i]["periods"]
             if eff[i]["contested"]:
