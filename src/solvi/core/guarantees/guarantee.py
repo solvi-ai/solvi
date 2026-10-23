@@ -511,7 +511,7 @@ def _fold_heads(system, question, examples, folds, seed):
 
 def guard_question(system, question, examples=None, *, max_error=None, max_risk=None, method=None, delta=0.10, signal=None,
                    answer=None, groups=None, min_group=100, min_support=10, correct=None, folds=None, seed=0,
-                   weak="raise", promise=None, corrections=None, sources=None, procedure="bonferroni", label_check=True):
+                   weak="raise", promise=None, corrections=None, sources=None, procedure="bonferroni", label_check=False):
     """Put a calibrated threshold with a stated promise on a question of `system` (System.guarantee): every later answer
     is let through alone only when its signal ≥ the threshold, else the question abstains with the reason; the promise,
     the signal and the threshold are recorded with every answer. examples: [(init_state, correct answer)], not used to fit
@@ -535,7 +535,7 @@ def guard_question(system, question, examples=None, *, max_error=None, max_risk=
     The other arguments, the methods and their promises: calibrate() and the module docstring.
     → the calibration report ({"threshold", "n", "answered", "error", "risk", "support", "separation", "promise", ...};
     for an attached promise, its report).
-    label_check (default True; it reads the answers already computed, no extra call): the report's "label_issues" —
+    label_check (default False, opt-in; it reads the answers already computed, no extra call): the report's "label_issues" —
     the examples whose label the answer's probabilities confidently contradict (solvi.core.calibration.label_issues;
     ids are the examples' positions) — and a line in "warnings" when there are any; every label is still used.
 
@@ -597,7 +597,7 @@ def _label_row(q, r, y):
 
 def _guard_question(system, question, examples, *, max_error, max_risk, method, delta, signal, answer, groups,
                     min_group, min_support, correct, folds, seed, weak, promise, corrections, sources, procedure="bonferroni",
-                    label_check=True):
+                    label_check=False):
     """guard_question without the log."""
     if examples is False:
         old = system.guards.pop(question, None)

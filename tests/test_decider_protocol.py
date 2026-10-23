@@ -61,12 +61,11 @@ def test_every_public_method_of_a_part_is_a_combinations_with_the_same_signature
 def test_calibrate_for_on_a_combination_returns_the_parts_keys_and_sets_its_shared_threshold():
     s, l_, _, _ = _parts()
     cal = _labelled()
-    want = set(s.calibrate_for(cal, max_error=0.05)) - {"warnings"}
+    want = set(s.calibrate_for(cal, max_error=0.05))
     for c in (Cascade([s, l_]), Vote([s, l_])):
         fp = c.fingerprint()
         info = c.calibrate_for(cal, max_error=0.05)
-        # "warnings": the label check (label_issues) runs on the combination's own decisions, which can differ
-        assert want <= set(info) and set(info) - want - {"warnings"} == {"calls_per_question", "scale"}
+        assert want <= set(info) and set(info) - want == {"calls_per_question", "scale"}
         assert info["signal"] == "shared" and info["method"] == "empirical" and info["n"] == len(cal)
         assert info["error"] <= 0.05 + 1e-12 and c.threshold == info["threshold"] and c.fingerprint() != fp
         assert c.guarantee["method"] == "empirical"

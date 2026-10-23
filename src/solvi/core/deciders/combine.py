@@ -608,7 +608,7 @@ class Combination:
 
     @_deprecate.removed_kwargs(risk="max_risk")
     def act_guard(self, examples, *, max_risk=0.10, signal="auto", groups=None, min_group=100, delta=0.10,
-                  label_check=True, scale="raw"):
+                  label_check=False, scale="raw"):
         """Answer alone only as far as a guarantee allows, for the combination as a whole: on labelled examples of your
         stream [(input, correct)] (an input is what every part reads, or Facts(...) by name) every part is asked, and
         one threshold t shared by every part is chosen by conformal risk control so that P(answered alone AND wrong)
@@ -770,7 +770,7 @@ class Combination:
         return srcs, gold, states, ranks, rk, grid, loss, auto_all, cost, calls, who
 
     @_deprecate.removed_kwargs(error="max_error")
-    def calibrate_for(self, examples, *, max_error=0.05, signal="auto", method="empirical", delta=0.10, label_check=True,
+    def calibrate_for(self, examples, *, max_error=0.05, signal="auto", method="empirical", delta=0.10, label_check=False,
                       scale="raw"):
         """Choose the shared threshold for a target error rate among the answers the combination gives alone, on
         labelled examples [(input, correct)] — as DecisionPart.calibrate_for, with one threshold t for every part's
