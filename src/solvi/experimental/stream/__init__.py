@@ -1,4 +1,5 @@
-"""solvi.experimental.stream — a promise earned on the stream (experimental; stage 1: the certificate alone).
+"""solvi.experimental.stream — a promise earned on the stream (experimental; stages 1–2: the certificate, its detector
+and the sampling inside the Dispatcher).
 
     from solvi.experimental.stream import StreamPromise, DeltaBudget
 
@@ -14,14 +15,22 @@ bets, or bets="agrapa" — `experimental._evalue.MeanBound` mirrored), fixed-seq
 `stream.certificate` for the statement and what is recorded. Clean samples a fresh certificate needs at α = δ = 5 %:
 85 (v = 1), 116 (v = 2), 134 (v = 3); 74 for the mixture at the full δ, against 59 for a one-shot binomial test.
 
-Unmeasured: no stand has run yet. The sampling coin, the change detector, the Dispatcher wiring and the store records
-are later stages; until then the caller draws the samples and calls `learn` and `restart`."""
+Stage 2: `RiskDetector` (a Shiryaev–Roberts e-detector on the deployed risk, `stream.detector`) and the calibration
+coin and rate (`stream.sampling`), run by `Dispatcher(audit="adaptive", promise=sp, detector=det,
+on_drift="recertify", probation=300, secret=key)`: the coin draws the samples, the slow path labels them, an alarm
+restarts the certificate and opens probation, every decision records its state and `Dispatcher.replay_stream()`
+rebuilds it. Standalone, the caller still draws the samples and calls `learn` and `restart`.
+
+Unmeasured: no stand has run yet. The agent as labeller and the learning loop are stage 3."""
 from __future__ import annotations
 
 from .. import warn_on_import
 from ._eprocess import DeltaBudget, MirrorBound, Mixture, clean_need
 from .certificate import StreamPromise, fixed_grid
+from .detector import RiskDetector
+from .sampling import Rate, StreamDriver, coin_message
 
 warn_on_import(__name__)
 
-__all__ = ["DeltaBudget", "MirrorBound", "Mixture", "StreamPromise", "clean_need", "fixed_grid"]
+__all__ = ["DeltaBudget", "MirrorBound", "Mixture", "Rate", "RiskDetector", "StreamDriver", "StreamPromise", "clean_need",
+           "coin_message", "fixed_grid"]

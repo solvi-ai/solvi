@@ -145,9 +145,10 @@ class StreamPromise:
     def promise(self) -> str:
         what = ("P(answered alone and wrong) ≤ " if self.kind == "joint" else
                 "the error among the answers given alone ≤ ") + f"{self.level:g}"
-        return (f"with probability ≥ {1 - self.delta_v:.6g}, at every point in time, {what} for the threshold in "
-                f"force, on a stream i.i.d. between change points (the conditional risk given the past is constant), "
-                f"sampled by a coin independent of the input")
+        # no state in the text (not δ_v of the current restart): a replay re-derives the recorded verdicts with it
+        return (f"with probability ≥ 1 − δ_v (version index v, δ_v = 6δ/(π²v²), δ = {self.delta:g}), at every point in "
+                f"time, {what} for the threshold in force, on a stream i.i.d. between change points (the conditional "
+                f"risk given the past is constant), sampled by a coin independent of the input")
 
     @property
     def report(self) -> dict:
@@ -221,6 +222,12 @@ class StreamPromise:
         self._fresh()
         self._event("recertify", why=why)
         return self.v, self.delta_v
+
+    def stream_driver(self, detector=None, **kw):
+        """The per-decision step a Dispatcher runs for this promise (`sampling.StreamDriver`): how
+        `Dispatcher(promise=sp, detector=, audit="adaptive")` reaches the experimental code without importing it."""
+        from .sampling import StreamDriver
+        return StreamDriver(self, detector, **kw)
 
     # --- what is recorded
     def state(self) -> dict:

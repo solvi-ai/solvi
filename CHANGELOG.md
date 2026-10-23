@@ -66,6 +66,25 @@
   same samples rebuild the same state. Clean samples to certify at α = δ = 5 %: 85 (v = 1), 116 (v = 2), 134 (v = 3);
   74 for the mixture at the full δ (93 with aGRAPA), against 59 for a one-shot binomial test. Unmeasured: the stand,
   the sampling coin, the change detector and the Dispatcher wiring are later stages.
+- **Stream certificate (experimental), stage 2: the detector, the calibration coin and the Dispatcher wiring.**
+  `RiskDetector` (`solvi.experimental.stream`): a Shiryaev–Roberts mixture e-detector on the deployed loss
+  1{answered alone and wrong} of the sampled decisions, null at α (`alternatives=` moves it to min·α), alarm at
+  `arl` = A; its statement is E[samples to a false alarm] ≥ A, not a per-horizon probability. It reproduces the
+  design's script bit for bit (α = 5 %, A = 1000: mean run 1 333 at α, 153 samples at 2×, 36 at 4×). `Dispatcher(
+  audit="adaptive", promise=sp, detector=det, on_drift="recertify", probation=300, sampling=)`: a calibration coin
+  HMAC(secret, "sample|question|seed|n") with no input bytes, at a rate from the past only (1 until certified and in
+  probation, else min(1, max(floor, budget / share alone))); an escalated decision that wins the coin is a free sample
+  (the slow path's accepted answer is the label), an alone one is checked by the slow path; a sample without a label
+  is a loss. An alarm restarts the certificate (next δ_v, threshold +inf) and escalates everything for `probation`
+  decisions and until re-certified; with `on_drift="human"` it is the latched drift flag. Every dispatch record
+  carries `stream` (sample, certificate, detector), each state change is a record of kind `stream` (`stream` is
+  KEPT by a redaction), `Dispatcher.replay_stream()` rebuilds the certificate, detector and rate from the records and
+  recomputes each coin where the secret is given; the system report gets one block. A control in the tests:
+  calibrating on escalations only loosens the threshold past α on 12 of 12 seeds; the coin over every decision on 0.
+  Fixed on the way: `StreamPromise.promise` no longer names the current δ_v (a replay after a restart re-derived a
+  different reason text). The design's α/2 numbers are not what the code gives: about 1.5 % of streams at α/2 alarm
+  within 1 000 samples (44 of 3 000), not ≤ 1 %, and some do within 20 000 (19 of 100), not none. Without the new
+  options a dispatcher's records and config fingerprint are unchanged. Unmeasured: the stand (stage 4).
 - **A secret for the supervision and audit draws: `Dispatcher(secret=)`** (`solvi.core.dispatch`; security). The
   draws were `sha256(f"{seed}|{input hash}|{n}")` with the public default `seed=0`, so whoever could vary the inputs
   could compute which decisions would be supervised or audited and avoid them. With `secret=` (bytes or str; None reads

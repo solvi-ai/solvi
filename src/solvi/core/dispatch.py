@@ -81,6 +81,7 @@ asks (the budget, the drift state and the decision numbers follow the order of t
 from __future__ import annotations
 
 import abc
+import copy
 import dataclasses
 import hashlib
 import hmac
@@ -99,6 +100,8 @@ from .costs import Budget, BudgetStop, Cost, _usages, cost_of, price_of, recorde
 SIGNALS = ("guarantee", "openset", "abstain", "constraint", "agreement", "drift", "supervise")
 THINK = ("guarantee", "openset", "abstain", "constraint", "agreement")
 PATHS = ("s1", "s2", "human")
+SAMPLE_REASON = "sampled for the stream certificate (calibration coin < ρ)"
+PROBATION_REASON = "probation after a recertification: System 1 does not answer alone"
 SECRET_ENV = "SOLVI_AUDIT_SECRET"   # noqa: S105 — the name of the variable read for Dispatcher(secret=None)
 
 
@@ -626,7 +629,8 @@ class Dispatched:
     have answered, for the person; disagreement: System 1's and the slow path's answers when they differ; cost:
     {"s1", "s2", "total"} Costs; n: the decision's number; draw: its supervision draw; spent_before: the dispatcher's
     total spend before it; drift: the drift flag it saw; keyed: the draws were keyed by the dispatcher's secret (stored
-    as "draw_keyed": true; absent from records made without one)."""
+    as "draw_keyed": true; absent from records made without one); stream: with a stream certificate (promise=), the
+    decision's sample, certificate and detector state (stored as "stream"; absent otherwise)."""
     question: str
     answer: Any
     by: str
@@ -648,6 +652,7 @@ class Dispatched:
     stored_id: str | None = None
     audit: bool = False
     keyed: bool = False
+    stream: dict | None = None
 
     @property
     def supervised(self):
@@ -662,7 +667,7 @@ class Dispatched:
                 "n": self.n, "draw": self.draw, "spent_before": self.spent_before.to_dict(), "drift": self.drift,
                 "expected": None if self.expected is None else self.expected.to_dict(), "over_budget": self.over_budget,
                 "config": self.config, "slice": self.slice, **({"audit": True} if self.audit else {}),
-                **({"draw_keyed": True} if self.keyed else {})}
+                **({"draw_keyed": True} if self.keyed else {}), **({"stream": self.stream} if self.stream is not None else {})}
 
     def to_json(self, indent=None):
         return json.dumps(self.to_dict(), ensure_ascii=False, indent=indent, default=str)
@@ -680,7 +685,7 @@ class Dispatched:
                    Cost.from_dict(d.get("spent_before") or {}), d.get("drift"),
                    Cost.from_dict(d["expected"]) if d.get("expected") is not None else None, d.get("over_budget"),
                    d.get("config"), d.get("slice"), audit=bool(d.get("audit", False)),
-                   keyed=bool(d.get("draw_keyed", False)))
+                   keyed=bool(d.get("draw_keyed", False)), stream=d.get("stream"))
 
     def replay(self, dispatcher, trust_models=False):
         """Re-check this decision against `dispatcher` without calling a model → {"ok", "mismatches": [(what, why)]}:
@@ -728,12 +733,25 @@ class Dispatcher:
     secret only to recompute and check it (a dispatcher without the secret replays a keyed record and does not
     recompute its draw). Without a secret the draws are as before (bit for bit), and a dispatcher that samples (supervise
     or audit strictly between 0 and 1; at 1 every decision is checked) gives a PredictableDrawWarning once per
-    process."""
+    process.
+
+    A stream certificate (experimental; the objects come from the experimental stream package, this module does not
+    import it): promise= the StreamPromise installed on the question (`system.guarantee(question, promise=sp)`), with
+    audit="adaptive" (the two go together): a calibration coin, `coin(n)` — the hash (HMAC with the secret) of
+    "sample|question|seed|n", no input bytes — below a rate from the past only (1 until certified and in probation,
+    else min(1, max(floor, budget / the share answered alone over the last window)); sampling= {"floor", "budget",
+    "window"}, defaults 0.05, 0.05, 500). A sampled decision System 1 would answer alone is checked by the slow path
+    whatever `wake` says (one extra call); a sampled escalation is free; the slow path's accepted answer is the label,
+    none is a loss. detector= a RiskDetector fed each sample's deployed loss; on its alarm on_drift="recertify"
+    restarts the certificate and escalates every decision for probation= decisions (default 300) and until it is
+    certified again, "human" / "accept" latch the alarm as the drift flag. Each decision records `stream` (sample,
+    certificate, detector) and each state change a record of kind "stream"; `replay_stream()` rebuilds them all.
+    Without promise= nothing of this runs and the records are as before."""
 
     def __init__(self, system, slow=None, *, question=None, budget=None, total=None, price=None, wake=SIGNALS,
                  agreement=None, monitor=None, supervise=0.0, seed=0, think="s2", on_disagree="record", storage=None,
                  store_responses=True, asked=None, same=None, unknown="answer", on_drift="human", audit=0.0,
-                 secret: bytes | str | None = None):
+                 secret: bytes | str | None = None, promise=None, detector=None, probation=None, sampling=None):
         if question is None:
             if len(system.questions) != 1:
                 raise ValueError(f"the System asks {sorted(system.questions)}: say which with question=")
@@ -745,9 +763,22 @@ class Dispatcher:
             raise ValueError(f"unknown signal(s) {bad}; the signals are {SIGNALS}")
         if not 0.0 <= float(supervise) <= 1.0:
             raise ValueError("supervise is a share between 0 and 1")
-        if not 0.0 <= float(audit) <= 1.0:
+        adaptive = isinstance(audit, str)
+        if adaptive and audit != "adaptive":
+            raise ValueError('audit is a share between 0 and 1 (the decisions marked for labelling) or "adaptive"')
+        if not adaptive and not 0.0 <= float(audit) <= 1.0:
             raise ValueError("audit is a share between 0 and 1 (the decisions marked for labelling)")
-        self.audit = float(audit)
+        self.audit = 0.0 if adaptive else float(audit)
+        if adaptive != (promise is not None):
+            raise ValueError('audit="adaptive" and promise= go together: the adaptive coin draws the samples of the '
+                             "stream certificate given as promise=, and that certificate learns from no other sampling")
+        if detector is not None and promise is None:
+            raise ValueError("detector= watches the deployed risk of a stream certificate: give promise= too")
+        if on_drift == "recertify" and detector is None:
+            raise ValueError('on_drift="recertify" restarts the stream certificate on the detector\'s alarm: give '
+                             "promise= and detector=")
+        if probation is not None and on_drift != "recertify":
+            raise ValueError('probation= is the escalation after a recertification: it needs on_drift="recertify"')
         if secret is None:
             secret = os.environ.get(SECRET_ENV) or None
         if secret is not None:
@@ -763,8 +794,8 @@ class Dispatcher:
             raise ValueError('on_disagree must be "record", "human" or "s2"')
         if unknown not in ("answer", "human"):
             raise ValueError('unknown must be "answer" or "human"')
-        if on_drift not in ("human", "accept"):
-            raise ValueError('on_drift must be "human" or "accept"')
+        if on_drift not in ("human", "accept", "recertify"):
+            raise ValueError('on_drift must be "human", "accept" or "recertify"')
         if same is not None and not callable(same):
             raise TypeError("same is a function (answer, answer) → bool")
         for b in (budget, total):
@@ -806,8 +837,20 @@ class Dispatcher:
         self.drift = None
         self.policy = None                # calibrate(): who answers on each slice System 1 hands over
         self._lock = threading.Lock()
+        self._stream = self._stream0 = None
+        if promise is not None:
+            guard = getattr(system, "guards", {}).get(question)
+            if guard is None or guard.promise is not promise:
+                raise ValueError("promise= is the stream certificate installed on the question: "
+                                 f"system.guarantee({question!r}, promise=sp) first")
+            if not callable(getattr(promise, "stream_driver", None)):
+                raise TypeError("promise= takes a stream certificate (a StreamPromise: it has stream_driver)")
+            self._stream = promise.stream_driver(detector, on_drift=on_drift,
+                                                 probation=300 if probation is None else probation, **(sampling or {}))
+            self._stream0 = copy.deepcopy(self._stream)          # what replay_stream rebuilds the states from
         global _predictable_warned
-        if secret is None and any(0 < x < 1 for x in (self.supervise, self.audit)) and not _predictable_warned:
+        if secret is None and (any(0 < x < 1 for x in (self.supervise, self.audit)) or adaptive) \
+                and not _predictable_warned:
             _predictable_warned = True
             warnings.warn("Dispatcher: the supervision / audit draw is a public hash of the seed, the input and the "
                           "decision's number, so whoever can vary the inputs can predict which decisions are checked; "
@@ -839,7 +882,8 @@ class Dispatcher:
                       self.slow.fingerprint() if self.slow is not None else None,
                       None if self.policy is None else self.policy["fingerprint"],
                       *([("contract", self.slow.contract.fingerprint())]       # a decision made under another contract
-                        if self.slow is not None and getattr(self.slow, "contract", None) is not None else []))
+                        if self.slow is not None and getattr(self.slow, "contract", None) is not None else []),
+                      *([("stream", "adaptive", self._stream.config())] if self._stream is not None else []))
 
     # --- the decision
     @property
@@ -865,6 +909,12 @@ class Dispatcher:
         """The audit draw of decision n on this input: a number in [0, 1) from a hash, independent of `draw` (keyed
         as `draw`)."""
         h = self._hash(f"audit|{self.seed}|{init_hash}|{n}", self.keyed if keyed is None else keyed)
+        return int(h[:13], 16) / 16 ** 13
+
+    def coin(self, n, *, keyed=None):
+        """The calibration coin of decision n (audit="adaptive"): a number in [0, 1) from the hash of
+        "sample|question|seed|n" — no input bytes, so the coin cannot depend on the input (keyed as `draw`)."""
+        h = self._hash(f"sample|{self.question}|{self.seed}|{n}", self.keyed if keyed is None else keyed)
         return int(h[:13], 16) / 16 ** 13
 
     def expected(self):
@@ -905,17 +955,23 @@ class Dispatcher:
                                   f"{state.get('why')}"))
         return out
 
-    def decide(self, res, draw, spent_before, drift, expected=None):
+    def decide(self, res, draw, spent_before, drift, expected=None, *, probation=False, sampled=False):
         """The dispatch of one System 1 response → (action, reasons). Pure: the same response, draw, spend, drift
-        state and expected cost give the same dispatch (replay re-derives it)."""
+        state and expected cost give the same dispatch (replay re-derives it). With a stream certificate: probation
+        (System 1 answers nothing alone: a think) and sampled (the calibration coin came up: an answer System 1 gives
+        alone is checked by the slow path, whatever `wake` says)."""
         sig = self.signals(res)
         if drift and not any(s == "drift" for s, _ in sig):
             sig.append(("drift", drift))
         reasons = []
         think = [(s, w) for s, w in sig if s in THINK]
+        if probation and not think and res[self.question].status == "ok":
+            think = [("guarantee", PROBATION_REASON)]
         check = [(s, w) for s, w in sig if s == "drift"]
         if not think and res[self.question].status == "ok" and draw < self.supervise:
             check.append(("supervise", f"sampled for supervision (draw {draw:.4f} < {self.supervise:g})"))
+        if sampled and not think and res[self.question].status == "ok":
+            check.append(("sample", SAMPLE_REASON))
         if think:
             reasons += [w for _, w in think]
             if not all(s in self.wake for s, _ in think):
@@ -930,18 +986,18 @@ class Dispatcher:
                 return "human", reasons + [why]
             return "think", reasons
         drifted = [w for s, w in check if s == "drift"] if res[self.question].status != "forced" else []
-        check = [(s, w) for s, w in check if s in self.wake]
+        check = [(s, w) for s, w in check if s in self.wake or s == "sample"]
         if check and self.slow is not None:
             why = self._no_budget(spent_before, expected)
             if not why:
                 return "check", [w for _, w in check]
-            if drifted and self.on_drift == "human":
+            if drifted and self.on_drift != "accept":
                 return "human", [w for _, w in check] + [why + "; System 1 is out of its guarantee since the drift "
                                                                "flag: a person decides"]
             return "accept", [w for _, w in check] + [why + "; System 1's answer stands unchecked"
                                                       + (", out of its guarantee since the drift flag" if drifted else "")]
         if drifted:
-            if self.on_drift == "human":
+            if self.on_drift != "accept":
                 return "human", drifted + ["System 1 is out of its guarantee since the drift flag and no slow path "
                                            "checks it: a person decides"]
             return "accept", drifted + ["System 1 answered, out of its guarantee since the drift flag (on_drift="
@@ -973,7 +1029,7 @@ class Dispatcher:
                 if self.slow is None or "drift" not in self.wake:
                     from .guarantees.guarantee import GuaranteeWarning
                     warnings.warn(f"drift flagged ({self.drift}) and no slow path checks System 1: its answers are "
-                                  + ("given to a person" if self.on_drift == "human" else "given out of its guarantee")
+                                  + ("given to a person" if self.on_drift != "accept" else "given out of its guarantee")
                                   + " until reset_drift()", GuaranteeWarning, stacklevel=2)
         with self._lock:
             self.n += 1
@@ -981,7 +1037,12 @@ class Dispatcher:
             spent = Cost(**vars(self.spent))
         draw = self.draw(res.trace.init_hash, n)
         expected = self.expected()
-        action, reasons = self.decide(res, draw, spent, self.drift, expected)
+        rho, prob, sampled = None, False, False
+        if self._stream is not None:
+            rho, prob = self._stream.before()
+            sampled = self.coin(n) < rho
+        action, reasons = self.decide(res, draw, spent, self.drift, expected, probation=prob, sampled=sampled)
+        paid = action == "check" and reasons[:1] == [SAMPLE_REASON]
         r1 = res[q]
         would1 = r1.answer if r1.status != "abstain" else _would(r1, res, q)
         cand = {"s1": would1}
@@ -1008,15 +1069,109 @@ class Dispatcher:
         with self._lock:
             self.spent = self.spent + c2
             self.counts[by] += 1
-        d = Dispatched(q, answer, by, action, reasons, res, th, cand, disagreement, cost, n, draw, spent, self.drift,
+        drift_seen = self.drift
+        stream, events = None, []
+        if self._stream is not None:
+            stream, events, why = self._stream.after(**self._stream_inputs(action, paid, r1, would1, th),
+                                                     sampled=sampled, rho=rho)
+            self._stream_told(events, why)
+        d = Dispatched(q, answer, by, action, reasons, res, th, cand, disagreement, cost, n, draw, spent, drift_seen,
                        expected, over, self.config(), slice=sl,
                        audit=bool(self.audit) and self.audit_draw(res.trace.init_hash, n) < self.audit,
-                       keyed=self.keyed)
+                       keyed=self.keyed, stream=stream)
         if self.storage is not None:
             from .store import FORMAT
             rec = self.storage._append({"v": FORMAT, "kind": "dispatch", **json.loads(d.to_json())})
             d.stored_id = rec["id"]
+            for e in events:
+                self.storage._append({"v": FORMAT, "kind": "stream",
+                                      "stream": json.loads(json.dumps({**e, "question": q, "decision": n}))})
         return d
+
+    # --- the stream certificate (promise=, audit="adaptive")
+    def _stream_inputs(self, action, paid, r1, would1, th):
+        """What the stream step reads of one decision: the gate's signal and threshold, System 1's would-be answer,
+        whether it was given alone, the slow path's accepted answer as the label (None: missing), whether the sample
+        was free (the slow path ran anyway)."""
+        from .catalog import Unknown
+        g = (r1.extra or {}).get("guarantee") or {}
+        label = None
+        if th is not None and th.accepted and not (self.unknown == "human" and th.answer is Unknown):
+            label = would1 if self.agrees(th.answer, would1) else th.answer
+        return {"score": g.get("value"), "in_force": g.get("threshold"), "would": would1,
+                "alone": r1.status == "ok" and action in ("accept", "check"), "label": label,
+                "label_source": "s2" if label is not None else None, "free": th is not None and not paid}
+
+    def _stream_told(self, events, why):
+        """An alarm: a person is told (a GuaranteeWarning); with on_drift other than "recertify" it is the latched
+        drift flag."""
+        if not any(e["event"] == "alarm" for e in events):
+            return
+        from .guarantees.guarantee import GuaranteeWarning
+        if why is not None:
+            if self.drift is None:
+                self.drift = why
+            warnings.warn(f"{why}: the stream certificate's answers go "
+                          + ("to a person" if self.on_drift == "human" else "out of its guarantee")
+                          + " until reset_drift()", GuaranteeWarning, stacklevel=3)
+        else:
+            alarm = next(e for e in events if e["event"] == "alarm")
+            warnings.warn(f"{alarm['why']}: the stream certificate restarts (version index "
+                          f"{self._stream.promise.v}, threshold +inf) and System 1 answers nothing alone for "
+                          f"{self._stream.probation} decisions and until it is certified again", GuaranteeWarning,
+                          stacklevel=3)
+
+    def replay_stream(self, stored=None):
+        """Rebuild the stream certificate, its detector and its rate from the stored decisions in order and compare at
+        every decision → {"ok", "mismatches": [(n, what, why)], "coin": "verified" | "unverified ...", "decisions"}.
+        Starts from the state the dispatcher was built with; re-reads each decision's gate signal (the guard's
+        recorded state is compared before it is observed), recomputes the calibration coin (only with the secret for
+        a keyed record; else the recorded flag is taken and the coin is reported unverified), feeds the same samples
+        and compares the recorded sample, certificate and detector fields; with storage, the "stream" records too."""
+        if self._stream is None:
+            raise ValueError('replay_stream needs a dispatcher with a stream certificate (promise=, audit="adaptive")')
+        drv = copy.deepcopy(self._stream0)
+        p, q = drv.promise, self.question
+        bad, events, unverified, k = [], [], 0, 0
+        for d in stored if stored is not None else self.stored():
+            k += 1
+            st = d.stream
+            if st is None:
+                bad.append((d.n, "stream", "a decision without the stream record"))
+                continue
+            r1 = d.s1[q]
+            g = (r1.extra or {}).get("guarantee") or {}
+            if g.get("method") == p.method and g.get("value") is not None:
+                if g.get("state") != _json(p.state()):
+                    bad.append((d.n, "guard state", "the gate's recorded state is not the rebuilt one"))
+                p.observe(g["value"])
+            rho, prob = drv.before()
+            sam = st.get("sample") or {}
+            if rho != sam.get("rho") or prob != sam.get("probation"):
+                bad.append((d.n, "rate", f"recorded ρ {sam.get('rho')} (probation {sam.get('probation')}), rebuilt "
+                                         f"{rho} ({prob})"))
+            sampled = bool(sam.get("sampled"))
+            if d.keyed and not self.keyed:
+                unverified += 1
+            elif (self.coin(d.n, keyed=d.keyed) < rho) != sampled:
+                bad.append((d.n, "coin", f"recorded sampled={sampled}, the coin gives {not sampled}"))
+            would1 = r1.answer if r1.status != "abstain" else _would(r1, d.s1, q)
+            paid = d.action == "check" and d.reasons[:1] == [SAMPLE_REASON]
+            rec, ev, _ = drv.after(**self._stream_inputs(d.action, paid, r1, would1, d.s2), sampled=sampled,
+                                   rho=sam.get("rho"))
+            rec = _json(rec)
+            for part in ("sample", "certificate", "detector"):
+                if rec.get(part) != st.get(part):
+                    bad.append((d.n, part, f"recorded {st.get(part)}, rebuilt {rec.get(part)}"))
+            events += [_json({**e, "question": q, "decision": d.n}) for e in ev]
+        if stored is None and self.storage is not None:
+            got = [s.data.get("stream") for s in self.storage.iter(kind="stream")]
+            got = [e for e in got if (e or {}).get("question") == q]
+            if got != events:
+                bad.append((None, "stream records", f"{len(got)} stored, {len(events)} rebuilt, or they differ"))
+        coin = "verified" if not unverified else (f"unverified on {unverified} keyed decision(s): this dispatcher has "
+                                                  "no secret")
+        return {"ok": not bad, "mismatches": bad, "coin": coin, "decisions": k}
 
     def _needs_slow(self, sl):
         """Does a think on this slice run the slow path? Always before calibrate(); after it, only when the slice's
@@ -1318,7 +1473,17 @@ class Dispatcher:
             draw = self.draw(d.s1.trace.init_hash, d.n, keyed=d.keyed)
             if abs(draw - d.draw) > 1e-12:
                 bad.append(("draw", f"recorded {d.draw}, recomputed {draw}"))
-        action, reasons = self.decide(d.s1, d.draw, d.spent_before, d.drift, d.expected)
+        prob = sampled = False
+        if (d.stream is None) != (self._stream is None):
+            bad.append(("stream", "a stream record, and the dispatcher has no stream certificate" if d.stream is not None
+                        else "no stream record, and the dispatcher has a stream certificate"))
+        elif d.stream is not None:
+            sam = d.stream.get("sample") or {}
+            prob, sampled = bool(sam.get("probation")), bool(sam.get("sampled"))
+            if (not d.keyed or self.keyed) and (self.coin(d.n, keyed=d.keyed) < float(sam.get("rho", 1.0))) != sampled:
+                bad.append(("coin", f"recorded sampled={sampled}, the coin gives {not sampled}"))
+        action, reasons = self.decide(d.s1, d.draw, d.spent_before, d.drift, d.expected, probation=prob,
+                                      sampled=sampled)
         if action != d.action:
             bad.append(("dispatch", f"recorded {d.action}, the response gives {action}"))
         elif reasons != d.reasons[:len(reasons)]:
@@ -1362,6 +1527,11 @@ class Dispatcher:
     def summary(self):
         """{"decisions", "by": {path: count}, "spent": Cost dict, "slow_runs"}."""
         return {"decisions": self.n, "by": dict(self.counts), "spent": self.spent.to_dict(), "slow_runs": self._runs[0]}
+
+
+def _json(x):
+    """As stored: JSON data (tuples → lists)."""
+    return json.loads(json.dumps(x))
 
 
 def _per_round(expected, slow):
@@ -1427,6 +1597,7 @@ def _vh(v):
     return vhash(plain(v))
 
 
-__all__ = ["AskPath", "Budget", "BudgetStop", "Cost", "Dispatched", "Dispatcher", "PATHS", "PredictableDrawWarning",
+__all__ = ["AskPath", "Budget", "BudgetStop", "Cost", "Dispatched", "Dispatcher", "PATHS", "PROBATION_REASON",
+           "PredictableDrawWarning", "SAMPLE_REASON",
            "RefinePath", "SearchPath", "SECRET_ENV", "SIGNALS", "SlowPath", "Thought", "cost_of", "price_of",
            "recorded_calls"]
