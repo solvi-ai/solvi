@@ -79,6 +79,8 @@
   family's fingerprint) are kept in the promise. At run time a node held back by the threshold hands its question to
   a person; each decision step records `{"signal", "automatic"}` and `replay` re-checks it (step `"promise"`).
   `guarantee()` is in force when calibrated on this very process and family and the path watch has not flagged;
+  it assumes the end-labelled runs are exchangeable with the stream, and it bounds the share of all runs that end
+  automatically and wrong, not the error rate among automatic decisions;
   nothing certified sends every node's answer to a person. The default order of `"per_node_fixed"` is now from the
   end nodes back to the start (it was start to end). The harness has the end_to_end arms (`--stage 4`).
 - **`Guard.fingerprint()`**: what decides a guard's calls as one hash, read from its declarations (tools with their
