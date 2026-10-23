@@ -392,6 +392,13 @@
   retraction) takes no side on its key: it was a hypothesis and still made the other value `disputed` and opened a
   dispute; after `retest(id, ok=True)` it takes its side again. Behaviour change by design in these three cases (item
   statuses, `disputes()` and the snapshots built from them); every other key resolves as before.
+- **A contract's fingerprint reads `applicable`'s source once per code object.** A System's questions fingerprint,
+  built on every `ask`, took each contract's fingerprint, which ran `inspect.getsource` on `applicable` each time (the
+  dispatcher's fingerprint of a slow path's contract too). The text hashed is now kept per function and read again when
+  its code changes (a new `__code__` or qualified name, or another function); the fingerprint itself is unchanged.
+  `benchmarks/contract_fingerprint.py` measures the `ask` time with and without the memo on a one-rule system (same
+  answers in both arms); on one machine the median ask was about 39% shorter, more where `applicable` lives in a long
+  module.
 
 ### Changed
 - **The experimental deadline reads "a future release".** The deadline set at 1.0 for every experimental piece was 1.2;
