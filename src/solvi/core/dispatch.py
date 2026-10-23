@@ -1097,6 +1097,7 @@ class Dispatcher:
         if self._stream is not None:
             rho, prob = self._stream.before()
             sampled = self.coin(n) < rho
+            self._stream.issue(n, sampled)                 # its sample is read in the order of the numbers
         action, reasons = self.decide(res, draw, spent, self.drift, expected, probation=prob, sampled=sampled)
         sl = self.slice_of(res) if action == "think" else None
         needs = action == "check" or (action == "think" and self._needs_slow(sl))
@@ -1139,7 +1140,7 @@ class Dispatcher:
         stream, events = None, []
         if self._stream is not None:
             stream, events, why = self._stream.after(**self._stream_inputs(action, paid, r1, would1, th),
-                                                     sampled=b.sampled, rho=b.rho, probation=b.probation)
+                                                     sampled=b.sampled, rho=b.rho, probation=b.probation, n=b.n)
             self._stream_told(events, why)
         d = Dispatched(q, answer, by, action, reasons, res, th, cand, disagreement, cost, b.n, b.draw, b.spent, b.drift,
                        b.expected, over, self.config(), slice=b.slice,
@@ -1258,6 +1259,7 @@ class Dispatcher:
                 unverified += 1
             elif (self.coin(n, keyed=keyed) < rho) != sampled:
                 bad.append((n, "coin", f"recorded sampled={sampled}, the coin gives {not sampled}"))
+            drv.issue(n, sampled)
 
         for kind, x, extra in items:
             if kind == "pending":
@@ -1288,7 +1290,7 @@ class Dispatcher:
             would1 = r1.answer if r1.status != "abstain" else _would(r1, d.s1, q)
             paid = d.action == "check" and d.reasons[:1] == [SAMPLE_REASON]
             rec, ev, why = drv.after(**self._stream_inputs(d.action, paid, r1, would1, d.s2), sampled=sampled,
-                                     rho=sam.get("rho"), probation=prob)
+                                     rho=sam.get("rho"), probation=prob, n=d.n)
             latched = d.drift or why
             rec = _json(rec)
             for part in ("sample", "certificate", "detector"):

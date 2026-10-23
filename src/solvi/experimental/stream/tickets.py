@@ -33,7 +33,9 @@ ticket stays open); the slow path's contract, if any, applies as it does to an i
 slow path's Thought (mode "agent"; its record {"oracle": {"ticket", "label_source", "label_of"}}); the dispatcher
 completes the decision with it as with any slow path (on_disagree for a check, think="agree", ...). label_source:
 "s2" (the agent is the slow path; the default, and what the MCP tool records) or "human" (a person gave it); label_of:
-the stored id of the ticket's record. On a sampled decision the label goes to the stream certificate with both.
+the stored id of the ticket's record. On a sampled decision the label goes to the stream certificate with both, in
+the order of the decisions' numbers: a verdict that comes before an earlier sampled ticket's waits for it
+(`sampling.StreamDriver`), so an agent slow on the hard cases cannot certify on the easy ones first.
 
 Expiry and failure. A ticket not resolved within its ttl (checked on every call and when the desk starts) or given
 up (`expire(ticket, why)`) gets a record of kind "pending_expired" and is completed with no verdict: the input goes to
