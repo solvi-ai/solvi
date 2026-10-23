@@ -397,8 +397,7 @@
   dispatcher's fingerprint of a slow path's contract too). The text hashed is now kept per function and read again when
   its code changes (a new `__code__` or qualified name, or another function); the fingerprint itself is unchanged.
   `benchmarks/contract_fingerprint.py` measures the `ask` time with and without the memo on a one-rule system (same
-  answers in both arms); on one machine the median ask was about 39% shorter, more where `applicable` lives in a long
-  module.
+  answers in both arms); on one machine the median ask was about 39% shorter (one run, 4,000 asks per arm).
 
 ### Changed
 - **The experimental deadline reads "a future release".** The deadline set at 1.0 for every experimental piece was 1.2;
