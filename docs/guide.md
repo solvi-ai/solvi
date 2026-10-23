@@ -4825,6 +4825,11 @@ without its own `valid` gets the intersection of its premises' validity and hold
 `snapshot(valid_at=t)` keeps as facts only those that hold at `t`, a snapshot row carries its item's `valid` (and
 `"periods"` when it holds on other spans), and a rule reads the value at a world time with
 `solvi.Knowledge.value(snapshot, s, r, valid_at=t)` (without `valid_at` it reads the first matching row).
+Two kinds of rows are facts though the item's own status is not "active": an item disputed only on an overlap is a
+fact outside it, and an item derived from such a premise is a fact where every premise of one of its derivations
+holds (its status stays "hypothesis", `usable(id)` without a time is False). Without `valid_at` such a row carries
+`"periods"`; an item that holds at no time (a premise disputed on its whole validity, or a derived item whose own
+`valid` misses every period where its premises hold) is not a fact.
 
 Contradictions resolve by rank: an observation refutes whatever it contradicts (the world changed), a higher-ranked
 source (outcome > person > spec > verified) refutes a lower one, a producer's new version (`supersedes=`) refutes the
