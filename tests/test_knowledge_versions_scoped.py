@@ -52,6 +52,57 @@ def test_a_derived_item_on_a_premise_disputed_everywhere_stays_blocked():
     assert not st.usable(d, valid_at=100) and st.snapshot(about="X", relation="refund", valid_at=100)["facts"] == []
 
 
+def test_without_a_time_a_derived_item_on_a_premise_disputed_everywhere_is_not_a_fact():
+    # before: snapshot() gave d as a fact row with "periods": [] and Knowledge.value() without a time read 200
+    km = solvi.Knowledge()
+    st = km.store
+    p = km.tell({"s": "X", "r": "price", "o": 263}, source="outcome", by="pricing", valid=(61, None))
+    km.tell({"s": "X", "r": "price", "o": 300}, source="outcome", by="vendor", valid=(61, None))
+    d = km.tell({"s": "X", "r": "refund", "o": 200}, source="outcome", by="rule", derived_from=[p], inferred=True)
+    assert st.periods(d) == [] and not st.usable(d)
+    snap = st.snapshot(about="X", relation="refund")
+    assert snap["facts"] == [] and [h["id"] for h in snap["hints"]] == [d]
+    assert solvi.Knowledge.value(km.snapshot(), "X", "refund") is None
+
+
+def test_a_premise_disputed_everywhere_does_not_scope_the_derived_item():
+    # before: the item was flagged premise_scoped although its premise holds at no time
+    km = solvi.Knowledge()
+    st = km.store
+    p = km.tell({"s": "X", "r": "price", "o": 263}, source="outcome", by="pricing", valid=(61, None))
+    km.tell({"s": "X", "r": "price", "o": 300}, source="outcome", by="vendor", valid=(61, None))
+    d = km.tell({"s": "X", "r": "refund", "o": 200}, source="outcome", by="rule", derived_from=[p], inferred=True)
+    assert st.status(d) == "hypothesis" and not st.state[d].get("premise_scoped")
+    assert [h["why"] for h in st.snapshot(about="X", relation="refund")["hints"]] == ["hypothesis"]
+
+
+def test_without_a_time_a_derived_item_whose_validity_misses_its_premise_is_not_a_fact():
+    # before: snapshot() gave d as a fact row with "periods": [] and Knowledge.value() without a time read "lab"
+    km = solvi.Knowledge()
+    st = km.store
+    p = km.tell({"s": "t0", "r": "role", "o": "researcher"}, source="outcome", by="hr", valid=(66, 100))
+    km.tell({"s": "t0", "r": "role", "o": "manager"}, source="outcome", by="crm", valid=(66, 100))
+    assert km.tell({"s": "t0", "r": "role", "o": "researcher"}, source="outcome", by="hr", valid=(187, None)) == p
+    d = km.tell({"s": "t0", "r": "access", "o": "lab"}, source="outcome", by="rule", derived_from=[p], inferred=True,
+                valid=(66, 100))
+    assert st.periods(p) == [[187, None]] and st.periods(d) == [] and not st.usable(d)
+    assert st.snapshot(about="t0", relation="access")["facts"] == []
+    assert solvi.Knowledge.value(km.snapshot(), "t0", "access") is None
+
+
+def test_a_derived_item_is_not_usable_where_its_premise_is_flagged():
+    # the premise holds at 240 by its periods; flagged (stale) it is not usable there, and neither is d
+    km, p, d = _premise_told_twice_disputed_once()
+    st = km.store
+    assert st.usable(d, valid_at=240)
+    st.flag(ids=[p], why="drift")
+    assert st.stale(p) and not st.stale(d) and not st.usable(p, valid_at=240)
+    assert not st.usable(d, valid_at=240)
+    snap = st.snapshot(about="t0", relation="access", valid_at=240)
+    assert snap["facts"] == [] and [h["why"] for h in snap["hints"]] == ["premises do not hold at 240"]
+    assert solvi.Knowledge.value(km.snapshot(valid_at=240), "t0", "access", valid_at=240) is None
+
+
 def _four_claims(order):
     ks = KnowledgeStore()
     ids = {}
