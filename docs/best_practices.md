@@ -1143,6 +1143,26 @@ the true error 59–92 % of the time; at 200 labels it covered 92–96 % and was
 narrower than the Wald interval on the same labels). An interval valid at 25 labels exists (a betting confidence
 sequence covered the true error at 2–3 times the Wilson width), but none usefully narrow was found. Not shipped.
 
+**A stratified reading does not fix the small-label case either.** A second pre-registered stand measured, once, the
+interval forms that stay valid when errors are rare: a prediction-powered estimate with the mixing weight fixed from
+calibration and a betting bound on the rectifier, and a post-stratified Wilson interval (two strata on the model's act
+probability, cut on the calibration split, the stratum weights read from all decisions; Yan and Su 2010). Same three
+intent datasets, same TF-IDF + logistic-regression decider, 25–200 random audit labels on windows of about 2,000
+decisions, 5,000 label samples per cell. Among answers given alone (4–6 % error) nothing with an unconditional
+guarantee is narrower than Wilson below 100 labels: the betting form covered ≥ 99 % at 1.5–1.9 times the Wilson
+width; the stratified Wilson covered 95–99 % in every cell, shifts included, but was 11–30 % wider than Wilson at
+25 labels, 7–28 % wider at 50 and within −3 to +15 % at 100. Two reasons, both expected: the act probability
+explains 9–12 % of the error's variance among answers given alone, which caps any such gain at 4–6 % of the width;
+and each stratum pays Wilson's own small-sample cost again (a stratum of 3–20 labels; where no stratum shows an error
+the plain Wilson z is used per stratum, the conservative choice). Over all traffic (8–15 % error, where the act
+probability explains 19–30 % of the variance) the stratified Wilson was valid and 12–18 % narrower than Wilson at
+100 labels before a shift, 9–16 % at 50 (a secondary line declared before the run; nothing ships on it) — the
+textbook post-stratification gain, the square root of one minus the share of the variance the strata explain, and no
+gain after a label-only shift. One decider, one run; the development stream was seen before the bars were fixed. Not
+shipped: the system report keeps the Wilson interval. If you need a narrower reading at 100 labels, the stratified
+Wilson helps only where errors are ≥ 10 % and the score separates them (the strata explain ≥ 20 % of the error's
+variance); below that, buy labels.
+
 **Refit on the hash split when examples keep arriving.** `build(split="hash")` (the default since 1.2; 1.1 shuffled)
 keeps every old example in its share when examples are added (600 + 60 examples, 5 seeds: 0 old examples moved in or out of the fit share, against 101–120 with the
 shuffle). Routes still move with the thresholds; `solvi diff` shows them. Moving from the shuffle to the hash puts
