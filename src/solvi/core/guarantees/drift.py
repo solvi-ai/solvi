@@ -399,9 +399,12 @@ class DriftMonitor:
             self._warned = True
             warnings.warn("DriftMonitor: a Result carries no act probability, so the act signal is not tested: observe "
                           "the Response (mon.observe(res, question=...)) or the part's Decision", stacklevel=2)
+        from .canary import changed_of
+        ch = changed_of(decision, question)          # an identity canary found another model behind the name
         self.seen += 1
         if self._ref is None:
-            self.reference.append(o)
+            if ch is None:                           # a decision of a changed model is not reference material
+                self.reference.append(o)
             if len(self.reference) >= self.window:
                 self._ref = window_stats(self.reference, self.accuracy)
                 self._start_sequential()
@@ -418,8 +421,6 @@ class DriftMonitor:
                     rep["why"].append(why)
             rep["drift"] = len(rep["flags"]) >= self.min_signals
             rep["seen"] = self.seen
-        from .canary import changed_of
-        ch = changed_of(decision)                    # an identity canary found another model behind the name
         if ch is not None:
             rep["flags"].append("identity")
             rep["why"].append(f"the remote model changed behind its name (identity canary event {ch.get('event')})")

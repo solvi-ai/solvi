@@ -115,7 +115,9 @@ _NO_PROBES = contextvars.ContextVar("solvi_no_probes", default=False)
 @contextlib.contextmanager
 def no_probes():
     """Within this block no identity canary (solvi.core.guarantees.canary) probes, counts or marks a decision: replay
-    runs under it. Defined here, in the execution layer, so the runtime need not import the guarantees."""
+    runs under it. Defined here, in the execution layer, so the runtime need not import the guarantees. It is a
+    context variable: it holds in this thread (replay recomputes in the calling thread), but not in thread-pool workers
+    started without copying the context — `system.ask` with workers > 1 inside this block still probes."""
     tok = _NO_PROBES.set(True)
     try:
         yield

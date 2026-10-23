@@ -833,8 +833,9 @@ class Combination:
         issues = self._label_report(states, gold, rk) if label_check else None
         if issues is not None:
             out["label_issues"] = issues
-            if label_warning(issues, n):
-                out["warnings"] = [label_warning(issues, n)]
+            lw = label_warning(issues, n)
+            if lw:
+                out["warnings"] = [lw]
         return out
 
     # --- the calibration file's state of the combination (solvi.core.calibfile reads and writes only the file format)

@@ -309,7 +309,9 @@ def label_issues(probs, labels, ids=None):
     It changes nothing: the calibration still uses every label. What it cannot tell apart: an example the model is
     confidently wrong about looks the same as a wrong label, so on a model with many confident mistakes most flags are
     the model's errors (false positives as label errors); a label error on an example the model is unsure of is
-    rarely flagged (false negatives). Read the list, check the flagged labels, recalibrate if some were wrong."""
+    rarely flagged (false negatives). An answer with no labelled example has no threshold, so it is never suggested (as
+    in cleanlab, every answer needs at least one label). Read the list, check the flagged labels, recalibrate if some
+    were wrong."""
     probs, labels = list(probs), list(labels)
     if len(probs) != len(labels):
         raise ValueError("probs and labels must have the same length")

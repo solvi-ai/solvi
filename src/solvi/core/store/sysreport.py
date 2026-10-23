@@ -28,9 +28,10 @@ What it shows, per question, from the records the library already writes:
   error: the report says how many decisions are labelled. A dispatcher with `audit=` marks a random share of its
   decisions for labelling; their "audit" labels are measured apart, as the audited sample, next to every promise — the
   unbiased reading of it;
-- how often a person was wrong: a decision with a person's label ("human" or "audit") and an outcome label
-  ("outcome") gives a pair; `corrections["people"]` counts the pairs where they differ, with a two-sided
-  Clopper–Pearson interval, per person (`by`) and per question;
+- how often a person was wrong: a decision with a person's label ("human" or "audit") given before its first outcome
+  label ("outcome") gives a pair; `corrections["people"]` counts the pairs where they differ, with a two-sided
+  Clopper–Pearson interval, per person (`by`) and per question; a person label given only after the outcome is
+  counted apart (`after_outcome`), not judged;
 - drift: the flags the decisions recorded (an open-set gate's change point, the dispatcher's drift flag) and a
   `DriftMonitor` run over the period's decisions in order (`drift_window=`; None: not run), with the first decision at
   which it flagged and why.
@@ -189,7 +190,9 @@ def system_report(store, since=None, until=None, *, question=None, price=None, d
             unmatched += 1
             continue
         key = (target.id, q)
-        pairs.setdefault(key, []).append((src, akey(store._answer_key(q, untag_floats(d.get("answer")))), d.get("by")))
+        if question is None or q == question:
+            pairs.setdefault(key, []).append((src, akey(store._answer_key(q, untag_floats(d.get("answer")))), d.get("by"),
+                                              c.seq))
         if src == VERIFIED and key in labels and labels[key][0] != VERIFIED:
             continue                              # a label from outside the system stays over a vouched System 2 answer
         labels[key] = (src, akey(store._answer_key(q, untag_floats(d.get("answer")))))
@@ -254,25 +257,32 @@ def _rate(rows, confidence):
 
 
 def _people(pairs, confidence=0.95):
-    """How often a person was wrong: every decision (and question) with a person's label ("human" or "audit") and a
-    later or earlier outcome label ("outcome") — the person's last answer against the last outcome. → {"paired",
-    "wrong", "error", "interval" (two-sided Clopper–Pearson at `confidence`), "confidence", "by" ({who: the same}),
-    "by_question", "rule"}."""
-    rows, by, by_q = [], {}, {}
+    """How often a person was wrong: every decision (and question) with a person's label ("human" or "audit") given
+    before its first outcome label ("outcome") — the person's last answer before that outcome against the last outcome.
+    A person label given after the outcome was known is not a judgement (a correction made knowing the answer): a
+    decision with only such labels is counted in "after_outcome", not paired. → {"paired", "wrong", "error", "interval"
+    (two-sided Clopper–Pearson at `confidence`), "confidence", "after_outcome", "by" ({who: the same}), "by_question",
+    "rule"}."""
+    rows, by, by_q, after = [], {}, {}, 0
     for (_, q), labs in pairs.items():
-        person = [x for x in labs if x[0] in PERSON]
         truth = [x for x in labs if x[0] in TRUTH]
-        if not person or not truth:
+        if not truth:
+            continue
+        first = min(x[3] for x in truth)
+        person = [x for x in labs if x[0] in PERSON and x[3] < first]
+        if not person:
+            after += any(x[0] in PERSON for x in labs)
             continue
         wrong = person[-1][1] != truth[-1][1]
         rows.append(wrong)
         by.setdefault(person[-1][2] or "unnamed", []).append(wrong)
         by_q.setdefault(q, []).append(wrong)
-    out = {**_rate(rows, confidence), "confidence": confidence,
+    out = {**_rate(rows, confidence), "confidence": confidence, "after_outcome": after,
            "by": {w: _rate(r, confidence) for w, r in sorted(by.items())},
            "by_question": {q: _rate(r, confidence) for q, r in sorted(by_q.items())},
-           "rule": "a decision's last person label (source human or audit) against its last outcome label (source "
-                   "outcome), both naming it (of=) or on its input; wrong when they differ"}
+           "rule": "a decision's last person label (source human or audit) given before its first outcome label (source "
+                   "outcome) against its last outcome label, both naming it (of=) or on its input; wrong when they "
+                   "differ; person labels given only after the outcome are counted in after_outcome, not judged"}
     return out
 
 

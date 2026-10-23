@@ -66,3 +66,19 @@ def test_clopper_pearson_known_values(k, n):
     else:
         assert binom.cdf(k, n, hi) == pytest.approx(0.025, rel=1e-6)
     assert clopper_pearson(0, 10)[1] == pytest.approx(0.3085, abs=1e-4)
+
+
+def test_a_person_label_after_the_outcome_is_not_judged(tmp_path):
+    s = _system(tmp_path)
+    res = [s.ask({"x": i / 20}) for i in range(6)]
+    truth = [i / 20 > 0.5 for i in range(6)]
+    for i in range(3):                                         # before the outcome: judged (0 wrong)
+        s.teach("label", {"x": i / 20}, truth[i], of=res[i].stored_id, by="ana")
+    for i in range(6):
+        s.outcome(res[i], truth[i], by="carrier")
+    for i in range(3, 6):                                      # after the outcome: a correction, not a judgement
+        s.teach("label", {"x": i / 20}, not truth[i], of=res[i].stored_id, by="bob")
+    P = s.report().corrections["people"]
+    assert (P["paired"], P["wrong"], P["after_outcome"]) == (3, 0, 3) and "bob" not in P["by"]
+    assert "before its first outcome" in P["rule"]
+    assert P["by_question"] == s.report(question="label").corrections["people"]["by_question"]
