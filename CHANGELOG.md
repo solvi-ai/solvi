@@ -203,6 +203,24 @@
   answered alone mostly on items it had been given labels for) and stays only as the core of a planned adapter (LoRA)
   loop; `TicketDesk` / `AgentOracle` are unmeasured on a stream; the promise holds between change points, not in the
   gap between a shift and its alarm.
+- **Adapter (LoRA) learning loop, stage 1: the policy and the gates** (experimental, `solvi.experimental.stream.policy`
+  and `stream.gates`; not wired into a loop yet). `LoopPolicy`, the abstract class a developer controls the loop
+  with: hooks `accept`, `split`, `want_train`, `select`, `hyper`, `freeze`, `promote`, `discard`, `alarm`, and a
+  `budget`; each reads a `LoopState` (a frozen snapshot: decisions, served and candidate versions, label counts by
+  split, the versions table, the served version's latest held-out outcomes, alarms, trainings started, the wall
+  clock, paused, the mode). `Budget`: trainings over the life and per 24 h, the interval between two, the seconds of
+  one, threads, device, rows per training, adapter files kept; `Budget.refuse` says why a training may not start.
+  `DefaultPolicy`: trusted label sources (slow-path ones only with `s2_labels=True`); a 70 / 15 / 15 train / calib /
+  holdout split by a hash of the content key (a key never changes split); train at ≥ 300 labels and ≥ 1.5 × the
+  served version's, only with an improvement signal (the served version errs alone above α, or answers nothing
+  alone, on its last 200 held-out labels); a class-balanced, half-recent selection; r 8, lr 3e-4, updates
+  clamp(⌈n / 4⌉, 200, 3000), seed = the version; freeze on ≥ 100 held-out labels with a gain of 0.01 in (right −
+  wrong) answered alone, an `act_guard` threshold, honesty within 0.02 and the time budget (label mode adds a paired
+  Wilson bound > 0); promote when certified, with ≥ 100 samples on keys the candidate never trained on, ≥ 5 % alone
+  on them and ≥ the served share + 1 point, and the memorisation probe (error alone on novel − on seen ≤ 0.10);
+  discard on a failed probe, uncertified after 1 500 samples or not better after 1 500; on a second alarm within 300
+  decisions roll back. `LabelRow`, `TrainReport`, `Paired`, `VersionInfo` carry what the hooks read. Policies
+  pickle (they go into the loop's checkpoint). Unmeasured: the numbers are the design's, not tuned.
 - **A secret for the supervision and audit draws: `Dispatcher(secret=)`** (`solvi.core.dispatch`; security). The
   draws were `sha256(f"{seed}|{input hash}|{n}")` with the public default `seed=0`, so whoever could vary the inputs
   could compute which decisions would be supervised or audited and avoid them. With `secret=` (bytes or str; None reads

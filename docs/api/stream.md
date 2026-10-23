@@ -43,3 +43,18 @@ per-decision step the Dispatcher runs.
 ## `solvi.experimental.stream.learner`
 
 ::: solvi.experimental.stream.learner
+
+## `solvi.experimental.stream.policy`
+
+The adapter loop's policy (stage 1, not wired into a loop yet): `LoopPolicy`, the abstract class whose hooks decide
+what the loop takes, when it trains, what it freezes, promotes and discards and what an alarm does; `LoopState`, what
+a hook reads; `Budget`; `DefaultPolicy`. Unmeasured.
+
+::: solvi.experimental.stream.policy
+
+## `solvi.experimental.stream.gates`
+
+The content-key split and the gate arithmetic the default policy uses: the held-out gate, the honesty gate, label
+mode's paired Wilson bound, the memorisation probe, the improvement signal.
+
+::: solvi.experimental.stream.gates
