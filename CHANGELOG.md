@@ -56,18 +56,19 @@
   (sync, async, through a session) is denied before any other check (`guard_not_paused`; deny, not escalate, so no
   approval can be queued while stopped), the reason names who paused and why, no tool runs, and
   `resolve(..., approve=True)` raises `PermissionError` until `resume`. A pause takes effect for every call that starts
-  after it (a lock around the state). With a storage, pause and resume are events in the store's chain (meta
+  after it (a lock around the state; each event is written under the same lock, so concurrent pauses and resumes are
+  chained in the order they took effect). With a storage, pause and resume are events in the store's chain (meta
   `"guard": {"event", "by", "reason", "at"}`), and a call denied while paused is a decision of a small system of its
   own, so `guard.replay(id)` reproduces the denial. The pause lives in memory: a Guard made anew starts running; the
   store keeps the events. It supports the "stop button" of the EU AI Act's human-oversight requirement (Art. 14(4)(e)).
-- **`solvi check`: the wording of questions (warnings).** `no_other_option` — a choice a model answers with no
-  catch-all option ("other", "none of these", "unknown", or one described as "anything else"), no decider `other=` and
-  no "not stated"; `numeric_levels` — levels that are bare numbers without a description of each; `compound_question` —
+- **`solvi check`: the wording of questions (warnings, and one note).** `no_other_option` (a note: closed label sets
+  are normal, so it never fails `--strict`) — a choice a model answers with no catch-all option ("other", "none of
+  these", "unknown", or one described as "anything else"), no decider `other=` and no "not stated"; `numeric_levels` — levels that are bare numbers without a description of each; `compound_question` —
   a question text with two question marks or "and whether" / "or whether"; `unused_given` — a `System(input_model=)`
-  field nothing reads (only when every question has a rule or a `uses` hint). Each names the question or field and
-  the fix in one line; none is an error, so `solvi check` without `--strict` exits as before. `solvi init
-  --with-model`'s refunds and minimal templates get an `"other"` option, so the scaffold still passes
-  `solvi check --strict`.
+  field nothing reads (only when every question has a rule or a `uses` hint; a field read by a guarantee's `groups=`
+  or named as its `signal=` counts as read). Each names the question or field and the fix in one line; none is an
+  error, so `solvi check` without `--strict` exits as before, and the examples raise no new warning under `--strict`.
+  `solvi init --with-model`'s refunds and minimal templates get an `"other"` option.
 
 ### Fixed
 - **A code fingerprint no longer depends on whether the code has run yet.** A module global set on first use

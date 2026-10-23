@@ -1,5 +1,5 @@
 """`solvi check`: the wording of questions — no catch-all option, bare-number levels, two questions in one, given facts
-nobody reads. Warnings, never errors."""
+nobody reads. Warnings or notes (no_other_option: a closed label set is often right), never errors."""
 from pydantic import BaseModel
 
 from solvi import Answer, Catalog, Question, System
@@ -21,16 +21,21 @@ def system(questions, rules=(), input_model=None, extra=None):
     return System(cat, questions, input_model=input_model)
 
 
-def warned(sys, code):
-    return {f.where: f.message for f in lint(sys).findings if f.code == code and f.level == "warning"}
+def warned(sys, code, level="warning"):
+    return {f.where: f.message for f in lint(sys).findings if f.code == code and f.level == level}
+
+
+def noted(sys, code):
+    return warned(sys, code, "note")
 
 
 # --- (a) no_other_option
-def test_a_model_choice_without_a_catch_all_warns_once_with_the_fix():
+def test_a_model_choice_without_a_catch_all_is_a_note_once_with_the_fix():
     s = system([Question("team", "Which team handles it?", Answer.choice(["billing", "tech"]), uses=["text_len"])])
-    got = warned(s, "no_other_option")
+    got = noted(s, "no_other_option")
     assert list(got) == ["team"] and '"other"' in got["team"] and "Answer.maybe" in got["team"]
-    assert lint(s).ok                                                   # a warning, not an error
+    assert warned(s, "no_other_option") == {}
+    assert lint(s).ok and lint(s, strict=True).ok                       # a note: closed label sets pass --strict
 
 
 def test_a_catch_all_option_or_not_stated_or_a_rule_silences_it():
@@ -41,7 +46,7 @@ def test_a_catch_all_option_or_not_stated_or_a_rule_silences_it():
           Question("e", "Which team?", Answer.choice({"billing": "charges", "general": "anything else"}),
                    uses=["text_len"]),
           Question("f", "Which team?", Answer.choice(["a", "b"]))]           # answered by a rule: code decides
-    assert warned(system(ok, rules=["f"]), "no_other_option") == {}
+    assert noted(system(ok, rules=["f"]), "no_other_option") == {}
 
 
 # --- (b) numeric_levels
@@ -93,3 +98,22 @@ def test_unused_given_is_skipped_when_a_learned_head_may_read_any_fact():
     assert warned(s, "unused_given") == {}
     s = system([Question("q", "Ok?", Answer.yes_no(), uses=["note", "total"])], input_model=Order)
     assert warned(s, "unused_given") == {}
+
+
+def test_a_field_read_only_by_a_guarantee_is_not_unused():
+    """A guarantee's groups= (a field name, a hierarchy, a function's parameters) and a signal= naming a fact read the
+    field: it is not flagged."""
+    from solvi.core.guarantees.guarantee import QuestionGuard
+
+    def more(cat):
+        @cat.check(hard=False)
+        def big(total: float) -> bool:
+            return total > 10
+    for groups in ("note", ["note"], lambda note: note[:1]):
+        s = system([Question("q", "Ok?", Answer.yes_no())], rules=["q"], input_model=Order, extra=more)
+        assert list(warned(s, "unused_given")) == ["note"]
+        s.guards["q"] = QuestionGuard("q", None, groups=groups)
+        assert warned(s, "unused_given") == {}
+    s = system([Question("q", "Ok?", Answer.yes_no())], rules=["q"], input_model=Order)
+    s.guards["q"] = QuestionGuard("q", None, signal="note")
+    assert list(warned(s, "unused_given")) == ["total"]                 # `note` is the guarantee's signal
