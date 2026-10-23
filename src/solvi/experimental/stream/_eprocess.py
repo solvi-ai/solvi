@@ -7,7 +7,7 @@ bet in the refuting direction):
 - `Mixture`: a mixture of constant bets. Component j multiplies its wealth by 1 + b_j·(α − L) with b_j = f_j/(1 − α)
   (a clean sample: 1 + f_j·α/(1 − α); a loss: 1 − f_j); the wealth is Σ_j w_j·K_j. Each K_j is a test martingale under
   H0 (its factor has conditional mean ≤ 1 when E[L | past] ≥ α), so is the mixture, and P(ever ≥ 1/δ) ≤ δ (Ville).
-  Default f = (0.9, 0.5, 0.25, 0.1), w = (0.6, 0.25, 0.1, 0.05) — kadi's constants, kept for comparability.
+  Default f = (0.9, 0.5, 0.25, 0.1), w = (0.6, 0.25, 0.1, 0.05) — constants from the design this was adapted from, kept for comparability.
 - `MirrorBound`: MeanBound(m = 1 − α) fed x = 1 − L (the mirror: "mean of 1 − L ≤ 1 − α" refuted).
 
 `DeltaBudget`: the δ spent over the certifications of one promise, δ_v = `Certificate.delta_at(v)` (Basel:

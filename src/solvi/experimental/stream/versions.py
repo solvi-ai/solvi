@@ -16,7 +16,7 @@ certifies). With `initial=` (opt-in) version 0 is an existing frozen model — t
 budget), fed from decision 1 (its freeze is before the stream); its fingerprint is the "start" event of decision 1. The
 live learner starts empty either way. The live learner (`stream.learner.Learner`) takes every accepted oracle label and
 is never served. When no candidate exists and the live learner has taken ≥ max(freeze_min, growth × the served version's
-labels at its freeze, the refreeze floor) labels (300, 2: kadi's constants), a snapshot is frozen as the candidate, with
+labels at its freeze, the refreeze floor) labels (300, 2: constants from the adapted design), a snapshot is frozen as the candidate, with
 its own `StreamPromise` drawing the next (v, δ_v) from the loop's one `DeltaBudget` (Σ δ_v ≤ δ over every version ever
 frozen). Each decision is scored by the served version and, in shadow, by the candidate, before its label is read.
 

@@ -7,7 +7,7 @@ guard signal) and has a fingerprint; `LearningLoop` (stream.versions) freezes, c
 - `HashedTextLearner` — for text streams: hashed word 1–2-grams and character 2–5-grams (CRC-32 into 2^18 buckets,
   L2-normalised counts) and an online softmax (one SGD step per label, plain numpy, sparse weights); the score is the
   largest probability. Classes are the given options, or (options=None) every label seen so far, in order of first
-  sight. kadi's reflex re-implemented from its description; not tuned, unmeasured.
+  sight. Re-implemented from a published description; not tuned, unmeasured.
 - `FastHeadLearner` — for typed-state questions: solvi's own `FastHead` (the head `System.fit` builds) over facts; the
   first `min_fit` labels are kept and fitted once, every later one is `FastHead.teach` (a rank-one update; its refit
   schedule as `System.fit`'s). The score is the head's largest probability. `facts=` turns an input into the facts

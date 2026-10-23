@@ -489,7 +489,7 @@ alone for `probation` decisions and until certified again, every one of them a f
 `stream` (sample, certificate, detector), each state change is a record of kind `stream`, both kept by a redaction,
 and the system report has one block (samples, free and paid, alarms, alone answers covered by the threshold in force,
 the deployed risk estimated on the sample). A control in the tests shows why the coin covers every decision:
-calibrating on the escalated decisions only (as kadi 0.1 did) loosens the threshold past the promise on every seed.
+calibrating on the escalated decisions only loosens the threshold past the promise on every seed.
 
 Stage 3a makes an agent the oracle, over MCP: its verdicts on blind tickets are the slow path.
 

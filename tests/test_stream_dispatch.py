@@ -20,7 +20,7 @@ from solvi.core.store.sysreport import system_report
 from solvi.testing.conformance import check_monitor
 
 
-# --- the detector: the design's Shiryaev–Roberts numbers (stuff/kadi_takeover/sr.py)
+# --- the detector: the design's Shiryaev–Roberts numbers
 def _run(p, rng, alpha=0.05, arl=1000, horizon=20000):
     det = RiskDetector(alpha, arl=arl)
     for t in range(1, horizon + 1):
@@ -282,7 +282,7 @@ def test_a_dispatcher_without_the_new_options_records_nothing_new():
     assert "sample" not in json.dumps(r.to_dict()["reasons"])
 
 
-# --- the control: calibrating on escalations only (kadi v0.1) breaks the promise
+# --- the control: calibrating on escalations only breaks the promise
 GRID = [round(1 - 0.05 * k, 2) for k in range(1, 20)]
 
 
