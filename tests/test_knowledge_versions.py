@@ -228,3 +228,42 @@ def test_pending_lists_the_items_waiting_for_a_retest_with_the_reason():
     assert st.pending() == [d] and "pending" not in st.item(f)
     st.retest(d, ok=True)
     assert st.pending() == []
+
+
+# --- taking back one assertion
+def test_one_of_two_identical_publications_can_be_taken_back():
+    # before: retract(only_from="ed") took back both of ed's publications; the read at 20 was empty
+    km = solvi.Knowledge()
+    st = km.store
+    a = km.tell({"s": "PM", "r": "incumbent", "o": "P"}, source="outcome", by="ed", valid=(16, None), evidence="rev1")
+    km.tell({"s": "PM", "r": "incumbent", "o": "V"}, source="outcome", by="vandal", valid=(30, None), evidence="rev2")
+    b = km.tell({"s": "PM", "r": "incumbent", "o": "P"}, source="outcome", by="ed", valid=(16, None), evidence="rev3")
+    assert a == b and len(st.items[a].asserts) == 2
+    second = st.item(a)["valid"]["claims"][1]["at"]
+    st.retract(a, assertion=second, why="duplicate")
+    assert st.status(a) == "active" and len(st.item(a)["valid"]["claims"]) == 1
+    assert vals(km, "PM", "incumbent", 20) == ["P"]
+    km2 = solvi.Knowledge()
+    a2 = km2.tell({"s": "PM", "r": "incumbent", "o": "P"}, source="outcome", by="ed", valid=(16, None), evidence="rev1")
+    km2.tell({"s": "PM", "r": "incumbent", "o": "P"}, source="outcome", by="ed", valid=(16, None), evidence="rev3")
+    km2.retract(a2, only_from=("ed", "rev3"))
+    assert km2.store.status(a2) == "active" and len(km2.store.item(a2)["valid"]["claims"]) == 1
+    km2.retract(a2, only_from=("ed", "rev1"))
+    assert km2.store.status(a2) == "retracted"
+    assert st.verify() and km2.store.verify()
+
+
+def test_only_from_a_writer_keeps_its_meaning_and_wrong_addresses_are_refused():
+    ks = KnowledgeStore()
+    a = ks.add("fact", {"s": "x", "r": "r", "o": 1}, source="spec", by="w", evidence="e1")
+    ks.add("fact", {"s": "x", "r": "r", "o": 1}, source="spec", by="w", evidence="e2")
+    for bad in ({"assertion": 99}, {"only_from": ("w", "nope")}, {"only_from": ("w",)},
+                {"only_from": "w", "assertion": 0}):
+        try:
+            ks.retract(a, **bad)
+            raise AssertionError(f"expected ValueError for {bad}")
+        except ValueError:
+            pass
+    ks.retract(a, only_from="w")
+    assert ks.status(a) == "retracted"
+    assert ks.add("fact", {"s": "x", "r": "r", "o": 1}, source="spec", by="w") == a and ks.pending_retest(a)

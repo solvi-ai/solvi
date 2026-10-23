@@ -114,7 +114,7 @@ _KNOWLEDGE = "knowledge"                              # the record kind of journ
 
 class _Item:
     __slots__ = ("id", "kind", "body", "scope", "key", "value", "asserts", "promoted", "retracted", "retired",
-                 "reconfirm_after", "uses", "cuts")
+                 "reconfirm_after", "uses", "cuts", "acuts", "rechecked")
 
     def __init__(self, iid, kind, body, scope, key, value, reconfirm_after):
         self.id, self.kind, self.body, self.scope, self.key, self.value = iid, kind, body, scope, key, value
@@ -123,15 +123,28 @@ class _Item:
         self.promoted = []          # [t]
         self.retracted = []         # [t]
         self.cuts = []              # [(t, writer)]: one writer's assertions taken back (retract(..., only_from=))
+        self.acuts = []             # [(t, n)]: one assertion taken back (retract(..., assertion=n))
+        self.rechecked = []         # [t]: passed re-tests (retest(id, ok=True))
         self.retired = []           # [t]
         self.reconfirm_after = reconfirm_after
         self.uses = [0, 0]          # [used, used and wrong]
 
 
+def _acut(it, a):
+    """The journal position assertion `a` was taken back at by its writer's or its own cut, or None."""
+    return min([tc for tc, w in it.cuts if tc > a["t"] and w == a["by"]]
+               + [tc for tc, n in it.acuts if n == a["t"] and tc > a["t"]], default=None)
+
+
 def _cut(it):
-    """The last journal position the item's whole support was taken back at (a retraction, or a writer's retraction
-    that left no other assertion standing), or -1."""
+    """The last journal position the item's whole support was taken back at (a retraction, or a writer's or an
+    assertion's retraction that left no other assertion standing), or -1."""
     cut = max(it.retracted, default=-1)
+    if it.acuts:
+        for tc in sorted({tc for tc, _ in it.cuts} | {tc for tc, _ in it.acuts}):
+            if tc > cut and all((x := _acut(it, a)) is not None and x <= tc for a in it.asserts if cut < a["t"] < tc):
+                cut = tc
+        return cut
     for tc, _ in sorted(it.cuts):
         if tc > cut and not any(cut < a["t"] < tc and not any(a["t"] < t2 <= tc and w2 == a["by"] for t2, w2 in it.cuts)
                                 for a in it.asserts):
@@ -140,7 +153,11 @@ def _cut(it):
 
 
 def _live(it):
-    """The item's assertions still standing: after its last retraction, and not taken back with their writer's."""
+    """The item's assertions still standing: after its last retraction, and not taken back with their writer's or on
+    their own."""
+    if it.acuts:
+        cut = _cut(it)
+        return [a for a in it.asserts if a["t"] > cut and _acut(it, a) is None]
     if not it.cuts:
         cut = max(it.retracted, default=-1)
         return [a for a in it.asserts if a["t"] > cut]
@@ -421,10 +438,14 @@ class KnowledgeStore:
         elif op == "promote":
             if r["item"] in self.items:
                 self.items[r["item"]].promoted.append(t)
+                if r.get("retest"):
+                    self.items[r["item"]].rechecked.append(t)
                 self._touch(r["item"])
         elif op == "retract":
             if r["item"] in self.items:
-                if r.get("only_from") is not None:
+                if r.get("assertions") is not None:
+                    self.items[r["item"]].acuts.extend((t, n) for n in r["assertions"])
+                elif r.get("only_from") is not None:
                     self.items[r["item"]].cuts.append((t, r["only_from"]))
                 else:
                     self.items[r["item"]].retracted.append(t)
@@ -618,19 +639,39 @@ class KnowledgeStore:
             rec = self._write("promote", item=iid, measured=measured)
             self._apply(rec)
 
-    def retract(self, iid, *, by=None, why=None, only_from=None):
+    def retract(self, iid, *, by=None, why=None, only_from=None, assertion=None):
         """Take an item back, with everything derived from it (the cascade over derived_from); what it refuted or
         disputed comes back. Nothing is deleted: the journal keeps the entry and the chain stays whole.
         only_from: a writer (the `by` of its assertions) — take back only that writer's assertions of the item: the same
         content told by others stays (one item for both, since an id is its content); the item goes only when no other
-        assertion is left. → {id: (status before, status after)} of every item whose status changed."""
+        assertion is left. only_from=(writer, evidence): only that writer's assertions given with this evidence (one of
+        two publications of the same content). assertion: the journal position of one standing assertion of the item
+        (`item(id)["valid"]["claims"]` lists them as "at"; a list takes several) — only it is taken back. → {id: (status
+        before, status after)} of every item whose status changed."""
         with self._lock:
             if iid not in self.items:
                 raise KeyError(f"no item {iid!r}")
+            if only_from is not None and assertion is not None:
+                raise ValueError("give only_from= or assertion=, not both")
             extra = {}
-            if only_from is not None:
+            live = _live(self.items[iid])
+            if isinstance(only_from, (tuple, list)):
+                if len(only_from) != 2:
+                    raise ValueError("only_from=(writer, evidence) names one writer and the evidence it gave")
+                w, ev = str(only_from[0]), plain_json(only_from[1])
+                assertion = [a["t"] for a in live if a["by"] == w and a.get("evidence") == ev]
+                if not assertion:
+                    raise ValueError(f"item {iid!r} has no standing assertion from {w!r} with evidence {ev!r}")
+                only_from = None
+            if assertion is not None:
+                ns = sorted({int(n) for n in (assertion if isinstance(assertion, (list, tuple)) else [assertion])})
+                missing = [n for n in ns if not any(a["t"] == n for a in live)]
+                if missing or not ns:
+                    raise ValueError(f"item {iid!r} has no standing assertion at journal entry {missing or ns}")
+                extra = {"assertions": ns}
+            elif only_from is not None:
                 only_from = str(only_from)
-                if not any(a["by"] == only_from for a in _live(self.items[iid])):
+                if not any(a["by"] == only_from for a in live):
                     raise ValueError(f"item {iid!r} has no standing assertion from {only_from!r}")
                 extra = {"only_from": only_from}
             self._settle()
