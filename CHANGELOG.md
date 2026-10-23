@@ -130,7 +130,12 @@
   oracle may return a `Verdict(label, source, label_of)`; `ticket_verdict(desk, resolved)` reads one from a ticket
   resolved on a `TicketDesk` (the agent's: source "s2"; an expired one: no label); decisions record `label_of`,
   `probation`, `left` and the detector's state. With `system=`, rolling back to version 0 puts back the head the
-  System had. Still no `Dispatcher(loop=)`. Unmeasured.
+  System had. Still no `Dispatcher(loop=)`. Unmeasured. Fix (found by the stage-4 smoke): an alarm now restarts the
+  candidate's promise too, certified or not (new δ_v, threshold +inf, its paired samples dropped; a "restart" event
+  with why "alarm" per restarted version, the served one included), so the promotion rule reads only post-freeze and
+  post-alarm samples — before, a candidate certified before the shift was promoted at the alarm (ℓ_s = 0) and served
+  the moved world on its old threshold (true risk 0.0548 > α on HWU64). A retired version certified before an alarm
+  restarts when it is rolled back to.
 - **A secret for the supervision and audit draws: `Dispatcher(secret=)`** (`solvi.core.dispatch`; security). The
   draws were `sha256(f"{seed}|{input hash}|{n}")` with the public default `seed=0`, so whoever could vary the inputs
   could compute which decisions would be supervised or audited and avoid them. With `secret=` (bytes or str; None reads

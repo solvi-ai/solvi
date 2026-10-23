@@ -446,3 +446,71 @@ def test_a_resolved_tickets_verdict_is_a_label_of_the_loop(tmp_path):
     assert out["by"] == "person" and loop.log[-1][1]["stream"]["missing"]
     with pytest.raises(ValueError):
         ticket_verdict(desk, desk.dispatcher.storage.iter(kind="pending").__iter__().__next__().id)
+
+
+def _shift_loop(stale=10 ** 6):
+    from solvi.experimental.stream import RiskDetector
+    return LearningLoop(_Fake([_Model("c", 0.85)] + [_Model(f"w{i}", 0.0) for i in range(5)]), question="q", max_risk=0.05, secret=KEY, initial=_Model("s1", 0.9),
+                        freeze_min=320, stale=stale, trial=10 ** 6, detector=RiskDetector(0.05, arl=50),
+                        probation=300, promise_options={"grid": [0.9, 0.5]})
+
+
+def _shift_run(loop, n=7000, at=5000):
+    """Before decision `at` the candidate is good but worse than version 0; from there the label moves and neither
+    is ever right again."""
+    r = random.Random(16)
+    outs = []
+    for i in range(n):
+        x = (r.choice("ab"), r.random())
+        outs.append(loop.step(x, (lambda x=x: x[0]) if i < at else (lambda: "moved")))
+    return outs
+
+
+def test_an_alarm_restarts_every_candidates_certificate():
+    """A candidate certified before the shift is not better than the served version, so it waits in trial; the alarm
+    restarts the served promise (+inf, ℓ_s = 0). Before the fix the candidate was promoted at once on its pre-shift
+    threshold and served the moved world; now its promise restarts too and it is never promoted on old evidence."""
+    loop = _shift_loop()
+    outs = _shift_run(loop)
+    alarm = _events(loop, "alarm")
+    assert alarm and alarm[0]["decision"] > 5000
+    a = alarm[0]["decision"]
+    frz = _events(loop, "freeze")
+    assert frz and frz[0]["decision"] < 5000
+    cert = [e for e in _events(loop, "certified") if e["version"] == 1]
+    assert cert and cert[0]["decision"] < a                # certified on the old regime
+    assert not _events(loop, "promote")                    # pre-fix: promoted at decision a
+    rs = [e for e in _events(loop, "restart") if e["decision"] == a]
+    assert {e["version"] for e in rs} == {0, 1} and all(e["why"] == "alarm" and e["threshold"] is None for e in rs)
+    assert loop.versions()[1]["threshold"] is None
+    assert not any(o["by"] == "local" for o in outs[a:])
+    assert len(loop._vs[1]["samples"]) <= len(outs) - a   # the paired samples: only those after the alarm
+    assert loop.delta_spent <= 0.05
+    assert loop.replay()["ok"]
+
+
+def test_a_rollback_target_certified_before_an_alarm_starts_over():
+    """A retired version's certificate predates the alarm: rolled back after it, it serves nothing alone until it is
+    certified again on post-alarm samples."""
+    from solvi.experimental.stream import RiskDetector
+    loop = LearningLoop(_Fake([_Model("c", 1.0)] + [_Model(f"w{i}", 0.0) for i in range(20)]), question="q", max_risk=0.05, secret=KEY, initial=_Model("s1", 0.6),
+                        freeze_min=320, detector=RiskDetector(0.05, arl=50), probation=0,
+                        promise_options={"grid": [0.9, 0.5]})
+    r = random.Random(17)
+    data = [(r.choice("ab"), r.random()) for _ in range(4000)]
+    for x in data[:2000]:
+        loop.step(x, lambda x=x: x[0])
+    assert loop.served == 1 and loop.versions()[0]["certified"]
+    for x in data[2000:]:
+        loop.step(x, lambda: "moved")
+    alarm = _events(loop, "alarm")
+    assert alarm and alarm[0]["version"] == 1
+    assert loop.versions()[0]["certified"]                 # retired: untouched until it is a rollback target
+    ev = loop.rollback(0, by="ops", why="test")
+    assert ev["event"] == "rollback"
+    assert loop.versions()[0]["threshold"] is None
+    rs = [e for e in _events(loop, "restart") if e["version"] == 0]
+    assert rs and rs[-1]["why"] == "alarm" and rs[-1]["decision"] == ev["decision"]
+    assert loop.step(data[0], lambda: "a")["by"] != "local"
+    assert loop.delta_spent <= 0.05
+    assert loop.replay()["ok"]
