@@ -21,7 +21,7 @@ label is missing.
 
 The grid. "auto": `ltt_grid` over the scores of the first `grid_from` decisions observed (labels unread), at most
 `grid_size` points; until then nothing certifies and a labelled sample is not read (counted in `dropped`). "fixed":
-`fixed_grid()` (kadi's shape on [0, 1]). A sequence: those thresholds. +inf is always the "answer nothing" point.
+`fixed_grid()` (a fixed shape on [0, 1]). A sequence: those thresholds. +inf is always the "answer nothing" point.
 
 The data a decision records (`state()`): v_index, delta_v, threshold, n (samples read), seen (decisions observed),
 missing, dropped, certified (points), evidence_fp (SHA-256 of the log-wealth vectors rounded to 1e-9 and the certified
@@ -41,7 +41,7 @@ BETS = ("mixture", "agrapa")
 
 
 def fixed_grid(lo: float = 0.0, hi: float = 1.0) -> list:
-    """kadi's fixed grid shape {1 − 10^(−e/8), e = 1..32} ∪ {0.05, 0.10, …, 0.95}, mapped onto [lo, hi]; strict → loose."""
+    """The fixed grid shape {1 − 10^(−e/8), e = 1..32} ∪ {0.05, 0.10, …, 0.95}, mapped onto [lo, hi]; strict → loose."""
     lo, hi = float(lo), float(hi)
     if not hi > lo:
         raise ValueError("the score range needs hi > lo")

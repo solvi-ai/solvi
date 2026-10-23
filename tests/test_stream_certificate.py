@@ -140,7 +140,7 @@ def test_the_auto_grid_is_fixed_from_unlabelled_scores_and_earlier_samples_are_n
     assert sp.state()["grid_fp"] is not None
 
 
-def test_fixed_grid_is_kadis_shape():
+def test_fixed_grid_shape():
     g = fixed_grid()
     assert g == sorted(g, reverse=True) and 0.05 in g and 0.95 in g and g[0] == pytest.approx(1 - 1e-4)
     assert fixed_grid(2.0, 4.0)[-1] == pytest.approx(2.1) and fixed_grid(2.0, 4.0)[0] == pytest.approx(4.0 - 2e-4)
