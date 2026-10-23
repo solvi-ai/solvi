@@ -65,11 +65,13 @@
   a hash of its seed.
 
 ### Fixed
-- **A skill certificate spends δ over its restarts** (`solvi.experimental.skills.Certificate`). After an alarm or a
-  widened skill condition the process restarted and certified again at the full δ, so after k restarts the chance that
+- **A skill certificate spends δ over its restarts** (`solvi.experimental.skills.Certificate`). After an alarm, or a
+  skill condition widened by the condition rule, the process restarted and certified again at the full δ, so after k restarts the chance that
   some certificate it issued was wrong was bounded only by k·δ, not by the δ the promise states. The v-th
   certification of a process (v = 1 for a fresh one, one more after each restart) now bets against
   δ_v = 6δ/(π²v²); Σ_v δ_v = δ, so every certificate a process ever issues holds together with probability ≥ 1 − δ.
+  Only an alarm and the condition rule restart a process: a lattice generalization (`footprint`, a condition widened
+  to `()`) widens a skill without a restart, so its certificate keeps its wealth and its `v` (as before 1.4).
   The process records `v`, `delta_v` and `delta_spent` (Σ δ_u for u ≤ v) in `EProcess.to_dict()` (so in the skill
   set's report and the evidence written by `to_knowledge`), and `Certificate.to_dict()` records `delta_split`;
   `Certificate.delta_at(v)` and `need_at(v)` give the numbers. The price: more clean outcomes per certification — at
