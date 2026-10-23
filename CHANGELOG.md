@@ -96,6 +96,14 @@
   (`supervise` or `audit` strictly between 0 and 1) then gives a `PredictableDrawWarning` once per process (a class
   of its own, so it can be filtered). `solvi.experimental.audit.AuditWatch`'s own draw (used when a decision carries no audit mark) is still
   a hash of its seed.
+- **The canonical form of a record hash, byte for byte, with test vectors.** `docs/trace_spec.md` §3 now says exactly what
+  a record hash is taken over, so a verifier in another language can recompute it: the hash body by format, then the
+  canonical text — keys sorted by Unicode code point, Python's float spelling (`1e-06`, `1e+16`, `100.0`, `-0.0`;
+  positional from 1e-4 up to 1e16), integers of any size kept apart from floats, which characters are escaped (U+2028
+  and U+2029 are not), `NaN` / `Infinity` only in records written before 0.7 (the writer refuses them) — and where it
+  differs from RFC 8785. `tests/fixtures/canonical_json/vectors.json`: 21 values, a format 1 and a format 2 record and
+  a chain link (22 values since the fix under Fixed), each with its canonical text and SHA-256, recomputed by `tests/test_canonical_json_vectors.py`. Nothing
+  written changes: the format and every hash are as before.
 
 ### Fixed
 - **A skill certificate spends δ over its restarts** (`solvi.experimental.skills.Certificate`). After an alarm, or a
@@ -121,6 +129,18 @@
   its question to the channel (`on_human="handoff"`): the hand-off skipped every result by a person, the dispatcher's
   included, not only an answer that came through the channel. Run and replay now skip only the channel's answer. Found
   by the E1 harness.
+- **A record with non-string dict keys now verifies.** The canonical JSON a record hash is taken over sorted a dict's
+  keys before turning them into strings, so a body appended with `{2: …, 10: …}` was hashed in number order while its
+  stored text reads back as `{"10": …, "2": …}`: `verify()` reported it as edited. Keys are now turned into their JSON
+  strings first (int and float by their JSON form, `True` / `False` / `None` as `true` / `false` / `null`), recursively,
+  and two keys that become one string (`{1: …, "1": …}`) are refused with `ValueError` (json would have written both).
+  Applies to the record hash and to the trace signature's item digests. Every record with string keys only hashes the
+  same bytes as before (every fixture store verifies as it did; the golden fingerprints are unchanged), so no valid
+  stored record changes its hash; records written before the fix with such keys still fail `verify()`. Decisions,
+  corrections and specialist runs convert their data to JSON first and were not affected; writers that pass a body to
+  the store as it is could be (not confirmed for any of them): the knowledge store, `refine`'s stored runs,
+  `solvi.testing.history`, `solvi.experimental.process`, the dispatcher's policy record and the eval access log of
+  `solvi.experimental.changes`. Canonicalizing a 10 KB record takes about 90 µs more (one walk over its dicts).
 - **A code fingerprint no longer depends on whether the code has run yet.** A module global set on first use
   (`_X = None`, filled by the first call) was hashed as None before that call and left out after it, so a Guard tool's
   `System.fingerprint()` taken before the first `guard.call` gave `argument_errors` another fingerprint than one taken

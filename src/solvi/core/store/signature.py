@@ -42,7 +42,8 @@ class NotLocatable(ValueError):
 
 # --- what is signed: content hashes of the items in order
 def _cj(obj):
-    return json.dumps(obj, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=repr)
+    from . import _jkeys                        # dict keys as JSON strings before sorting, as the record hash takes them
+    return json.dumps(_jkeys(obj), ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=repr)
 
 
 def record_digest(rec):
