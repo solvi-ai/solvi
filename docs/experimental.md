@@ -357,10 +357,10 @@ Some ideas were measured and did not make it into solvi, experimental or not; th
 
 ## `process`
 
-A process of several solvi systems: stages 0 to 3 of `solvi.Process` — the process described as data, running it
+A process of several solvi systems: stages 0 to 4 of `solvi.Process` — the process described as data, running it
 as one trace across the systems, questions put to a person through a queue, replaying a run from its records, and the
-path promise in the modes `union` and `per_node`; the later stages (the `end_to_end` promise, retraction) use the
-same format (`solvi.experimental.process.Process`). Since 1.4.
+process promise in the modes `union`, `per_node` and `end_to_end`; the later stage (retraction) uses the same
+format (`solvi.experimental.process.Process`). Since 1.4.
 
 A node is a `solvi.build` result, a System, a Guard or a question to a person; an edge carries a predicate written as
 data (`{"answer": "kind", "in": ["auto", "property"]}`, `{"status": "abstain"}`, `{"by": "s2"}`,
@@ -424,9 +424,10 @@ The path promise. `p.guarantee()` says what the declared promise gives (`stateme
 the share `r_i` and the most runs `m_i` of each node), each run that ends carries `r.automatic` (an end node
 answered and no person answered on the path) and `r.risk` (the process risk while the promise is in force), and
 `p.explain(r)` ends with the promise. `union` (the default): P(a run ends automatically and its end answer is wrong)
-≤ Σ r_i·m_i ≤ r — a union bound over every automatic node of the graph, not over the path a run took. The first wrong
-node of a wrong path was given right inputs, so it is wrong on its own question and answered alone; no independence
-between nodes is assumed. `split="equal"` gives r_i = r / K_auto; `split={node: r_i}` or a function of the spec gives
+≤ Σ r_i·m_i ≤ r — the standard union (Bonferroni) bound, taken over every automatic node of the graph, not over the
+path a run took; what the library adds is the declared promise, replayable with the run, and the conditions under
+which it is in force. The first wrong node of a wrong path was given right inputs, so it is wrong on its own question
+and answered alone; no independence between nodes is assumed, but each node must be calibrated in place (below). `split="equal"` gives r_i = r / K_auto; `split={node: r_i}` or a function of the spec gives
 your own (a payout's error may cost more than a triage's), with Σ r_i ≤ r checked. m_i counts a node once per run a
 loop can make it run (1 plus the `max_iter` of each loop edge that leads back to it), so an equal split with a loop
 can fall out of force. The promise is in force when every automatic node keeps its own promise at its share (CRC risk
@@ -436,9 +437,33 @@ calibrated in place, on what upstream gives it in the process (its errors and th
 calibrated on clean inputs breaks it. `per_node`: each node keeps its own promise and the statement says the end
 error is not bounded. `PathWatch` follows the share of runs that take each edge (two Bernoulli CUSUMs per edge,
 reference runs from the calibration stream, h simulated by resampling them): `p.monitor(PathWatch(), reference=runs)`
-puts `r.path_drift` on every run, and a flag puts the union promise out of force until `reset()`. Whether union is
-valid and what it costs in coverage is the E1 stand (`benchmarks/process_e1.py`), not run yet.
+puts `r.path_drift` on every run, and a flag puts the union promise out of force until `reset()`.
 
-- **Missing:** the `end_to_end` promise (a threshold family calibrated on end-labelled runs), the retraction across nodes with cancelled and re-asked tickets (later stages); a run follows one path (merge "all" is not run yet); the pre-registered stand (E1 promise, E2 scale at N=300, E3 retraction) is not run — E2 at N=10 (with 2% of the decisions asking a person) is a test, not the stand
-- **Script:** `benchmarks/process_e1.py` (E1, the promise: smoke only so far). **Deadline:** 1.2.
+`end_to_end`: the process is one decider with thresholds on its nodes' signals (their confidence).
+`p.promise(mode="end_to_end", risk=r, delta=δ, family="shared_rank")`, then `p.calibrate([(input, end_label), ...])`
+on n end-labelled runs: P(a run ends automatically and its end answer is wrong) ≤ r with probability ≥ 1 − δ. The
+loss is not monotone in a vector of thresholds once routing depends on the answers, so this is learn then test (a
+binomial test per threshold of a finite grid, the library's LTT code), not conformal risk control. Each example runs
+once with no threshold (each node asked by its own system and stored; nobody is asked — a node that does not answer
+alone makes the example not automatic); at each threshold t the loss is recomputed from the recorded signals, since a
+node held back by t hands its question to a person and the run is then not automatic. The family is your choice
+(`ThresholdFamily`: `grid(spec, signals)` — a finite list fixed before any label is read —, `automatic(node,
+signal, t)`, `fingerprint()`, `procedure` "bonferroni" or "fixed"). Built in: `"shared_rank"` (the documented
+default) — one rank threshold shared by every node, a node's answer going out alone when its signal's rank among its
+own calibration signals is high enough, 64 values with Bonferroni; one parameter, no order — and `"per_node_fixed"` —
+a rank threshold per node, nodes opened one at a time from closed to fully open in the declared order (`{"kind":
+"per_node_fixed", "order": [...]}`, by default from the end nodes back to the start), tested as a fixed sequence at
+the full δ; its result depends on that order. A family of your own is valid only if its grid and order did not look
+at the calibration labels; its fingerprint is recorded and `Process.from_spec(spec, family=obj)` refuses another.
+The chosen threshold and what it was calibrated on (n, the examples' hash, the hash of the process without its
+promise, the family's fingerprint) are kept in the promise, so the spec's hash changes. At run time a node that
+answered alone with a signal the threshold does not let through is turned into "a person decides" (handed over like
+its own guard's decision); each decision step records `{"signal", "automatic"}` and `replay` recomputes it (step
+`"promise"`). Nothing certified (too few examples, too many wrong): every node's answer goes to a person. In force
+when calibrated on this very process (spec and fingerprints) with this family and the path watch has not flagged; it
+assumes the end-labelled runs are exchangeable with the stream (with noisy end labels the promise is about the noisy
+label). Which mode gives more coverage at the same r is measured by the stand below, not assumed.
+
+- **Missing:** the retraction across nodes with cancelled and re-asked tickets (a later stage); a run follows one path (merge "all" is not run yet, so the 100-node process of the promise stand cannot run); the pre-registered stands for scale (300 systems) and retraction are not run — ten systems exchanging facts (with 2% of the decisions asking a person) is a test, not the stand
+- **Script:** `benchmarks/process_e1.py` (the promise stand: a synthetic insurance claim with a known truth; union, per_node and a hand-glued baseline, and end_to_end over both built-in families at n = 500, 1000, 3000). **Deadline:** 1.2.
 - API: [solvi.experimental.process](api/process.md).

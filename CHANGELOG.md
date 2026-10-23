@@ -54,15 +54,33 @@
   `r_i` and the most runs `m_i` it can make in one run — and every run that ends carries `automatic` (an end node
   answered with no person on the path) and `risk` (the process risk while the promise is in force); `explain` ends
   with the promise. `union`: P(a run ends automatically and its end answer is wrong) ≤ Σ r_i·m_i ≤ r over every
-  automatic node of the graph, with no independence assumed; `split="equal"` (r / K_auto), `{node: r_i}` or a
+  automatic node of the graph — the standard union (Bonferroni) bound; what is new is the declared promise, replayable
+  with the run, and its in-force conditions. No independence between nodes is assumed; it assumes each node was
+  calibrated in place, on what reaches it in the process (a node calibrated on clean inputs breaks it); `split="equal"` (r / K_auto), `{node: r_i}` or a
   function of the spec (Σ r_i ≤ r checked); in force when each automatic node keeps its own promise at its share (CRC
   risk ≤ r_i; an LTT node counts at its error level with Bonferroni over the δ's and a warning), a loop leaves room
   for the node's repeated runs, no node was loaded against another fingerprint and the path watch has not flagged.
   `per_node`: each node keeps its own promise and the statement says the end error is not bounded. `PathWatch`
   (`p.monitor(watch, reference=runs)`) follows the share of runs taking each edge with Bernoulli CUSUMs whose h is
-  simulated by resampling the reference runs; a flag puts the union promise out of force. `end_to_end` is the next
-  stage (`guarantee()` raises `NotImplementedError` for it). The E1 stand's harness is `benchmarks/process_e1.py`
-  (smoke run only; the stand itself is not run).
+  simulated by resampling the reference runs; a flag puts the union promise out of force. The harness of the promise
+  stand (a synthetic insurance claim with a known truth) is `benchmarks/process_e1.py`.
+- **Process (experimental), stage 4: the `end_to_end` promise.** `p.promise(mode="end_to_end", risk=r, delta=δ,
+  family=...)` and `p.calibrate([(input, end_label), ...])`: P(a run ends automatically and its end answer is wrong)
+  ≤ r with probability ≥ 1 − δ over n end-labelled runs, by learn then test on a finite grid of thresholds on the
+  nodes' signals (their confidence), reusing the library's LTT test — not conformal risk control, as the loss is not
+  monotone once routing depends on the answers. Each example runs once with no threshold (decisions stored, nobody
+  asked); the loss at each threshold is recomputed from the recorded signals. The threshold family is the user's
+  choice: `ThresholdFamily` (`grid`, `automatic`, `fingerprint`, `procedure` "bonferroni" | "fixed"); built in
+  `"shared_rank"` (the documented default: one rank threshold shared by every node, 64 values, Bonferroni) and
+  `"per_node_fixed"` (a rank threshold per node, nodes opened one at a time in the declared order — by default from
+  the end back to the start — as a fixed sequence at the full δ). A family of your own is valid only if its grid and
+  order ignore the labels; its fingerprint is recorded and `from_spec(spec, family=obj)` refuses another. The chosen
+  threshold and what it was calibrated on (n, the examples' hash, the process's hash without its promise, the
+  family's fingerprint) are kept in the promise. At run time a node held back by the threshold hands its question to
+  a person; each decision step records `{"signal", "automatic"}` and `replay` re-checks it (step `"promise"`).
+  `guarantee()` is in force when calibrated on this very process and family and the path watch has not flagged;
+  nothing certified sends every node's answer to a person. The default order of `"per_node_fixed"` is now from the
+  end nodes back to the start (it was start to end). The harness has the end_to_end arms (`--stage 4`).
 - **`Guard.fingerprint()`**: what decides a guard's calls as one hash, read from its declarations (tools with their
   schemas and functions, policies, functions, firewalls, the authorizer, settings); building nothing. The process
   records it per guard node instead of reading the guard's private attributes.
@@ -145,7 +163,7 @@
   dispatcher answers `by="human"` (status `"human"`) with no edge for it stopped the run `"abstain"` instead of putting
   its question to the channel (`on_human="handoff"`): the hand-off skipped every result by a person, the dispatcher's
   included, not only an answer that came through the channel. Run and replay now skip only the channel's answer. Found
-  by the E1 harness.
+  by the harness of the process promise stand.
 - **A record with non-string dict keys now verifies.** The canonical JSON a record hash is taken over sorted a dict's
   keys before turning them into strings, so a body appended with `{2: …, 10: …}` was hashed in number order while its
   stored text reads back as `{"10": …, "2": …}`: `verify()` reported it as edited. Keys are now turned into their JSON

@@ -1,8 +1,9 @@
 """E1 — the process promise on a synthetic insurance claim with a known truth (the pre-registered stand, bars frozen
-2026-10-23). The harness for stage 3 of solvi.experimental.process (union with the equal and the cost split,
-per_node, and a baseline of the same nodes glued by hand); the end_to_end arms of stage 4 are registered and skipped
-until that stage exists, and adding them changes no stage-3 result (a unit's data, models and human answers depend on
-its condition and seed only).
+2026-10-23). The harness for stages 3 and 4 of solvi.experimental.process: union with the equal and the cost split,
+per_node, a baseline of the same nodes glued by hand (stage 3), and end_to_end over the two built-in threshold families
+at three sizes of the end-labelled calibration set (stage 4). Adding the stage-4 arms changes no stage-3 result (a
+unit's data, models and human answers depend on its condition and seed only; the end-labelled set comes from a stream
+of its own that only the stage-4 arms draw).
 
 The generator. A claim has hidden true variables — kind (5), amount (its band: low / mid / high), documents complete,
 fraud, region — and a common latent h. Expert i sees its own target y through x = e_y + σ_i(√(1−ρ)·ε_i + √ρ·h·(e_{y+1}
@@ -26,13 +27,18 @@ answered and every run resumed (no ticket may be lost).
 Conditions (each × 10 seeds): rho ∈ {0, 0.5} × labels ∈ {a, b} (in place, no noise); noise 0.05; calibrated apart
 (on clean inputs) × rho; a faulty expert (one check at accuracy 0.5 after calibration) with and without its
 DriftMonitor. Arms: union_equal, union_cost (r_i ∝ 1 / cost of a node's error: triage 1, check 2, payout 4), per_node
-(every node at r = 0.05), glued (the union_equal nodes run by a Python loop with run_context by hand). Sizes: fit 2000,
-node calibration 2000, test 5000 claims per seed; r = 0.05.
+(every node at r = 0.05), glued (the union_equal nodes run by a Python loop with run_context by hand); stage 4:
+e2e_<family>_n<n> — end_to_end, r = 0.05, δ = 0.1, family shared_rank or per_node_fixed (order end → start), calibrated
+by Process.calibrate on the first n ∈ {500, 1000, 3000} claims of the end-labelled stream (labels: the end label, with
+the condition's noise). Its nodes are built at max_risk 0.5 (their own guard nearly open), so the process threshold,
+not the node's, decides who answers alone; the node calibration (in place or apart) is the same as the other arms'.
+Sizes: fit 2000, node calibration 2000, test 5000 claims per seed; r = 0.05.
 
     OMP_NUM_THREADS=4 uv run python benchmarks/process_e1.py --out DIR --smoke
     OMP_NUM_THREADS=4 uv run python benchmarks/process_e1.py --out DIR --only K=10
+    OMP_NUM_THREADS=4 uv run python benchmarks/process_e1.py --out DIR --only K=10 --stage 4   # the end_to_end arms
     uv run python benchmarks/process_e1.py --out DIR --list            # the units, done or not
-    uv run python benchmarks/process_e1.py --out DIR --report          # the bars B1, B3, B5 over the finished units
+    uv run python benchmarks/process_e1.py --out DIR --report          # B1, B3, B5 and B2, B6 over the finished units
 
 Every (arm, condition, seed) unit writes DIR/units/<unit>.json (written last, atomically: it marks the unit done)
 and its own log DIR/logs/<unit>.log; a rerun skips finished units and redoes an unfinished one from scratch. A unit
@@ -66,6 +72,9 @@ PAYOUT = ["pay", "deny", "investigate"]
 GROUPS = {"c_fraud_0": ["k0"], "c_fraud_1": ["k1"], "c_fraud_2": ["k2"], "c_fraud_34": ["k3", "k4"]}
 COST = {"triage": 1.0, "check": 2.0, "payout": 4.0}
 FAULTY = "c_fraud_34"
+E2E_DELTA = 0.1
+E2E_NODE_RISK = 0.5            # the end_to_end arms' nodes: their own guard nearly open
+N_END_MAX = 3000               # the end-labelled stream; an arm with n takes its first n claims
 
 
 # --- the graph (K=10)
@@ -303,7 +312,7 @@ ARMS = {
     "per_node": {"stage": 3, "mode": "per_node", "split": None},
     "glued": {"stage": 3, "mode": "baseline", "split": "equal"},
 }
-for _fam in ("shared_rank", "per_node_fixed"):         # stage 4: registered, skipped until end_to_end exists
+for _fam in ("shared_rank", "per_node_fixed"):         # stage 4
     for _n in (500, 1000, 3000):
         ARMS[f"e2e_{_fam}_n{_n}"] = {"stage": 4, "mode": "end_to_end", "family": _fam, "n_end": _n}
 
@@ -311,6 +320,8 @@ for _fam in ("shared_rank", "per_node_fixed"):         # stage 4: registered, sk
 def shares(arm, nodes):
     """The risk each node is calibrated at → {node: r_i}."""
     a = ARMS[arm]
+    if a["mode"] == "end_to_end":
+        return {n: E2E_NODE_RISK for n in nodes}
     if a["mode"] == "per_node":
         return {n: R_PROCESS for n in nodes}
     if a["split"] == "cost":
@@ -413,7 +424,9 @@ def make_process(systems, nodes, arm, storage, queue):
         for b in BANDS:
             p.edge(c, f"p_{b}", when={"and": [ok, {"answer": "band", "eq": b}]})
     a = ARMS[arm]
-    if a["mode"] == "per_node":
+    if a["mode"] == "end_to_end":
+        p.promise(mode="end_to_end", risk=R_PROCESS, delta=E2E_DELTA, family=a["family"])
+    elif a["mode"] == "per_node":
         p.promise(mode="per_node")
     elif a["split"] == "cost":
         r_i = shares(arm, nodes)
@@ -444,8 +457,8 @@ def edge_index(p):
 def run_unit(arm, cond_name, cond, seed, sizes, unit_dir, log, status):
     """One (arm, condition, seed) → the result dict."""
     a = ARMS[arm]
-    if a["stage"] > 3:
-        raise Skip(f"arm {arm} is stage {a['stage']} (end_to_end): not implemented yet")
+    if a["stage"] > 4:
+        raise Skip(f"arm {arm} is stage {a['stage']}: not implemented yet")
     if cond["K"] != 10:
         raise Skip("K=100 needs merge 'all' (20 regional triages in parallel), which the process does not run yet")
     us = unit_seed(cond_name, seed)
@@ -459,6 +472,9 @@ def run_unit(arm, cond_name, cond, seed, sizes, unit_dir, log, status):
     cal = gen_cases(rng, sizes["cal"], cond, nodes)
     test_rng = np.random.default_rng(us + 1)
     test = gen_cases(test_rng, sizes["test"], cond, nodes, faulty=cond["faulty"] is not None)
+    end_cal = None
+    if a["mode"] == "end_to_end":                         # a stream of its own: the stage-3 streams are untouched
+        end_cal = gen_cases(np.random.default_rng(us + 2), N_END_MAX, cond, nodes)[:a["n_end"]]
     status.set(phase="fit")
     experts = fit_experts(fit, nodes, cond["rho"])
     from solvi.core.store import JSONLStorage
@@ -472,7 +488,7 @@ def run_unit(arm, cond_name, cond, seed, sizes, unit_dir, log, status):
     if a["mode"] == "baseline":
         out = run_glued(systems, nodes, test, key, sizes, log, status)
     else:
-        out = run_process(systems, nodes, arm, test, key, sizes, unit_dir, routes, log, status)
+        out = run_process(systems, nodes, arm, test, key, sizes, unit_dir, routes, log, status, end_cal=end_cal)
     out.update(arm=arm, condition=cond_name, cond=cond, seed=seed, unit_seed=us, sizes=sizes, r=R_PROCESS,
                r_i=r_i, t_calibrate_s=t_cal, t_total_s=time.time() - t0,
                node_promises={n: s.system.guards[nodes[n]["question"]].promise.record() for n, s in systems.items()},
@@ -511,13 +527,22 @@ def _tally(test, finished, nodes):
             "wrong_auto": wrong_auto, "wrong_human": wrong_hum, "per_node": per}
 
 
-def run_process(systems, nodes, arm, test, key, sizes, unit_dir, routes, log, status):
+def run_process(systems, nodes, arm, test, key, sizes, unit_dir, routes, log, status, end_cal=None):
     from solvi.experimental.process import MemoryQueue, PathWatch
     queue = MemoryQueue()
     step, B = 0, sizes["step"]
     procs, live, finished = {}, {}, {}
     watch = PathWatch(alpha=0.01, horizon=max(1000, len(test)), seed=0)
     p0 = make_process(systems, nodes, arm, None, queue)
+    e2e = None
+    if end_cal is not None:                               # end_to_end: calibrated on end-labelled runs first
+        status.set(phase="calibrate_end", i=0, n=len(end_cal))
+        tc = time.time()
+        th = p0.calibrate([(dict(c["given"]), c["end_label"]) for c in end_cal])
+        pr = p0.spec()["promise"]
+        e2e = {"n_end": len(end_cal), "thresholds": th, "calibrated_on": pr["calibrated_on"],
+               "family": pr["family"], "t_calibrate_end_s": time.time() - tc}
+        log(f"end_to_end calibrated on {len(end_cal)}: {json.dumps(th)}")
     p0.monitor(watch)
     os.makedirs(os.path.join(unit_dir, "process"), exist_ok=True)
     ei = edge_index(p0)
@@ -580,13 +605,16 @@ def run_process(systems, nodes, arm, test, key, sizes, unit_dir, routes, log, st
     sample = rs.sample(sorted(finished), min(20, len(finished)))
     rep = [procs[finished[i]["proc"]].replay(finished[i]["run"]) for i in sample]
     ok_replays = sum(1 for x in rep if x.get("ok"))
-    return {"arm_mode": ARMS[arm]["mode"], "at_end_of_stream": snap, "after_flush": final, "lost_tickets": lost,
+    out = {"arm_mode": ARMS[arm]["mode"], "at_end_of_stream": snap, "after_flush": final, "lost_tickets": lost,
             "tickets": tickets, "asks": asks, "ms_per_claim": 1000 * (time.time() - t0) / len(test),
             "guarantee": {k: g0[k] for k in ("mode", "risk", "in_force", "bound", "statement", "problems")},
             "path_watch": {"flagged": watch.flagged, "at_run": flag_at, "why": watch.why},
             "replay": {"sampled": len(rep), "ok": ok_replays,
                        "pending_sampled": len(replay_pending),
                        "pending_ok": sum(1 for x in replay_pending if x.get("ok") and x.get("pending"))}}
+    if e2e is not None:                                   # stage 4 only: a stage-3 unit's JSON is unchanged
+        out["e2e"] = e2e
+    return out
 
 
 def run_glued(systems, nodes, test, key, sizes, log, status):
@@ -700,10 +728,11 @@ def main(argv=None):
     ap.add_argument("--out", required=True)
     ap.add_argument("--smoke", action="store_true", help="tiny sizes, one seed, two conditions, known-answer checks")
     ap.add_argument("--only", default=None, help="K=10 or K=100")
-    ap.add_argument("--arms", default=None, help="comma-separated arm names (default: all; stage 4 arms are skipped)")
+    ap.add_argument("--arms", default=None, help="comma-separated arm names (default: every arm of --stage)")
     ap.add_argument("--conditions", default=None)
     ap.add_argument("--seeds", default="0-9")
-    ap.add_argument("--stage", type=int, default=3, help="the highest stage whose arms run (3 now)")
+    ap.add_argument("--stage", type=int, default=3, help="the stage whose arms run: 3 (union, per_node, glued) or "
+                    "4 (end_to_end)")
     ap.add_argument("--list", action="store_true")
     ap.add_argument("--report", action="store_true")
     ap.add_argument("--max-units", type=int, default=None, help="stop after this many units (for a resume check)")
@@ -711,7 +740,7 @@ def main(argv=None):
     only_k = int(args.only.split("=")[1]) if args.only else None
     lo, _, hi = args.seeds.partition("-")
     seeds = range(int(lo), int(hi or lo) + 1)
-    arms = [a for a in (args.arms.split(",") if args.arms else ARMS) if ARMS[a]["stage"] <= args.stage]
+    arms = [a for a in (args.arms.split(",") if args.arms else ARMS) if ARMS[a]["stage"] == args.stage]
     conds = args.conditions.split(",") if args.conditions else None
     sizes = SIZES
     if args.smoke:
@@ -835,6 +864,19 @@ def smoke_checks(out, units, say):
     cs = gen_cases(np.random.default_rng(3), 4000, {"rho": 0.0, "regions": 4, "noise": 0.05}, nodes)
     fl = np.mean([c["end"] != c["end_label"] for c in cs])
     check("label noise 0.05", abs(fl - 0.05) < 0.012, f"{fl:.4f}")
+    # the end_to_end families: grids monotone, the fixed sequence moves one node per step from the end back
+    from solvi.experimental.process import PerNodeFixed, SharedRank
+    sig = {n: list(np.random.default_rng(11).random(200)) for n in nodes}
+    grid = SharedRank().grid({}, sig)
+    mono = all([t[n] for t in grid] == sorted(t[n] for t in grid) for n in nodes)
+    let = [sum(SharedRank().automatic(n, x, t) for n in nodes for x in sig[n]) for t in grid]
+    check("shared_rank grid monotone (thresholds up, answered alone down)", mono and let == sorted(let, reverse=True)
+          and let[0] == 200 * len(nodes), f"{let[0]} … {let[-1]}")
+    order = list(reversed(list(nodes)))
+    chain = PerNodeFixed().grid({"promise": {"family": {"kind": "per_node_fixed", "order": order}}}, sig)
+    one = all(sum(x[k] != y[k] for k in nodes) <= 1 for x, y in zip(chain, chain[1:]))
+    check("per_node_fixed chain: one node per step, end nodes first", one and len(chain) == 64 * len(nodes)
+          and chain[0][order[0]] is not None and all(chain[0][k] is None for k in order[1:]), f"{len(chain)} steps")
     # the units: written, sane, the promise as declared
     for arm, cn, _, s in units:
         u = unit_id(arm, cn, s)
@@ -858,6 +900,21 @@ def smoke_checks(out, units, say):
                 check(f"{u}: r_i = r/10", all(abs(r["r_i"][n] - want[n]) < 1e-12 for n in nodes))
         if r["arm_mode"] == "per_node":
             check(f"{u}: per_node says not bounded", "end error is not bounded" in r["guarantee"]["statement"])
+        if r["arm_mode"] == "end_to_end":
+            g, e, a = r["guarantee"], r["e2e"], ARMS[r["arm"]]
+            th = e["thresholds"]
+            check(f"{u}: end_to_end calibrated and in force", g["in_force"] and g["bound"] == R_PROCESS,
+                  f"problems {g['problems']}")
+            check(f"{u}: n and family as the arm", e["n_end"] == a["n_end"] == th["n"] and e["family"]["kind"] ==
+                  a["family"] and th["procedure"] == ("bonferroni" if a["family"] == "shared_rank" else "fixed"),
+                  f"n {e['n_end']} {th['procedure']}")
+            check(f"{u}: certified threshold has calibration loss ≤ r", th["t"] is None or
+                  th["wrong"] / th["n"] <= R_PROCESS, f"{th['wrong']}/{th['n']}, automatic {th['automatic']}")
+            tol = 3 * math.sqrt(R_PROCESS * (1 - R_PROCESS) / m["n"])    # the promise holds w.p. 1 − δ, on a small test
+            check(f"{u}: e_hat ≤ r + 3 sd of a {m['n']}-claim test", m["e_hat"] <= R_PROCESS + tol,
+                  f"{m['e_hat']:.4f} (≤ r: {m['e_hat'] <= R_PROCESS}), coverage {m['coverage']:.3f}")
+            check(f"{u}: replay ok", r["replay"]["ok"] == r["replay"]["sampled"] and
+                  r["replay"]["pending_ok"] == r["replay"]["pending_sampled"], json.dumps(r["replay"]))
         m0 = r["at_end_of_stream"]
         check(f"{u}: e_hat counts the automatic share only", m["e_with_human"] >= m["e_hat"]
               and m0["pending"] + m0["auto"] + m0["human"] + m0["other"] == m0["n"], "")
@@ -873,7 +930,7 @@ def smoke_checks(out, units, say):
     say(f"smoke: {sum(c['ok'] for c in checks)}/{len(checks)} checks ok")
 
 
-# --- the report: bars B1, B3, B5 over the finished units
+# --- the report: bars B1, B3, B5 (stage 3) and B2, B6 (stage 4) over the finished units
 
 def report(out):
     rows = [json.load(open(os.path.join(out, "units", f))) for f in sorted(os.listdir(os.path.join(out, "units")))
@@ -889,6 +946,32 @@ def report(out):
               f"{np.mean([x['e_hat'] for x in m]):10.4f}  {np.mean([x['human_share'] for x in m]):5.3f}  "
               f"{np.mean([r['at_end_of_stream']['pending_share'] for r in rs]):10.3f}  "
               f"{sum(r['lost_tickets'] for r in rs)}")
+    cov = {k: [r["after_flush"]["coverage"] for r in rs] for k, rs in by.items()}
+    conds = sorted({cn for _, cn in by})
+    e2e = [a for a in ARMS if ARMS[a]["mode"] == "end_to_end"]
+    if any((a, cn) in by for a in e2e for cn in conds):
+        print("\nB2: coverage(end_to_end, shared_rank) / coverage(union, equal), means over seeds (bar ≥ 1.5)")
+        for cn in conds:
+            base = np.mean(cov[("union_equal", cn)]) if ("union_equal", cn) in cov else float("nan")
+            parts = []
+            for n in (500, 1000, 3000):
+                k = (f"e2e_shared_rank_n{n}", cn)
+                if k in cov:
+                    parts.append(f"n{n} {np.mean(cov[k]):.3f}/{base:.3f} = {np.mean(cov[k]) / base:.2f}×")
+            if parts:
+                print(f"  {cn:24s} " + "   ".join(parts))
+        print("\nB6: per_node_fixed — valid (e_hat ≤ r in ≥ 9/10 seeds) and coverage / shared_rank (≥ 1.2× at n=3000 "
+              "goes to the author)")
+        for cn in conds:
+            parts = []
+            for n in (500, 1000, 3000):
+                kf, ks = (f"e2e_per_node_fixed_n{n}", cn), (f"e2e_shared_rank_n{n}", cn)
+                if kf in by:
+                    ok = sum(r["after_flush"]["e_hat"] <= R_PROCESS for r in by[kf])
+                    ratio = (np.mean(cov[kf]) / np.mean(cov[ks])) if ks in cov else float("nan")
+                    parts.append(f"n{n} valid {ok}/{len(by[kf])} cov {np.mean(cov[kf]):.3f} ({ratio:.2f}×)")
+            if parts:
+                print(f"  {cn:24s} " + "   ".join(parts))
     return 0
 
 
