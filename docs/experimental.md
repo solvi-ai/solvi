@@ -685,7 +685,11 @@ fresh learner its train labels again. A training in flight refuses the save, unl
 it first (recorded; it stays counted against the budget). In the tests, a loaded loop continued with the same
 decisions and records as the loop it was saved from, through a promotion and a rollback after the load, and its
 replay was exact; with the tiny LoRA checkpoint, a new process did the same. Unmeasured beyond that; the files are
-trusted after their hashes match, so load only checkpoints you wrote.
+trusted after their hashes match, so load only checkpoints you wrote. Threat model: the pickles in a checkpoint are
+run only after HMAC verification (the signature and every file's hash; a file the manifest does not list is refused),
+and without a secret there is no tamper protection against a writer of the folder — the check is a plain SHA-256 that
+anyone can recompute, and `load` warns. A checkpoint saved with a secret is refused without one. A save holds the
+part's lock for all its writes, so the part's decisions wait for it (unmeasured).
 
 Measured once on real streams: three public intent sets with a TF-IDF + logistic-regression answerer, 20 seeds per
 set, a shift to held-out intents, corrupted text and noisy labels; the numbers, the setting and the prior work are in

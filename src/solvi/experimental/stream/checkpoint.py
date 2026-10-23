@@ -22,10 +22,16 @@ file's SHA-256), `manifest.sig` (HMAC-SHA256 of the manifest under the loop's `s
 `labels.jsonl`, `records.jsonl`, `policy.pkl`, `policy0.pkl`, `monitor.pkl`, `monitor0.pkl` and `versions/<v>.*`.
 A save writes a new folder under a temporary name, syncs it, renames it, then replaces `CURRENT` (`os.replace`): a
 crash at any point leaves `CURRENT` naming a complete checkpoint, the previous one until the switch. Older folders are
-removed after the switch. `load` also takes the checkpoint folder itself.
+removed after the switch, under the same locks as the save (so a second save of the same loop waits for the first one's
+cleanup), and the folder `CURRENT` names is never removed. One loop saves into a directory: two loops sharing one are
+not serialised against each other. A save holds the part's version lock and the loop's lock for all its writes — the
+state, the labels, the pickles and every version's files (a LoRA version's adapter), each fsynced — so the part's
+decisions and the loop's controls wait for the whole save; the cost is unmeasured. `load` also takes the checkpoint
+folder itself.
 
 What load refuses (ValueError): a manifest whose signature does not match (tampered, or another secret — the secret is
-never written), a file whose hash is not the manifest's or that is missing, a learner of another class, a part whose
+never written), a file whose hash is not the manifest's or that is missing, a file in the folder that the manifest does
+not list, a checkpoint saved with a secret loaded without one, a learner of another class, a part whose
 model has other weights, a version file whose fingerprint is not the recorded one, an `initial=` with another
 fingerprint, a store that does not contain the checkpoint's chain head or holds records of this loop after it (those
 decisions are not in the saved state), a store given to a checkpoint saved without one or the other way round, a
@@ -40,9 +46,16 @@ event; it stays counted against the budget; nothing restarts it — the policy m
 A save and a load write no record: a loaded loop continues the saved records, so it and the loop it was saved from give
 the same records on the same continuation, and `replay()` on it rebuilds every decision, before and after the load.
 
-Trust: the pickles (policy, monitor, a `HeadVersion`'s model, a label that is not JSON) are loaded only after their
-hashes match the signed manifest; with `secret=` that is an HMAC, without one only a check against accidental damage.
-Load checkpoints you wrote. Unmeasured: tests on fake learners and a tiny random checkpoint only."""
+Trust: the pickles (policy, monitor, a `HeadVersion`'s model, a label that is not JSON) are run only after the
+manifest's signature and every file's hash are verified, and a folder holding a file the manifest does not list is
+refused; the version files copied into `versions_dir` are written from the verified bytes. With `secret=` the signature
+is an HMAC, so a file changed or added by someone without the secret is refused. Without a secret it is a plain SHA-256
+that anyone can recompute: a check against accidental damage, with no tamper protection against whoever can write the
+folder, and `load` warns (`CheckpointTrustWarning`). Whether the checkpoint was keyed is recorded inside the signed
+manifest (`keyed`), so with the secret a flip of it is caught by the HMAC, and a keyed checkpoint is refused without
+the secret; nothing written in the folder can stop its writer from forging an unkeyed checkpoint, which is why the
+unkeyed path warns. Load checkpoints you wrote. Unmeasured: tests on fake learners and a tiny random checkpoint
+only."""
 from __future__ import annotations
 
 import base64
@@ -56,6 +69,7 @@ import os
 import pickle
 import secrets
 import shutil
+import warnings
 from collections import deque
 from pathlib import Path
 
@@ -67,6 +81,11 @@ from .serving import HeadVersion
 
 FORMAT = "solvi adapter loop checkpoint v1"
 CURRENT = "CURRENT"
+_META = ("manifest.json", "manifest.sig")
+
+
+class CheckpointTrustWarning(UserWarning):
+    """A checkpoint loaded without a secret: its integrity check detects damage, not tampering."""
 
 
 # ───────────────────────────────────────────────────────────── small helpers
@@ -287,10 +306,27 @@ def save_loop(loop, dir, *, cancel=False) -> dict:
         except BaseException:
             shutil.rmtree(tmp, ignore_errors=True)
             raise
-    for old in root.iterdir():                           # older checkpoints and leftovers of crashed saves
-        if old.name != name and old.is_dir() and (old.name.startswith("ckpt-") or old.name.startswith(".tmp-ckpt-")):
-            shutil.rmtree(old, ignore_errors=True)
+        _cleanup(root, name)                             # under the lock: no other save of this loop runs meanwhile
     return {"path": root / name, "manifest": _sha(mbytes), "n": manifest["n"], "files": sorted(files)}
+
+
+def _current(root: Path):
+    try:
+        return (root / CURRENT).read_text().strip()
+    except OSError:
+        return None
+
+
+def _cleanup(root: Path, name: str):
+    """Remove older checkpoints, leftovers of crashed saves and a stale `.CURRENT.tmp`; never `name` (this save's) nor
+    the folder `CURRENT` names (read again before every removal)."""
+    for old in sorted(root.iterdir()):
+        if old.name == name or old.name == _current(root):
+            continue
+        if old.is_dir() and (old.name.startswith("ckpt-") or old.name.startswith(".tmp-ckpt-")):
+            shutil.rmtree(old, ignore_errors=True)
+        elif old.name == f".{CURRENT}.tmp" and old.is_file():
+            old.unlink(missing_ok=True)
 
 
 def _switch(root: Path, name: str):
@@ -324,16 +360,29 @@ def _verified(folder: Path, secret) -> tuple:
     m = json.loads(mbytes)
     if m.get("format") != FORMAT:
         raise ValueError(f"{folder}: not an adapter loop checkpoint ({m.get('format')!r})")
-    if m.get("keyed") and not secret:
-        raise ValueError("this checkpoint was saved by a loop with a secret: give secret= to load it")
-    if not m.get("keyed") and secret:
+    # `keyed` is read before the signature check only to pick the refusal; with the secret, a flipped `keyed` fails the
+    # HMAC below; without it nothing can be authenticated (see the module docstring).
+    keyed = bool(m.get("keyed")) or sig.get("kind") == "hmac-sha256"
+    if keyed and not secret:
+        raise ValueError("this checkpoint was saved with a secret: give secret= to load it (without the secret it "
+                         "cannot be verified, so it is refused)")
+    if not keyed and secret:
         raise ValueError("this checkpoint was saved by a loop without a secret; the coin would differ with one")
     want = _sig(secret, mbytes)
     if sig.get("kind") != want["kind"] or not hmac.compare_digest(str(sig.get("sig")), want["sig"]):
         raise ValueError("the manifest's signature does not match: the manifest was changed, or this is another "
                          "secret's checkpoint")
+    files = m["files"]
+    for rel in files:
+        parts = rel.split("/")
+        if rel.startswith("/") or "\\" in rel or any(q in ("", ".", "..") for q in parts) or rel in _META:
+            raise ValueError(f"checkpoint file name {rel!r} is not allowed")
+    extra = sorted(rel for p in folder.rglob("*") if not p.is_dir()
+                   for rel in [p.relative_to(folder).as_posix()] if rel not in files and rel not in _META)
+    if extra:
+        raise ValueError(f"checkpoint folder holds files the manifest does not list (unlisted, refused): {extra[:5]}")
     data = {}
-    for rel, h in m["files"].items():
+    for rel, h in files.items():
         p = folder / rel
         if not p.is_file():
             raise ValueError(f"checkpoint file {rel} is missing")
@@ -369,6 +418,11 @@ def load_loop(cls, dir, learner, *, system=None, storage=None, versions_dir=None
     if isinstance(secret, str):
         secret = secret.encode()
     secret = bytes(secret) if secret else None
+    if secret is None:
+        warnings.warn("AdapterLoop.load without secret=: the checkpoint's integrity check is a plain SHA-256 that "
+                      "anyone can recompute — it detects damage, not tampering, and the policy, monitor, version and "
+                      "label pickles in it are run; load only checkpoints you wrote", CheckpointTrustWarning,
+                      stacklevel=3)
     folder = _folder(dir)
     m, data = _verified(folder, secret)
     st = json.loads(data["state.json"])
@@ -423,11 +477,14 @@ def load_loop(cls, dir, learner, *, system=None, storage=None, versions_dir=None
     loop._policy0 = data["policy0.pkl"]
     loop._monitor0 = pickle.loads(data["monitor0.pkl"])  # noqa: S301
     _restore(loop, m, st, data, folder, groups)
-    if versions_dir is not None:                         # the version files a replay reads
-        for f in sorted((folder / "versions").iterdir()):
-            dst = loop.versions_dir / f.name
-            if not f.name.startswith("0.") and not dst.exists():   # version 0 is never saved there
-                shutil.copy2(f, dst)
+    if versions_dir is not None:                         # the version files a replay reads: the verified bytes only
+        for rel, b in sorted(data.items()):
+            if not rel.startswith("versions/"):
+                continue
+            fname = rel[len("versions/"):]
+            dst = loop.versions_dir / fname
+            if "/" not in fname and not fname.startswith("0.") and not dst.exists():   # version 0 is never saved there
+                _write(dst, b)
     if system is not None:                               # serve the saved served version
         srv = loop._base if loop.served == 0 else loop._vs[loop.served].get("served_as")
         if srv is not None:
@@ -513,4 +570,4 @@ def _restore(loop, m, st, data, folder, groups):
         loop.log = [tuple(json.loads(line)) for line in data["records.jsonl"].decode().splitlines() if line]
 
 
-__all__ = ["CURRENT", "FORMAT", "load_loop", "save_loop"]
+__all__ = ["CURRENT", "FORMAT", "CheckpointTrustWarning", "load_loop", "save_loop"]

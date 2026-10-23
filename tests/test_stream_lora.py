@@ -243,6 +243,61 @@ def test_a_pass_in_flight_on_a_model_without_adapters_is_untouched_by_a_staging_
     assert not errors and not bad and n[0] > 0, (errors[:3], len(bad), n[0])
 
 
+def test_a_pass_held_mid_way_is_not_changed_by_a_staging_thread(ckpt, trained):
+    """The deterministic form of the test above: a forward pre-hook on the model's second layer holds the scoring
+    thread's pass mid-way; the main thread then stages the adapter and switches it on. With the network gate, stage()
+    waits for the pass (the hook gives up after 1 s and the pass ends plain); without it the second half of the pass
+    would run through the active adapter and the logits would differ from the plain checkpoint's."""
+    import re
+
+    import numpy as np
+    ad = trained[4].adapter
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        m, part = _part(ckpt)
+    x = _toy(1, 43)[0][0]
+
+    def raw():
+        with m._lock:
+            m._cache.clear()
+        z, act = part._raw([x])[0]
+        return np.asarray(z, float), act
+    ref = {}
+    t = threading.Thread(target=lambda: ref.update(r=raw()))       # the scoring thread's own setting
+    t.start()
+    t.join()
+    net = m.scorer.model
+    layer = next(mod for name, mod in net.named_modules() if re.fullmatch(r".*layers\.1", name))
+    mid, go, tid = threading.Event(), threading.Event(), [None]
+
+    def hook(mod, args):
+        if threading.get_ident() == tid[0] and not mid.is_set():
+            mid.set()
+            go.wait(1.0)                     # with the gate nothing can install meanwhile: this times out
+    h = layer.register_forward_pre_hook(hook)
+    out = {}
+
+    def score():
+        tid[0] = threading.get_ident()
+        out["r"] = raw()
+    th = threading.Thread(target=score)
+    th.start()
+    try:
+        assert mid.wait(10)
+        lora.stage(part, ad)                 # waits at the gate for the pass in flight; without the gate, goes on
+        with lora.using(m.scorer, ad.name):  # the adapter on: the held pass would finish through it
+            go.set()
+            th.join(5)
+    finally:
+        go.set()
+        th.join(5)
+        h.remove()
+        lora.unstage(part, ad)
+    assert not th.is_alive()
+    z, act = out["r"]
+    assert np.array_equal(z, ref["r"][0]) and act == ref["r"][1], (np.abs(z - ref["r"][0]).max(), act, ref["r"][1])
+
+
 def test_a_version_saves_loads_and_is_found_by_its_hash(trained, tmp_path):
     m, part, learner, v0, v1 = trained
     files = v1.save(tmp_path, 3)

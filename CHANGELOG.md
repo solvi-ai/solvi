@@ -360,7 +360,14 @@
   records, policy and version files, an edited manifest and another secret are refused; on the tiny LoRA checkpoint a
   version trained in a subprocess is promoted, saved, loaded in a new process (the adapter installed), continued with
   the same decisions and records, and the rescored replay is exact. Unmeasured: no stand; the files are trusted once
-  their hashes match (pickles are loaded), so load only checkpoints you wrote.
+  their hashes match (pickles are loaded), so load only checkpoints you wrote. Fixed after review: `load` refuses a
+  folder holding a file the manifest does not list and writes the version files into `versions_dir` from the
+  verified bytes (before, an unlisted `versions/<v>.pkl` was copied and unpickled by `replay(rescore=True)`); a
+  checkpoint saved with a secret is refused without one (`keyed` is recorded in the signed manifest); a load without
+  a secret warns (`CheckpointTrustWarning`: a plain SHA-256 detects damage, not tampering); the removal of older
+  folders runs under the save's locks and never removes the folder `CURRENT` names (before, two concurrent saves could
+  leave `CURRENT` naming a removed folder); a save holds the part's version lock for all its writes, so the part's
+  decisions wait for it (unmeasured).
 - **A secret for the supervision and audit draws: `Dispatcher(secret=)`** (`solvi.core.dispatch`; security). The
   draws were `sha256(f"{seed}|{input hash}|{n}")` with the public default `seed=0`, so whoever could vary the inputs
   could compute which decisions would be supervised or audited and avoid them. With `secret=` (bytes or str; None reads
@@ -459,7 +466,10 @@
   scorer now has a gate: plain passes share it, and every change to the network (install, switch, remove, the copy a
   training starts from) holds it alone, so passes in flight finish first and new ones wait. Plain passes still run in
   parallel; the adapter's disabled path gives the plain checkpoint's logits bit for bit (tested while an adapter is
-  staged and unstaged 40 times beside a scoring thread).
+  staged and unstaged 40 times beside a scoring thread, and by a pass held mid-way while another thread stages the
+  adapter and switches it on). With `ThreadRunner` the copy a training starts from is made in the loop's process
+  under the gate, so decisions on the model wait while it is made; unmeasured (the default `SubprocessRunner` copies
+  in the child).
 - **DriftMonitor no longer flags "mean confidence up" on an unchanged stream** (`solvi.core.guarantees.drift`). The
   window z test of the mean confidence (and act probability) used the window's own spread; on a skewed signal
   (confidence near 1 with a few low values) a window that by chance misses the low tail has a higher mean and a much

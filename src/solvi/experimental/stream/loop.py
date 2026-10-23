@@ -1231,7 +1231,9 @@ class AdapterLoop:
         """Save the loop's whole state to `dir` (see `stream.checkpoint`): written to a temporary folder, then switched
         in atomically, so a crash in the middle leaves the previous checkpoint usable. A training in flight refuses the
         save (RuntimeError) unless cancel=True, which cancels it first (`cancel_training`, a "cancel" event). → {"path",
-        "manifest", "n", "files"}. Writes no record otherwise."""
+        "manifest", "n", "files"}. Writes no record otherwise. The save holds the part's version lock and the loop's lock
+        for all its writes (every version's files, each fsynced, included): the part's decisions and the loop's controls
+        wait for it; unmeasured."""
         from .checkpoint import save_loop
         return save_loop(self, dir, cancel=cancel)
 

@@ -83,12 +83,17 @@ versions that still have a model (through `Served.save`, version 0 included), th
 budget's counters, the policy (now and as built), the `RiskDetector` (`dump()`), the score monitor, the rate's window,
 the label store `labels.jsonl` and the records `records.jsonl` (or, with a `TraceStorage`, its chain head) — into
 `dir/ckpt-<n>-<id>/`, then replaces `dir/CURRENT` atomically, so a crash leaves the previous checkpoint usable.
-`manifest.json` lists every file's SHA-256 and is signed (`manifest.sig`, HMAC-SHA256 under the loop's secret). `load`
-refuses a tampered or missing file, another secret, another learner class, a part with other weights, a version file
+`manifest.json` lists every file's SHA-256 and is signed (`manifest.sig`, HMAC-SHA256 under the loop's secret,
+SHA-256 without one). Threat model: the pickles in a checkpoint are run only after the HMAC and every file's hash are
+verified, so with a secret a file changed or added by someone without it is refused; without a secret there is no
+tamper protection against a writer of the folder (a plain SHA-256 anyone can recompute), and `load` warns
+(`CheckpointTrustWarning`). `load` refuses a tampered, missing or unlisted file, a checkpoint saved with a secret
+loaded without one, another secret, another learner class, a part with other weights, a version file
 with another fingerprint, a store without the chain head or with records after it. The learner is given fresh and fed
 the saved train labels again. A training in flight refuses the save unless `cancel=True`. A loaded loop continues with
 the same decisions and records as the loop it was saved from and `replay()` rebuilds every decision before and after
-the load. Unmeasured.
+the load. A save holds the part's version lock and the loop's lock for all its writes, so the part's decisions wait
+for it; one loop saves into a directory. Unmeasured.
 
 ::: solvi.experimental.stream.checkpoint
 
