@@ -88,6 +88,30 @@ def test_non_string_keys_are_written_as_their_json_strings_before_sorting():
     assert _jkeys(d) is d
 
 
+def test_list_tuple_and_dict_subclasses_are_walked_as_json_writes_them():
+    """json.dumps writes a list / tuple subclass as an array and a dict subclass as an object: their dicts' keys are
+    turned into JSON strings before sorting too, and string-keyed ones come back as they were."""
+    import collections
+
+    from solvi.core.store import _jkeys
+
+    class L(list):
+        pass
+
+    class T(tuple):
+        pass
+
+    class D(dict):
+        pass
+    plain = '{"a":[{"10":"b","2":"a"}]}'
+    for wrap in (L, T, list, tuple):
+        assert _cj({"a": wrap([{2: "a", 10: "b"}])}) == plain
+        assert _cj({"a": wrap([D({2: "a", 10: "b"})])}) == plain
+        assert _cj({"a": wrap([collections.OrderedDict([(2, "a"), (10, "b")])])}) == plain
+        same = wrap([{"x": 1}])
+        assert _jkeys(same) is same and json.dumps(same) == '[{"x": 1}]'
+
+
 @pytest.mark.parametrize("d", [{1: "a", "1": "b"}, {1.0: "a", "1.0": "b"}, {None: 0, "null": 1}, {"x": {True: 0, "true": 1}}])
 def test_two_keys_that_become_one_json_key_are_refused(d):
     with pytest.raises(ValueError, match="two dict keys"):
