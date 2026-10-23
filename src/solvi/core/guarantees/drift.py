@@ -37,6 +37,9 @@ minimum. So on a stream that has not changed, the chance of a false flag within 
 at most alpha (default 1%), as far as each test's p-value is exact and the reference stands for the stream; a longer
 stream gets alpha per horizon.
 
+A decision marked by an identity canary (solvi.core.guarantees.canary: the remote model answering is not the one of the
+reference) is flagged "identity" at once, whatever min_signals says.
+
 It is a signal, not a verdict: what to do — recalibrate, escalate, ask for labels — is the caller's. Simulated on
 independent decisions (benchmarks/drift_simulation.py): 6 of 1,152 unchanged streams were flagged within 1,000
 decisions; a fall of the share answered alone from 73% to 13% was flagged 23–27 decisions later whatever the window; a
@@ -415,6 +418,12 @@ class DriftMonitor:
                     rep["why"].append(why)
             rep["drift"] = len(rep["flags"]) >= self.min_signals
             rep["seen"] = self.seen
+        from .canary import changed_of
+        ch = changed_of(decision)                    # an identity canary found another model behind the name
+        if ch is not None:
+            rep["flags"].append("identity")
+            rep["why"].append(f"the remote model changed behind its name (identity canary event {ch.get('event')})")
+            rep["drift"] = True
         self._flagged = bool(rep["drift"])
         self.history.append(rep)
         return rep
