@@ -291,6 +291,71 @@ def ltt_threshold(score, wrong, error=0.10, delta=0.10, grid=None, procedure="bo
     return float(grid[hit[0]]) if len(hit) else float("inf")
 
 
+LABEL_RULE = ("confident learning (Northcutt, Jiang & Chuang 2021), prune by noise rate: per answer j the threshold t_j "
+              "is the mean probability of j over the examples labelled j; an example's confident answer is the most "
+              "probable k with p_k >= t_k; the counts (given y, confident k), rescaled to the number labelled y, estimate "
+              "how many labels y are really k; that many examples labelled y with the largest margin p_k - p_y are "
+              "flagged, k suggested")
+
+
+def label_issues(probs, labels, ids=None):
+    """Suspected label errors among labelled calibration examples, by confident learning (cleanlab's default rule,
+    `prune_by_noise_rate`, written out here: no dependency, no fitting) — see LABEL_RULE.
+    probs: one {answer: probability} per example, from a model that did not learn from these examples (out of sample);
+    labels: the given answer per example (None: not checked — a label with several right answers, or one the
+    probabilities do not cover); ids: a name per example (default: its index). → {"count", "ids", "suggested" ({id:
+    answer}), "checked", "thresholds", "rule"}.
+
+    It changes nothing: the calibration still uses every label. What it cannot tell apart: an example the model is
+    confidently wrong about looks the same as a wrong label, so on a model with many confident mistakes most flags are
+    the model's errors (false positives as label errors); a label error on an example the model is unsure of is
+    rarely flagged (false negatives). Read the list, check the flagged labels, recalibrate if some were wrong."""
+    probs, labels = list(probs), list(labels)
+    if len(probs) != len(labels):
+        raise ValueError("probs and labels must have the same length")
+    ids = list(range(len(probs))) if ids is None else list(ids)
+    rows = [(i, p, y) for i, p, y in zip(ids, probs, labels)
+            if y is not None and isinstance(p, dict) and y in p]
+    sums, n_of = {}, {}
+    for _, p, y in rows:
+        sums[y] = sums.get(y, 0.0) + float(p[y])
+        n_of[y] = n_of.get(y, 0) + 1
+    thr = {y: sums[y] / n_of[y] for y in sums}
+    joint = {}                                       # (given, confident) → count
+    for _, p, y in rows:
+        conf = [(float(p[k]), k) for k in p if k in thr and float(p[k]) >= thr[k]]
+        if conf:
+            k = max(conf, key=lambda c: c[0])[1]
+            joint[(y, k)] = joint.get((y, k), 0) + 1
+    flagged, suggested = {}, {}
+    for y in n_of:
+        tot = sum(c for (g, _), c in joint.items() if g == y)
+        for (g, k), c in joint.items():
+            if g != y or k == y or not tot:
+                continue
+            m = int(round(c * n_of[y] / tot))          # the calibrated count of labels y that are really k
+            if not m:
+                continue
+            cand = sorted(((float(p.get(k, 0.0)) - float(p[y]), j, i) for j, (i, p, gy) in enumerate(rows) if gy == y),
+                          key=lambda t: (-t[0], t[1]))
+            for margin, j, i in cand[:m]:
+                if margin > 0 and j not in flagged:     # a label the model prefers to the given one
+                    flagged[j], suggested[i] = i, k
+    order = sorted(flagged)
+    return {"count": len(order), "ids": [flagged[j] for j in order], "suggested": suggested, "checked": len(rows),
+            "thresholds": {str(k): round(v, 4) for k, v in thr.items()}, "rule": LABEL_RULE}
+
+
+def label_warning(issues, n):
+    """The warning line of label_issues' result, or None when nothing was flagged."""
+    if not issues or not issues["count"]:
+        return None
+    shown = ", ".join(map(str, issues["ids"][:20])) + (" ..." if issues["count"] > 20 else "")
+    return (f"{issues['count']} of {n} calibration labels look wrong by confident learning (examples {shown}): the model "
+            "confidently gives another answer there. The calibration used them as given; check them — a wrong label "
+            "moves the threshold — or they are the model's confident mistakes (see label_issues)")
+
+
 def conformal_quantile(scores, alpha):
     """The ⌈(n + 1)(1 − alpha)⌉-th smallest score; inf when there are too few (n < 1/alpha − 1)."""
     s = np.sort(np.asarray(scores, float))
@@ -498,6 +563,6 @@ def group_name(path):
     return " / ".join(path) if path else "(the rest of the stream)"
 
 
-__all__ = ["GroupBy", "accuracy_at", "certify_groups", "check_rate", "conformal_quantile", "coverage_at", "crc_threshold", "ece",
+__all__ = ["GroupBy", "accuracy_at", "certify_groups", "check_rate", "conformal_quantile", "label_issues", "coverage_at", "crc_threshold", "ece",
            "evaluate", "group_name", "group_nodes", "group_path", "group_thresholds", "loss_budget", "ltt_certified", "ltt_grid", "ltt_threshold",
            "node_of", "reliability", "separation", "set_scores", "summary", "threshold_for"]

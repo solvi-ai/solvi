@@ -326,7 +326,7 @@ def test_rank_scale_lets_a_cascade_use_both_models_when_their_signals_differ_in_
     assert ir["scale"] == "raw" and ik["scale"] == "rank" and rank.scale == "rank" and len(rank.ranks) == 2
     assert ir["answered_by"][0] < 0.05 and raw.scale == "raw" and raw.ranks is None
     assert any("no better than a single model" in w and 'scale="rank"' in w for w in ir["warnings"])
-    assert ik["answered_by"][0] > 0.05 and "warnings" not in ik
+    assert ik["answered_by"][0] > 0.05 and not [w for w in ik.get("warnings", []) if "look wrong" not in w]
     assert ik["answered"] > ir["answered"] + 0.05
     assert rank.guarantee["signal"] == "shared-rank"                  # a name, as a part's "act" / "confidence"
     assert raw.guarantee["signal"] == "shared"
