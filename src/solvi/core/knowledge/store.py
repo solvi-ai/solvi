@@ -282,17 +282,36 @@ def _effective(units):
     (units))] → {item id: {"periods": [[lo, hi], ...], "contested": [[lo, hi], ...]}}, or None when the times on the
     key do not compare."""
     try:
-        segs = _segments([u[3] for u in units])
+        units = [u for u in units if u[3][0] is None or u[3][1] is None or u[3][0] < u[3][1]]   # empty: never holds
+        order = sorted(range(len(units)), key=lambda k: (units[k][3][0] is not None, units[k][3][0]
+                                                          if units[k][3][0] is not None else 0))
+        rank = {k: n for n, k in enumerate(order)}      # position by since (None first)
+        starts, ends = defaultdict(list), defaultdict(list)
+        active = []                                     # the covering versions' positions, in since order
+        for k, u in enumerate(units):
+            if u[3][0] is None:
+                insort(active, rank[k])
+            else:
+                starts[u[3][0]].append(rank[k])
+            if u[3][1] is not None:
+                ends[u[3][1]].append(rank[k])
         out = {u[1]: {"periods": [], "contested": []} for u in units}
-        for seg in segs:
-            cov = [u for u in units if _covers_seg(u[3], seg)]
-            if not cov:
+        for seg in _segments([u[3] for u in units]):
+            if seg[0] is not None:
+                for n in ends.get(seg[0], ()):
+                    if n in active:
+                        active.remove(n)
+                for n in starts.get(seg[0], ()):
+                    insort(active, n)
+            if not active:
                 continue
-            top = cov[0][3][0]
-            for u in cov[1:]:
-                if _lo_lt(top, u[3][0]):
-                    top = u[3][0]
-            best = [u for u in cov if not _lo_lt(u[3][0], top) and not _lo_lt(top, u[3][0])]
+            top = units[order[active[-1]]][3][0]
+            best = []
+            for n in reversed(active):
+                u = units[order[n]]
+                if _lo_lt(u[3][0], top):
+                    break
+                best.append(u)
             names = {u[0] for u in best}
             best = [u for u in best if not (u[4] & names)]
             vals = {u[2] for u in best}
@@ -1641,6 +1660,10 @@ def _inside(iv, ivs):
         return True
 
 
+def _time_kind(x):
+    return "number" if isinstance(x, (int, float)) and not isinstance(x, bool) else type(x).__name__
+
+
 def _walk_key_valid(ids, live, arank, values, res, units=None):
     """_walk_key on a key where assertions carry `valid` (see the module docstring) → the same {id: (state,
     refuted_at, refuted_by, dispute_opened_at)}. A version is an item's assertions of one since (an item told for two
@@ -1655,6 +1678,9 @@ def _walk_key_valid(ids, live, arank, values, res, units=None):
     writers = defaultdict(set)                          # assertion's interval and rank, every writer seen asserting it
     lost = defaultdict(set)                             # version → the versions that took its overlap
     holders, disputed, refuted, dopen = set(), set(), {}, None
+    kinds = {_time_kind(_interval(e[3].get("valid"))[0]) for e in ev if e[1] == 0}
+    mixed = len(kinds - {"NoneType"}) > 1              # times of several types: every version is a candidate
+    by_since = defaultdict(set)                         # since → the versions seen with it (rival candidates)
 
     def rival(u, v):
         return values[u[0]] != values[v[0]] and _overlap(seen[u][0], seen[v][0]) and \
@@ -1680,7 +1706,10 @@ def _walk_key_valid(ids, live, arank, values, res, units=None):
         disputed.discard(u)
         refuted.pop(u, None)
         lost.pop(u, None)
-        rivals = sorted(v for v in holders | disputed if rival(u, v))
+        sk = repr(float(iv[0])) if isinstance(iv[0], (int, float)) and not isinstance(iv[0], bool) else u[1]
+        by_since[sk].add(u)
+        cands = (holders | disputed) if mixed else [v for v in by_since[sk] if v in holders or v in disputed]
+        rivals = sorted(v for v in cands if rival(u, v))
         verdict = {v: _beats(a, r, iv, a.get("by"), seen[v]) for v in rivals}
         beaten = [v for v in rivals if verdict[v] < 0]
         if beaten:
