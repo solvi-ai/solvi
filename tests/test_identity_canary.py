@@ -184,3 +184,113 @@ def test_arguments_checked():
     with pytest.raises(TypeError):
         IdentityCanary(PROBES).attach(object())
     assert math.isfinite(IdentityCanary(PROBES).tol)
+
+
+def _routed(srv, **kw):
+    m = _model(srv)
+    c = IdentityCanary(PROBES, **kw).attach(m)
+    part = m.decision("team", "Which team?", "email", TEAMS)
+    cat = Catalog()
+    part.question(cat, "route")
+    return c, System(cat, [Question("route", "Route", Answer.choice(TEAMS))])
+
+
+def test_the_mark_reaches_drift_through_responses_and_a_dispatcher():
+    import warnings
+
+    from solvi.core.dispatch import Dispatcher
+    from solvi.core.guarantees.canary import changed_of
+    srv = Server()
+    c, s = _routed(srv)
+    c.probe()
+    mon = DriftMonitor(window=4, sequential=False)
+    for i in range(4):
+        assert not mon.observe(s.ask({"email": f"charged {i}"}), question="route")["drift"]
+    srv.swapped = True
+    assert c.probe()["verdict"] == "changed"
+    r = s.ask({"email": "charged after"})
+    assert changed_of(r)["event"] == 2 and changed_of(r, "route") == changed_of(r)
+    rep = mon.observe(r, question="route")
+    assert rep["drift"] and "identity" in rep["flags"]
+    # the same through a Dispatcher (System 1 only: the drift is warned about, there is no slow path)
+    srv2 = Server()
+    c2, s2 = _routed(srv2)
+    c2.probe()
+    disp = Dispatcher(s2, monitor=DriftMonitor(window=4, sequential=False))
+    for i in range(4):
+        disp.ask({"email": f"charged {i}"})
+    assert disp.drift is None
+    srv2.swapped = True
+    c2.probe()
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        disp.ask({"email": "charged after"})
+    assert disp.drift is not None and "identity canary event 2" in disp.drift
+    assert any("drift flagged" in str(w.message) for w in caught)
+
+
+def test_a_marked_decision_stays_out_of_the_reference():
+    srv = Server()
+    c, s = _routed(srv)
+    c.probe()
+    srv.swapped = True
+    c.probe()
+    mon = DriftMonitor(window=4, sequential=False)
+    rep = mon.observe(s.ask({"email": "charged"}), question="route")
+    assert rep["phase"] == "reference" and rep["drift"] and mon.reference == []
+
+
+class Raising:
+    """A local scorer whose probe path breaks: texts of the probe set raise, the real inputs are scored."""
+    model_id = "raising"
+
+    def logits(self, items):
+        if any("parcel" in it.text.lower() for it in items):
+            raise RuntimeError("probe backend exploded")
+        return [np.array([2.0, 0.0]) if "charged" in it.text else np.array([0.0, 2.0]) for it in items]
+
+
+def test_a_failing_scheduled_probe_leaves_the_decision_alone():
+    m = DecideModel(Raising(), model_id="raising")
+    c = IdentityCanary(PROBES, every=1).attach(m)
+    part = m.decision("team", "Which team?", "email", TEAMS)
+    d = part.decide("I was charged")
+    assert d.value == "billing" and d.escalate is None and "canary" not in d.extra
+    ev = c.events[-1]
+    assert ev["verdict"] == "error" and ev["error"] == "RuntimeError: probe backend exploded" and ev["at"] == 1
+    assert c.seen == 1 and not c.changed
+    with pytest.raises(RuntimeError):                          # on demand: raised
+        c.probe()
+
+
+def test_a_probe_round_does_not_hold_up_other_decisions():
+    import threading
+
+    gate, started = threading.Event(), threading.Event()
+
+    class Slow:
+        model_id = "slow"
+
+        def logits(self, items):
+            if any("parcel" in it.text.lower() for it in items):          # the probe round waits at the gate
+                started.set()
+                assert gate.wait(10)
+            return [np.array([2.0, 0.0]) if "charged" in it.text else np.array([0.0, 2.0]) for it in items]
+
+    m = DecideModel(Slow(), model_id="slow")
+    c = IdentityCanary(PROBES, every=1).attach(m)
+    part = m.decision("team", "Which team?", "email", TEAMS)
+    out = {}
+    t = threading.Thread(target=lambda: out.setdefault("a", part.decide("charged A")))
+    t.start()
+    assert started.wait(10)
+    done = threading.Event()
+    u = threading.Thread(target=lambda: (out.setdefault("b", part.decide("charged B")), done.set()))
+    u.start()
+    assert done.wait(10), "a decision waited for another thread's probe round"
+    assert "canary" not in out["b"].extra                      # its round was due but one was running: not started
+    gate.set()
+    t.join(10)
+    u.join(10)
+    assert out["a"].extra["canary"] == {"probed": 1} and [e["verdict"] for e in c.events] == ["reference"]
+    assert c.seen == 2

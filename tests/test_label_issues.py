@@ -121,3 +121,24 @@ def test_a_combination_reports_on_its_own_decisions():
     assert info["label_issues"]["ids"] == flip
     assert "label_issues" not in v.act_guard(_examples(flip), max_risk=0.10, label_check=False)
     assert v.calibrate_for(_examples(flip), max_error=0.1, label_check=True)["label_issues"]["ids"] == flip
+
+
+def test_in_sample_fast_head_gets_a_warning_and_folds_does_not():
+    import random
+
+    rng = random.Random(0)
+    cat = Catalog()
+
+    @cat.fn
+    def score(x: float) -> float:
+        return x
+    s = System(cat, [Question("label", "label?", Answer.yes_no())])
+    ex = [({"x": x}, x > 0.5) for x in (rng.random() for _ in range(80))]
+    s.fit("label", ex, features=["score"])
+    msg = "in-sample probabilities"
+    rep = s.guarantee("label", ex, max_risk=0.2, label_check=True)
+    assert any(msg in w for w in rep["warnings"])
+    rep = s.guarantee("label", ex, max_risk=0.2, label_check=True, folds=4)
+    assert not any(msg in w for w in rep["warnings"])
+    rep = s.guarantee("label", ex, max_risk=0.2)                              # no label check: no such line
+    assert not any(msg in w for w in rep["warnings"])

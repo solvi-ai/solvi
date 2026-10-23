@@ -1011,7 +1011,8 @@ code (exact fractions, the Clopper–Pearson bound, the procedures as the papers
 A wrong calibration label moves the threshold. With `label_check=True` (opt-in), `act_guard`, `calibrate_for` (a
 part's and a combination's) and `System.guarantee` check the labels on the way — no extra model call, the decisions
 are already made: `info["label_issues"]`
-lists the examples whose label the model confidently contradicts (`count`, `ids` — the examples' positions —, the
+lists the examples whose label the model confidently contradicts (`count`, `ids` — the examples' positions, the
+appended `corrections=` included —, the
 `suggested` answer), and `info["warnings"]` gets a line when there are any. The rule is confident learning (Northcutt,
 Jiang & Chuang 2021, cleanlab's default "prune by noise rate", written out in `solvi.core.calibration.label_issues`):
 per answer a threshold, the mean probability of that answer over the examples labelled with it; an example counts
@@ -1023,7 +1024,9 @@ mistakes most of the list is the model's errors — check the listed labels, fix
 simulation (400 examples, 3 answers, 12 labels flipped, a model mostly sure and right) it listed 8–12 of the 12 flips
 and 0–2 other examples over ten seeds; with no flip and a model confidently wrong on 10% of the examples it listed 36
 of them. The probabilities must be out of sample: a part fitted (`fit`, `teach`) on the same examples sees its own
-labels and lists fewer. It is off by default because of those false positives: on clean labels with a model
+labels and lists fewer. For a System question answered by a `FastHead` fitted on these examples, pass `folds=k` to
+`System.guarantee` (each example is then scored by a head fitted without it); without `folds=` the report gets a
+warning saying the check ran on in-sample probabilities. An answer with no labelled example is never suggested. It is off by default because of those false positives: on clean labels with a model
 confidently wrong on 10% of the examples it listed 36 of 400, so on by default most users would get a warning on clean
 data, and existing calls would change their `"warnings"`.
 
@@ -1788,18 +1791,22 @@ model = llm("https://openrouter.ai/api/v1", "openai/gpt-oss-20b", api_key=KEY)  
 canary = IdentityCanary([("I was charged twice", "Which team?", ["billing", "shipping"]), ...],
                         every=500).attach(model)     # every 500 decisions of the model; every=None: canary.probe() only
 canary.probe()                                       # the reference (len(probes) calls)
-canary.events[-1]["verdict"]                         # "reference", "same", "changed", "unanswered"
+canary.events[-1]["verdict"]                         # "reference", "same", "changed", "unanswered", "error"
 ```
 
 A round differs from the reference when a probe answers differently (`min_changed=1`), the mean total-variation
-distance of the probabilities is above `tol` (0.15), or the server names another model; with `confirm=True` (the
+distance of the probabilities is above `tol` (0.15), or the server names a model the reference did not; with `confirm=True` (the
 default) the difference is asked once more and counts only when it repeats. After a change every decision of the model
 carries `extra["canary"]["changed"]` (in the trace) until `canary.accept()` takes the new answers as the reference —
 do that after recalibrating on the new model. `on_change="flag"` (default) only marks: a `DriftMonitor` observing those
-decisions flags `"identity"` at once. `on_change="escalate"` also escalates them. Probes cost calls, so nothing is asked
-unless a canary is attached; a replay never probes. It is a cheap check, not a test with a false-alarm rate: choose
+decisions (the Decision, or the Response of `system.ask` — so a Dispatcher with that monitor too) flags `"identity"` at
+once. `on_change="escalate"` also escalates them. Probes cost calls, so nothing is asked unless a canary is attached.
+The scheduled round runs on the thread of the 500th decision, so that decision waits for it; the model's other
+decisions go on, and a round that raises is recorded as an `"error"` event without touching the decision. A replay
+never probes; under `on_change="escalate"` a recorded escalation of a deterministic remote decider replays as a
+mismatch, since the canary's state is not part of the replayed input. It is a cheap check, not a test with a false-alarm rate: choose
 probes with clear answers (a borderline one flips under the provider's own noise), and a change the probes do not touch
-is missed. Measured on fake servers only.
+is missed. Tested on fake servers only (`tests/test_identity_canary.py`).
 
 ### Inputs from outside the calibration set: OpenSetGate
 
@@ -4136,7 +4143,9 @@ What it shows, per question:
   error is that of the labelled ones: corrections are usually made where an answer looked wrong.
 - **How often a person was wrong.** A person is not an oracle. Where a decision has a person's label (a correction,
   `label_source="human"`, or an audit label) and also an outcome label (`System.outcome`, `label_source="outcome"`) —
-  both naming it with `of=`, or on its input — the person's last answer is compared with the last outcome:
+  both naming it with `of=`, or on its input — the person's last answer given before the first outcome label is
+  compared with the last outcome (a label given after the outcome was known is not a judgement: decisions with only
+  such labels are counted in `after_outcome`, not paired):
   `corrections["people"]` gives the pairs, the wrong ones, the error with a two-sided 95% Clopper–Pearson interval, and
   the same per person (`by=`) and per question; the text report adds a "People:" line. A person's answer to a
   decision handed over by a dispatcher is such a label too: `teach(..., of=<the dispatched decision's id>, by=...)`.

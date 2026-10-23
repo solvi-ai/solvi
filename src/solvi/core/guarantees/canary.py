@@ -20,23 +20,30 @@ answers (borderline probes flip under a provider's own non-determinism and give 
 its answer and the probability of every option, from the scorer's raw output (the model's own probabilities, before any
 local adaptation or temperature, so fitting the part never looks like a new model), and the model name the server says
 answered (`extra["llm"]["served_by"]`). Two probe rounds differ when at least `min_changed` probes answer differently,
-the mean total-variation distance of their probabilities is above `tol`, or the server names another model. With
+the mean total-variation distance of their probabilities is above `tol`, or the server names a model the reference did
+not name (a name that disappears — the server stops reporting one — is not a difference). With
 `confirm=True` (the default) a difference is asked once more and counts only when it repeats. A probe the server does
 not answer (an escalation) is left out of the comparison; when fewer than half of the probes answer, the round gives no
 verdict (`"verdict": "unanswered"`).
 
 When: `every=N` probes after every N decisions the model makes (cache hits included); `canary.probe()` on demand;
 `every=None` (the default) only on demand. Probes cost calls — len(probes) requests a round, twice that when a
-difference is confirmed — so nothing is asked unless you attach a canary and ask or schedule it. The first round is
+difference is confirmed — so nothing is asked unless you attach a canary and ask or schedule it. A scheduled round runs
+on the thread of the decision that made it due, so that one decision waits for the round; the round runs outside the
+canary's lock, so the model's other decisions go on, and while one round runs no second one starts. A scheduled round
+that raises (a scorer error the decision path does not hit) is recorded as an event with "verdict": "error" and the
+decision is returned untouched; `probe()` on demand raises. The first round is
 the reference; `accept()` takes the latest round as the new reference (after you recalibrate on the new model).
 
 After a change every decision of the model carries `extra["canary"] = {"changed": True, "event", "reference",
 "identity"}` — recorded in the trace like every decision's extra — until `accept()`. `on_change="flag"` (the default)
-only marks: a `DriftMonitor` observing those decisions flags the signal "identity" (and a Dispatcher with that monitor
-treats it as drift). `on_change="escalate"` also escalates them ("model identity changed ...; would have answered ...").
+only marks: a `DriftMonitor` observing those decisions — the Decision, or the Response of a System ask (the mark is
+read from its `answer:<question>` trace record) — flags the signal "identity", and a Dispatcher with that monitor treats
+it as drift. A bare Result of a choice question carries no extra, so it shows no mark. `on_change="escalate"` also escalates them ("model identity changed ...; would have answered ...").
 A decision that triggered a probe round carries `extra["canary"]["probed"]` with the round's number. `events` holds
-every round: {"n", "at" (decisions seen), "reason", "verdict" ("reference", "same", "changed", "unanswered"),
-"answers_changed", "tv", "served", "identity", "reference", "calls"}.
+every round: {"n", "at" (decisions seen), "reason", "verdict" ("reference", "same", "changed", "unanswered", "error"),
+"answers_changed", "tv", "served", "identity", "reference", "calls"}. "identity" hashes the round's answers and served
+model names only, so a round changed by the probability rule alone keeps the reference's identity.
 
 Replay never probes: `Trace.replay` runs under `no_probes()`, and a model's decisions made inside it are neither
 counted nor marked. An LLM is not re-run by replay anyway (its recorded output is checked); a remote decider declared
@@ -46,7 +53,7 @@ canary's state is not part of the replayed input.
 What it is not: a statistical test with a false-alarm rate. It compares answers of a fixed probe set, so its false
 alarms come from the provider's own non-determinism on the probes (choose clear ones, keep `confirm=True`), and a
 change the probes do not touch is missed. fpverify (MIT) does an anytime-valid sequential test on many probes; this
-canary is the cheap first step, measured on fakes only."""
+canary is the cheap first step, tested on fake servers only (tests/test_identity_canary.py)."""
 from __future__ import annotations
 
 import threading
@@ -66,9 +73,20 @@ def _probe(p):
     return str(text), str(task), list(options), (rest[0] if rest else None)
 
 
-def changed_of(decision):
-    """The canary mark of a decision (a Decision, a Result, or a dict with "extra") when it says the model changed,
-    else None."""
+def changed_of(decision, question=None):
+    """The canary mark of a decision when it says the model changed, else None. decision: a Decision, a dict with
+    "extra", or a Response (the mark is read from its `answer:<question>` trace record, where the decision's extra is
+    recorded; question= names the question, needed only when the Response answers several). A bare Result carries no
+    extra for a choice question, so it has no mark: observe the Response or the Decision."""
+    if hasattr(decision, "results") and hasattr(decision, "trace"):          # a Response
+        if question is None:
+            if len(decision.results) != 1:
+                return None
+            question = next(iter(decision.results))
+        rec = next((r for r in decision.trace.records if r.name == f"answer:{question}"), None)
+        ex = getattr(rec, "extra", None)
+        c = ex.get("canary") if isinstance(ex, dict) else None
+        return c if isinstance(c, dict) and c.get("changed") else None
     ex = decision.get("extra") if isinstance(decision, dict) else getattr(decision, "extra", None)
     c = ex.get("canary") if isinstance(ex, dict) else None
     return c if isinstance(c, dict) and c.get("changed") else None
@@ -99,7 +117,8 @@ class IdentityCanary:
         self.seen = 0                    # decisions of the model counted since attach
         self.calls = 0                   # probe questions asked
         self._change = None              # the event of the change in force (until accept)
-        self._lock = threading.RLock()
+        self._lock = threading.RLock()   # the state; held only for short updates, never during a probe round
+        self._round = threading.Lock()   # one probe round at a time
 
     # --- wiring
     def attach(self, model):
@@ -125,8 +144,9 @@ class IdentityCanary:
         from ..deciders.adapt import _Spec
         m = self.model
         pairs = [(_Spec(task, options, desc), m.text(text)) for text, task, options, desc in self.probes]
+        with self._lock:
+            self.calls += len(pairs)
         out, _ = m._score(pairs)
-        self.calls += len(pairs)
         res = []
         for (sp, text), o in zip(pairs, out):
             z, _ = m._pick(sp, o, text)
@@ -158,34 +178,41 @@ class IdentityCanary:
                 "differs": changed >= self.min_changed or tv > self.tol or bool(served)}
 
     def probe(self, reason="on demand"):
-        """Ask the probes now → the round's event (see the module docs). The first answered round is the reference."""
+        """Ask the probes now → the round's event (see the module docs). The first answered round is the reference.
+        Waits for a round another thread is running; an error of the probe path is raised (a scheduled round records
+        it instead)."""
         if self.model is None:
             raise ValueError("attach the canary to a model first: canary.attach(model)")
+        with self._round:
+            return self._run(reason)
+
+    def _run(self, reason):
+        # called with self._round held: the remote calls run outside self._lock, so the model's other decisions go on
         with self._lock:
-            calls0 = self.calls
-            cur = self._ask()
-            ev = {"n": len(self.events) + 1, "at": self.seen, "reason": reason}
-            if self.reference is None:
-                answered = sum(r["answer"] is not None for r in cur)
-                if 2 * answered < len(self.probes):
-                    ev.update(verdict="unanswered")
+            calls0, at, ref = self.calls, self.seen, self.reference
+        cur = self._ask()
+        ev = {"reason": reason}
+        if ref is None:
+            answered = sum(r["answer"] is not None for r in cur)
+            ev.update(verdict="unanswered" if 2 * answered < len(self.probes) else "reference")
+        else:
+            cmp = self._compare(ref, cur)
+            if cmp is not None and cmp["differs"] and self.confirm:
+                again = self._ask()
+                cmp2 = self._compare(ref, again)
+                if cmp2 is None or not cmp2["differs"]:
+                    cmp = {**(cmp2 or cmp), "differs": False, "unconfirmed": cmp}
                 else:
-                    self.reference = cur
-                    ev.update(verdict="reference")
+                    cur, cmp = again, cmp2
+            if cmp is None:
+                ev.update(verdict="unanswered")
             else:
-                cmp = self._compare(self.reference, cur)
-                if cmp is not None and cmp["differs"] and self.confirm:
-                    again = self._ask()
-                    cmp2 = self._compare(self.reference, again)
-                    if cmp2 is None or not cmp2["differs"]:
-                        cmp = {**(cmp2 or cmp), "differs": False, "unconfirmed": cmp}
-                    else:
-                        cur, cmp = again, cmp2
-                if cmp is None:
-                    ev.update(verdict="unanswered")
-                else:
-                    ev.update(verdict="changed" if cmp.pop("differs") else "same", **cmp)
+                ev.update(verdict="changed" if cmp.pop("differs") else "same", **cmp)
+        with self._lock:
+            if ev["verdict"] == "reference":
+                self.reference = cur
             self.latest = cur
+            ev = {"n": len(self.events) + 1, "at": at, **ev}
             ev.update(identity=_identity(cur), reference=self.identity, calls=self.calls - calls0)
             if ev["verdict"] == "changed" and self._change is None:
                 self._change = ev
@@ -203,14 +230,30 @@ class IdentityCanary:
 
     # --- the model's decisions (called by DecideModel._decision)
     def mark(self, d):
-        """Count one decision of the model, probe when it is due, and mark the decision after a change."""
+        """Count one decision of the model, probe when it is due, and mark the decision after a change. A due round runs
+        on this decision's thread (this decision waits for it), outside the lock, so the model's other decisions go on;
+        when another thread is already running a round, this one is not started. An error of the round is recorded as
+        an event ("verdict": "error") and the decision is returned as it is."""
         if _QUIET.get():
             return d
         with self._lock:
             self.seen += 1
-            ev = None
-            if self.every is not None and self.seen % self.every == 0:
-                ev = self.probe(reason=f"every {self.every} decisions")
+            due = self.every is not None and self.seen % self.every == 0
+        ev = None
+        if due and self._round.acquire(blocking=False):
+            reason = f"every {self.every} decisions"
+            try:
+                with self._lock:
+                    calls0, at = self.calls, self.seen
+                try:
+                    ev = self._run(reason)
+                except Exception as e:                   # the probe path never takes the real decision down
+                    with self._lock:
+                        self.events.append({"n": len(self.events) + 1, "at": at, "reason": reason, "verdict": "error",
+                                            "error": f"{type(e).__name__}: {e}"[:200], "calls": self.calls - calls0})
+            finally:
+                self._round.release()
+        with self._lock:
             ch = self._change
         if ev is not None:
             d.extra.setdefault("canary", {})["probed"] = ev["n"]

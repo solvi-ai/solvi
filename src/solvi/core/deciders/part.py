@@ -793,8 +793,9 @@ class DecisionPart:
         issues = self._label_report(ds, examples) if label_check else None
         if issues is not None:
             out["label_issues"] = issues
-            if label_warning(issues, len(ok)):
-                out["warnings"] = [label_warning(issues, len(ok))]
+            lw = label_warning(issues, len(ok))
+            if lw:
+                out["warnings"] = [lw]
         return out
 
     @_deprecate.removed_kwargs(risk="max_risk")

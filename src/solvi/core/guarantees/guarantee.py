@@ -537,7 +537,10 @@ def guard_question(system, question, examples=None, *, max_error=None, max_risk=
     for an attached promise, its report).
     label_check (default False, opt-in; it reads the answers already computed, no extra call): the report's "label_issues" —
     the examples whose label the answer's probabilities confidently contradict (solvi.core.calibration.label_issues;
-    ids are the examples' positions) — and a line in "warnings" when there are any; every label is still used.
+    ids are the examples' positions, the appended corrections= included) — and a line in "warnings" when there are any;
+    every label is still used. It needs out-of-sample probabilities: a fast head fitted on these examples has seen the
+    labels it is asked to contradict, so without folds= a FastHead question gets a warning to pass folds=k (each example
+    is then scored by a head fitted without it).
 
     Every call is logged in `system.guard_history`, in order: {"question", "time" (seconds since the epoch), "outcome"
     ("installed", "failed" or "removed"), "replaced" (a guarantee was in force before the call), "method", "n",
@@ -649,6 +652,11 @@ def _guard_question(system, question, examples, *, max_error, max_risk, method, 
             lw = label_warning(issues, len(sig))
             if lw:
                 promise.report["warnings"].append(lw)
+            from ..deciders.heads import FastHead
+            if not folds and isinstance(system.heads.get(question), FastHead):
+                promise.report["warnings"].append(
+                    "the label check ran on in-sample probabilities (a fast head fitted on these examples has seen their "
+                    "labels, so it lists fewer issues): pass folds=k to score each example by a head fitted without it")
         if groups is not None:
             promise.by = "answer" if groups == "answer" else guard._by.label()
         if folds:
