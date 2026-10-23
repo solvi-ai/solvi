@@ -856,8 +856,9 @@ class System:
                     return Result(None, 0.0, f"hard check {f} is false and its `then` answer is not usable: {e}",   # still
                                   "abstain", source=f, guard="hard_check")                                         # decides
                 return Result(forced, 1.0, said, "forced", provenance=r.origin, source=f, guard="hard_check")
-            return Result(None, 0.0, f"{said} and no answer is set for it", "abstain", source=f,   # the reason kept
-                          guard="hard_check")
+            text = (f"{said} and no answer is set for it" if because   # the reason kept
+                    else f"hard check {f} is false and no answer is set for it")
+            return Result(None, 0.0, text, "abstain", source=f, guard="hard_check")
         for f, part in hard:                          # a governing hard check that could not be evaluated: the answer
             r = by.get(f)                             # is unknown, never "passed"
             if r is not None and r.value is MISSING and governs(part, q):
