@@ -374,6 +374,14 @@
   raises with the journal unchanged. `Knowledge.forget(writer, by=, why=, storage=, decide=)` is the facade, beside
   `Knowledge.retract`. With a TraceStorage nothing changes.
 
+
+### Changed
+- **The experimental deadline reads "a future release".** The deadline set at 1.0 for every experimental piece was 1.2;
+  it passed with the pieces still here, and the import warning of 1.3 and 1.4 still said "it is removed in 1.2 unless it
+  graduates". `solvi.experimental.DEADLINE`, each `STATUS[...]["deadline"]`, the warning and docs/experimental.md now say
+  "a future release": no release is named until one is decided. The old paths of the pieces that graduated in 1.1
+  (`solvi.experimental.specialist`, `.mcp`, `.counterfactual`) say the same in their warning. Only text changes.
+
 ### Docs
 - **Drift and audit: measured caveats** (best practices; the `ShiftWatch.shift`, `DriftMonitor` and `sysreport`
   docstrings). A change of the correct answers alone is invisible to every label-free test by construction; read it
