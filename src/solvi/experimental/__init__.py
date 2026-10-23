@@ -288,9 +288,16 @@ STATUS: dict[str, dict] = {
                "Dispatcher (audit=\"adaptive\", promise=, detector=, on_drift=\"recertify\", probation=), recorded "
                "in the chain and rebuilt by Dispatcher.replay_stream (stages 1–2 of 4); tickets: an agent as the "
                "oracle over MCP (stream.tickets, TicketDesk, solvi serve --mcp --agent-oracle) — blind, durable in "
-               "the store, an expired ticket a recorded loss (stage 3a)",
-               "missing": "unmeasured: the stand against offline calibration (stage 4) has not run; the learning loop "
-               "of frozen versions is stage 3b; the expired-share stop (max_drop) and repeated tickets for the "
+               "the store, an expired ticket a recorded loss (stage 3a); the closed learning loop (stream.versions, "
+               "LearningLoop over stream.learner's HashedTextLearner / FastHeadLearner): frozen versions, each with "
+               "its own StreamPromise calibrated only on samples drawn after its freeze, δ from one DeltaBudget, "
+               "promoted when certified and answering alone at least as often as the served version on the same "
+               "samples, every freeze / promote / discard / rollback in the chain and replayed (stage 3b)",
+               "missing": "unmeasured: the stand against offline calibration and the loop's stand (stage 4) have not "
+               "run, so the loop's gain is unproven (solvi's earlier evidence is against it); the loop is not wired "
+               "into the Dispatcher (no loop=, no detector on the served version, no tickets) and version 0 is "
+               "always 'no model'; under the joint promise a model of noise can be promoted at a strict threshold "
+               "(it answers almost nothing alone); the expired-share stop (max_drop) and repeated tickets for the "
                "oracle's own noise are not built; a person's audit label does not yet replace the slow path's label",
                "script": None},
 }

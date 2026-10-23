@@ -427,8 +427,8 @@ candidate to freeze.
 
 A promise earned on the stream instead of on a fixed calibration set: `StreamPromise` starts at +inf (nothing
 answered alone) and loosens its threshold as labelled samples arrive, with a statement that holds at every point in
-time, not only at the end of a calibration. Stages 1–2 of 4: the certificate, its change detector and the sampling
-wired into the Dispatcher. Since 1.4.
+time, not only at the end of a calibration. Stages 1–3b of 4: the certificate, its change detector, the sampling
+wired into the Dispatcher, the agent as the oracle and the closed learning loop. Since 1.4.
 
 ```python
 from solvi.experimental.stream import StreamPromise
@@ -520,6 +520,46 @@ options is refused and the ticket stays open. `replay_all()` and `replay_stream(
 (the gate, rate and coin where the ticket was issued, the sample where it was completed). Not built: the expired-share
 stop, repeated tickets for the oracle's own noise, several servers on one store, a free-text input.
 
-- **Missing:** unmeasured: the stand against offline calibration (stage 4) has not run; the learning loop of frozen versions is stage 3b; the expired-share stop (max_drop) and repeated tickets for the oracle's own noise are not built; a person's audit label does not yet replace the slow path's label
+Stage 3b closes the loop: a live learner takes the oracle's labels, and frozen copies of it are certified and served.
+
+```python
+from solvi.experimental.stream import HashedTextLearner, LearningLoop
+
+loop = LearningLoop(HashedTextLearner(), question="intent", max_risk=0.05, delta=0.05, secret=key, storage=store,
+                    versions_dir="intent.versions", system=system, feature="text")
+out = loop.step(text, lambda: oracle(text))   # the oracle is called only when a label is needed
+out["by"]                                     # "local" (the served version alone), "oracle" or "person"
+loop.versions()                               # each version: state, certified, threshold, δ_v, frozen at
+loop.replay(rescore=True)                     # every decision and event rebuilt from the chain
+```
+
+Version 0 is "no model": it answers nothing alone, has no certificate and spends no δ. The live learner is never
+served. Once it has taken max(300, 2 × the served version's labels at its freeze) labels, a copy is frozen as the
+candidate with its own `StreamPromise`, its (v, δ_v) drawn from the loop's one `DeltaBudget`, so every version ever
+frozen holds together with probability ≥ 1 − δ. Each decision is scored by the served version and, in shadow, by the
+candidate before its label is read. A sampled decision reaches the promises of the served version and the candidate,
+both frozen before it, and only then trains the live learner: a version never reads a sample from before its freeze
+(a test checks this for every version). The coin and the rate are stage 2's. A candidate is promoted once it is
+certified and, on its own samples, answers alone at least as often as the served version at the served threshold
+(ℓ_k ≥ ℓ_s + margin, margin 0, and ℓ_k > 0). A candidate not certified after 1 500 samples, or certified and not better
+after `trial` samples (default 1 500), is discarded. Its δ_v stays spent, and the next freeze waits for 1.5 × the
+labels taken. Labels from "human", "outcome", "rule" or "audit" are taken by default. A slow path's answer ("s2" or
+"verified") is refused unless `s2_labels=True`, and with it is recorded as "s2". Each decision is a record of kind
+`loop` (its `stream` part is kept by a redaction; the input, the would-be answers and the label are not). Each freeze,
+promote, discard and rollback is a record of kind `stream` with the version, (v, δ_v), and, for a freeze, the frozen
+model's fingerprint. `replay()` re-runs the protocol from the records alone and compares which version served each
+decision, both certificates' states and every event; with `versions_dir` it also checks each pickled version's
+fingerprint and, with `rescore=True`, recomputes every recorded score. With `system=`, the served version is the
+question's answer head (`solvi.core.versions.serve_head`), so the System's fingerprint and every trace name it.
+`HashedTextLearner` is hashed word and character n-grams with an online softmax in numpy; `FastHeadLearner` is
+solvi's `FastHead` over facts (`FastHeadLearner.for_system(system, question)`).
+
+In the tests, on a synthetic five-intent text stream of 2 000 decisions the loop answers more than half alone in the
+last 500 with no wrong alone answer. Under `max_error=`, shuffled labels never promote a candidate (3 seeds). Under
+`max_risk=` (joint), a model of noise is promoted at a strict threshold that almost nothing passes: it stays within
+the promise but is churn. These are smoke checks, not measurements: whether the loop gains anything on a real stream is
+unproven (solvi's earlier evidence is against it), and the stage-4 stand measures it.
+
+- **Missing:** unmeasured: the stand against offline calibration and the loop's stand (stage 4) have not run, so the loop's gain is unproven (solvi's earlier evidence is against it); the loop is not wired into the Dispatcher (no loop=, no detector on the served version, no tickets) and version 0 is always 'no model'; under the joint promise a model of noise can be promoted at a strict threshold (it answers almost nothing alone); the expired-share stop (max_drop) and repeated tickets for the oracle's own noise are not built; a person's audit label does not yet replace the slow path's label
 - **Script:** none yet. **Deadline:** 1.2.
 - API: [solvi.experimental.stream](api/stream.md).

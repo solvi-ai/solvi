@@ -100,6 +100,22 @@
   from its store: numbers, spend, runs, drift flag, the stream state), `Dispatched.pending`; `replay_stream()` reads a
   ticket's gate and coin where it was issued. Not built: the expired-share stop, repeated tickets for the oracle's
   noise. Unmeasured.
+- **Stream certificate (experimental), stage 3b: the closed learning loop.** `solvi.experimental.stream.versions`:
+  `LearningLoop` — a live learner (`stream.learner`: the `Learner` / `Frozen` protocols, `HashedTextLearner` = hashed
+  word and character n-grams with an online softmax in numpy, `FastHeadLearner` = solvi's `FastHead` over facts) takes
+  every accepted oracle label and is never served; at max(300, 2 × the served version's labels at its freeze) labels a
+  copy is frozen as the candidate with its own `StreamPromise`, its (v, δ_v) from one `DeltaBudget` over every
+  version; a version's promise reads only samples drawn after its freeze; a certified candidate is promoted when, on
+  its own samples, it answers alone at least as often as the served version (margin 0, and more than nothing); an
+  uncertified one is discarded after 1 500 samples (its δ_v stays spent); version 0 is "no model" and never
+  certifies; `rollback(v)`. Labels from trusted sources by default; slow-path labels ("s2", "verified") only with
+  `s2_labels=True`, recorded as "s2". Each decision is a record of kind `loop`; freeze / promote / discard / rollback
+  are records of kind `stream`; `replay(rescore=)` rebuilds which version served each decision, the certificates and
+  the events, and checks the pickled versions (`versions_dir=`). New in `solvi.core.versions`: `serve_head(system,
+  question, head)`, the hook that installs a served version as the question's answer head. Found on the way: under
+  the joint promise a model of shuffled labels can be certified at a strict threshold and promoted (it answers almost
+  nothing alone; the design's control C3 assumed it cannot certify); under `max_error=` it is never promoted. Not
+  wired into the Dispatcher yet. Unmeasured: the gain is unproven; the stage-4 stand measures it.
 - **A secret for the supervision and audit draws: `Dispatcher(secret=)`** (`solvi.core.dispatch`; security). The
   draws were `sha256(f"{seed}|{input hash}|{n}")` with the public default `seed=0`, so whoever could vary the inputs
   could compute which decisions would be supervised or audited and avoid them. With `secret=` (bytes or str; None reads
