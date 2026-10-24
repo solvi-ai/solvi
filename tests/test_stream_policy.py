@@ -418,17 +418,34 @@ def test_label_mode_promotes_on_the_pre_freeze_gates():
 
 
 def test_discard_reasons():
+    """stale / trial count decisions since the freeze (decision 14), not coin samples: _cand is frozen at 400."""
     p = DefaultPolicy()
-    assert p.discard(_cand(certified=False, samples=1499), GOOD) is None
-    assert p.discard(_cand(certified=False, samples=1500), GOOD) == "not certified after 1500 samples"
+    assert (p.stale, p.trial) == (3000, 3000)
+    assert p.discard(_cand(certified=False, samples=150, n=3399), GOOD) is None
+    assert p.discard(_cand(certified=False, samples=150, n=3400), GOOD) == \
+        "not certified 3000 decisions after its freeze (150 samples)"
     flat = Paired(200, 20, 0, 20, 100, 40, 0)                 # certified, not better
-    assert p.discard(_cand(samples=1499), flat) is None
-    assert p.discard(_cand(samples=1500), flat).startswith("certified, not better after 1500")
-    assert p.discard(_cand(samples=1500), GOOD) is None        # promotable: the loop promotes, not discards
+    assert p.discard(_cand(samples=150, n=3399), flat) is None
+    assert p.discard(_cand(samples=150, n=3400), flat).startswith("certified, not better 3000 decisions after its freeze")
+    assert p.discard(_cand(samples=150, n=3400), GOOD) is None   # promotable: the loop promotes, not discards
     memoriser = Paired(200, 60, 30, 20, 100, 80, 0)
-    assert p.discard(_cand(samples=10), memoriser).startswith("memorisation probe")
+    assert p.discard(_cand(samples=10, n=401), memoriser).startswith("memorisation probe")
     # stream mode with no sample yet (paired None) still goes stale
-    assert p.discard(_cand(certified=False, samples=1500), None) == "not certified after 1500 samples"
+    assert p.discard(_cand(certified=False, samples=0, n=3400), None).startswith("not certified 3000 decisions")
+
+
+def test_stale_and_trial_read_decisions_not_samples():
+    """Many samples a few decisions after the freeze do not discard; few samples many decisions after it do."""
+    p = DefaultPolicy(stale=500, trial=700)
+    flat = Paired(200, 20, 0, 20, 100, 40, 0)
+    assert p.discard(_cand(certified=False, samples=10 ** 4, n=899), GOOD) is None
+    assert p.discard(_cand(certified=False, samples=1, n=900), GOOD).startswith("not certified 500 decisions")
+    assert p.discard(_cand(samples=10 ** 4, n=1099), flat) is None      # certified: the trial clock, not stale's
+    assert p.discard(_cand(samples=1, n=1100), flat).startswith("certified, not better 700 decisions")
+    st = _cand(n=1234)
+    assert st.since_freeze == 834 and _state().since_freeze is None
+    no_freeze = _state(versions=(VersionInfo(0, "served"), VersionInfo(1, "candidate")), candidate=1, n=10 ** 6)
+    assert no_freeze.since_freeze is None and p.discard(no_freeze, flat) is None
 
 
 # ───────────────────────────────────────────────────────────── alarm

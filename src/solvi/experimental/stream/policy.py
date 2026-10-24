@@ -72,8 +72,16 @@ own counters in `self` and must pickle (the loop's checkpoint saves it).
   probe=False drops the probe (promotion and discard). Label
   mode (no paired samples): the pre-freeze gates decided, promote.
 - discard — (probe on) the probe shows the gap beyond noise (Wilson lower bound of the novel error − Wilson upper bound of the
-  seen error > gap, at `wilson` confidence; a point-estimate gap at n = 30 does not discard); not certified after
-  `stale` (1500) samples; certified and not promotable after `trial` (1500).
+  seen error > gap, at `wilson` confidence; a point-estimate gap at n = 30 does not discard); not certified
+  `stale` (3000) decisions after its freeze; certified and not promotable `trial` (3000) decisions after its freeze
+  (`LoopState.since_freeze`). Both clocks count decisions, not coin samples (author's decision 14, 2026-10-24): at a
+  rate ρ ≈ 0.08–0.17, 1 500 samples were 9 000–18 000 decisions, so a certified candidate that never cleared the
+  margin stayed in trial for a whole 12 000-decision stream and no later training started. 3 000, not 1 500: the
+  grid opens 200 decisions after the freeze and a 0–1 %-risk point certifies after about 120–280 samples (δ_v of the
+  2nd–4th version) at 6–12 decisions per sample, i.e. 900–3 600 decisions after the freeze; 1 500 would discard a
+  zero-risk candidate at 12 decisions per sample (≈ 1 700), 3 000 lets a 1 %-risk point of the first candidate
+  certify at any of these rates (≤ 2 840) and the 2nd–4th up to 10 decisions per sample. The clock runs from the
+  freeze: an alarm's restart drops the paired samples but does not restart it.
 - alarm — "recertify"; a second alarm on the current serving of the served version (alarms at n ≥ served_since)
   within `probation` (300) decisions → "rollback:<v>", v the highest retired version below the served one with no
   alarm on record (the versions rolled back from were alarmed); no such version → "recertify".
@@ -191,7 +199,8 @@ class VersionInfo:
 @dataclass(frozen=True)
 class LoopState:
     """What a hook sees, rebuilt by the loop for every call (changing it changes nothing in the loop). n: decisions
-    so far; served / candidate: version numbers (candidate None: none in trial); labels: label counts by split;
+    so far; served / candidate: version numbers (candidate None: none in trial; `since_freeze`: the decisions since
+    the candidate's freeze); labels: label counts by split;
     versions: the versions table; holdout: the served version's [(alone, wrong)] on its latest held-out labels, oldest
     first; alpha: the promised level; alarms: [{"n", "who", "version"}] so far; served_history: the versions served,
     in order (a rollback appends); served_since: the decision at which the current serving of `served` began (a
@@ -226,6 +235,13 @@ class LoopState:
     def __post_init__(self):
         if self.mode not in ("stream", "label"):
             raise ValueError(f"mode is 'stream' or 'label', not {self.mode!r}")
+
+    @property
+    def since_freeze(self) -> int | None:
+        """Decisions since the candidate was frozen: n − its frozen_at (None: no candidate, or a candidate row
+        built without frozen_at). DefaultPolicy's `stale` / `trial` clocks read it."""
+        c = self.candidate_info
+        return None if c is None or c.frozen_at is None else self.n - c.frozen_at
 
     def version(self, v) -> VersionInfo:
         for row in self.versions:
@@ -423,7 +439,8 @@ class DefaultPolicy(LoopPolicy):
     it answers alone on less than half its held-out labels; None: the error-only signal); min_gain, min_holdout, tolerance:
     the pre-freeze gates; wilson: the confidence of the Wilson bounds (label mode's paired gain, the probe's discard
     test); min_novel, min_share, margin: the
-    promotion rule; gap, probe_min: the memorisation probe; stale, trial: when a candidate is discarded; probation:
+    promotion rule; gap, probe_min: the memorisation probe; stale, trial: the decisions after its freeze at which a
+    candidate not certified / certified and not promotable is discarded (decisions, not coin samples); probation:
     two alarms closer than this roll back (0: never); r, lr, min_updates, max_updates: the training's settings;
     refreeze: the lane LearningLoop's retrain floor instead of the largest n_train (None: off); probe: the memorisation
     probe on (False: off, promotion and discard); pre_freeze: the pre-freeze gates on (False: every training is
@@ -439,7 +456,7 @@ class DefaultPolicy(LoopPolicy):
                  holdout: float = 0.15, first: int = 300, growth: float = 1.5, window: int = 200, target_share=0.5,
                  min_gain: float = 0.01, min_holdout: int = 100, tolerance: float = 0.02, wilson: float = 0.95,
                  min_novel: int = 100, min_share: float = 0.05, margin: float = 0.01, gap: float = 0.10,
-                 probe_min: int = 30, stale: int = 1500, trial: int = 1500, probation: int = 300, r: int = 8,
+                 probe_min: int = 30, stale: int = 3000, trial: int = 3000, probation: int = 300, r: int = 8,
                  lr: float = 3e-4, min_updates: int = 200, max_updates: int = 3000, refreeze=None, probe: bool = True,
                  pre_freeze: bool = True, novel_risk: bool = True, min_calib: int | None = None, watch: bool = True,
                  watch_min: int = 100, novel_only: bool = True):
@@ -645,11 +662,14 @@ class DefaultPolicy(LoopPolicy):
         pr = self._probe(paired) if self.probe else {"shown": False}
         if pr["shown"]:
             return f"memorisation probe: {pr['why']}"
-        if not c.certified and c.samples >= self.stale:
-            return f"not certified after {c.samples} samples"
-        if c.certified and c.samples >= self.trial and not self.promote(st, paired):
-            return (f"certified, not better after {c.samples} samples (share_k {paired.share_k:.4g}, share_s "
-                    f"{paired.share_s:.4g}, {paired.n_novel} novel)")
+        age = st.since_freeze                                     # decisions, not coin samples (decision 14)
+        if age is None:
+            return None
+        if not c.certified and age >= self.stale:
+            return f"not certified {age} decisions after its freeze ({c.samples} samples)"
+        if c.certified and age >= self.trial and not self.promote(st, paired):
+            return (f"certified, not better {age} decisions after its freeze ({c.samples} samples; share_k "
+                    f"{paired.share_k:.4g}, share_s {paired.share_s:.4g}, {paired.n_novel} novel)")
         return None
 
     def watch(self, st, w) -> bool:

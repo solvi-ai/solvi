@@ -122,21 +122,58 @@ def test_a_better_certified_candidate_is_promoted_a_worse_one_discarded():
     # version 3 (right on 30 %) certifies but answers alone less often than version 2 on the same samples: discarded
     disc = _events(loop, "discard")
     assert disc and disc[0]["version"] == 3 and disc[0]["why"].startswith("certified, not better")
-    assert disc[0]["samples"] == loop.trial == 300
+    # trial counts decisions since the freeze (decision 14), not samples: version 2 serves alone, so ρ < 1
+    v3 = next(e for e in _events(loop, "freeze") if e["version"] == 3)
+    assert disc[0]["decision"] >= v3["frozen_at"] + loop.trial and loop.trial == 300   # at the first certified one
+    assert disc[0]["samples"] < loop.trial
     assert loop.served == 2
 
 
-def test_an_uncertified_candidate_is_discarded_after_stale_samples_and_its_delta_stays_spent():
+def test_an_uncertified_candidate_is_discarded_after_stale_decisions_and_its_delta_stays_spent():
     loop = LearningLoop(_Fake([_Model("wrong", 0.0), _Model("wrong2", 0.0)]), question="q", max_risk=0.05,
-                        secret=KEY)
+                        secret=KEY, stale=1500)
     _run_fake(loop, _fake_data(2, 1900))
     disc = _events(loop, "discard")
-    assert len(disc) == 1 and disc[0]["version"] == 1 and disc[0]["why"] == "not certified after 1500 samples"
+    assert len(disc) == 1 and disc[0]["version"] == 1
+    assert disc[0]["why"] == "not certified 1500 decisions after its freeze (1500 samples)"
     assert disc[0]["decision"] == 300 + 1500                # frozen at 300, every decision sampled (ρ = 1)
     assert loop.refreeze_floor == 1.5 * 1800
     assert loop.candidate is None and loop.budget.v == 1   # its δ_v stays spent; the next freeze takes v = 2
     v1 = loop.versions()[1]
     assert v1["state"] == "discarded" and not v1["certified"]
+
+
+def _served_loop(models, **kw):
+    """Version 0 is a model that answers alone on 90 %: once it certifies the coin samples about 1 decision in 18,
+    so the decisions since a freeze run far ahead of the candidate's samples."""
+    return LearningLoop(_Fake(models), question="q", max_risk=0.05, secret=KEY, initial=_Model("s1", 0.9),
+                        freeze_min=320, growth=1.0, **kw)
+
+
+def test_a_certified_candidate_never_promotable_is_discarded_after_trial_decisions_and_training_resumes():
+    """Decision 14: `trial` counts decisions since the freeze, not samples. Version 1 (right on 85 %) certifies but
+    never answers alone more often than version 0 (90 %); with trial=3000 it is discarded exactly 3 000 decisions
+    after its freeze with ~200 samples (counted in samples it would have stayed in trial to the end and blocked every
+    later training), and the next training freezes version 2."""
+    loop = _served_loop([_Model(f"c{i}", 0.85) for i in range(6)], stale=10 ** 6, trial=3000)
+    _run_fake(loop, _fake_data(21, 9000))
+    fr, disc = _events(loop, "freeze"), _events(loop, "discard")
+    assert fr[0]["version"] == 1 and disc and disc[0]["version"] == 1
+    assert disc[0]["why"].startswith("certified, not better 3000 decisions after its freeze")
+    assert disc[0]["decision"] == fr[0]["frozen_at"] + 3000
+    assert disc[0]["samples"] < 3000 // 5                  # far fewer samples than decisions: ρ well below 1
+    assert not _events(loop, "promote") and loop.served == 0
+    assert len(fr) >= 2 and fr[1]["version"] == 2 and fr[1]["decision"] > disc[0]["decision"]   # training resumed
+    assert loop.replay()["ok"]
+
+
+def test_an_uncertified_candidate_is_discarded_after_stale_decisions_not_samples():
+    loop = _served_loop([_Model(f"z{i}", 0.0) for i in range(6)], stale=1500, trial=10 ** 6)
+    _run_fake(loop, _fake_data(21, 2500))
+    fr, disc = _events(loop, "freeze"), _events(loop, "discard")
+    assert disc and disc[0]["version"] == 1 and disc[0]["why"].startswith("not certified 1500 decisions after its freeze")
+    assert disc[0]["decision"] == fr[0]["frozen_at"] + 1500 and disc[0]["samples"] < 1500 // 5
+    assert loop.replay()["ok"]
 
 
 def test_version_zero_never_certifies_and_spends_no_delta():

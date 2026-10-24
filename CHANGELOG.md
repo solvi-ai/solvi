@@ -691,6 +691,19 @@ labels, 10 % of the labels discordant) rolled back in 10 / 28 / 70 % of runs by 
   answers in both arms); on one machine the median ask was about 39% shorter (one run, 4,000 asks per arm).
 
 ### Changed
+- **`DefaultPolicy(stale=, trial=)` count decisions since the candidate's freeze, not coin samples; defaults
+  1 500 → 3 000** (`solvi.experimental.stream`; also `LearningLoop` / `lane_policy`). **Behaviour change.** A candidate
+  not certified `stale` decisions after its freeze, or certified and not promotable `trial` decisions after it, is
+  discarded. Before, both limits counted coin-sampled decisions: at a sampling rate of 0.08–0.17, 1 500 samples were
+  9 000–18 000 decisions, so a certified candidate that never cleared the share margin stayed in trial for a whole
+  12 000-decision stream and `want_train` refused every later training. New `LoopState.since_freeze` (n − the
+  candidate's `frozen_at`) is what the rule reads; `frozen_at` is already in the records and the checkpoint, so replay
+  stays exact. Why 3 000 and not 1 500 decisions: the grid opens 200 decisions after the freeze, and a point with
+  0–1 % risk certifies after about 120–280 samples (the 2nd–4th version's δ_v) at 6–12 decisions per sample, i.e.
+  900–3 600 decisions after the freeze (arithmetic from the certificate's constants, not measured); 1 500 would
+  discard even a zero-risk candidate at 12 decisions per sample. The clock runs from the freeze: an alarm's restart
+  drops the paired samples but does not reset it. A policy pickled before 1.4.0 keeps its numbers, now read as
+  decisions.
 - **`DefaultPolicy(target_share=0.5)`: the improvement signal also reads coverage** (`solvi.experimental.stream`).
   **Behaviour change**: the default was `None`. The served version is now also short when it answers alone on less
   than half of its last `window` held-out labels, not only when its error alone is above α. With the error alone as

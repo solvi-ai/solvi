@@ -34,8 +34,9 @@ alarm): ℓ_k = the share with the candidate's score ≥ its threshold, ℓ_s = 
 ≥ the served threshold now — a paired comparison on the same samples. Promote when ℓ_k ≥ `min_share` (0.05) AND
 ℓ_k ≥ ℓ_s + `margin` (0.01: one point) — the author's rule (2026-10-23): under the joint promise a model of noise
 certifies at a strict threshold that almost nothing passes, and with margin 0 over a version that answers nothing it
-was promoted; the floor keeps such a version out (the shuffled-label control: shuffled labels never promote, both kinds). Discard a candidate not certified after `stale` samples
-(1 500) or certified and not better after `trial` samples (default: stale); the refreeze floor becomes `refreeze` × the
+was promoted; the floor keeps such a version out (the shuffled-label control: shuffled labels never promote, both kinds). Discard a candidate not certified `stale` decisions
+after its freeze (3 000) or certified and not better `trial` decisions after it (default: stale) — decisions, not coin
+samples (1.4.0; before, 1 500 samples, at ρ ≈ 0.1 more decisions than a stream holds); the refreeze floor becomes `refreeze` × the
 live learner's labels (1.5). A discarded version's δ_v stays spent. Every version's certificate holds together under the
 budget, so the rule only affects utility, not validity.
 
@@ -94,11 +95,11 @@ from .loop import S2_SOURCES, AdapterLoop, Verdict, ticket_verdict
 from .policy import Budget, DefaultPolicy
 
 
-def lane_policy(*, freeze_min=300, growth=2.0, stale=1500, trial=None, min_share=0.05, margin=0.01, refreeze=1.5,
+def lane_policy(*, freeze_min=300, growth=2.0, stale=3000, trial=None, min_share=0.05, margin=0.01, refreeze=1.5,
                 s2_labels=False) -> DefaultPolicy:
     """The lane LearningLoop's protocol as a DefaultPolicy: every label trains, every training freezes (the stream
-    certificate decides), promotion on certified and ℓ_k ≥ min_share and ℓ_k ≥ ℓ_s + margin, discard after `stale`
-    uncertified or `trial` certified samples, retrain at ≥ max(freeze_min, growth × the served version's labels,
+    certificate decides), promotion on certified and ℓ_k ≥ min_share and ℓ_k ≥ ℓ_s + margin, discard `stale`
+    decisions after the freeze uncertified or `trial` decisions certified (not coin samples), retrain at ≥ max(freeze_min, growth × the served version's labels,
     refreeze × the labels at the latest discard), no training budget, no alarm rollback."""
     return DefaultPolicy(Budget(per_day=2 ** 62, min_interval_s=0.0), s2_labels=s2_labels, calib=0.0, holdout=0.0,
                          first=int(freeze_min), growth=float(growth), refreeze=float(refreeze), min_novel=1,
@@ -119,7 +120,7 @@ class LearningLoop(AdapterLoop):
     as the question's answer head (feature: the text fact a text model reads)."""
 
     def __init__(self, learner, *, question, max_risk=None, max_error=None, delta=0.05, freeze_min=300, growth=2.0,
-                 stale=1500, trial=None, min_share=0.05, margin=0.01, refreeze=1.5, initial=None, detector=None,
+                 stale=3000, trial=None, min_share=0.05, margin=0.01, refreeze=1.5, initial=None, detector=None,
                  probation=300, s2_labels=False, source="human", secret=None, seed=0, sampling=None,
                  promise_options=None, storage=None, versions_dir=None, system=None, feature="text"):
         policy = lane_policy(freeze_min=freeze_min, growth=growth, stale=stale, trial=trial, min_share=min_share,
