@@ -50,6 +50,15 @@ The adapter loop's policy (run by `AdapterLoop`, stage 2): `LoopPolicy`, the abs
 what the loop takes, when it trains, what it freezes, promotes and discards and what an alarm does; `LoopState`, what
 a hook reads; `Budget`; `DefaultPolicy`. Unmeasured.
 
+`DefaultPolicy`'s improvement signal reads coverage as well as error: with `target_share=0.5` (the default) the served
+version is short when it answers alone on less than half of its last `window` held-out labels, or errs alone there
+above α. On error alone a weak but certified incumbent would never be retrained — certification keeps its error alone
+at most α, so it is short in coverage, not in error. The share is read on held-out labels, a selection-biased sample
+that is mostly deferred decisions, so it reads low (0.09 there against 0.30 on the whole stream in one smoke run whose
+script is not in the repository); a strong incumbent will usually be retrained too, and the promotion gates (the
+novel-only paired comparison, the memorisation probe, the novel-risk bar) keep a worse version out.
+`target_share=None` restores the error-only signal. Unmeasured; see [experimental](../experimental.md#stream).
+
 ::: solvi.experimental.stream.policy
 
 ## `solvi.experimental.stream.loop`

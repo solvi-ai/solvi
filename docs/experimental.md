@@ -634,6 +634,17 @@ answers only what it trained on is not promoted). `stream.gates` holds the arith
 the design's. A limit: "novel" is exact-key identity, so a paraphrase of a trained item counts as novel; the probe and
 the held-out gate do not see near-duplicates.
 
+The improvement signal reads coverage too: `DefaultPolicy(target_share=0.5)` (the default) counts the served version
+short when it answers alone on less than half of its last 200 held-out labels, as well as when its error alone there is
+above α. Why: a certified incumbent keeps its error alone at most α, so on error alone a weak but certified incumbent —
+short in coverage, not in error — is never retrained; in one smoke run (its script is not in the repository)
+solvi-base on Banking77 answered 0.090 of its held-out labels alone with no error from about decision 960 to 2 000 and
+the loop never trained. The share is read on held-out labels, a selection-biased sample that is mostly deferred
+decisions, so it reads low — 0.09 there against 0.30 on the whole stream in that run. A strong incumbent will
+therefore usually be retrained too; the promotion gates (the novel-only paired comparison, the memorisation probe,
+the novel-risk bar) are what keep a worse version from being served. `target_share=None` restores the error-only
+signal. Unmeasured: the default's cost and gain are for the stand to measure.
+
 Stage 2 wires the policy into a loop: `AdapterLoop` (`stream.loop`) is `LearningLoop`'s protocol with every constant a
 `LoopPolicy` hook, and `LearningLoop` is now `AdapterLoop` with `DefaultPolicy` at its old constants. Only train
 labels reach the learner; batch learners get the rows the policy selects (`HashedTextTrainer` stands in for the LoRA
