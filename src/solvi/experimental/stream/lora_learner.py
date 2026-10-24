@@ -307,9 +307,12 @@ class LoraLearner:
             raise ValueError("no calib labels: act_guard needs labels the adapter never trained on")
         rows = list(zip(L._texts(part, [x for x, _ in pairs]), [y for _, y in pairs]))
         m = part.model
-        mq = getattr(m.scorer, "mq", None) or {}
         alpha = getattr(job, "alpha", None)
-        return {"model": {"path": m.path, "max_len": mq.get("max_len"), "overrides": dict(getattr(m, "_overrides", {})),
+        # the part's own input length (the encoder's max_len, e.g. a model loaded with max_len=768), not the
+        # multi-question layout's length: the training process must read the same question the part reads
+        enc = getattr(m.scorer, "enc", None)
+        return {"model": {"path": m.path, "max_len": getattr(enc, "max_len", None),
+                          "overrides": dict(getattr(m, "_overrides", {})),
                           "weights": m.weights_fingerprint()},
                 "part": _part_bytes(part), "rows": rows, "calib": calib,
                 "hyper": {"r": int(hyper.get("r", 8)), "lr": float(hyper.get("lr", 3e-4)),
