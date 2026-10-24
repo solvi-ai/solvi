@@ -254,6 +254,14 @@ def _alone(score, thr) -> bool:
     return score is not None and math.isfinite(thr) and math.isfinite(float(score)) and score >= thr
 
 
+def _mirror_budget(budget, v):
+    """A private `DeltaBudget` with the delta and schedule of `budget` whose next() hands out index v: the comparison
+    certificate's δ_v is the candidate's own, and the loop's budget is not moved (nothing is spent from it)."""
+    b = DeltaBudget(budget.delta, budget.schedule)
+    b.v = int(v) - 1
+    return b
+
+
 class _Replayed(Exception):
     """A recorded error raised again by replay at the place it was recorded."""
 
@@ -502,7 +510,16 @@ class AdapterLoop:
     def _row(v, state, model, promise, frozen_at, seen, n_train, keys, fp):
         return {"version": v, "state": state, "model": model, "promise": promise, "frozen_at": frozen_at,
                 "seen": seen, "n_train": n_train, "keys": keys, "fingerprint": fp, "samples": [], "fed": [],
-                "discarded_at": None, "served_cls": None}
+                "discarded_at": None, "served_cls": None, "cmp": None}
+
+    def _comparison(self, p):
+        """The served version's comparison certificate for a candidate whose promise is p: a `StreamPromise` with the
+        loop's settings and p's (v, δ_v), on a private mirror of the budget (`_mirror_budget`) — it spends nothing from
+        the loop's budget. It reads the served version's score on exactly the decisions and samples p reads (same
+        grid rule, same samples, same δ), so the promotion compares the two versions certified the same way on the same
+        data. It only ranks: nothing is ever answered at its threshold, so it is outside the δ accounting (see
+        `_paired`)."""
+        return StreamPromise(**self._pkw, budget=_mirror_budget(self.budget, p.v))
 
     @contextlib.contextmanager
     def _locked(self):
@@ -552,12 +569,25 @@ class AdapterLoop:
                          detector=None if self.detector is None else self.detector.state())
 
     def _paired(self, c) -> Paired:
-        """The candidate's Paired at the thresholds in force now (see the module docstring). A policy with
-        `novel_only` False (`DefaultPolicy(novel_only=False)`, a control) gets every sample, seen ones too, in the
-        comparison fields; the seen fields are counted as always."""
-        thr_k, thr_s = self._threshold(c), self._threshold(self.served)
+        """The candidate's Paired (see the module docstring). A policy with `novel_only` False
+        (`DefaultPolicy(novel_only=False)`, a control) gets every sample, seen ones too, in the comparison fields; the
+        seen fields are counted as always.
+
+        The symmetric comparison (1.4.0): alone_served / wrong_served are the served version's answers at the threshold
+        of its comparison certificate (`_comparison`: built on exactly the candidate's post-freeze samples, the same
+        grid rule and the candidate's δ_v), so both versions are certified the same way on the same data and a fresh
+        candidate does not lose on certificate age (the served version's own certificate has read more samples and
+        loosened further). alone_served_own / wrong_served_own are the old comparison, at the served version's own
+        threshold in force now, kept for the records. The comparison is a decision rule, not a guarantee: the served
+        version always answers at its own threshold, a promoted candidate at its own certificate's, and every
+        certificate that ever serves holds under the loop's one δ budget whatever this rule decides. With no comparison
+        certificate (a checkpoint saved before 1.4.0 with a candidate in trial) the comparison falls back to the own
+        threshold. Deterministic from the recorded samples: replay gives the same numbers."""
+        thr_k, thr_own = self._threshold(c), self._threshold(self.served)
+        cmp = self._vs[c].get("cmp")
+        thr_s = thr_own if cmp is None else cmp.threshold
         novel_only = bool(getattr(self.policy, "novel_only", True))   # a policy pickled before the switch: on
-        n_nov = a_nov = w_nov = a_srv = w_srv = n_seen = a_seen = w_seen = 0
+        n_nov = a_nov = w_nov = a_srv = w_srv = n_seen = a_seen = w_seen = a_own = w_own = 0
         for sk, ss, wk, ws, seen in self._vs[c]["samples"]:
             ak = _alone(sk, thr_k)
             if seen:
@@ -571,8 +601,11 @@ class AdapterLoop:
                 if _alone(ss, thr_s):
                     a_srv += 1
                     w_srv += ws
+                if _alone(ss, thr_own):
+                    a_own += 1
+                    w_own += ws
         return Paired(n_nov, a_nov, w_nov, a_srv, n_seen=n_seen, alone_seen=a_seen, wrong_seen=w_seen,
-                      wrong_served=w_srv)
+                      wrong_served=w_srv, alone_served_own=a_own, wrong_served_own=w_own)
 
     # --- the per-decision step
     def step(self, x, oracle=None, *, source=None, key=None) -> dict:
@@ -976,6 +1009,9 @@ class AdapterLoop:
             for v, score in ((sv, score_s), (c, score_k)):
                 if v is not None and self._vs[v]["promise"] is not None:
                     self._vs[v]["promise"].observe(score)
+            cmp = None if c is None else self._vs[c].get("cmp")
+            if cmp is not None:                            # the served version, read as the candidate's promise reads
+                cmp.observe(score_s)
             if sampled:
                 for v, score, would in ((sv, score_s, would_s), (c, score_k, would_k)):
                     if v is None or self._vs[v]["promise"] is None:
@@ -985,6 +1021,8 @@ class AdapterLoop:
                         raise RuntimeError(f"decision {n} would calibrate version {v} frozen at {ver['frozen_at']}")
                     ver["promise"].learn(score, would, label)
                     ver["fed"].append(n)
+                if cmp is not None:
+                    cmp.learn(score_s, would_s, label)
                 if c is not None:
                     self._vs[c]["samples"].append((score_k, score_s, label is None or would_k != label,
                                                    label is None or would_s != label, key in self._vs[c]["keys"]))
@@ -1245,7 +1283,12 @@ class AdapterLoop:
         (its measurement is the freeze's report)."""
         if paired is None:
             return {"l_k": None, "l_s": None, "samples": len(self._vs[c]["samples"]), "n_novel": None, "n_seen": None}
-        return {"l_k": paired.share_k, "l_s": paired.share_s, "samples": len(self._vs[c]["samples"]),
+        cmp = self._vs[c].get("cmp")
+        return {"l_k": paired.share_k, "l_s": paired.share_s, "l_s_own": paired.share_s_own,
+                "thr_s_cmp": None if cmp is None or not math.isfinite(cmp.threshold) else cmp.threshold,
+                "thr_s_own": (None if not math.isfinite(self._threshold(self.served))
+                              else self._threshold(self.served)),
+                "samples": len(self._vs[c]["samples"]),
                 "n_novel": paired.n_novel, "n_seen": paired.n_seen}
 
     def _restart(self, v, n, why="alarm") -> list:
@@ -1253,6 +1296,9 @@ class AdapterLoop:
         paired samples dropped. → its "recertify" and a "restart" event."""
         ver = self._vs[v]
         ver["promise"].restart(why)
+        if ver.get("cmp") is not None:                     # the comparison restarts with the candidate, at its new δ_v
+            ver["cmp"].budget.v = ver["promise"].v - 1
+            ver["cmp"].restart(why)
         ver["samples"], ver["stale"] = [], False
         ev = self._promise_events()
         return ev + [self._event("restart", v, n, why=why)]
@@ -1275,6 +1321,7 @@ class AdapterLoop:
         ver["state"] = "discarded"
         self._release(ver.get("served_as"), ver["model"])
         ver["model"] = None                                # never served: its file (versions_dir) remains
+        ver["cmp"] = None                                  # out of trial: its comparison certificate is done
         ver["discarded_at"] = self._split_n["train"]
         self.candidate = None
         return self._event("discard", c, n, samples=len(ver["samples"]), why=why)
@@ -1288,6 +1335,7 @@ class AdapterLoop:
         if old != v:
             self._vs[old]["state"] = "retired"
         self._vs[v]["state"] = "served"
+        self._vs[v]["cmp"] = None                          # served: out of trial, its comparison certificate is done
         self.served = v
         if self.candidate == v:
             self.candidate = None
@@ -1611,6 +1659,7 @@ class AdapterLoop:
         self._ev_seen[k] = 0
         row = self._row(k, "candidate", model, p, n, self.live.seen(), n_train, keys, fp)
         row["served_as"], row["served_cls"] = srv, None if srv is None else type(srv)
+        row["cmp"] = None if p is None else self._comparison(p)
         self._vs[k] = row
         self.candidate = k
         return self._event("freeze", k, n, frozen_at=n, seen=self.live.seen(), n_train=n_train,

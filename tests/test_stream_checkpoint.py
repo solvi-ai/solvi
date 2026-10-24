@@ -167,6 +167,28 @@ def test_a_loaded_loop_continues_exactly_as_the_loop_it_was_saved_from(tmp_path)
     assert r["ok"] and r["decisions"] == 9000, r["mismatches"][:5]
 
 
+def test_the_comparison_certificate_of_a_candidate_in_trial_is_saved_and_restored(tmp_path):
+    """The served version's comparison certificate (the symmetric promotion rule, 1.4.0) is part of the checkpoint: a
+    candidate saved in trial keeps its comparison's (v, δ_v) — the candidate's own — and its evidence, and the loaded
+    loop goes on with the same paired numbers."""
+    data = _fake(7, 4000)
+    a = _loop()
+    n = 0
+    while a.candidate is None or a._vs[a.candidate]["cmp"].n == 0:   # until the comparison has read a sample
+        _run(a, data[n:n + 1])
+        n += 1
+    c = a.candidate
+    ca, pa = a._vs[c]["cmp"], a._vs[c]["promise"]
+    assert (ca.v, ca.delta_v) == (pa.v, pa.delta_v) and a.budget.v == pa.v      # nothing spent by the comparison
+    a.save(tmp_path / "ck")
+    b = _load(tmp_path / "ck")
+    cb = b._vs[c]["cmp"]
+    assert cb.state() == ca.state() and cb.budget is not b.budget and b.budget.v == a.budget.v
+    for x in data[n:n + 500]:
+        assert a.step(x, lambda x=x: x[0]) == b.step(x, lambda x=x: x[0])
+    assert a.versions() == b.versions()
+
+
 def test_a_loop_with_a_trace_storage_loads_from_its_chain_head(tmp_path):
     from solvi.core.store import JSONLStorage
     store = JSONLStorage(tmp_path / "records.jsonl")

@@ -204,9 +204,10 @@ def _state(loop) -> dict:
                                for sk, ss, wk, ws, seen in ver["samples"]],
                    "fed": list(ver["fed"]), "discarded_at": ver["discarded_at"], "stale": ver.get("stale"),
                    "served_cls": _cls_path(ver.get("served_cls")), "has_model": ver["model"] is not None,
-                   "promise": None if p is None else p.dump(), "fixed": (None if ver.get("fixed") is None
-                                                                        or not math.isfinite(ver["fixed"])
-                                                                        else float(ver["fixed"]))})
+                   "promise": None if p is None else p.dump(),
+                   "cmp": None if ver.get("cmp") is None else ver["cmp"].dump(),
+                   "fixed": (None if ver.get("fixed") is None or not math.isfinite(ver["fixed"])
+                             else float(ver["fixed"]))})
     rows_keys = {r.key for r in loop._rows}
     return {"n": loop.n, "served": loop.served, "candidate": loop.candidate, "left": loop.left,
             "paused": loop.paused, "closed": loop.closed, "error": loop.error, "attempt": loop._attempt,
@@ -575,6 +576,11 @@ def _restore(loop, m, st, data, vdir, groups):
         row["discarded_at"] = r["discarded_at"]
         row["served_cls"] = scls
         row["fixed"] = r.get("fixed")                     # label mode's threshold of the version
+        if r.get("cmp") is not None:                      # the served version's comparison certificate (1.4.0)
+            cmp = StreamPromise(**loop._pkw, budget=DeltaBudget(loop.budget.delta, loop.budget.schedule))
+            cmp.restore(r["cmp"])
+            cmp.budget.v = cmp.v                          # its private budget: it spends nothing from the loop's
+            row["cmp"] = cmp
         if r["stale"] is not None:
             row["stale"] = r["stale"]
         if v != 0:

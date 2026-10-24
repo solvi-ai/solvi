@@ -92,7 +92,8 @@ def test_learning_loop_is_the_adapter_loop_with_the_default_policy_at_the_lanes_
     # the same stream gives the records the old LearningLoop class (before AdapterLoop) wrote: the fixture is its log,
     # recorded at the stage-1 commit on a stream without repeats (every input unique, so the novel-only comparison is
     # the old one); the new fields (content key, split, wall clock, the "train" event, counts added to events) are
-    # dropped, every other field must be equal
+    # dropped, every other field must be equal (the symmetric comparison's fields of 1.4.0 too: version 0 here has no
+    # model, so l_s is 0 under either comparison and the decisions are the old ones)
     r = random.Random(1)
     voc = {c: [f"{c}w{i}" for i in range(12)] for c in "abcde"}
     data = []
@@ -104,7 +105,8 @@ def test_learning_loop_is_the_adapter_loop_with_the_default_policy_at_the_lanes_
         a.step(x, lambda y=y: y)
     old = json.loads(gzip.decompress((Path(__file__).parent / "fixtures" / "learning_loop_04c7e18.json.gz")
                                      .read_bytes()))
-    new_fields = {"loop": {"key", "split", "t"}, "stream": {"train_keys", "n_train", "n_novel", "n_seen", "install"}}
+    new_fields = {"loop": {"key", "split", "t"}, "stream": {"train_keys", "n_train", "n_novel", "n_seen", "install",
+                                                            "l_s_own", "thr_s_cmp", "thr_s_own"}}
     got = []
     for k, d in a.log:
         if k == "stream":
