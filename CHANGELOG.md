@@ -687,6 +687,17 @@ labels, 10 % of the labels discordant) rolled back in 10 / 28 / 70 % of runs by 
   answers in both arms); on one machine the median ask was about 39% shorter (one run, 4,000 asks per arm).
 
 ### Changed
+- **`DefaultPolicy(target_share=0.5)`: the improvement signal also reads coverage** (`solvi.experimental.stream`).
+  **Behaviour change**: the default was `None`. The served version is now also short when it answers alone on less
+  than half of its last `window` held-out labels, not only when its error alone is above α. With the error alone as
+  the only signal a weak but certified incumbent was never retrained: certification keeps its error alone ≤ α, so it
+  is short in coverage, not in error (in one smoke run, its script not in the repository, solvi-base on Banking77
+  answered 0.090 of its held-out labels alone with no error from about decision 960 to 2 000 and the loop never
+  trained). The share is read on held-out labels, a selection-biased sample that is mostly deferred decisions, so it
+  reads low (0.09 there against 0.30 on the whole stream in that run): a strong incumbent will usually be retrained
+  too, and the promotion gates (the novel-only paired comparison, the memorisation probe, the novel-risk bar) are what
+  keep a worse version from being served. `target_share=None` restores the error-only signal. Unmeasured: the stand
+  will measure the default.
 - **Versions in time on a key with `valid`.** **Behaviour change**: on a key with `valid`, a later `since` on an
   overlapping interval closes the earlier version at that `since` instead of refuting it (a bounded version gives the
   old value back after it; a retracted version re-opens what it closed; a missing since is the beginning of time);

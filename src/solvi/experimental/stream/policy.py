@@ -28,9 +28,16 @@ own counters in `self` and must pickle (the loop's checkpoint saves it).
   served version's n_train and ≥ refreeze × the train labels the loop had at the latest discard); the budget allows
   one now; and the improvement signal
   (`gates.incumbent_short`): on its last `window` (200) held-out labels the served version answers nothing alone, or
-  errs alone above the promised α, or (target_share given) answers alone less than that. A strong incumbent is not
-  retrained for nothing. The signal is read only once the window holds min(min_holdout, window) outcomes of the
-  served version: fewer (the window restarts at a promotion or a rollback) is "no signal yet", not "short", so a new
+  errs alone above the promised α, or answers alone on less than `target_share` (0.5; None: off) of them. Why the
+  share: a certified incumbent keeps its error alone ≤ α, so with the error alone as the only signal a weak but
+  certified incumbent — short in coverage, not in error — is never retrained (one smoke run, its script not in the
+  repository, solvi-base on Banking77: error alone 0.000, share alone 0.090 from about decision 960 to 2 000, no
+  training). The share is read on held-out labels,
+  a selection-biased sample (labels come mostly from deferred decisions), so it reads low (0.09 there against 0.30 on
+  the whole stream in that run), and a strong incumbent will usually be retrained too; the promotion gates (the
+  novel-only paired comparison, the memorisation probe, the novel-risk bar) are what keep a worse version from being
+  served. Unmeasured: the stand will measure the default. target_share=None restores the error-only signal. The
+  signal is read only once the window holds min(min_holdout, window) outcomes of the served version: fewer (the window restarts at a promotion or a rollback) is "no signal yet", not "short", so a new
   served version is not retrained before it was measured (version 0 without a model fills the window with outcomes
   answered by nobody, so it is short as soon as the window is full; with holdout=0 there is no window and the signal
   reads short). With the pre-freeze gates on, a training also waits for the labels those gates need — ≥ min_holdout
@@ -412,7 +419,8 @@ class LoopPolicy(abc.ABC):
 class DefaultPolicy(LoopPolicy):
     """See the module docstring for each hook. budget: a Budget (None: the defaults); s2_labels: take slow-path labels;
     calib / holdout: the split's shares; first, growth: the train labels before the first / a next training (absolute,
-    × the served version's n_train); window, target_share: the improvement signal; min_gain, min_holdout, tolerance:
+    × the served version's n_train); window, target_share: the improvement signal (target_share 0.5: also short when
+    it answers alone on less than half its held-out labels; None: the error-only signal); min_gain, min_holdout, tolerance:
     the pre-freeze gates; wilson: the confidence of the Wilson bounds (label mode's paired gain, the probe's discard
     test); min_novel, min_share, margin: the
     promotion rule; gap, probe_min: the memorisation probe; stale, trial: when a candidate is discarded; probation:
@@ -428,7 +436,7 @@ class DefaultPolicy(LoopPolicy):
     there the pre-freeze gates are the only measurement before a version is served."""
 
     def __init__(self, budget: Budget | None = None, *, s2_labels: bool = False, calib: float = 0.15,
-                 holdout: float = 0.15, first: int = 300, growth: float = 1.5, window: int = 200, target_share=None,
+                 holdout: float = 0.15, first: int = 300, growth: float = 1.5, window: int = 200, target_share=0.5,
                  min_gain: float = 0.01, min_holdout: int = 100, tolerance: float = 0.02, wilson: float = 0.95,
                  min_novel: int = 100, min_share: float = 0.05, margin: float = 0.01, gap: float = 0.10,
                  probe_min: int = 30, stale: int = 1500, trial: int = 1500, probation: int = 300, r: int = 8,

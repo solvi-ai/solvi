@@ -162,10 +162,10 @@ def test_want_train_needs_the_improvement_signal():
     # a served version answering nothing alone is short; one with no held-out outcome yet has no signal (stage-2 S2)
     assert p.want_train(_ready(versions=vs, served=1, labels=labels, holdout=((False, False),) * 200))
     assert not p.want_train(_ready(versions=vs, served=1, labels=labels, holdout=()))
-    # target_share: a strong but timid incumbent is short of it
+    # target_share (default 0.5): a timid incumbent with no error alone is short of it; None: the error-only signal
     timid = tuple([(True, False)] * 40 + [(False, False)] * 160)
-    assert not p.want_train(_ready(versions=vs, served=1, labels=labels, holdout=timid))
-    assert DefaultPolicy(target_share=0.5).want_train(_ready(versions=vs, served=1, labels=labels, holdout=timid))
+    assert p.want_train(_ready(versions=vs, served=1, labels=labels, holdout=timid))
+    assert not DefaultPolicy(target_share=None).want_train(_ready(versions=vs, served=1, labels=labels, holdout=timid))
     # the promised level is the state's
     assert not p.want_train(_ready(versions=vs, served=1, labels=labels, holdout=erring, alpha=0.10))
     # fewer than min(min_holdout, window) (100) outcomes: no signal yet, no training — the served version is measured
@@ -178,6 +178,27 @@ def test_want_train_needs_the_improvement_signal():
     one = gates.incumbent_short([(True, False)], 0.05, min_n=100)
     assert one["short"] and "< 100" in one["why"]
     assert not gates.incumbent_short([(True, False)], 0.05)["short"]          # the gate's own default: min_n 1
+
+
+def test_the_default_trains_on_a_certified_incumbent_short_in_coverage():
+    """Author decision 13: a certified incumbent keeps its error alone ≤ α, so with the error alone as the only signal
+    a weak one (error 0 alone, share 0.09) was never retrained. The default target_share 0.5 makes it short in
+    coverage; target_share=None gives back the error-only signal, under which it is not short."""
+    vs = (VersionInfo(0, "retired"), VersionInfo(1, "served", n_train=300))
+    labels = {"train": 1000}
+    certified_weak = tuple([(True, False)] * 18 + [(False, False)] * 182)        # 200 held-out: share 0.09, error 0
+    st = _ready(versions=vs, served=1, labels=labels, holdout=certified_weak)
+    assert DefaultPolicy().target_share == 0.5
+    assert DefaultPolicy().want_train(st) and DefaultPolicy().why_not_train(st) is None
+    sig = gates.incumbent_short(certified_weak, 0.05, 0.5, min_n=100)
+    assert sig["short"] and sig["error"] == 0 and sig["share"] == 0.09 and sig["why"].startswith("share alone 0.090 <")
+    old = DefaultPolicy(target_share=None)
+    assert not old.want_train(st)
+    assert old.why_not_train(st) == ("no improvement signal: error alone 0.000 ≤ 0.05, share alone 0.090 on 200 "
+                                     "held-out label(s)")
+    # a share at the target is not short on it
+    half = tuple([(True, False)] * 100 + [(False, False)] * 100)
+    assert not DefaultPolicy().want_train(_ready(versions=vs, served=1, labels=labels, holdout=half))
 
 
 def test_want_train_is_off_while_paused_or_with_a_candidate_in_trial():

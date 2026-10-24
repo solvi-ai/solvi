@@ -2171,6 +2171,15 @@ loop = AdapterLoop.attach(system, learner, initial=v0)   # a System alone: syste
 loop.status()["watch"]              # label mode after a promotion: the served version against the one before it
 ```
 
+`DefaultPolicy` trains when the labels grew and the served version is short on its last held-out labels: it errs
+alone above α, or answers alone on less than `target_share` (0.5 by default) of them. The share is there because a
+certified version keeps its error alone at most α: on error alone a weak but certified version, short in coverage and
+not in error, is never retrained. The share is read on held-out labels, a selection-biased sample that is mostly
+deferred decisions, so it reads lower than the share on the whole stream, and a strong version will usually be
+retrained too; the promotion gates (the novel-only paired comparison, the memorisation probe, the novel-risk bar) are
+what keep a worse version from being served. `DefaultPolicy(target_share=None)` trains on the error alone only. The
+default is unmeasured.
+
 The control is a `LoopPolicy` subclass: give each hook, and the loop calls them.
 
 ```python
