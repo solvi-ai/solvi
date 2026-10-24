@@ -561,6 +561,10 @@ labels, 10 % of the labels discordant) rolled back in 10 / 28 / 70 % of runs by 
   waits for a second task outside physics.
 
 ### Fixed
+- **`LoraLearner` trains at the part's own input length** (`solvi.experimental.stream`). The training payload
+  carried the multi-question layout's `max_len` instead of the model's, so a part loaded with `max_len=768` was retrained
+  at the default 512 and every training of a question longer than 512 tokens (77 intents with descriptions) failed.
+  Covered by `tests/test_stream_lora.py::test_the_training_reads_the_question_at_the_parts_own_max_len`.
 - **The adapter loop's first training is no longer refused at the freeze for repeated held-out labels**
   (`solvi.experimental.stream`). `DefaultPolicy.want_train` checked the pre-freeze floors (100 held-out labels, the
   calib labels the threshold needs) on label counts with repeats, while the freeze report scores the latest label per

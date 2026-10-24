@@ -694,3 +694,14 @@ def test_attach_end_to_end_dispatcher_background_training_promote_rollback_save_
         loop.detach()
         assert part.fingerprint() == fp0 and disp.loop is None
         loop2.detach()
+
+
+def test_the_training_reads_the_question_at_the_parts_own_max_len(ckpt, tmp_path):
+    # a part loaded with max_len=N trains at N: the payload carried the multi-question layout's length before, so a
+    # training rebuilt the model at the default 512 and refused a question that the part itself reads (77 intents
+    # with descriptions at 768 tokens)
+    for n in (256, 768):
+        m = DecideModel.load(ckpt, backend="torch", device="cpu", max_len=n)
+        part = m.decision("team", "Which team?", "email", TEAMS)
+        learner = LoraLearner(part, tmp_path / str(n), runner=ThreadRunner(heartbeat_s=0.5))
+        assert learner._payload(_job())["model"]["max_len"] == n
