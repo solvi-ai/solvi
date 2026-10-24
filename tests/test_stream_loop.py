@@ -584,6 +584,8 @@ def test_an_alarm_restarts_every_candidates_certificate():
     assert loop.versions()[1]["threshold"] is None
     assert not any(o["by"] == "local" for o in outs[a:])
     assert len(loop._vs[1]["samples"]) <= len(outs) - a   # the paired samples: only those after the alarm
+    p, cmp = loop._vs[1]["promise"], loop._vs[1]["cmp"]     # the comparison restarted with it, at its new (v, δ_v)
+    assert cmp is not None and (cmp.v, cmp.delta_v) == (p.v, p.delta_v) and cmp.budget is not loop.budget
     assert loop.delta_spent <= 0.05
     assert loop.replay()["ok"]
 

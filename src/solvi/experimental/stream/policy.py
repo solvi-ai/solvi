@@ -305,9 +305,10 @@ class Paired:
     whose key is not in the candidate's train_keys — n_novel of them, alone_novel / wrong_novel the candidate's
     answers alone / alone and wrong there, alone_served / wrong_served the served version's on the same novel samples
     at the threshold of its comparison certificate (1.4.0: a `StreamPromise` built on exactly the candidate's samples
-    with the candidate's δ_v, so both versions are certified the same way on the same data; it only ranks, it never
-    serves), alone_served_own / wrong_served_own at the served version's own threshold in force now (the comparison
-    before 1.4.0, kept for the records; None when not counted). Seen: the samples whose key it trained on — n_seen,
+    with the same grid rule and the candidate's δ_v; it only ranks, it never serves) once that certificate is
+    certified, and at the served version's own threshold while it is not (thr_s: "cmp", "own" or "no_model" — a served
+    version without a model never answers alone), alone_served_own / wrong_served_own at the served version's own
+    threshold in force now (the comparison before 1.4.0, kept for the records; None when not counted). Seen: the samples whose key it trained on — n_seen,
     the candidate's alone_seen / wrong_seen — read only by the memorisation probe. A candidate with no sample yet is Paired(0, 0, 0, 0), not None.
 
     Exact-key identity: a paraphrase of a trained item counts as novel, and calib keys (the threshold was fitted on
@@ -322,6 +323,7 @@ class Paired:
     wrong_served: int = 0
     alone_served_own: int | None = None
     wrong_served_own: int | None = None
+    thr_s: str | None = None
 
     @property
     def share_k(self) -> float:
@@ -634,7 +636,7 @@ class DefaultPolicy(LoopPolicy):
                "novel": {"ok": paired.n_novel >= self.min_novel, "n_novel": paired.n_novel, "min": self.min_novel},
                "min_share": {"ok": paired.share_k >= self.min_share, "share_k": paired.share_k},
                "margin": {"ok": paired.share_k >= paired.share_s + self.margin, "share_k": paired.share_k,
-                          "share_s": paired.share_s, "share_s_own": paired.share_s_own}}
+                          "share_s": paired.share_s, "share_s_own": paired.share_s_own, "thr_s": paired.thr_s}}
         if self.novel_risk:
             risk = paired.wrong_novel / paired.n_novel if paired.n_novel else None
             ub = gates._wilson(paired.wrong_novel, paired.n_novel, self.wilson)[1] if paired.n_novel else None
@@ -682,6 +684,7 @@ class DefaultPolicy(LoopPolicy):
             return f"not certified {age} decisions after its freeze ({c.samples} samples)"
         if c.certified and age >= self.trial and not self.promote(st, paired):
             own = "" if paired.share_s_own is None else f", share_s_own {paired.share_s_own:.4g}"
+            own += "" if paired.thr_s is None else f", thr_s {paired.thr_s}"
             return (f"certified, not better {age} decisions after its freeze ({c.samples} samples; share_k "
                     f"{paired.share_k:.4g}, share_s {paired.share_s:.4g}{own}, {paired.n_novel} novel)")
         return None

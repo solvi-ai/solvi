@@ -597,8 +597,11 @@ both frozen before it, and only then trains the live learner: a version never re
 certified and, on its own samples, answers alone on at least `min_share` of them (default 0.05) and on at least one
 point more than the served version (ℓ_k ≥ ℓ_s + `margin`, default 0.01). **Changed in 1.4.0:** ℓ_s is read at the
 threshold of a comparison certificate, a `StreamPromise` for the served version built on exactly the candidate's
-post-freeze decisions and samples with the same grid rule and the candidate's δ_v, so both versions are certified the
-same way on the same data; before, it was read at the served version's own threshold, whose certificate had read far
+post-freeze decisions and samples, so both versions are certified by the same rule on the same samples at the same δ
+(their grids differ: each comes from its own version's scores); while that certificate is not yet certified, ℓ_s
+falls back to the served version's own threshold (not +inf, which would read ℓ_s as 0), and a served version 0
+without a model gets no comparison (ℓ_s = 0, as before); `thr_s` in the promote event and the discard reason says
+which threshold was used ("cmp" / "own" / "no_model"). Before, it was read at the served version's own threshold, whose certificate had read far
 more samples and loosened at a larger δ_v, and a fresh candidate lost on the certificate's age (in one LoRA stand 0 of
 78 certified candidates were promoted, 53 would have been under this rule). The comparison only ranks: it spends no δ,
 nothing is answered at its threshold, and the served version and a promoted candidate answer at their own

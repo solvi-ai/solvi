@@ -581,11 +581,12 @@ class AdapterLoop:
         threshold in force now, kept for the records. The comparison is a decision rule, not a guarantee: the served
         version always answers at its own threshold, a promoted candidate at its own certificate's, and every
         certificate that ever serves holds under the loop's one δ budget whatever this rule decides. With no comparison
-        certificate (a checkpoint saved before 1.4.0 with a candidate in trial) the comparison falls back to the own
-        threshold. Deterministic from the recorded samples: replay gives the same numbers."""
+        certificate, or while it is not certified, the comparison falls back to the served version's own threshold
+        (`_thr_served`, conservative: an uncertified comparison would put ℓ_s at 0 and the margin would pass on the
+        candidate alone); Paired.thr_s records which one was used. Deterministic from the recorded samples: replay gives
+        the same numbers."""
         thr_k, thr_own = self._threshold(c), self._threshold(self.served)
-        cmp = self._vs[c].get("cmp")
-        thr_s = thr_own if cmp is None else cmp.threshold
+        thr_s, rule = self._thr_served(c)
         novel_only = bool(getattr(self.policy, "novel_only", True))   # a policy pickled before the switch: on
         n_nov = a_nov = w_nov = a_srv = w_srv = n_seen = a_seen = w_seen = a_own = w_own = 0
         for sk, ss, wk, ws, seen in self._vs[c]["samples"]:
@@ -605,7 +606,21 @@ class AdapterLoop:
                     a_own += 1
                     w_own += ws
         return Paired(n_nov, a_nov, w_nov, a_srv, n_seen=n_seen, alone_seen=a_seen, wrong_seen=w_seen,
-                      wrong_served=w_srv, alone_served_own=a_own, wrong_served_own=w_own)
+                      wrong_served=w_srv, alone_served_own=a_own, wrong_served_own=w_own, thr_s=rule)
+
+    def _thr_served(self, c):
+        """The served version's threshold for candidate c's comparison → (threshold, rule). "cmp": its comparison
+        certificate's, once certified. "own": its own threshold in force now, while the comparison is not certified or
+        absent (a checkpoint saved before 1.4.0 with a candidate in trial) — the conservative fallback: an uncertified
+        comparison (+inf) would read ℓ_s as 0. "no_model": the served version has no model (version 0 without one);
+        its scores are None and it never answers alone, as before 1.4.0."""
+        thr_own = self._threshold(self.served)
+        if self._vs[self.served]["model"] is None:
+            return thr_own, "no_model"
+        cmp = self._vs[c].get("cmp")
+        if cmp is not None and math.isfinite(cmp.threshold):
+            return cmp.threshold, "cmp"
+        return thr_own, "own"
 
     # --- the per-decision step
     def step(self, x, oracle=None, *, source=None, key=None) -> dict:
@@ -1287,7 +1302,7 @@ class AdapterLoop:
         return {"l_k": paired.share_k, "l_s": paired.share_s, "l_s_own": paired.share_s_own,
                 "thr_s_cmp": None if cmp is None or not math.isfinite(cmp.threshold) else cmp.threshold,
                 "thr_s_own": (None if not math.isfinite(self._threshold(self.served))
-                              else self._threshold(self.served)),
+                              else self._threshold(self.served)), "thr_s": paired.thr_s,
                 "samples": len(self._vs[c]["samples"]),
                 "n_novel": paired.n_novel, "n_seen": paired.n_seen}
 
@@ -1659,7 +1674,8 @@ class AdapterLoop:
         self._ev_seen[k] = 0
         row = self._row(k, "candidate", model, p, n, self.live.seen(), n_train, keys, fp)
         row["served_as"], row["served_cls"] = srv, None if srv is None else type(srv)
-        row["cmp"] = None if p is None else self._comparison(p)
+        row["cmp"] = (None if p is None or self._vs[self.served]["model"] is None   # no model served: nothing to rank
+                      else self._comparison(p))
         self._vs[k] = row
         self.candidate = k
         return self._event("freeze", k, n, frozen_at=n, seen=self.live.seen(), n_train=n_train,

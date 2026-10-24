@@ -701,14 +701,20 @@ labels, 10 % of the labels discordant) rolled back in 10 / 28 / 70 % of runs by 
   on its answers. In one LoRA stand (40 runs, 78 certified candidates) none was promoted; with the served certificate
   rebuilt on the candidate's samples at the candidate's δ_v, 53 would have been (a diagnosis on that stand's
   evaluation data; a gain counts only on a new run). The comparison is a decision rule, not a guarantee: it spends
-  nothing from the δ budget (it never serves, it only ranks; reusing the candidate's δ_v value keeps the two
-  certifications identical), the served version still answers at its own threshold and a promoted candidate at its
-  own certificate's, so every served answer's guarantee is unchanged. The candidate must still be certified, and the
+  nothing from the δ budget (it never serves, it only ranks; it reuses the candidate's δ_v value, so both
+  certifications follow the same rule on the same samples at the same δ — their grids differ, each comes from its own
+  version's scores), the served version still answers at its own threshold and a promoted candidate at its own
+  certificate's, so every served answer's guarantee is unchanged. While the comparison certificate is not yet
+  certified (a fresh candidate can certify first), ℓ_s is read at the served version's own threshold, the rule before
+  this change — not at +inf, which would put ℓ_s at 0 and let the margin pass on the candidate alone; a served
+  version 0 without a model gets no comparison and ℓ_s stays 0, as before. Which threshold was used is recorded:
+  `Paired.thr_s` ("cmp" / "own" / "no_model"), `thr_s` in the promote event, the margin check and the discard
+  reason. The candidate must still be certified, and the
   margin, `min_share`, the probe and the novel-risk bar are unchanged. The old ℓ_s stays in the records: `Paired`
   gains `alone_served_own` / `wrong_served_own` (`share_s_own`), the promote event `l_s_own`, `thr_s_cmp` and
   `thr_s_own`, the discard reason `share_s_own`; the checkpoint saves the comparison certificate, and replay rebuilds
   it from the recorded decisions. A checkpoint saved before this change with a candidate in trial has none: that
-  candidate is compared at the served threshold, as before.
+  candidate is compared at the served version's own threshold, as before (a test checks it).
 - **`DefaultPolicy(stale=, trial=)` count decisions since the candidate's freeze, not coin samples; defaults
   1 500 → 3 000** (`solvi.experimental.stream`; also `LearningLoop` / `lane_policy`). **Behaviour change.** A candidate
   not certified `stale` decisions after its freeze, or certified and not promotable `trial` decisions after it, is

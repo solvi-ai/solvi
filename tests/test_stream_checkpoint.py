@@ -3,7 +3,9 @@ AdapterLoop.save / load — a loop loaded from a checkpoint continues with the s
 was saved from (a promotion and a rollback after the load included) and replays exactly; a tampered or foreign
 checkpoint is refused; a crash in the middle of a save leaves the previous checkpoint usable; a training in flight
 refuses the save unless cancelled. No torch: the LoRA end to end is in test_stream_lora.py."""
+import dataclasses
 import json
+import math
 import random
 import threading
 import warnings
@@ -187,6 +189,92 @@ def test_the_comparison_certificate_of_a_candidate_in_trial_is_saved_and_restore
     for x in data[n:n + 500]:
         assert a.step(x, lambda x=x: x[0]) == b.step(x, lambda x=x: x[0])
     assert a.versions() == b.versions()
+
+
+def _in_trial_certified(seed=7):
+    """A loop whose candidate is certified and still in trial (version 0 answers 80 %, the candidate 60 %: not
+    better), and its comparison certificate certified too. → (loop, candidate, data, next index)."""
+    a = _loop(initial=_Model("v0", 0.8), policy=_plain(keep=3, growth=1.0, trial=10 ** 6, stale=10 ** 6, first=200))
+    data = _fake(seed, 8000)
+    for n, x in enumerate(data[:6000], 1):
+        a.step(x, lambda x=x: x[0])
+        c = a.candidate
+        if c is not None and math.isfinite(a._vs[c]["promise"].threshold) and math.isfinite(a._vs[c]["cmp"].threshold):
+            return a, c, data, n
+    raise AssertionError("no certified candidate in trial with a certified comparison")
+
+
+def test_an_uncertified_comparison_falls_back_to_the_served_versions_own_threshold():
+    """While the comparison certificate is not certified, ℓ_s is read at the served version's own threshold (the rule
+    before 1.4.0), not at +inf (ℓ_s = 0, a margin passed on the candidate alone); Paired, the promote fields, the
+    margin check and the discard reason record which threshold was used."""
+    a, c, data, n = _in_trial_certified()
+    p = a._paired(c)
+    assert p.thr_s == "cmp" and a._paired_fields(c, p)["thr_s"] == "cmp"
+    a._vs[c]["cmp"] = a._comparison(a._vs[c]["promise"])          # a comparison that has read nothing: +inf
+    assert math.isinf(a._vs[c]["cmp"].threshold) and math.isfinite(a._threshold(a.served))
+    p = a._paired(c)
+    assert p.thr_s == "own" and p.share_s == p.share_s_own > 0.5   # not 0: the served version answers at its own
+    assert a._paired_fields(c, p)["thr_s"] == "own"
+    pol, st = a.policy, a._state()
+    assert pol.promote_checks(st, p)["margin"]["thr_s"] == "own" and not pol.promote(st, p)
+    why = pol.discard(dataclasses.replace(st, n=st.n + 10 ** 6), p)
+    assert why and "thr_s own" in why
+
+
+def test_a_served_version_without_a_model_gets_no_comparison_certificate():
+    """Version 0 without a model never answers alone (score None): no comparison certificate is built, ℓ_s is 0 as
+    before 1.4.0, recorded as "no_model"."""
+    a, data = _loop(initial=None), _fake(7, 2000)
+    n = 0
+    while a.candidate is None and n < len(data):
+        _run(a, data[n:n + 1])
+        n += 1
+    assert a.candidate is not None
+    _run(a, data[n:n + 50])
+    c = a.candidate
+    if c is not None:
+        p = a._paired(c)
+        assert a._vs[c]["cmp"] is None and p.thr_s == "no_model" and p.share_s == 0.0
+    assert all(e.get("thr_s") == "no_model" for e in _events(a, "promote") if e["from"] == 0)
+
+
+def test_an_alarm_in_trial_restarts_the_comparison_at_the_candidates_new_delta():
+    """An alarm restarts the candidate's promise at the next (v, δ_v); its comparison certificate restarts with it at
+    the same (v, δ_v), on its private budget (the loop's budget moves only for the candidate's restart)."""
+    a, c, data, n = _in_trial_certified()
+    p, cmp = a._vs[c]["promise"], a._vs[c]["cmp"]
+    v0, spent = p.v, a.budget.v
+    a._restart(c, a.n, "alarm")
+    assert p.v > v0 and (cmp.v, cmp.delta_v) == (p.v, p.delta_v) and cmp.budget is not a.budget
+    assert math.isinf(cmp.threshold) and cmp.n == 0 and a.budget.v == p.v == spent + 1
+    for x in data[n:n + 200]:
+        a.step(x, lambda x=x: x[0])
+    if a.candidate == c:
+        assert (cmp.v, cmp.delta_v) == (p.v, p.delta_v)
+
+
+def test_a_checkpoint_without_a_comparison_certificate_falls_back_to_the_own_threshold(tmp_path, monkeypatch):
+    """A checkpoint written before 1.4.0 has no comparison certificate: a candidate loaded in trial is compared at the
+    served version's own threshold, as before, and the loaded loop goes on."""
+    a, c, data, n = _in_trial_certified()
+    real = ckpt_mod._state
+
+    def old_writer(loop):
+        st = real(loop)
+        for r in st["versions"]:
+            r.pop("cmp", None)
+        return st
+
+    monkeypatch.setattr(ckpt_mod, "_state", old_writer)
+    a.save(tmp_path / "ck")
+    monkeypatch.setattr(ckpt_mod, "_state", real)
+    b = _load(tmp_path / "ck")
+    assert b.candidate == c and b._vs[c]["cmp"] is None
+    p = b._paired(c)
+    assert p.thr_s == "own" and p.share_s == p.share_s_own > 0
+    for x in data[n:n + 300]:
+        b.step(x, lambda x=x: x[0])
 
 
 def test_a_loop_with_a_trace_storage_loads_from_its_chain_head(tmp_path):
