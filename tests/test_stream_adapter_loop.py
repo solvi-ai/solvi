@@ -106,7 +106,7 @@ def test_learning_loop_is_the_adapter_loop_with_the_default_policy_at_the_lanes_
     old = json.loads(gzip.decompress((Path(__file__).parent / "fixtures" / "learning_loop_04c7e18.json.gz")
                                      .read_bytes()))
     new_fields = {"loop": {"key", "split", "t"}, "stream": {"train_keys", "n_train", "n_novel", "n_seen", "install",
-                                                            "l_s_own", "thr_s_cmp", "thr_s_own"}}
+                                                            "l_s_own", "thr_s_cmp", "thr_s_own", "thr_s"}}
     got = []
     for k, d in a.log:
         if k == "stream":
