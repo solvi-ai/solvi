@@ -709,10 +709,15 @@ def unstage(part, ad):
             uninstall(m.scorer, ad.name)
 
 
+_OWN = object()
+
+
 @contextlib.contextmanager
-def scoring(part, ad):
+def scoring(part, ad, *, adaptation=_OWN):
     """On this thread, score the part's question with adapter `ad` (None: with no adapter) in place of its own slot's —
-    other threads, other questions and the fingerprints are unchanged. The adapter is staged first. Holds the part's
+    other threads, other questions and the fingerprints are unchanged. The adapter is staged first. adaptation: the
+    question's adaptation to score with in place of the one the served version set (None: none; default: the served
+    one) — a version's own calibration, so a version scores the same whichever version is served. Holds the part's
     version lock, so the part's own decisions wait (lock order: the part's, then the scorer's)."""
     from ..core.deciders.model import _SHADOW
     m, key = part.model, _lora_key(part)
@@ -722,9 +727,15 @@ def scoring(part, ad):
         mp = getattr(_SHADOW, "map", None)
         if mp is None:
             mp = _SHADOW.map = {}
-        k = (id(m), key)
+        ma = getattr(_SHADOW, "adapt", None)
+        if ma is None:
+            ma = _SHADOW.adapt = {}
+        k, ka = (id(m), key), (id(m), _akey(part))
         had, prev = k in mp, mp.get(k)
+        had_a, prev_a = ka in ma, ma.get(ka)
         mp[k] = ad
+        if adaptation is not _OWN:
+            ma[ka] = adaptation
         try:
             yield
         finally:
@@ -732,6 +743,10 @@ def scoring(part, ad):
                 mp[k] = prev
             else:
                 mp.pop(k, None)
+            if had_a:
+                ma[ka] = prev_a
+            else:
+                ma.pop(ka, None)
 
 
 def swap(part, ad, cal, *, drop_old=True):

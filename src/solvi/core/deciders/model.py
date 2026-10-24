@@ -28,6 +28,7 @@ from .gate import Facts, act_features
 from .part import DecisionPart
 
 _SHADOW = threading.local()      # per thread: {(id(model), lora_key): adapter or None} — solvi.experimental.lora.scoring
+#                                  and .adapt: {(id(model), adaptation key): Adaptation or None} — the version's own
 
 
 class NetGate:
@@ -122,6 +123,16 @@ def _shadow(model, k):
     """The adapter this thread scores the slot `k` of `model` with in place of its own (solvi.experimental.lora.scoring:
     a candidate version scored in shadow), as (found, adapter or None)."""
     m = getattr(_SHADOW, "map", None)
+    if not m:
+        return False, None
+    key = (id(model), k)
+    return (True, m[key]) if key in m else (False, None)
+
+
+def _shadow_adaptation(model, k):
+    """The adaptation this thread scores the question with adaptation key `k` of `model` with in place of the model's
+    own (solvi.experimental.lora.scoring: a version scored with its own calibration), as (found, Adaptation or None)."""
+    m = getattr(_SHADOW, "adapt", None)
     if not m:
         return False, None
     key = (id(model), k)
@@ -735,9 +746,16 @@ class DecideModel:
         return res[0] if one else res
 
     # --- calibrated scores
+    def _adaptation_of(self, sp, warn=False):
+        """The adaptation a question is scored with: the model's, unless this thread scores it with a version's own
+        (solvi.experimental.lora.scoring)."""
+        k = self._akey(sp, warn=warn)
+        found, a = _shadow_adaptation(self, k)
+        return a if found else self.adaptations.get(k)
+
     def _scores(self, sp, z):
         """Raw logits → calibrated scores s (softmax / sigmoid input) with this question's adaptation."""
-        a = self.adaptations.get(self._akey(sp, warn=True))
+        a = self._adaptation_of(sp, warn=True)
         z = np.asarray(z, float)
         if a is not None and a.bias is not None:
             z = z - np.asarray(a.bias)
@@ -858,7 +876,7 @@ class DecideModel:
 
     def _decision_v1(self, sp, z):
         s = self._scores(sp, z)
-        a = self.adaptations.get(self._akey(sp))
+        a = self._adaptation_of(sp)
         if sp.multi:
             p = _sig(s)
             probs = {o: float(v) for o, v in zip(sp.real, p)}
