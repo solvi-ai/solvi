@@ -1094,7 +1094,7 @@ class Dispatcher:
         answers alone — outside System 1's call, so no part's lock is held while the loop's is taken) and takes it, with
         the slow path's label, after. The loop's decisions run one at a time (`_learn_lock`, taken before the part's
         and the loop's locks and never while either is held), the slow path's call included: with a loop attached a
-        Dispatcher's throughput is at most 1 / the slow path's latency (measured once on a stand-in: 40 decisions in
+        Dispatcher's throughput is at most 1 / the slow path's latency (on a stand-in: 40 decisions in
         four threads with a 50 ms slow path took 3.7 × as long as without a loop). The loop's controls take the same
         lock first, so a control waits for the decision in flight. The lock is needed as built: the decision's
         number and coin are read before System 1 and the step after it, and a second decision in between would read

@@ -2201,7 +2201,7 @@ an outcome's, a rule's or an audit's; the slow path's only with `s2_labels=True`
 source: an attach whose policy takes no label from the slow path is refused (give `s2_labels=True`, a trusted oracle as
 the slow path whose Thoughts carry `{"oracle": {"label_source": "human"}}`, or use label mode on the System); refused
 labels are counted in `status()["labels"]["refused"]` and 200 in a row with none accepted warn once. With a loop, a Dispatcher serves one decision at a time, the slow
-path's call included (measured once on a stand-in: 3.7 × slower at four threads and a 50 ms slow path). A Cascade, Vote
+path's call included (measured once on a stand-in, the script is not in the repository: 3.7 × slower at four threads and a 50 ms slow path). A Cascade, Vote
 or Route over a part a loop serves is refused until `detach()`. Unmeasured: nothing here says the loop improves a
 system. See [experimental](experimental.md#stream).
 

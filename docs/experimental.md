@@ -713,7 +713,7 @@ after `warn_refused` (200) of them in a row with none accepted.
 
 One Dispatcher with a loop serves one decision at a time, the slow path's call included, under a lock taken before
 the part's and the loop's (order: dispatcher → part → loop on every path): its throughput is at most one decision per
-slow-path latency. Measured once on a stand-in: 40 decisions in four threads with a 50 ms slow path took 3.7 × as
+slow-path latency. Measured once on a stand-in (the script is not in the repository): 40 decisions in four threads with a 50 ms slow path took 3.7 × as
 long as without a loop. The lock is needed as built (the decision's number and coin are read before System 1 and the
 step after it). The loop's controls (`promote`, `rollback`, `detach`, `pause`, `train_now`, `serving`, `save`) take
 the same lock first, so a control waits for the decision in flight and every decision is recorded under the version
@@ -790,6 +790,6 @@ What the measurement found against these pieces:
 - **The promise is relative to the oracle.** Noisy labels, or a hosted LLM as the oracle, cost coverage, not
   validity against those labels.
 
-- **Missing:** measured once (the stand's script is not in the repository); see the documented limits in docs/experimental.md: the RiskDetector alarmed far later than the confidence CUSUM (DriftMonitor before its 1.4.0 window z-test change) on shifts to new intents and must not be the only alarm; the LearningLoop gained nothing with gold labels and is kept only as the core of a planned adapter loop; TicketDesk is unmeasured on a stream. The loop is not wired into the Dispatcher (no loop=: it drives its own coin and oracle); the expired-share stop (max_drop) and repeated tickets for the oracle's own noise are not built; a person's audit label does not yet replace the slow path's label
+- **Missing:** measured once (the stand's script is not in the repository); see the documented limits in docs/experimental.md: the RiskDetector alarmed far later than the confidence CUSUM (DriftMonitor before its 1.4.0 window z-test change) on shifts to new intents and must not be the only alarm; the LearningLoop gained nothing with gold labels and is kept only as the core of a planned adapter loop; TicketDesk is unmeasured on a stream. LearningLoop on its own is not wired into the Dispatcher (it drives its own coin and oracle; AdapterLoop attaches); the expired-share stop (max_drop) and repeated tickets for the oracle's own noise are not built; a person's audit label does not yet replace the slow path's label
 - **Script:** none in the repository (the measurement's stand ran outside it). **Deadline:** a future release.
 - API: [solvi.experimental.stream](api/stream.md).
