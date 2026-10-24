@@ -500,3 +500,37 @@ def test_a_version_file_swapped_after_the_check_is_never_read(tmp_path, monkeypa
     assert b.versions() == a.versions() and b.status() == a.status()
     data = _fake(13, 1500)
     assert _run(a, data) == _run(b, data)
+
+
+class _Flat(_Det):
+    """Every training gives a model right on 85 %: it certifies but never beats version 0 (90 %)."""
+
+    def train(self, job):
+        return _Model(f"flat{job.version}", 0.85)
+
+
+def test_a_loaded_loop_keeps_the_trial_clock_in_decisions_since_the_freeze(tmp_path):
+    """The trial clock reads decisions since the freeze (frozen_at, carried by the checkpoint), not samples: saved
+    in the middle of a trial, the loaded loop discards the candidate at the same decision, as the uninterrupted one."""
+    def make(learner=None):
+        return _loop(learner=learner or _Flat(), initial=_Model("v0", 0.9), detector=None,
+                     policy=_plain(growth=1.0, first=200, stale=10 ** 6, trial=1200))
+    data = _fake(31, 6000)
+    a = make()
+    fr = None
+    for i, x in enumerate(data, start=1):
+        a.step(x, lambda x=x: x[0])
+        if fr is None and a.candidate is not None:
+            fr = _events(a, "freeze")[-1]
+        if fr is not None and i == fr["frozen_at"] + 600:
+            break
+    assert a.candidate == fr["version"] and not _events(a, "discard")
+    a.save(tmp_path / "ck")
+    b = _load(tmp_path / "ck", learner=_Flat())
+    for x in data[a.n:]:
+        assert a.step(x, lambda x=x: x[0]) == b.step(x, lambda x=x: x[0])
+    da, db = _events(a, "discard"), _events(b, "discard")
+    assert da and da == db and da[0]["version"] == fr["version"]
+    assert da[0]["why"].startswith("certified, not better") and da[0]["decision"] >= fr["frozen_at"] + 1200
+    assert da[0]["samples"] < 1200
+    assert _norm(a.log) == _norm(b.log) and b.replay()["ok"]

@@ -86,7 +86,7 @@ def test_learning_loop_is_the_adapter_loop_with_the_default_policy_at_the_lanes_
     loop = LearningLoop(HashedTextLearner(), question="q", max_risk=0.05, secret=KEY, growth=1.5, trial=700)
     assert isinstance(loop, AdapterLoop) and type(loop.policy) is DefaultPolicy
     p = loop.policy
-    assert (p.first, p.growth, p.refreeze, p.stale, p.trial, p.min_share, p.margin) == (300, 1.5, 1.5, 1500, 700,
+    assert (p.first, p.growth, p.refreeze, p.stale, p.trial, p.min_share, p.margin) == (300, 1.5, 1.5, 3000, 700,
                                                                                       0.05, 0.01)
     assert (p.calib, p.holdout, p.probe, p.pre_freeze, p.novel_risk, p.probation) == (0.0, 0.0, False, False, False, 0)
     # the same stream gives the records the old LearningLoop class (before AdapterLoop) wrote: the fixture is its log,

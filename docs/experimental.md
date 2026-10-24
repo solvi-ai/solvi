@@ -597,8 +597,13 @@ both frozen before it, and only then trains the live learner: a version never re
 certified and, on its own samples, answers alone on at least `min_share` of them (default 0.05) and on at least one
 point more than the served version at the served threshold (ℓ_k ≥ ℓ_s + `margin`, default 0.01). The floor is the
 author's rule after the joint promise certified a model of shuffled labels at a threshold almost nothing passes and
-promoted it over "no model" with margin 0. A candidate not certified after 1 500 samples, or certified and not better
-after `trial` samples (default 1 500), is discarded. Its δ_v stays spent, and the next freeze waits for 1.5 × the
+promoted it over "no model" with margin 0. A candidate not certified `stale` decisions after its freeze (default 3 000),
+or certified and not better `trial` decisions after it (default 3 000), is discarded. **Changed in 1.4.0:** the two
+limits count decisions, not coin samples; at a sampling rate of 0.08–0.17 the old 1 500 samples were 9 000–18 000
+decisions, so a certified candidate that never cleared the margin stayed in trial for a whole stream and no later
+training started. 3 000 decisions leave room to certify: the grid opens 200 decisions after the freeze, and a point
+with 0–1 % risk needs about 120–280 samples at 6–12 decisions per sample (an arithmetic from the certificate's
+constants, not a measurement). Its δ_v stays spent, and the next freeze waits for 1.5 × the
 labels taken. Labels from "human", "outcome", "rule" or "audit" are taken by default. A slow path's answer ("s2" or
 "verified") is refused unless `s2_labels=True`, and with it is recorded as "s2". Each decision is a record of kind
 `loop` (its `stream` part is kept by a redaction; the input, the would-be answers and the label are not). Each freeze,

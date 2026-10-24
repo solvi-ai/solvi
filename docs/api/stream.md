@@ -59,6 +59,14 @@ script is not in the repository); a strong incumbent will usually be retrained t
 novel-only paired comparison, the memorisation probe, the novel-risk bar) keep a worse version out.
 `target_share=None` restores the error-only signal. Unmeasured; see [experimental](../experimental.md#stream).
 
+`DefaultPolicy`'s `stale` and `trial` (default 3 000 each) count **decisions since the candidate's freeze**
+(`LoopState.since_freeze`), not coin samples — changed in 1.4.0. A candidate not certified `stale` decisions after its
+freeze, or certified and not promotable `trial` decisions after it, is discarded, and training can start again. At a
+sampling rate of 0.08–0.17 the old 1 500 samples were 9 000–18 000 decisions, so a stalled candidate blocked training
+for a whole stream. 3 000 leaves room to certify: the grid opens 200 decisions after the freeze and a point with
+0–1 % risk needs about 120–280 samples at 6–12 decisions per sample (arithmetic from the certificate's constants, not
+measured). The clock runs from the freeze; an alarm's restart does not reset it.
+
 ::: solvi.experimental.stream.policy
 
 ## `solvi.experimental.stream.loop`
