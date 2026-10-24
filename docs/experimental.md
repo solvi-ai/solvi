@@ -595,7 +595,15 @@ candidate before its label is read. A sampled decision reaches the promises of t
 both frozen before it, and only then trains the live learner: a version never reads a sample from before its freeze
 (a test checks this for every version). The coin and the rate are stage 2's. A candidate is promoted once it is
 certified and, on its own samples, answers alone on at least `min_share` of them (default 0.05) and on at least one
-point more than the served version at the served threshold (ℓ_k ≥ ℓ_s + `margin`, default 0.01). The floor is the
+point more than the served version (ℓ_k ≥ ℓ_s + `margin`, default 0.01). **Changed in 1.4.0:** ℓ_s is read at the
+threshold of a comparison certificate, a `StreamPromise` for the served version built on exactly the candidate's
+post-freeze decisions and samples with the same grid rule and the candidate's δ_v, so both versions are certified the
+same way on the same data; before, it was read at the served version's own threshold, whose certificate had read far
+more samples and loosened at a larger δ_v, and a fresh candidate lost on the certificate's age (in one LoRA stand 0 of
+78 certified candidates were promoted, 53 would have been under this rule). The comparison only ranks: it spends no δ,
+nothing is answered at its threshold, and the served version and a promoted candidate answer at their own
+certificates' thresholds, so the guarantee is unchanged. The old ℓ_s is kept in the records (`l_s_own` in a promote
+event, `share_s_own` in a discard reason). The floor is the
 author's rule after the joint promise certified a model of shuffled labels at a threshold almost nothing passes and
 promoted it over "no model" with margin 0. A candidate not certified `stale` decisions after its freeze (default 3 000),
 or certified and not better `trial` decisions after it (default 3 000), is discarded. **Changed in 1.4.0:** the two

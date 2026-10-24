@@ -31,7 +31,11 @@ breaks the promise: the stage-2 control).
 
 Promotion. Once the candidate is certified, on the candidate's own samples (all after its freeze and after the last
 alarm): ℓ_k = the share with the candidate's score ≥ its threshold, ℓ_s = the share with the served version's score
-≥ the served threshold now — a paired comparison on the same samples. Promote when ℓ_k ≥ `min_share` (0.05) AND
+≥ the threshold of its comparison certificate — a paired comparison on the same samples, both versions certified the
+same way: the comparison certificate is a `StreamPromise` for the served version on exactly the candidate's decisions
+and samples, same grid rule, the candidate's δ_v (1.4.0; before, the served version's own threshold, from an older
+certificate loosened at a larger δ_v, so a fresh candidate lost on the certificate's age). It only ranks and spends no
+δ: nothing is answered at its threshold. Promote when ℓ_k ≥ `min_share` (0.05) AND
 ℓ_k ≥ ℓ_s + `margin` (0.01: one point) — the author's rule (2026-10-23): under the joint promise a model of noise
 certifies at a strict threshold that almost nothing passes, and with margin 0 over a version that answers nothing it
 was promoted; the floor keeps such a version out (the shuffled-label control: shuffled labels never promote, both kinds). Discard a candidate not certified `stale` decisions

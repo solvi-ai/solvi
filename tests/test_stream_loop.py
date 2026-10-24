@@ -167,6 +167,68 @@ def test_a_certified_candidate_never_promotable_is_discarded_after_trial_decisio
     assert loop.replay()["ok"]
 
 
+class _Graded:
+    """x = (label, u, v), score 1 − u: right when u < q, right on 90 % of the band q ≤ u < q + 0.3 (v ≥ 0.1), else
+    wrong. A stricter threshold has fewer errors, so a certificate that has read more samples loosens further: the
+    served version's own certificate, old, answers alone more often than a fresh one on the same samples would."""
+
+    def __init__(self, name, q):
+        self.name, self.q = name, q
+
+    def score(self, x):
+        y, u, v = x
+        right = u < self.q or (u < self.q + 0.3 and v >= 0.1)
+        return (y if right else "wrong", 1.0 - u)
+
+    def probs(self, x):
+        a, s = self.score(x)
+        return {a: s}
+
+    def fingerprint(self):
+        return f"graded-{self.name}-{self.q}"
+
+
+def _graded_run(q):
+    """Version 0 is _Graded(0.5), certified from decision 1 and loosened over ~3 600 decisions; the candidate frozen at
+    decision 3 647 is _Graded(q), certified on ~140 post-freeze samples."""
+    r = random.Random(5)
+    data = [(r.choice("ab"), r.random(), r.random()) for _ in range(6800)]
+    loop = LearningLoop(_Fake([_Graded("k", q)] + [_Graded(f"z{i}", 0.0) for i in range(5)]), question="q",
+                        max_risk=0.05, secret=KEY, initial=_Graded("s", 0.5), freeze_min=1500, growth=1.0,
+                        trial=3000, stale=3000)
+    for x in data:
+        loop.step(x, lambda x=x: x[0])
+    return loop
+
+
+def test_the_promotion_compares_both_versions_certified_the_same_way_on_the_same_samples():
+    """The symmetric comparison (1.4.0): ℓ_s is the served version's share at the threshold of a comparison certificate
+    built on exactly the candidate's post-freeze samples with the candidate's δ_v. A better candidate (right below
+    u < 0.65 against 0.5) with ~140 samples is promoted; at the served version's own threshold (old, loosened) the old
+    rule would have refused it (ℓ_k < ℓ_s_own + margin). The comparison spends no δ and replays exactly."""
+    loop = _graded_run(0.65)
+    fr, pr = _events(loop, "freeze"), _events(loop, "promote")
+    assert fr[0]["version"] == 1 and pr and pr[0]["version"] == 1 and pr[0]["from"] == 0
+    p = pr[0]
+    assert p["l_k"] >= p["l_s"] + loop.margin                       # the symmetric rule promotes
+    assert p["l_k"] < p["l_s_own"] + loop.margin                    # the old rule would not have
+    assert p["thr_s_cmp"] > p["thr_s_own"]                          # fresh comparison: stricter than the old one
+    assert p["samples"] < 200
+    # the comparison certificate spends nothing: version 0 took v = 1, version 1 v = 2, version 2 (frozen at the
+    # promotion) v = 3, nothing else
+    assert not _events(loop, "restart") and loop.budget.v == len(loop.versions())
+    assert loop.replay()["ok"]
+
+
+def test_a_worse_candidate_is_still_discarded_under_the_symmetric_comparison():
+    loop = _graded_run(0.3)
+    assert not _events(loop, "promote") and loop.served == 0
+    disc = _events(loop, "discard")
+    assert disc and disc[0]["version"] == 1 and disc[0]["why"].startswith("certified, not better 3000 decisions")
+    assert "share_s " in disc[0]["why"] and "share_s_own " in disc[0]["why"]     # both comparisons recorded
+    assert loop.replay()["ok"]
+
+
 def test_an_uncertified_candidate_is_discarded_after_stale_decisions_not_samples():
     loop = _served_loop([_Model(f"z{i}", 0.0) for i in range(6)], stale=1500, trial=10 ** 6)
     _run_fake(loop, _fake_data(21, 2500))
