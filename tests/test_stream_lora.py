@@ -103,6 +103,35 @@ def test_swap_then_rollback_is_bit_exact(trained):
     assert part.fingerprint() == fp0 and [part.decide(x).probs for x in t] == probs0
 
 
+def test_a_version_scores_with_its_own_adaptation_whatever_version_is_served(ckpt, tmp_path):
+    """Version 0 of a fitted part (an adaptation) and a trained version (none of its own): each scores with its own
+    calibration, so version 0 rescored after a promotion, and the candidate scored in shadow, give the served scores
+    to the bit; the rollback serves version 0's scores again."""
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        m, part = _part(ckpt)
+        part.fit(_toy(40, 3))
+        part.act_guard(_toy(60, 7), max_risk=0.3)
+        learner = LoraLearner(part, tmp_path / "lora_loop", runner=ThreadRunner(heartbeat_s=0.5))
+        v0 = learner.version0()
+        v1 = learner.train(_job())
+    assert v0.calibration["adaptation"] is not None
+    assert v1.calibration["adaptation"] != v0.calibration["adaptation"]
+    t = [x for x, _ in _toy(8, 11)]
+
+    def live():
+        return [(d.value, part._signal(d)[1]) for d in (part.decide(x) for x in t)]
+    s0, s1 = [v0.score(x) for x in t], [v1.score(x) for x in t]     # v1 in shadow while version 0 is served
+    assert s0 == live()
+    v1.install()                                                     # the promotion
+    try:
+        assert live() == s1                                          # the shadow score was the served one
+        assert [v0.score(x) for x in t] == s0                        # version 0 rescored while v1 is served
+    finally:
+        v0.install()                                                 # the rollback
+    assert live() == s0 and [v1.score(x) for x in t] == s1
+
+
 def test_a_concurrent_scorer_never_sees_an_adapter_without_its_thresholds(trained, swaps=60):
     """Two threads decide while a third swaps version 1 in and out: every decision's probabilities, adapter and
     guarantee are one version's (the adapter it records answered it, with that adapter's own thresholds)."""

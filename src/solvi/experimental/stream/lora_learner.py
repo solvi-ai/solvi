@@ -164,11 +164,12 @@ class LoraVersion:
         return (self.calibration.get("guarantee") or {}).get("signal")
 
     def score(self, x):
-        """→ (the answer, the signal): the part's question scored with this version's adapter on this thread only
-        (no threshold applied); the signal is the one its threshold is on (act or confidence)."""
+        """→ (the answer, the signal): the part's question scored with this version's adapter and its own adaptation
+        on this thread only (no threshold applied), whichever version the part serves; the signal is the one its
+        threshold is on (act or confidence)."""
         part = self._bound()
         L = _lora()
-        with L.scoring(part, self.adapter):
+        with L.scoring(part, self.adapter, adaptation=self.calibration.get("adaptation")):
             text = part._input_text(x)
             if part.long is not None and part._too_long(text):
                 text = part.long_input(text)
