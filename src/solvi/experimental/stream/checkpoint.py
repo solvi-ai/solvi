@@ -77,7 +77,7 @@ from collections import deque
 from pathlib import Path
 
 from ._eprocess import DeltaBudget
-from .certificate import StreamPromise
+from .certificate import StreamPromise, _Mirror
 from .detector import RiskDetector
 from .policy import LabelRow
 from .serving import HeadVersion
@@ -642,7 +642,6 @@ def _restore(loop, m, st, data, vdir, groups):
         if r.get("cmp") is not None:                      # the served version's comparison certificate (1.4.0)
             cmp = StreamPromise(**loop._pkw, budget=DeltaBudget(loop.budget.delta, loop.budget.schedule))
             cmp.restore(r["cmp"])
-            from .loop import _Mirror
             cmp.budget = _Mirror(promise)                 # the candidate's index: it spends nothing from the loop's
             row["cmp"] = cmp
         if r["stale"] is not None:

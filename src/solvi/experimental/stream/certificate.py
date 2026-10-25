@@ -353,4 +353,25 @@ class StreamPromise:
         return f"StreamPromise({self.kind}, {self.level:g}, threshold={thr}, n={self.n}, v={self.v})"
 
 
+class _Mirror:
+    """The comparison certificate's budget: its next() hands out the candidate promise's own (v, δ_v) — charging the
+    candidate first if it has no index yet (lazy δ charge: both read the same samples, so the candidate bets on this
+    sample too) — and moves nothing else: the comparison spends nothing of its own from the loop's budget."""
+
+    def __init__(self, promise):
+        self.promise = promise
+        self.delta, self.schedule = promise.budget.delta, promise.budget.schedule
+
+    def delta_at(self, v):
+        return self.promise.budget.delta_at(v)
+
+    def next(self):
+        self.promise._charge()
+        return self.promise.v, self.promise.delta_v
+
+    @property
+    def v(self):
+        return self.promise.v or 0
+
+
 __all__ = ["BETS", "KINDS", "StreamPromise", "fixed_grid"]

@@ -175,7 +175,7 @@ from collections import deque
 from typing import Any, NamedTuple
 
 from ._eprocess import DeltaBudget
-from .certificate import StreamPromise, _sha
+from .certificate import StreamPromise, _Mirror, _sha
 from .detector import RiskDetector
 from .gates import calib_threshold
 from .learner import TrainJob
@@ -254,27 +254,6 @@ def _json(x):
 
 def _alone(score, thr) -> bool:
     return score is not None and math.isfinite(thr) and math.isfinite(float(score)) and score >= thr
-
-
-class _Mirror:
-    """The comparison certificate's budget: its next() hands out the candidate promise's own (v, δ_v) — charging the
-    candidate first if it has no index yet (lazy δ charge: both read the same samples, so the candidate bets on this
-    sample too) — and moves nothing else: the comparison spends nothing of its own from the loop's budget."""
-
-    def __init__(self, promise):
-        self.promise = promise
-        self.delta, self.schedule = promise.budget.delta, promise.budget.schedule
-
-    def delta_at(self, v):
-        return self.promise.budget.delta_at(v)
-
-    def next(self):
-        self.promise._charge()
-        return self.promise.v, self.promise.delta_v
-
-    @property
-    def v(self):
-        return self.promise.v or 0
 
 
 class _Replayed(Exception):
@@ -451,6 +430,8 @@ class AdapterLoop:
                         additive=additive, max_layers=int(max_layers))
         self.additive, self.max_layers = additive, int(max_layers)
         self._layers = [0]                                 # additive: the chain L0, L1, … (versions; L0 = served)
+        self._chain_rev = 0                                # additive: +1 at every change of the chain or of a Λ (a
+        #                                                    Dispatcher's _pre routed on the chain it read: `_post`)
         self._route: dict = {}                             # additive: version → its frozen routing threshold Λ
         self._frozen: set = set()                          # additive: versions whose promise does not learn
         self._relearn: set = set()                         # additive: frozen layers restarted, learning until certified
@@ -785,8 +766,12 @@ class AdapterLoop:
         d = self._layers[-1]
         zone = (self.candidate is not None and j == len(self._layers) - 1 and d in self._route
                 and not _alone(path[-1][2], self._route[d]))
-        thr = [self._route[v] for v, _, _ in path[:-1]] + [self._thr_owner(path[-1][0])]   # in force at the draw
-        return {"path": path, "owner": path[-1][0], "layer": j, "zone": bool(zone), "thr": thr}
+        return {"path": path, "owner": path[-1][0], "layer": j, "zone": bool(zone), "thr": self._route_thr(path)}
+
+    def _route_thr(self, path) -> list:
+        """Additive mode: the thresholds in force at the draw along a routed path — Λ_v for a passed layer, the owner's
+        threshold in force (`_thr_owner`) for the last."""
+        return [self._route[v] for v, _, _ in path[:-1]] + [self._thr_owner(path[-1][0])]
 
     @staticmethod
     def _recorded_path(path, woulds):
@@ -824,6 +809,7 @@ class AdapterLoop:
             raise RuntimeError(f"attach of version {k} below the uncertified layer {d}")
         self._route[d] = lam
         self._frozen.add(d)
+        self._chain_rev += 1
         return self._event("attach", k, n, zone_of=d, routing_thr=lam)
 
     def _attach_refused(self) -> str | None:
@@ -863,6 +849,7 @@ class AdapterLoop:
         lam = self._route.pop(d, None)
         self._frozen.discard(d)
         self._relearn.discard(d)                           # the deepest learns anyway
+        self._chain_rev += 1
         return self._event("unfreeze", d, n, routing_thr=lam)
 
     def _layer_in(self, k, n, **extra) -> dict:
@@ -877,6 +864,7 @@ class AdapterLoop:
             raise ValueError(f"version {k} is not a certified candidate in trial")
         d = self._layers[-1]
         self._layers.append(k)
+        self._chain_rev += 1
         self._vs[k]["state"] = "layer"
         self._vs[k]["cmp"] = None
         self._dets[k] = _fresh_detector(self.detector)
@@ -989,6 +977,7 @@ class AdapterLoop:
             ev.append(self._discard(self.candidate, n, "detach"))
         removed = self._layers[j:]
         del self._layers[j:]
+        self._chain_rev += 1
         for v in removed:
             ver = self._vs[v]
             self._release(ver.get("served_as"), ver["model"])
@@ -1131,6 +1120,7 @@ class AdapterLoop:
                 prob, rho, sampled, alone = self._draw(n, score_o, thr_o, prob=self._prob(route["owner"]))
                 would_k, score_k = self._zone_shadow(x, route)
             out = {"n": n, "served": self.served, "candidate": self.candidate, "hist": len(self._history),
+                   "chain": self._chain_rev,
                     "scores": (would_s, score_s, would_k, score_k), "key": self._key(x), "sampled": sampled,
                     "trial": self._trial(x, would_k, score_k, route),
                     "alone": alone, "probation": prob, "rho": rho, "fingerprint": s["fingerprint"]}
@@ -1146,8 +1136,8 @@ class AdapterLoop:
         `_pre` and here, the scores are read again (the step is the loop's record of the decision either way)."""
         with self._locked():
             self._refuse_if_stopped()
-            same = ((self.n + 1, self.served, self.candidate, len(self._history))
-                    == (pre["n"], pre["served"], pre["candidate"], pre["hist"]))
+            same = ((self.n + 1, self.served, self.candidate, len(self._history), self._chain_rev)
+                    == (pre["n"], pre["served"], pre["candidate"], pre["hist"], pre.get("chain")))
             if same:
                 would_s, score_s, would_k, score_k = pre["scores"]
                 trial = pre.get("trial")
@@ -1403,6 +1393,8 @@ class AdapterLoop:
         if self.additive:                                  # the owner's coin and answer (one coin per decision)
             if route is None:                              # replay: rebuilt from the recorded path scores
                 route = self._route_of(x, would_s, score_s, scored=scored)
+            else:                                          # a Dispatcher's _pre route (same chain): the thresholds
+                route = dict(route, thr=self._route_thr(route["path"]))   # in force now (a restart since _pre)
             _, score_o, thr_o = self._owner(route)
             prob, rho, sampled, alone = self._draw(n, score_o, thr_o, prob=self._prob(route["owner"]))
         else:

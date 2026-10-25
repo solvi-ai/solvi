@@ -1251,6 +1251,9 @@ class Dispatcher:
                    events=step["events"])
         if not step["same"]:
             out["step"] = {"served": step["served"], "candidate": step["candidate"]}
+            for k in ("owner", "layer"):                 # additive: the chain changed since _pre — the step's routing
+                if k in step:
+                    out["step"][k] = step[k]
         return out
 
     # --- the stream certificate (promise=, audit="adaptive")

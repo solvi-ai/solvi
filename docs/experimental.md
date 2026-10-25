@@ -780,8 +780,9 @@ decision) was not measured.
 
 **Additive coverage (experimental, 1.4).** `AdapterLoop(..., additive=True, max_layers=3)` changes what a certified
 candidate does: instead of replacing the served version, it serves the zone the served version escalates. The default
-stays `additive=False`, the replacement protocol above, with records and events unchanged; additive mode needs stream
-mode and an `initial` model.
+stays `additive=False`, the replacement protocol above, with the same records and events as with `additive` omitted
+(both differ from 1.3 by the lazy δ charge below: `v_index` / `delta_v` are `None` until a promise's first sample, and
+"recertify" carries `None`); additive mode needs stream mode and an `initial` model.
 
 - *The chain and its zones.* The loop serves a chain of layers L0, L1, … (L0 is the served version). Every layer has
   its own `StreamPromise` and live threshold λ_j; every layer but the deepest also has a routing threshold Λ_j, frozen
@@ -813,8 +814,10 @@ mode and an `initial` model.
 - *Drift, per layer.* Each layer has its own `RiskDetector` on its own coin-sampled answers; the score monitor reads
   L0's scores only. An alarm on layer j restarts only j's promise and puts only j in probation (its zone escalates
   until it re-certifies; a frozen layer learns until then and is frozen again, "refreeze"); Λ_j and the other layers
-  are unchanged. `rollback(j)`, with a layer index, detaches layer j and every deeper layer ("detach"); layer j−1
-  becomes the deepest and learns again.
+  are unchanged. A restarted layer that is not the deepest relearns on the decisions it owns ({score_j ≥ Λ_j}, the
+  part of its zone it answers), not on its whole zone: conservative, since that is exactly where it serves.
+  `rollback(j)`, with a layer index, detaches layer j and every deeper layer ("detach"); layer j−1 becomes the deepest
+  and learns again.
 - *Lazy δ charge (both modes).* A promise takes its (v, δ_v) at its first sample, not when it is built or restarted.
   Indices stay in the order they are taken; a candidate discarded or a restart rolled back before its first sample
   spends nothing.
@@ -832,13 +835,21 @@ mode and an `initial` model.
   its file in `versions_dir`. `save()` writes checkpoint format v2 with the chain (layers, routing thresholds,
   frozen layers, one detector per layer); a replacement loop's checkpoint stays v1, and `load(additive=)` refuses a
   protocol mismatch. Attached to a Dispatcher, a decision owned by a deeper layer is decided with that layer's version
-  installed for the call.
+  installed for the call: the decision holds the loop's and the part's locks for its whole System 1 call (the loop's
+  controls and the part's other callers wait), so each layer costs that call's time and the share of traffic its zone
+  owns is serialised on those locks. A
+  control that changes the chain between the Dispatcher's read and its step (a rollback, an attach) makes the step
+  route the decision again on the chain in force.
 
 Checked on synthetic streams with known per-zone risk (`tests/test_stream_additive_validity.py`; 400 seeds per case
-with `-m slow`): candidates whose true zone risk is α at every threshold were falsely certified no more often than
-δ_v, a run's false certifications over every index (the base, candidates, a restart) no more often than δ, a
-candidate with zone risk 1 % certified within the documented sample counts, and with the joint kind each zone's
-realised risk stayed ≤ α and the stream-wide risk within α·(1 + P(Z_1)). Unmeasured: no stand has run additive mode;
+with `-m slow`, one run). Selective kind (α = 0.10, δ = 0.30), with candidates whose error is exactly α at every grid
+point, the worst case: false certifications per index were 7 / 400 at δ_v = 0.046, 1 / 400 at 0.020, 0 / 400 at
+0.007, and runs with any false certification over every index (the base, candidates, a restart) 15 / 400 against
+δ = 0.30. The pass bar is a one-sided 95 % binomial upper bound of δ_v · runs: coarse, it cannot tell a 1.4×
+inflation of δ_v from none. A candidate with zone risk 1 % (joint, α = δ = 0.05) certified in 400 / 400 runs, median
+116 samples, max 166 (bar 249). Joint kind, two layers: each zone's realised risk was 0.020 and 0.017 (≤ α = 0.05)
+and the stream-wide risk 0.032 within α·(1 + P̂(Z_1)) = 0.087 — a sanity check of a good layer's realised risk, not a
+worst case of the bound. Unmeasured: no stand has run additive mode;
 nothing here says it gains coverage on real data.
 
 Measured once on real streams (the stand's script is not in the repository): three public intent sets with a TF-IDF +

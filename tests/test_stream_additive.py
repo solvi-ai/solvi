@@ -282,3 +282,45 @@ def test_a_one_layer_additive_run_replays():
     loop = _attached(n=1500)
     rep = loop.replay()
     assert rep["ok"], rep["mismatches"][:3]
+
+
+# ───────────────────────────── a Dispatcher's _pre / _post with the chain changed or a layer restarted in between
+def _chain_of_two():
+    loop = _loop([GOOD, GOOD], policy=_policy(), max_layers=2)
+    _run(loop, _xs(0, 4000))
+    assert loop._layers == [0, 1]
+    return loop
+
+
+def _pre_owned_by(loop, v, alone=None):
+    for x in _xs(9, 2000):
+        pre = loop._pre(x)
+        if pre.get("owner") == v and (alone is None or pre["alone"] == alone):
+            return x, pre
+    raise AssertionError(f"no decision owned by version {v}")
+
+
+def test_a_detach_between_pre_and_post_makes_the_pre_route_stale_and_the_step_routes_again():
+    loop = _chain_of_two()
+    x, pre = _pre_owned_by(loop, 1)
+    assert pre["layer"] == 1
+    # rollback(1) (a control, or an alarm on another in-flight decision) detaches layer 1 before this decision's _post
+    loop.rollback(1, by="test")
+    out = loop._post(pre, x, x[0], "human")
+    assert out["same"] is False and out["owner"] == 0 and out["layer"] == 0
+    assert loop.status()["state"] == "running"
+    rec = _recs(loop)[-1]
+    assert rec["owner"] == 0 and [p[0] for p in rec["path"]] == [0]
+    assert loop.replay()["ok"]
+
+
+def test_a_restart_between_pre_and_post_records_the_threshold_in_force_at_the_draw():
+    loop = _chain_of_two()
+    x, pre = _pre_owned_by(loop, 1, alone=True)
+    # λ_1 = +inf from here, nothing alone in its zone (the internal restart: no public control restarts a layer with
+    # the decision number and the chain unchanged; the record must still read the threshold its draw used)
+    loop._restart(1, loop.n)
+    out = loop._post(pre, x, x[0], "human")
+    assert out["same"] is True
+    rec = _recs(loop)[-1]
+    assert rec["owner"] == 1 and rec["path"][-1][2] is None and rec["alone"] is False
