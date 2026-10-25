@@ -272,11 +272,7 @@ def test_a_discard_unfreezes_the_layer_above_and_it_learns_again():
     assert rec_u["candidate"] in (None, 2) and (rec_u["candidate"] is not None or not rec_u["trial_zone"])
 
 
-# ───────────────────────────── what stage B2 does not build yet: refused, not silently wrong
-def test_the_checkpoint_of_an_additive_loop_is_refused_until_its_stage(tmp_path):
-    loop = _attached(n=800)
-    with pytest.raises(NotImplementedError, match="stage B3"):
-        loop.save(tmp_path / "ck")
+# the checkpoint of an additive loop (stage B3): tests/test_stream_additive_b3.py
 
 
 def test_a_one_layer_additive_run_replays():

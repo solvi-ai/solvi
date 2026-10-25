@@ -389,8 +389,10 @@ class AdapterLoop:
     layer learns until then and is frozen again, "refreeze"); rollback(j) — a layer index — detaches the layers ≥ j
     ("detach"), layer j−1 becomes the deepest and learns again. Attached to a Dispatcher, a decision owned by a deeper
     layer is decided by System 1 with that layer's version installed for the call (`serving`). Needs stream mode and an
-    initial model. TODO(additive B3): checkpoints (per-layer detectors, Λ, frozen/relearn sets) and replay of a chain
-    deeper than L0 from the recorded path scores. TODO(additive B5): the synthetic validity test and the docs."""
+    initial model. Records: owner, layer, zone, path [[v, score, thr in force]], trial_zone in the stream record, every
+    reached layer's answer in the payload's "path_would" — replay recomputes the routing from them; status() "zones"
+    (per layer Λ, λ, P̂(Z), realised risk; the composite stream-wide risk, reported). Checkpoint: format v2 with the
+    chain (a replacement loop's stays v1). TODO(additive B5): the synthetic validity test and the docs."""
 
     def __init__(self, learner, *, question, policy=None, max_risk=None, max_error=None, delta=0.05, initial=None,
                  detector=None, monitor="auto", probation=300, source="human", secret=None, seed=0, sampling=None,
@@ -438,6 +440,7 @@ class AdapterLoop:
         self._dets: dict = {}                              # additive: version → its RiskDetector (L0's: self.detector)
         self._left_of: dict = {}                           # additive: version → its probation left (L0's: self.left)
         self._refused_why = None                           # additive: the loop's last train refusal ("train_refused")
+        self._zstat: dict = {0: self._zcount(0)} if additive else {}   # additive: version → its zone's counts
         self.trace_candidate = bool(trace_candidate)
         if warn_refused is not None and (isinstance(warn_refused, bool) or int(warn_refused) < 1):
             raise ValueError("warn_refused is a number of labelled decisions ≥ 1, or None (never warn)")
@@ -620,7 +623,8 @@ class AdapterLoop:
                          detector=None if self.detector is None else self.detector.state(),
                          **({} if not self.additive else
                             {"layers": tuple(self._layers), "deepest": self._layers[-1],
-                             "deepest_certified": math.isfinite(self._threshold(self._layers[-1]))}))
+                             "deepest_certified": math.isfinite(self._threshold(self._layers[-1])),
+                             "zone_share": self._zone_share()}))
 
     def _paired(self, c) -> Paired:
         """The candidate's Paired (see the module docstring). A policy with `novel_only` False
@@ -698,7 +702,7 @@ class AdapterLoop:
             k = self._key(x) if key is None else str(key)
             return self._advance(x, k, would_s, score_s, would_k, score_k, oracle,
                                  self.source if source is None else source, watch=self._watch_scores(x, k),
-                                 trial=self._trial(x, would_k, score_k), route=route)
+                                 trial=self._trial(x, would_k, score_k, route), route=route)
 
     def _shadow(self, x, sampled):
         """The candidate's (would, score) on x when the step reads it: while its promise's grid is not fixed yet (the
@@ -712,13 +716,14 @@ class AdapterLoop:
         return None, None
 
     # --- additive coverage: the chain's routing (stage B1)
-    def _route_of(self, x, would_s, score_s) -> dict | None:
+    def _route_of(self, x, would_s, score_s, scored=None) -> dict | None:
         """Additive mode: decision x's walk down the chain → {"path": [(v, would, score)] for every layer reached,
         "owner": the version that owns it, "layer": its index, "zone": whether x is in the zone of the candidate in
         trial}; None in replacement mode. L0's (would, score) are the step's; a deeper layer is scored here, only when
         the decision reaches it. Layer j is passed when it is not the deepest and its score is below its frozen routing
         threshold Λ_j (input side only: no label enters the routing). The candidate's zone: the decision reached the
-        deepest layer d and d's score is below Λ_d (frozen at the attach)."""
+        deepest layer d and d's score is below Λ_d (frozen at the attach). scored: version → (would, score) read from
+        the records instead of scoring (replay: `_recorded_path`)."""
         if not self.additive:
             return None
         path = [(self._layers[0], would_s, score_s)]
@@ -726,14 +731,36 @@ class AdapterLoop:
         while j < len(self._layers) - 1 and not _alone(path[-1][2], self._route[path[-1][0]]):
             j += 1
             v = self._layers[j]
-            m = self._vs[v]["model"]
-            would, score = m.score(x) if m is not None else (None, None)
+            if scored is not None:
+                would, score = scored(v)
+            else:
+                m = self._vs[v]["model"]
+                would, score = m.score(x) if m is not None else (None, None)
             path.append((v, would, score))
         d = self._layers[-1]
         zone = (self.candidate is not None and j == len(self._layers) - 1 and d in self._route
                 and not _alone(path[-1][2], self._route[d]))
         thr = [self._route[v] for v, _, _ in path[:-1]] + [self._thr_owner(path[-1][0])]   # in force at the draw
         return {"path": path, "owner": path[-1][0], "layer": j, "zone": bool(zone), "thr": thr}
+
+    @staticmethod
+    def _recorded_path(path, woulds):
+        """Replay, additive mode: the recorded path ([[v, score, thr]] in the stream record, the answers in the loop
+        payload's "path_would") → version → (would, score), for `_route_of`. The routing itself is recomputed from
+        these scores and the rebuilt chain's thresholds; a decision whose rebuilt walk reaches a layer the record did
+        not score is an error of the replay (a mismatch), never a silent rescore."""
+        got = {}
+        woulds = list(woulds or [])
+        for i, entry in enumerate(path or []):
+            v, score = int(entry[0]), entry[1]
+            got[v] = (woulds[i] if i < len(woulds) else None, score)
+
+        def scored(v):
+            if v not in got:
+                raise RuntimeError(f"replay: the decision reaches version {v}, which the record's path did not score "
+                                   f"({sorted(got)})")
+            return got[v]
+        return scored
 
     def _zone_shadow(self, x, route):
         """Additive mode: the candidate's (would, score) on a decision of its zone; (None, None) outside it (the
@@ -808,9 +835,78 @@ class AdapterLoop:
         self._vs[k]["state"] = "layer"
         self._vs[k]["cmp"] = None
         self._dets[k] = _fresh_detector(self.detector)
+        self._zstat[k] = self._zcount(n)                   # its zone's counts from the next decision
         self.candidate = None
         return self._event("promote", k, n, additive=True, zone_of=d, routing_thr=self._route[d],
                            thr_k=self._threshold(k), **{"from": d, "to": k}, **extra)
+
+    @staticmethod
+    def _zcount(since) -> dict:
+        """Additive mode: a layer's counts from the decision it joined the chain (`since`; L0: 0) — "reach": decisions
+        that reached it (its zone Z_v), "owned" / "alone": those it owned / answered alone by its rule; on the
+        coin-sampled owned ones "sampled", "s_alone" and "s_wrong" (alone and wrong, a missing label wrong — as its
+        detector reads them). Rebuilt by replay, kept by the checkpoint; every one is recomputable from the records
+        (owner, path, alone, sampled, label and the payload's path_would)."""
+        return {"since": int(since), "reach": 0, "owned": 0, "alone": 0, "sampled": 0, "s_alone": 0, "s_wrong": 0}
+
+    def _zone_count(self, route, sampled, alone, label):
+        for v, _, _ in route["path"]:
+            self._zstat[v]["reach"] += 1
+        o, would_o, _ = route["path"][-1]
+        z = self._zstat[o]
+        z["owned"] += 1
+        z["alone"] += bool(alone)
+        if sampled:
+            z["sampled"] += 1
+            z["s_alone"] += bool(alone)
+            z["s_wrong"] += bool(alone and (label is None or would_o != label))
+
+    def _zone_share(self) -> dict:
+        """Additive mode: layer version → P̂(Z_v), the share of the decisions since v joined the chain that reached it
+        (input side; L0: 1.0)."""
+        out = {}
+        for v in self._layers:
+            z = self._zstat[v]
+            m = self.n - z["since"]
+            out[v] = None if m <= 0 else z["reach"] / m
+        return out
+
+    def _zones(self) -> dict:
+        """Additive mode: status()'s "zones" — per layer its Λ, λ, P̂(Z), its realised risk on its own coin samples,
+        and the composite stream-wide risk of both kinds (estimates, reported, not promised: each layer's numbers are
+        over its own window since it joined; the promise is per zone, at level α — the joint kind's stream-wide bound
+        is α·(1 + Σ_{j≥1} P(Z_j)))."""
+        share = self._zone_share()
+        layers = []
+        for j, v in enumerate(self._layers):
+            z = dict(self._zstat[v])
+            thr = self._threshold(v)
+            joint = None if not z["sampled"] else z["s_wrong"] / z["sampled"]
+            sel = None if not z["s_alone"] else z["s_wrong"] / z["s_alone"]
+            nxt = share.get(self._layers[j + 1]) if j + 1 < len(self._layers) else 0.0
+            own = None if share[v] is None or nxt is None else max(0.0, share[v] - nxt)
+            layers.append({"version": v, "layer": j, "routing_thr": self._route.get(v),
+                           "threshold": None if math.isinf(thr) else thr, "certified": math.isfinite(thr),
+                           "learning": v not in self._frozen, "probation": self._prob(v),
+                           "zone_share": share[v], "owned_share": own, **z,
+                           "risk": {"joint": joint, "selective": sel}})
+        joint = alone = 0.0                                # Σ_j P̂(owned_j)·(wrong_j, alone_j per sample)
+        ok = True
+        for row in layers:
+            if not row["owned"]:
+                continue
+            if row["owned_share"] is None or not row["sampled"]:
+                ok = False                                 # a zone with answers and no sample: no estimate
+                continue
+            joint += row["owned_share"] * row["s_wrong"] / row["sampled"]
+            alone += row["owned_share"] * row["s_alone"] / row["sampled"]
+        d = self._layers[-1]
+        return {"layers": layers, "deepest": d, "deepest_certified": math.isfinite(self._threshold(d)),
+                "zone_share": share,
+                "composite": {"joint": joint if ok else None, "selective": joint / alone if ok and alone else None,
+                              "joint_bound": self.alpha * (1 + sum(x for v, x in share.items()
+                                                                   if v != self._layers[0] and x is not None))},
+                "max_layers": self.max_layers}
 
     def _thr_owner(self, o):
         """The threshold in force for owner o: its live λ_o, never below its routing threshold Λ_o when it has one (a
@@ -857,6 +953,7 @@ class AdapterLoop:
             self._relearn.discard(v)
             self._dets.pop(v, None)
             self._left_of.pop(v, None)
+            self._zstat.pop(v, None)
         p = self._layers[-1]
         lam = self._route.pop(p, None)
         self._frozen.discard(p)
@@ -905,18 +1002,23 @@ class AdapterLoop:
     def _route_record(self, route) -> dict:
         """The record's view of a routed decision: owner, layer, zone (the owner's zone index), path [[v, score, thr in
         force]] (Λ_v for a passed layer, λ_v for the owner), trial_zone (in the candidate's zone).
-        TODO(additive B3): replay recomputes the routing from these path scores (deeper layers are rescored today)."""
+        Replay recomputes the routing from these path scores (`_recorded_path`); the answers are in the payload's
+        "path_would"."""
         path = []
         for (v, _, score), thr in zip(route["path"], route["thr"]):   # the thresholds in force at the draw (a
             path.append([v, _num(score), None if math.isinf(thr) else thr])   # detach in the step drops a Λ)
         return {"owner": route["owner"], "layer": route["layer"], "zone": route["layer"], "path": path,
                 "trial_zone": route["zone"]}
 
-    def _trial(self, x, would_k, score_k):
+    def _trial(self, x, would_k, score_k, route=None):
         """trace_candidate: the candidate's (would, score) on x for the records (the shadow's when the step read it,
-        else scored here) — None with the option off or no candidate. Read by no rule."""
+        else scored here) — None with the option off or no candidate. Read by no rule. Additive mode (route given):
+        the candidate is scored on its zone only — the zone shadow's (would, score) there, None outside it (the record
+        keeps "candidate_score" None: not scored)."""
         if not self.trace_candidate or self.candidate is None:
             return None
+        if route is not None:
+            return (would_k, score_k) if route["zone"] else None
         if score_k is not None:
             return would_k, score_k
         m = self._vs[self.candidate]["model"]
@@ -985,7 +1087,7 @@ class AdapterLoop:
                 would_k, score_k = self._zone_shadow(x, route)
             out = {"n": n, "served": self.served, "candidate": self.candidate, "hist": len(self._history),
                     "scores": (would_s, score_s, would_k, score_k), "key": self._key(x), "sampled": sampled,
-                    "trial": self._trial(x, would_k, score_k),
+                    "trial": self._trial(x, would_k, score_k, route),
                     "alone": alone, "probation": prob, "rho": rho, "fingerprint": s["fingerprint"]}
             if route is not None:                          # an owner below L0: the Dispatcher decides with its version
                 out["route"] = route                       # installed for System 1's call (`serving`)
@@ -1014,7 +1116,7 @@ class AdapterLoop:
                                                                   self._threshold(self.served))[2])
                 else:
                     would_k, score_k = self._zone_shadow(x, route)
-                trial = self._trial(x, would_k, score_k)
+                trial = self._trial(x, would_k, score_k, route)
             src = self.source if source is None else source
             out = self._advance(x, pre["key"], would_s, score_s, would_k, score_k,
                                 lambda: Verdict(label, source, label_of), src, lenient=True, trial=trial,
@@ -1248,14 +1350,14 @@ class AdapterLoop:
         return sp
 
     def _advance(self, x, key, would_s, score_s, would_k, score_k, oracle, src, lenient=False, watch=None,
-                 trial=None, route=None):
+                 trial=None, route=None, scored=None):
         from ...core.sources import UntrustedLabel
         n = self.n + 1
         sv, c = self.served, self.candidate
         thr_s = self._threshold(sv)
         if self.additive:                                  # the owner's coin and answer (one coin per decision)
-            if route is None:                              # replay: rebuilt from the recorded L0 score
-                route = self._route_of(x, would_s, score_s)
+            if route is None:                              # replay: rebuilt from the recorded path scores
+                route = self._route_of(x, would_s, score_s, scored=scored)
             _, score_o, thr_o = self._owner(route)
             prob, rho, sampled, alone = self._draw(n, score_o, thr_o, prob=self._prob(route["owner"]))
         else:
@@ -1324,6 +1426,7 @@ class AdapterLoop:
             if route is not None:                          # additive: the zone reads (no comparison certificate)
                 o_thr = route["thr"][-1]                   # the owner's threshold in force at the draw
                 zev = self._zone_learn(n, key, route, sampled, label, would_k, score_k, c)
+                self._zone_count(route, sampled, alone, label)
             for v, score in ((sv, score_s), (c, score_k)) if route is None else ():
                 if v is not None and self._vs[v]["promise"] is not None:
                     self._vs[v]["promise"].observe(score)
@@ -1410,19 +1513,21 @@ class AdapterLoop:
             self._write(self._record(n, sv, c, rho, sampled, alone, by, lsrc, lof, label, prob, score_s, thr_s,
                                      score_k, det, key, split, t, error={k: err[k] for k in ("where", "call", "why")},
                                      watch=wrec, trial=trial, route=route),
-                        self._payload(x, would_s, would_k, label, answer, watch, c, trial), events)
+                        self._payload(x, would_s, would_k, label, answer, watch, c, trial, route), events)
             raise
         rec = self._record(n, sv, c, rho, sampled, alone, by, lsrc, lof, label, prob, score_s, thr_s, score_k, det,
                            key, split, t, watch=wrec, trial=trial, route=route)
-        self._write(rec, self._payload(x, would_s, would_k, label, answer, watch, c, trial), events)
+        self._write(rec, self._payload(x, would_s, would_k, label, answer, watch, c, trial, route), events)
         out = {"n": n, "answer": answer, "by": by, "served": sv, "candidate": c, "sampled": sampled, "label": label,
                "label_source": lsrc, "events": [e["event"] for e in events]}
         if route is not None:
             out.update(owner=route["owner"], layer=route["layer"], trial_zone=route["zone"])
         return out
 
-    def _payload(self, x, would_s, would_k, label, answer, watch, c=None, trial=None):
+    def _payload(self, x, would_s, would_k, label, answer, watch, c=None, trial=None, route=None):
         out = {"input": x, "would": would_s, "shadow_would": would_k, "label": label, "answer": answer}
+        if route is not None:                              # additive: every reached layer's answer (the owner's last;
+            out["path_would"] = [w for _, w, _ in route["path"]]   # replay and an audit read it with the path scores)
         if self.mode == "label":
             out["watch_would"] = None if watch is None else watch[0]
         if self.trace_candidate and c is not None:
@@ -1476,7 +1581,7 @@ class AdapterLoop:
                "key": key, "split": split, "t": t}
         if self.mode == "label":
             rec["watch"] = watch
-        if self.trace_candidate and c is not None:     # TODO(additive B3): the trace on zone decisions only
+        if self.trace_candidate and c is not None:     # additive: None outside the candidate's zone (not scored)
             rec["candidate_score"] = None if trial is None else _num(trial[1])
         if route is not None:
             rec.update(self._route_record(route))
@@ -2203,16 +2308,13 @@ class AdapterLoop:
         "manifest", "n", "files"}. Writes no record otherwise. The save holds the part's version lock and the loop's lock
         for all its writes (every version's files, each fsynced, included): the part's decisions and the loop's controls
         wait for it; unmeasured."""
-        if self.additive:     # TODO(additive B3): checkpoint fields (layers, Λ, frozen/relearn, per-layer detectors,
-            # per-layer probation, _refused_why) + format bump
-            raise NotImplementedError("a checkpoint of an additive loop is not built yet (stage B3)")
-        from .checkpoint import save_loop
+        from .checkpoint import save_loop                  # additive: format v2 with the chain (stream.checkpoint)
         return save_loop(self, dir, cancel=cancel)
 
     @classmethod
     def load(cls, dir, learner, **kw) -> "AdapterLoop":
         """The loop saved in `dir`, continuing where it was saved (see `stream.checkpoint.load_loop` for the keywords:
-        system, storage, versions_dir, part, initial, key, served, clock, secret, groups)."""
+        system, storage, versions_dir, part, initial, key, served, clock, secret, groups, additive)."""
         from .checkpoint import load_loop
         return load_loop(cls, dir, learner, **kw)
 
@@ -2398,7 +2500,9 @@ class AdapterLoop:
                                lambda: Verdict(label, st.get("label_source") or fresh.source, st.get("label_of")),
                                fresh.source, watch=None if wr is None else (lp.get("watch_would"), wr.get("score")),
                                trial=(lp.get("candidate_would"), st["candidate_score"]) if "candidate_score" in st
-                               else None)
+                               else None,
+                               scored=(fresh._recorded_path(st.get("path"), lp.get("path_would"))
+                                       if fresh.additive else None))
             except _Replayed:
                 pass
             except Exception as e:  # noqa: BLE001 — an error the records do not hold
@@ -2454,6 +2558,18 @@ class AdapterLoop:
                         got = models[v].score(lp.get("input"))[1]
                         if _num(got) != st.get(key):
                             bad.append((st["n"], "rescore", f"version {v}: recorded {st.get(key)}, scores {got}"))
+                for i, entry in enumerate((st.get("path") or [])[1:], 1):   # additive: every deeper layer reached
+                    v, rec_score = entry[0], entry[1]
+                    if v not in models:
+                        bad.append((st["n"], "rescore", f"version {v} (path {i}): no file to rescore it"))
+                        continue
+                    would, got = models[v].score(lp.get("input"))
+                    if _num(got) != rec_score:
+                        bad.append((st["n"], "rescore", f"version {v} (path {i}): recorded {rec_score}, scores {got}"))
+                    pw = lp.get("path_would")
+                    if pw is not None and i < len(pw) and _json(would) != pw[i]:
+                        bad.append((st["n"], "rescore", f"version {v} (path {i}): recorded answer {pw[i]!r}, "
+                                                        f"answers {would!r}"))
         live = {id(x) for ver in vs.values() for x in (ver.get("model"), ver.get("served_as")) if x is not None}
         live_fp = {ver["model"].fingerprint() for ver in vs.values() if ver.get("model") is not None}
         for v, mdl in models.items():                      # the copies loaded for the check: unstaged again, unless
@@ -2485,7 +2601,11 @@ class AdapterLoop:
         """{"state", "error", "served", "candidate", "n", "labels": {"train", "calib", "holdout", "refused"},
         "trainings",
         "budget": {...}, "job", "paused", "alarms", "mode", "attached", "guarantee", "watch", "delta_spent",
-        "versions_kept"}. labels: the accepted labels by split and "refused", the labels the policy refused on the
+        "versions_kept"} — and "zones" in additive mode (`_zones`: per layer version, layer, routing_thr Λ, threshold λ,
+        certified, learning, probation, zone_share P̂(Z_v), owned_share, its counts and realised risk on its own coin
+        samples; the chain's deepest, deepest_certified, zone_share, the composite stream-wide joint and selective risk
+        — estimates, reported, not promised — beside the joint kind's bound α·(1 + Σ_{j≥1} P̂(Z_j))). labels: the
+        accepted labels by split and "refused", the labels the policy refused on the
         attached path (each a missing label). watch: label mode after a promotion, the watch's counts {"target", "n",
         "better", "worse", "total", "lw"} ("lw": its e-process's log wealths; None otherwise).
         attached: "dispatcher", "system" or None. state: "detached", "closed", "error" (a hook raised: the loop stopped; error: {"n", "where", "why"}), "training", "paused" or
@@ -2495,7 +2615,7 @@ class AdapterLoop:
 
         Takes no lock: it answers while a step (or an inline training inside it) runs on another thread. Its fields
         are read one by one, so two of them may straddle a decision."""
-        b, job, err = self.policy.budget, self._job, self.error   # TODO(additive B3): layers, Λ, λ, P̂(Z), per-zone risk
+        b, job, err = self.policy.budget, self._job, self.error
         state = ("detached" if self.detached else "closed" if self.closed else "error" if err is not None
                  else "training" if job is not None else "paused" if self.paused else "running")
         host = self.host
@@ -2512,7 +2632,8 @@ class AdapterLoop:
                               "fixed-set (act_guard on calib labels); no anytime certificate"),
                 "watch": None if self._watch is None else _watch_copy(self._watch),
                 "delta_spent": self.budget.spent,
-                "versions_kept": sum(1 for ver in list(self._vs.values()) if ver["state"] in KEPT)}
+                "versions_kept": sum(1 for ver in list(self._vs.values()) if ver["state"] in KEPT),
+                **({} if not self.additive else {"zones": self._zones()})}
 
     def fed(self, v) -> list:
         """The decisions whose samples reached version v's promise, in order."""
