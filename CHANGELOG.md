@@ -17,7 +17,8 @@
   zone's share and realised risk. Records carry `owner`, `layer`, `zone`, `path`, `trial_zone` and `path_would`;
   `replay()` recomputes the routing and `rescore=True` rescores every layer; the checkpoint of an additive loop is
   format v2 (a replacement loop's stays v1; an older library refuses v2 by name). `additive=False` writes the same
-  records and events as before. Checked on synthetic streams with known per-zone risk; no stand has run it, and no
+  records and events as with `additive` omitted; both differ from 1.3 by the lazy δ charge (see Changed: `v_index` /
+  `delta_v` are `None` until a promise's first sample, "recertify" carries `None`). Checked on synthetic streams with known per-zone risk; no stand has run it, and no
   gain is claimed.
 - **`DefaultPolicy(novel_only=...)`: the promotion's novel-only paired comparison can be switched off, for controls**
   (`solvi.experimental.stream`). Default `True`, unchanged: the comparison counts only post-freeze samples on keys the
@@ -721,7 +722,9 @@ labels, 10 % of the labels discordant) rolled back in 10 / 28 / 70 % of runs by 
   samples; an alarm on it since the latest freeze, or ≥ `backlog_max` (default 2 × `first`) labels since then, opens
   the gate anyway. "auto" is on in additive mode and **off in replacement mode** (replacement runs train when they did
   before); an int turns it on in both modes, `None` off. The reason the gate opened is in the "train_start" / "train"
-  events (`gate`) and in `why_not_train`.
+  events (`gate`) and in `why_not_train`. A promise dump saved before the gate (no `peaks`) restores with its
+  loosening history empty: the gate then waits up to `mature_patience` samples longer than the uninterrupted run would
+  have (conservative, but the continuation of such an old dump is not identical to the run it was saved from).
 - **The promotion compares the candidate and the served version certified the same way on the same samples**
   (`solvi.experimental.stream`, `AdapterLoop` / `LearningLoop`). **Behaviour change.** ℓ_s, the served version's
   share alone in the paired rule ℓ_k ≥ ℓ_s + `margin`, is now read at the threshold of a comparison certificate: a
