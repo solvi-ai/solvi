@@ -364,13 +364,17 @@ class AdapterLoop:
     from construction on, every decision of that part takes this RLock, whether or not a version is ever swapped;
     warn_refused: attached to a Dispatcher, after this many labelled decisions in a row whose label the policy refused
     (none accepted in between) a `UserWarning` says the loop learns nothing, once (None: never; the count is
-    `status()["labels"]["refused"]`)."""
+    `status()["labels"]["refused"]`); trace_candidate: while a candidate is on trial, every decision's records carry
+    its score and would-be answer ("candidate_score" in the stream record, "candidate_would" in the loop payload;
+    the existing "shadow" is filled only where the protocol reads it) — for offline replays of promotion rules; the
+    protocol never reads them (no behaviour change), it costs one candidate scoring per decision; the keys are absent
+    with no candidate or with the option off (default)."""
 
     def __init__(self, learner, *, question, policy=None, max_risk=None, max_error=None, delta=0.05, initial=None,
                  detector=None, monitor="auto", probation=300, source="human", secret=None, seed=0, sampling=None,
                  promise_options=None, storage=None, versions_dir=None, system=None, feature="text", key=None,
                  served=None, clock=None, wait=False, part=None, mode="stream", warn_refused=200,
-                 _detector_alone=False, _batch=None):
+                 trace_candidate=False, _detector_alone=False, _batch=None):
         global _warned
         if mode not in MODES:
             raise ValueError(f"mode is 'stream' (decisions through step, a promise per version) or 'label' (labels "
@@ -392,7 +396,8 @@ class AdapterLoop:
         self._kw = dict(question=question, max_risk=max_risk, max_error=max_error, delta=delta, initial=initial,
                         probation=probation, source=source, seed=seed, sampling=sampling,
                         promise_options=promise_options, feature=feature, key=key, served=served, wait=wait,
-                        mode=mode, warn_refused=warn_refused)
+                        mode=mode, warn_refused=warn_refused, trace_candidate=bool(trace_candidate))
+        self.trace_candidate = bool(trace_candidate)
         if warn_refused is not None and (isinstance(warn_refused, bool) or int(warn_refused) < 1):
             raise ValueError("warn_refused is a number of labelled decisions ≥ 1, or None (never warn)")
         self.warn_refused = None if warn_refused is None else int(warn_refused)
@@ -639,7 +644,8 @@ class AdapterLoop:
                     raise ValueError("this decision needs a label: step(x, oracle)")
             k = self._key(x) if key is None else str(key)
             return self._advance(x, k, would_s, score_s, would_k, score_k, oracle,
-                                 self.source if source is None else source, watch=self._watch_scores(x, k))
+                                 self.source if source is None else source, watch=self._watch_scores(x, k),
+                                 trial=self._trial(x, would_k, score_k))
 
     def _shadow(self, x, sampled):
         """The candidate's (would, score) on x when the step reads it: while its promise's grid is not fixed yet (the
@@ -651,6 +657,16 @@ class AdapterLoop:
         if c["promise"].grid is None or sampled:
             return c["model"].score(x)
         return None, None
+
+    def _trial(self, x, would_k, score_k):
+        """trace_candidate: the candidate's (would, score) on x for the records (the shadow's when the step read it,
+        else scored here) — None with the option off or no candidate. Read by no rule."""
+        if not self.trace_candidate or self.candidate is None:
+            return None
+        if score_k is not None:
+            return would_k, score_k
+        m = self._vs[self.candidate]["model"]
+        return m.score(x) if m is not None else (None, None)
 
     def _watch_scores(self, x, key):
         """Label mode with a watch running: the rollback target's (would, score) on x (None: no watch). Only a calib or
@@ -709,6 +725,7 @@ class AdapterLoop:
             would_k, score_k = self._shadow(x, sampled)
             return {"n": n, "served": self.served, "candidate": self.candidate, "hist": len(self._history),
                     "scores": (would_s, score_s, would_k, score_k), "key": self._key(x), "sampled": sampled,
+                    "trial": self._trial(x, would_k, score_k),
                     "alone": alone, "probation": prob, "rho": rho, "fingerprint": s["fingerprint"]}
 
     def _post(self, pre, x, label, source, label_of=None) -> dict:
@@ -721,13 +738,15 @@ class AdapterLoop:
                     == (pre["n"], pre["served"], pre["candidate"], pre["hist"]))
             if same:
                 would_s, score_s, would_k, score_k = pre["scores"]
+                trial = pre.get("trial")
             else:
                 s = self._vs[self.served]
                 would_s, score_s = s["model"].score(x) if s["model"] is not None else (None, None)
                 would_k, score_k = self._shadow(x, self._draw(self.n + 1, score_s, self._threshold(self.served))[2])
+                trial = self._trial(x, would_k, score_k)
             src = self.source if source is None else source
             out = self._advance(x, pre["key"], would_s, score_s, would_k, score_k,
-                                lambda: Verdict(label, source, label_of), src, lenient=True)
+                                lambda: Verdict(label, source, label_of), src, lenient=True, trial=trial)
             out["same"] = same
             return out
 
@@ -956,7 +975,8 @@ class AdapterLoop:
             self._split_of[key] = sp                       # the first state change, before the decision's own
         return sp
 
-    def _advance(self, x, key, would_s, score_s, would_k, score_k, oracle, src, lenient=False, watch=None):
+    def _advance(self, x, key, would_s, score_s, would_k, score_k, oracle, src, lenient=False, watch=None,
+                 trial=None):
         from ...core.sources import UntrustedLabel
         n = self.n + 1
         sv, c = self.served, self.candidate
@@ -988,7 +1008,7 @@ class AdapterLoop:
         self._step_t = t
         try:
             return self._advance_at(n, x, key, sv, c, thr_s, prob, rho, sampled, alone, label, lsrc, lof, split,
-                                    would_s, score_s, would_k, score_k, t, watch)
+                                    would_s, score_s, would_k, score_k, t, watch, trial)
         finally:
             self._step_t = None
 
@@ -1010,7 +1030,7 @@ class AdapterLoop:
                 UserWarning, stacklevel=2)
 
     def _advance_at(self, n, x, key, sv, c, thr_s, prob, rho, sampled, alone, label, lsrc, lof, split, would_s,
-                    score_s, would_k, score_k, t, watch=None):
+                    score_s, would_k, score_k, t, watch=None, trial=None):
         # --- from here the state changes: a hook that raises from here on stops the loop (`_stop`), the decision is
         # recorded with its "error" event and replay raises the same error at the same place
         self.n = n
@@ -1089,19 +1109,21 @@ class AdapterLoop:
             events += self._promise_events() + [err]
             self._write(self._record(n, sv, c, rho, sampled, alone, by, lsrc, lof, label, prob, score_s, thr_s,
                                      score_k, det, key, split, t, error={k: err[k] for k in ("where", "call", "why")},
-                                     watch=wrec),
-                        self._payload(x, would_s, would_k, label, answer, watch), events)
+                                     watch=wrec, trial=trial),
+                        self._payload(x, would_s, would_k, label, answer, watch, c, trial), events)
             raise
         rec = self._record(n, sv, c, rho, sampled, alone, by, lsrc, lof, label, prob, score_s, thr_s, score_k, det,
-                           key, split, t, watch=wrec)
-        self._write(rec, self._payload(x, would_s, would_k, label, answer, watch), events)
+                           key, split, t, watch=wrec, trial=trial)
+        self._write(rec, self._payload(x, would_s, would_k, label, answer, watch, c, trial), events)
         return {"n": n, "answer": answer, "by": by, "served": sv, "candidate": c, "sampled": sampled, "label": label,
                 "label_source": lsrc, "events": [e["event"] for e in events]}
 
-    def _payload(self, x, would_s, would_k, label, answer, watch):
+    def _payload(self, x, would_s, would_k, label, answer, watch, c=None, trial=None):
         out = {"input": x, "would": would_s, "shadow_would": would_k, "label": label, "answer": answer}
         if self.mode == "label":
             out["watch_would"] = None if watch is None else watch[0]
+        if self.trace_candidate and c is not None:
+            out["candidate_would"] = None if trial is None else trial[0]
         return out
 
     def _watched(self, n, sv, thr_s, would_s, score_s, label, split, watch):
@@ -1141,7 +1163,7 @@ class AdapterLoop:
         return rec, ev
 
     def _record(self, n, sv, c, rho, sampled, alone, by, lsrc, lof, label, prob, score_s, thr_s, score_k, det, key,
-                split, t, error=None, watch=None):
+                split, t, error=None, watch=None, trial=None):
         st = lambda v: None if v is None or self._vs[v]["promise"] is None else self._vs[v]["promise"].state()  # noqa: E731
         rec = {"n": n, "served": sv, "candidate": c, "rho": rho, "sampled": sampled, "alone": alone, "by": by,
                "label_source": lsrc, "label_of": lof, "missing": (sampled or not alone) and label is None,
@@ -1151,6 +1173,8 @@ class AdapterLoop:
                "key": key, "split": split, "t": t}
         if self.mode == "label":
             rec["watch"] = watch
+        if self.trace_candidate and c is not None:
+            rec["candidate_score"] = None if trial is None else _num(trial[1])
         if error is not None:
             rec["error"] = error
         return rec
@@ -1973,7 +1997,9 @@ class AdapterLoop:
                 fresh._advance(lp.get("input"), st.get("key"), lp.get("would"), st.get("score"),
                                lp.get("shadow_would"), st.get("shadow"),
                                lambda: Verdict(label, st.get("label_source") or fresh.source, st.get("label_of")),
-                               fresh.source, watch=None if wr is None else (lp.get("watch_would"), wr.get("score")))
+                               fresh.source, watch=None if wr is None else (lp.get("watch_would"), wr.get("score")),
+                               trial=(lp.get("candidate_would"), st["candidate_score"]) if "candidate_score" in st
+                               else None)
             except _Replayed:
                 pass
             except Exception as e:  # noqa: BLE001 — an error the records do not hold
@@ -1985,6 +2011,9 @@ class AdapterLoop:
             for f in sorted(set(st) | set(got)):
                 if st.get(f) != got.get(f):
                     bad.append((st["n"], f, f"recorded {st.get(f)}, rebuilt {got.get(f)}"))
+            if ("candidate_score" in st) != ("candidate_score" in got):    # trace_candidate: on every trial decision
+                bad.append((st["n"], "candidate_score", "recorded " + ("with" if "candidate_score" in st else
+                                                                       "without") + " the candidate's trace"))
         rebuilt_ev = [e for kk, e in fresh.log if kk == "stream"]
         if rebuilt_ev != stored_ev:
             bad.append((None, "stream records", f"{len(stored_ev)} stored, {len(rebuilt_ev)} rebuilt, or they differ"))
@@ -2018,8 +2047,9 @@ class AdapterLoop:
                 if kind != "loop":
                     continue
                 st, lp = d["stream"], d.get("loop") or {}
-                for v, key in ((st.get("served"), "score"), (st.get("candidate"), "shadow")):
-                    if key == "shadow" and st.get(key) is None:      # not scored in shadow on that decision
+                for v, key in ((st.get("served"), "score"), (st.get("candidate"), "shadow"),
+                               (st.get("candidate"), "candidate_score")):
+                    if key != "score" and st.get(key) is None:       # not scored in shadow on that decision
                         continue
                     if v in models:
                         got = models[v].score(lp.get("input"))[1]
