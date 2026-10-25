@@ -1107,7 +1107,12 @@ class Dispatcher:
                 pre = loop._pre(x)
             except Exception as e:  # noqa: BLE001 — a stopped or failing loop: the dispatch goes on without it
                 pre = {"stopped": f"{type(e).__name__}: {e}"}
-            b = self._start(state, pre)
+            owner = pre.get("owner")                 # an additive loop's layer below the served version owns it:
+            if owner is not None and owner != pre.get("served"):     # System 1 decides with that layer installed
+                with loop.serving(owner):
+                    b = self._start(state, pre)
+            else:
+                b = self._start(state, pre)
             th = None
             if b.needs_slow:
                 per_round = None if b.expected is None else _per_round(b.expected, self.slow)
@@ -1233,6 +1238,9 @@ class Dispatcher:
         if "stopped" in pre:
             return {"stopped": pre["stopped"]}
         out = {k: pre[k] for k in ("n", "served", "candidate", "fingerprint", "alone", "sampled", "rho", "probation")}
+        for k in ("owner", "layer", "owner_fingerprint"):   # an additive loop: the layer that owned the decision
+            if k in pre:
+                out[k] = pre[k]
         inp = self._stream_inputs(action, paid, r1, would1, th)
         try:
             step = self.loop._post(pre, x, inp["label"], inp["label_source"], inp.get("label_of"))
@@ -1729,7 +1737,7 @@ class Dispatcher:
             if self.loop is None:
                 bad.append(("learning", "a decision made with an adapter loop, and the dispatcher has none attached"))
             else:
-                ctx = self.loop.serving(lr["served"])
+                ctx = self.loop.serving(lr.get("owner", lr["served"]))   # additive: the owning layer's version
         try:
             with ctx:
                 rep1 = d.s1.trace.replay(self.system, trust_models=trust_models)

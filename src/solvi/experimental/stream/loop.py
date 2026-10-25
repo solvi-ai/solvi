@@ -379,10 +379,18 @@ class AdapterLoop:
     replacement mode); every other layer's promise is frozen. Attach (a freeze in additive mode): Λ_d := λ_d of the
     deepest layer d, d's promise is frozen, the candidate's zone is {score_d < Λ_d}; every zone decision is escalated
     and the candidate's promise learns on every one of them (no coin filter; a missing label counts as a loss), it is
-    scored on zone decisions only and has no comparison certificate. A discard unfreezes d. max_layers: the chain's
-    depth cap (base + layers). Needs stream mode and an initial model. Stage B1 of the additive-coverage spec: the
-    promotion into a layer (gate, event wiring), per-layer detectors, checkpoints and replay of a chain deeper than
-    L0 are later stages."""
+    scored on zone decisions only and has no comparison certificate. A discard unfreezes d. Layering (the policy's
+    promote, DefaultPolicy's additive gate: certified, novel, novel_risk, probe — no share or margin comparison; or the
+    promote() control): the certified candidate becomes the deepest layer from the next decision ("promote" with
+    additive=True). max_layers: the chain's depth cap (base + layers); at the cap, and while the deepest layer is not
+    certified, the schedule starts no training ("train_refused", once per reason) and train_now is refused at the cap.
+    Drift: one RiskDetector per layer on its own coin-sampled answers, the score monitor on L0's scores; an alarm on
+    layer j restarts only j's promise and puts only j in probation (its zone escalates until it re-certifies; a frozen
+    layer learns until then and is frozen again, "refreeze"); rollback(j) — a layer index — detaches the layers ≥ j
+    ("detach"), layer j−1 becomes the deepest and learns again. Attached to a Dispatcher, a decision owned by a deeper
+    layer is decided by System 1 with that layer's version installed for the call (`serving`). Needs stream mode and an
+    initial model. TODO(additive B3): checkpoints (per-layer detectors, Λ, frozen/relearn sets) and replay of a chain
+    deeper than L0 from the recorded path scores. TODO(additive B5): the synthetic validity test and the docs."""
 
     def __init__(self, learner, *, question, policy=None, max_risk=None, max_error=None, delta=0.05, initial=None,
                  detector=None, monitor="auto", probation=300, source="human", secret=None, seed=0, sampling=None,
@@ -401,8 +409,8 @@ class AdapterLoop:
         if additive and initial is None:
             raise ValueError("additive coverage needs an initial model (version 0): a layer is attached below a "
                              "certified layer, and version 0 without a model is never certified")
-        # TODO(additive B2): the joint kind is allowed (decision D2): docs state the per-zone guarantee and the
-        # stream-wide factor α·(1 + Σ P(Z_j)) — nothing to refuse here.
+        # The joint kind is allowed (decision D2) — nothing to refuse here. TODO(additive B5): the docs state the
+        # per-zone guarantee and the stream-wide joint factor α·(1 + Σ P(Z_j)).
         if mode == "label" and (detector is not None or (monitor is not None and monitor != "auto")):
             raise ValueError("label mode has no coin samples: no detector and no score monitor (its guarantee is "
                              "act_guard's fixed-set one on the calib labels)")
@@ -426,6 +434,10 @@ class AdapterLoop:
         self._layers = [0]                                 # additive: the chain L0, L1, … (versions; L0 = served)
         self._route: dict = {}                             # additive: version → its frozen routing threshold Λ
         self._frozen: set = set()                          # additive: versions whose promise does not learn
+        self._relearn: set = set()                         # additive: frozen layers restarted, learning until certified
+        self._dets: dict = {}                              # additive: version → its RiskDetector (L0's: self.detector)
+        self._left_of: dict = {}                           # additive: version → its probation left (L0's: self.left)
+        self._refused_why = None                           # additive: the loop's last train refusal ("train_refused")
         self.trace_candidate = bool(trace_candidate)
         if warn_refused is not None and (isinstance(warn_refused, bool) or int(warn_refused) < 1):
             raise ValueError("warn_refused is a number of labelled decisions ≥ 1, or None (never warn)")
@@ -720,7 +732,8 @@ class AdapterLoop:
         d = self._layers[-1]
         zone = (self.candidate is not None and j == len(self._layers) - 1 and d in self._route
                 and not _alone(path[-1][2], self._route[d]))
-        return {"path": path, "owner": path[-1][0], "layer": j, "zone": bool(zone)}
+        thr = [self._route[v] for v, _, _ in path[:-1]] + [self._thr_owner(path[-1][0])]   # in force at the draw
+        return {"path": path, "owner": path[-1][0], "layer": j, "zone": bool(zone), "thr": thr}
 
     def _zone_shadow(self, x, route):
         """Additive mode: the candidate's (would, score) on a decision of its zone; (None, None) outside it (the
@@ -742,9 +755,9 @@ class AdapterLoop:
         return self._event("attach", k, n, zone_of=d, routing_thr=lam)
 
     def _attach_refused(self) -> str | None:
-        """Additive mode: why a trained candidate cannot be attached now (None: it can). Stage B1 discards it at birth;
-        TODO(additive B2): `want_train` refuses earlier (LoopState.deepest_certified, the `max_layers` cap with a
-        "train_refused" event), so a training never starts for a candidate that cannot attach."""
+        """Additive mode: why a trained candidate cannot be attached now (None: it can). The backstop at the apply (a
+        training started by train_now, or a deepest layer restarted while it ran): the candidate is discarded at birth.
+        The schedule never starts such a training (`_train_refusal`)."""
         d = self._layers[-1]
         if len(self._layers) >= self.max_layers:
             return f"max_layers: the chain has {len(self._layers)} layer(s), the cap is {self.max_layers}"
@@ -752,37 +765,109 @@ class AdapterLoop:
             return f"attach refused: the deepest layer (version {d}) is not certified"
         return None
 
+    def _train_refusal(self, n) -> list:
+        """Additive mode, asked where the schedule would ask `want_train`: the loop refuses a training whose candidate
+        could not attach — the chain at `max_layers` (decision D3: training stops at the cap) or the deepest layer not
+        certified (nothing escalates below an uncertified layer; DefaultPolicy.why_not_train says so too, from
+        LoopState.deepest_certified). → (refused, events): one "train_refused" event each time the reason changes
+        (not one per decision); None once a training may start again."""
+        d = self._layers[-1]
+        if len(self._layers) >= self.max_layers:
+            why, detail = "max_layers", f"the chain has {len(self._layers)} layer(s), the cap is {self.max_layers}"
+        elif not math.isfinite(self._threshold(d)):
+            why, detail = "deepest_uncertified", f"the deepest layer (version {d}) is not certified"
+        else:
+            self._refused_why = None
+            return False, []
+        if why == self._refused_why:
+            return True, []
+        self._refused_why = why
+        return True, [self._event("train_refused", d, n, why=why, detail=detail, layers=list(self._layers))]
+
     def _unfreeze(self, n) -> dict:
         """Additive mode, the candidate attached below the deepest layer d was discarded: d's routing threshold is
         dropped and its promise learns again from its state (same index: a frozen process never bet) → "unfreeze"."""
         d = self._layers[-1]
         lam = self._route.pop(d, None)
         self._frozen.discard(d)
+        self._relearn.discard(d)                           # the deepest learns anyway
         return self._event("unfreeze", d, n, routing_thr=lam)
 
-    def _layer_in(self, k, n) -> dict:
+    def _layer_in(self, k, n, **extra) -> dict:
         """Additive mode: the certified candidate k becomes the deepest layer from the next decision — it answers alone
-        in its zone at its own threshold and its promise keeps learning on coin samples; the layer above keeps its Λ
-        and stays frozen → the "promote" event (additive). Stage B1 builds the state change only.
-        TODO(additive B2): wire it from `_protocol` behind the additive gate (DefaultPolicy.promote_checks: certified,
-        novel, novel_risk, probe) and decide its install on an attached Dispatcher (System 1 answers with the
-        installed version: refused here until then)."""
-        if self.host is not None:
-            raise ValueError("additive layering on an attached loop is not built yet (stage B2)")
+        in its zone at its own threshold and its promise keeps learning on coin samples (the trial's read of every
+        zone decision ends); the layer above keeps its Λ and stays frozen; k gets its own detector (a fresh copy of
+        L0's) → the "promote" event (additive). Called from `_protocol` behind the policy's promote (DefaultPolicy:
+        the additive gate, decision D1) and from the promote() control. Nothing is installed on the System: L0 stays
+        installed, and on an attached Dispatcher a decision owned by a deeper layer is decided with that layer's
+        version installed for the System 1 call only (`_pre` → "owner"; Dispatcher._ask_loop, `serving`)."""
         if k != self.candidate or not math.isfinite(self._threshold(k)):
             raise ValueError(f"version {k} is not a certified candidate in trial")
         d = self._layers[-1]
         self._layers.append(k)
         self._vs[k]["state"] = "layer"
         self._vs[k]["cmp"] = None
+        self._dets[k] = _fresh_detector(self.detector)
         self.candidate = None
         return self._event("promote", k, n, additive=True, zone_of=d, routing_thr=self._route[d],
-                           thr_k=self._threshold(k), **{"from": d, "to": k})
+                           thr_k=self._threshold(k), **{"from": d, "to": k}, **extra)
+
+    def _thr_owner(self, o):
+        """The threshold in force for owner o: its live λ_o, never below its routing threshold Λ_o when it has one (a
+        deepest layer with a candidate attached below it: a restarted and re-certified λ_o may sit below Λ_o, and the
+        candidate's zone {score_o < Λ_o} stays escalated in trial; a non-deepest owner's score is ≥ Λ_o anyway)."""
+        thr = self._threshold(o)
+        lam = self._route.get(o)
+        return thr if lam is None else max(thr, lam)
 
     def _owner(self, route):
-        """The owner's (would, score, threshold in force λ) of a routed decision."""
+        """The owner's (would, score, threshold in force) of a routed decision."""
         o, would, score = route["path"][-1]
-        return would, score, self._threshold(o)
+        return would, score, self._thr_owner(o)
+
+    def _prob(self, v) -> bool:
+        """Additive mode: whether layer v is in probation (after an alarm on it: per layer, decision D4's reading —
+        an alarm on one layer leaves the others serving). L0's counter is the loop's `left`."""
+        return (self.left if v == self._layers[0] else self._left_of.get(v, 0)) > 0
+
+    def _det_of(self, v):
+        """Additive mode: layer v's RiskDetector (L0's is the loop's `detector`)."""
+        return self.detector if v == self._layers[0] else self._dets.get(v)
+
+    def _detach_layers(self, j, n, *, by=None, why=None, control=False) -> tuple:
+        """Additive mode, rollback(j): remove layers ≥ j (j a layer index ≥ 1); layer j−1 becomes the deepest, its Λ is
+        dropped and its promise learns again from its state (same index). A candidate in trial is discarded (it was
+        attached below a removed layer). The removed versions are released (state "detached", their files stay).
+        → (the "detach" event, all events)."""
+        if isinstance(j, bool) or not isinstance(j, int) or not 1 <= j < len(self._layers):
+            raise ValueError(f"rollback of an additive loop takes a layer index in 1..{len(self._layers) - 1} (the "
+                             f"layers ≥ it are detached), not {j!r}; the chain is {self._layers}")
+        ev = []
+        self._changing = True
+        if self.candidate is not None:
+            ev.append(self._discard(self.candidate, n, "detach"))
+        removed = self._layers[j:]
+        del self._layers[j:]
+        for v in removed:
+            ver = self._vs[v]
+            self._release(ver.get("served_as"), ver["model"])
+            ver["state"], ver["model"], ver["served_as"] = "detached", None, None
+            self._route.pop(v, None)
+            self._frozen.discard(v)
+            self._relearn.discard(v)
+            self._dets.pop(v, None)
+            self._left_of.pop(v, None)
+        p = self._layers[-1]
+        lam = self._route.pop(p, None)
+        self._frozen.discard(p)
+        self._relearn.discard(p)
+        self._refused_why = None
+        extra = {"layer": j, "removed": removed, "routing_thr": lam, "by": None if by is None else str(by), "why": why}
+        if control:
+            extra.update(control=True, t=self._now())
+        e = self._event("detach", p, n, **extra)
+        ev.append(e)
+        return e, ev
 
     def _zone_learn(self, n, key, route, sampled, label, would_k, score_k, c):
         """Additive mode, the promises' reads of one decision: every layer reached observes its score; the owner's
@@ -795,12 +880,18 @@ class AdapterLoop:
         if route["zone"]:
             self._vs[c]["promise"].observe(score_k)
         o, would_o, score_o = route["path"][-1]
+        ev = []
         if sampled and o not in self._frozen and self._vs[o]["promise"] is not None:
             ver = self._vs[o]
             if not n > ver["frozen_at"]:                   # cannot happen: a version is frozen at the end of a step
                 raise RuntimeError(f"decision {n} would calibrate version {o} frozen at {ver['frozen_at']}")
             ver["promise"].learn(score_o, would_o, label)
             ver["fed"].append(n)
+            if o in self._relearn and math.isfinite(self._threshold(o)):   # re-certified after its restart: frozen
+                self._relearn.discard(o)                   # again at its new threshold (a stopping time: valid)
+                self._frozen.add(o)
+                ev.append(self._event("refreeze", o, n, layer=self._layers.index(o),
+                                      routing_thr=self._route.get(o)))
         if route["zone"]:
             ver = self._vs[c]
             if not n > ver["frozen_at"]:
@@ -809,15 +900,15 @@ class AdapterLoop:
             ver["fed"].append(n)
             ver["samples"].append((score_k, score_o, label is None or would_k != label,
                                    label is None or would_o != label, key in ver["keys"]))
+        return ev
 
     def _route_record(self, route) -> dict:
         """The record's view of a routed decision: owner, layer, zone (the owner's zone index), path [[v, score, thr in
         force]] (Λ_v for a passed layer, λ_v for the owner), trial_zone (in the candidate's zone).
         TODO(additive B3): replay recomputes the routing from these path scores (deeper layers are rescored today)."""
-        path, last = [], len(route["path"]) - 1
-        for i, (v, _, score) in enumerate(route["path"]):
-            thr = self._route[v] if i < last else self._threshold(v)
-            path.append([v, _num(score), None if math.isinf(thr) else thr])
+        path = []
+        for (v, _, score), thr in zip(route["path"], route["thr"]):   # the thresholds in force at the draw (a
+            path.append([v, _num(score), None if math.isinf(thr) else thr])   # detach in the step drops a Λ)
         return {"owner": route["owner"], "layer": route["layer"], "zone": route["layer"], "path": path,
                 "trial_zone": route["zone"]}
 
@@ -888,16 +979,18 @@ class AdapterLoop:
             if route is None:
                 prob, rho, sampled, alone = self._draw(n, score_s, self._threshold(self.served))
                 would_k, score_k = self._shadow(x, sampled)
-            else:                                          # TODO(additive B2): an owner below L0 on a Dispatcher
+            else:                                          # additive: the owner's coin and rule
                 _, score_o, thr_o = self._owner(route)
-                prob, rho, sampled, alone = self._draw(n, score_o, thr_o)
+                prob, rho, sampled, alone = self._draw(n, score_o, thr_o, prob=self._prob(route["owner"]))
                 would_k, score_k = self._zone_shadow(x, route)
             out = {"n": n, "served": self.served, "candidate": self.candidate, "hist": len(self._history),
                     "scores": (would_s, score_s, would_k, score_k), "key": self._key(x), "sampled": sampled,
                     "trial": self._trial(x, would_k, score_k),
                     "alone": alone, "probation": prob, "rho": rho, "fingerprint": s["fingerprint"]}
-            if route is not None:
-                out["route"] = route
+            if route is not None:                          # an owner below L0: the Dispatcher decides with its version
+                out["route"] = route                       # installed for System 1's call (`serving`)
+                out["owner"], out["layer"] = route["owner"], route["layer"]
+                out["owner_fingerprint"] = self._vs[route["owner"]]["fingerprint"]
             return out
 
     def _post(self, pre, x, label, source, label_of=None) -> dict:
@@ -978,8 +1071,6 @@ class AdapterLoop:
             self._refuse_if_stopped()
             if self.host is not None:
                 raise ValueError("this loop is attached already: detach() first")
-            if self.additive and len(self._layers) > 1:     # TODO(additive B2): see _layer_in
-                raise ValueError("an additive loop with layers below L0 cannot be attached yet (stage B2)")
             if isinstance(host, Dispatcher):
                 if self.mode != "stream":
                     raise ValueError("a Dispatcher's decisions go through a stream-mode loop (mode='stream')")
@@ -1122,12 +1213,12 @@ class AdapterLoop:
                 if loaded:
                     self._release(srv)
 
-    def _draw(self, n, score_s, thr_s):
+    def _draw(self, n, score_s, thr_s, prob=None):
         """Decision n's (probation, rate, sampled, alone) from the state before it (no state change). Label mode: no
-        coin and nothing alone — every call is a label."""
+        coin and nothing alone — every call is a label. prob: the owner's probation (additive mode; None: the loop's)."""
         if self.mode == "label":
             return False, 0.0, False, False
-        prob = self.left > 0
+        prob = self.left > 0 if prob is None else bool(prob)
         rho = self.rate.rate(full=math.isinf(thr_s) or prob)
         sampled = self._coin(n) < rho
         alone = not prob and score_s is not None and math.isfinite(thr_s) and score_s >= thr_s
@@ -1166,7 +1257,7 @@ class AdapterLoop:
             if route is None:                              # replay: rebuilt from the recorded L0 score
                 route = self._route_of(x, would_s, score_s)
             _, score_o, thr_o = self._owner(route)
-            prob, rho, sampled, alone = self._draw(n, score_o, thr_o)
+            prob, rho, sampled, alone = self._draw(n, score_o, thr_o, prob=self._prob(route["owner"]))
         else:
             prob, rho, sampled, alone = self._draw(n, score_s, thr_s)
         label, lsrc, lof, split = None, None, None, None
@@ -1229,8 +1320,10 @@ class AdapterLoop:
             if self._inject is not None and self._inject["call"] == 0:
                 raise _Replayed(self._inject["why"])
             cmp = None if c is None else self._vs[c].get("cmp")
+            zev = []
             if route is not None:                          # additive: the zone reads (no comparison certificate)
-                self._zone_learn(n, key, route, sampled, label, would_k, score_k, c)
+                o_thr = route["thr"][-1]                   # the owner's threshold in force at the draw
+                zev = self._zone_learn(n, key, route, sampled, label, would_k, score_k, c)
             for v, score in ((sv, score_s), (c, score_k)) if route is None else ():
                 if v is not None and self._vs[v]["promise"] is not None:
                     self._vs[v]["promise"].observe(score)
@@ -1251,23 +1344,38 @@ class AdapterLoop:
                     self._vs[c]["samples"].append((score_k, score_s, label is None or would_k != label,
                                                    label is None or would_s != label, key in self._vs[c]["keys"]))
             det_rep, mon_rep, ps = None, None, self._vs[sv]["promise"]
-            # additive: the detector stays on L0's own alone answers (TODO(additive B2): one detector per layer)
-            alone_s = alone if route is None else (alone and route["owner"] == sv)
-            if sampled and det is not None and ps is not None and math.isfinite(thr_s) and not prob:
-                wrong = label is None or would_s != label
-                if ps.kind == "joint":
-                    loss, fed = (1.0 if (alone_s and wrong) else 0.0), True
-                else:                                      # selective: the error among the alone answers
-                    loss, fed = (1.0 if wrong else 0.0), alone_s
-                if fed and det.update(loss):
-                    det_rep = det.report()
-            if self.monitor is not None and not prob and score_s is not None and math.isfinite(float(score_s)):
+            det_v = sv                                     # the version the detector's alarm is about
+            if route is None:
+                if sampled and det is not None and ps is not None and math.isfinite(thr_s) and not prob:
+                    wrong = label is None or would_s != label
+                    if ps.kind == "joint":
+                        loss, fed = (1.0 if (alone and wrong) else 0.0), True
+                    else:                                  # selective: the error among the alone answers
+                        loss, fed = (1.0 if wrong else 0.0), alone
+                    if fed and det.update(loss):
+                        det_rep = det.report()
+            else:                                          # additive: the owner's detector on its own coin samples
+                det_v = route["owner"]
+                det_o, po = self._det_of(det_v), self._vs[det_v]["promise"]
+                if sampled and det_o is not None and po is not None and math.isfinite(o_thr) and not prob:
+                    wrong = label is None or route["path"][-1][1] != label
+                    if po.kind == "joint":
+                        loss, fed = (1.0 if (alone and wrong) else 0.0), True
+                    else:
+                        loss, fed = (1.0 if wrong else 0.0), alone
+                    if fed and det_o.update(loss):
+                        det_rep = det_o.report()
+            mon_prob = prob if route is None else self.left > 0   # additive: the monitor is L0's (decision D4)
+            if self.monitor is not None and not mon_prob and score_s is not None and math.isfinite(float(score_s)):
                 self._at("monitor")
                 rep = self.monitor.observe(float(score_s))
                 if isinstance(rep, dict) and rep.get("drift"):
                     mon_rep = rep
             if prob:
-                self.left -= 1
+                if route is None or route["owner"] == self._layers[0]:
+                    self.left -= 1
+                else:                                      # additive: the owner's probation counts down
+                    self._left_of[route["owner"]] -= 1
             if label is not None:
                 self._rows.append(LabelRow(key, x, label, lsrc, n))
                 self._split_n[split] += 1
@@ -1287,9 +1395,10 @@ class AdapterLoop:
                 answer, by = None, "person"
             if n == 1 and self._vs[0]["model"] is not None:
                 events.append(self._event("start", 0, n, fingerprint=self._vs[0]["fingerprint"], why=None))
-            events += self._promise_events()
+            events += self._promise_events() + zev
             if det_rep is not None or mon_rep is not None:
-                events += self._on_alarm(n, sv, c, det_rep, mon_rep)
+                events += (self._on_alarm(n, sv, c, det_rep, mon_rep) if route is None
+                           else self._on_alarm_layers(n, det_v, det_rep, mon_rep))
             if self.mode == "label" and self._watch is not None:
                 wrec, ev_w = self._watched(n, sv, thr_s, would_s, score_s, label, split, watch)
                 events += ev_w
@@ -1469,6 +1578,60 @@ class AdapterLoop:
             ev += self._rollback(target, by="policy", why=f"alarm ({who})", control=False)[1]
         return ev
 
+    def _on_alarm_layers(self, n, det_v, det_rep, mon_rep) -> list:
+        """Additive mode: an alarm per layer. The detector's is about the owner det_v (its own coin samples); the score
+        monitor's about L0 (decision D4: the monitor reads L0's scores only). Each alarmed layer asks policy.alarm (the
+        report carries "version" and "layer"); "recertify" restarts only that layer's promise (λ = +inf: its zone
+        escalates to the oracle, every zone decision is labelled — rate full — until it re-certifies; a frozen layer
+        learns until then and is frozen again, "refreeze") and puts only that layer in probation; Λ and the other
+        layers are untouched. "rollback:<j>" detaches the layers ≥ j (j a layer index). "ignore" as in replacement."""
+        l0 = self._layers[0]
+        who_of = {}
+        if det_rep is not None:
+            who_of.setdefault(det_v, []).append("detector")
+        if mon_rep is not None:
+            who_of.setdefault(l0, []).append("monitor")
+        ev = []
+        for v in sorted(who_of, key=self._layers.index):
+            if v not in self._layers:                      # detached by the alarm handled before it
+                continue
+            j = self._layers.index(v)
+            dr = det_rep if "detector" in who_of[v] else None
+            mr = mon_rep if "monitor" in who_of[v] else None
+            who = "+".join(who_of[v])
+            self._at("policy.alarm")
+            action = self.policy.alarm(self._state(), who, _json({"detector": dr, "monitor": mr, "version": v,
+                                                                  "layer": j}))
+            target = None
+            if isinstance(action, str) and action.startswith("rollback:"):
+                target = int(action.split(":", 1)[1])
+            elif action not in ACTIONS:
+                raise ValueError(f"policy.alarm returned {action!r}: 'recertify', 'rollback:<j>' or 'ignore'")
+            mon_why = None if mr is None else (mr.get("why") or [None])
+            ev.append(self._event("alarm", v, n, who=who, action=action, layer=j,
+                                  R=None if dr is None else dr["R"], detector_n=None if dr is None else dr["n"],
+                                  why=dr["why"][0] if dr is not None else
+                                  (mon_why[0] if isinstance(mon_why, list) else mon_why)))
+            self._alarms.append({"n": n, "who": who, "version": v})
+            det = self._det_of(v)                          # this layer's reference from scratch (and L0's monitor)
+            if det is not None:
+                det.reset()
+            if v == l0 and self.monitor is not None:
+                self._at("monitor.reset")
+                m = self.monitor
+                (m.adapted if callable(getattr(m, "adapted", None)) else m.reset)()
+            if action == "ignore":
+                continue
+            if v == l0:
+                self.left = self.probation
+            else:
+                self._left_of[v] = self.probation
+            ev += self._promise_events()
+            ev += self._restart(v, n)
+            if target is not None:
+                ev += self._detach_layers(target, n, by="policy", why=f"alarm ({who}) on layer {j}")[1]
+        return ev
+
     def _rereference(self):
         if self.detector is not None:
             self.detector.reset()
@@ -1492,15 +1655,16 @@ class AdapterLoop:
             paired = None if self.mode == "label" else self._paired(c)    # label mode: the pre-freeze gates decided
             st = self._state()
             certified = math.isfinite(self._threshold(c))     # as the promote() control: never an uncertified one
-            # TODO(additive B2): the additive gate and the layering promote (`_layer_in`) plug in here; stage B1
-            # never promotes an additive candidate (it trials, and is discarded by the policy's discard rule)
-            if not self.paused and not self.additive:
+            if not self.paused:
                 self._at("policy.promote")
-            if not self.paused and not self.additive and certified and self.policy.promote(st, paired):
-                ev.append(self._event("promote", c, n, **{"from": self.served, "to": c, **self._paired_fields(c, paired),
-                                                         "why": None}))
-                ev[-1]["install"] = self._serve(c, n, promoted=True)
-                ev += self._evict(n)
+            if not self.paused and certified and self.policy.promote(st, paired):
+                if self.additive:                          # layering: k serves its zone below the deepest layer
+                    ev.append(self._layer_in(c, n, **self._zone_fields(c, paired), why=None))
+                else:
+                    ev.append(self._event("promote", c, n, **{"from": self.served, "to": c,
+                                                             **self._paired_fields(c, paired), "why": None}))
+                    ev[-1]["install"] = self._serve(c, n, promoted=True)
+                    ev += self._evict(n)
             else:
                 self._at("policy.discard")
                 why = self.policy.discard(st, paired)
@@ -1510,9 +1674,12 @@ class AdapterLoop:
                         ev.append(self._unfreeze(n))
         if self.candidate is None and not self.paused:
             if self._run is None and self._job is None:
-                self._at("policy.want_train")
-                if self.policy.want_train(self._state()):
-                    ev += self._start("schedule", n, inline=self.wait)[1]
+                refused, rev = self._train_refusal(n) if self.additive else (False, [])
+                ev += rev
+                if not refused:
+                    self._at("policy.want_train")
+                    if self.policy.want_train(self._state()):
+                        ev += self._start("schedule", n, inline=self.wait)[1]
             if self._run is not None and self._ready(n, "decision"):
                 ev += self._apply(n, "decision")[1]
         return ev
@@ -1530,16 +1697,27 @@ class AdapterLoop:
                 "samples": len(self._vs[c]["samples"]),
                 "n_novel": paired.n_novel, "n_seen": paired.n_seen}
 
+    def _zone_fields(self, c, paired):
+        """An additive promote event's view of the trial: the candidate's own numbers on its zone samples (no
+        comparison with the layer above: a layer only adds coverage)."""
+        return {"l_k": paired.share_k, "samples": len(self._vs[c]["samples"]), "n_novel": paired.n_novel,
+                "wrong_novel": paired.wrong_novel, "n_seen": paired.n_seen}
+
     def _restart(self, v, n, why="alarm") -> list:
         """Version v's promise from scratch (the next (v, δ_v), threshold +inf, wealth 1) and, for a candidate, its
         paired samples dropped. → its "recertify" and a "restart" event."""
         ver = self._vs[v]
-        ver["promise"].restart(why)
+        ver["promise"].restart(why)                        # TODO(additive B4): lazy δ charge (index at the first learn)
         if ver.get("cmp") is not None:                     # the comparison restarts with the candidate, at its new δ_v
             ver["cmp"].budget.v = ver["promise"].v - 1
             ver["cmp"].restart(why)
         ver["samples"], ver["stale"] = [], False
         ev = self._promise_events()
+        if self.additive and v in self._layers:            # a frozen layer learns until it re-certifies
+            if v in self._frozen:
+                self._frozen.discard(v)
+                self._relearn.add(v)
+            return ev + [self._event("restart", v, n, why=why, layer=self._layers.index(v))]
         return ev + [self._event("restart", v, n, why=why)]
 
     @staticmethod
@@ -1963,6 +2141,8 @@ class AdapterLoop:
             k = max(self._vs) + 1
             why = ("paused" if self.paused else f"version {self.candidate} is in trial" if self.candidate is not None
                    else "a training is in flight" if self._run is not None else None)
+            if why is None and self.additive and len(self._layers) >= self.max_layers:
+                why = f"max_layers: the chain has {len(self._layers)} layer(s), the cap is {self.max_layers}"
             ev = []
             if why:
                 job = TrainJob(id=f"{k}.-", version=k, trigger="train_now", started=self._now(), state="refused",
@@ -2023,7 +2203,8 @@ class AdapterLoop:
         "manifest", "n", "files"}. Writes no record otherwise. The save holds the part's version lock and the loop's lock
         for all its writes (every version's files, each fsynced, included): the part's decisions and the loop's controls
         wait for it; unmeasured."""
-        if self.additive:                                  # TODO(additive B3): checkpoint fields + format bump
+        if self.additive:     # TODO(additive B3): checkpoint fields (layers, Λ, frozen/relearn, per-layer detectors,
+            # per-layer probation, _refused_why) + format bump
             raise NotImplementedError("a checkpoint of an additive loop is not built yet (stage B3)")
         from .checkpoint import save_loop
         return save_loop(self, dir, cancel=cancel)
@@ -2051,8 +2232,6 @@ class AdapterLoop:
                                  lambda: self._promote(v, force, by, why))
 
     def _promote(self, v, force, by, why):
-        if self.additive:                                  # TODO(additive B2): the layering promote as a control
-            raise ValueError("promote() of an additive loop is not built yet (stage B2)")
         c = self.candidate
         if self.paused:
             raise ValueError("the loop is paused: resume() before a promotion")
@@ -2066,6 +2245,11 @@ class AdapterLoop:
         if not force and not self.policy.promote(self._state(), paired):
             raise ValueError(f"the policy does not promote version {c} now (force=True skips its rule)")
         self._changing = True
+        if self.additive:                                  # the layering promote (force skips the gate, never the
+            e = self._layer_in(c, self.n, **self._zone_fields(c, paired), why=why,     # certificate)
+                               by=None if by is None else str(by), forced=bool(force), control=True, t=self._now())
+            self._write(None, None, [e] + self._promise_events())
+            return e
         e = self._event("promote", c, self.n, **{"from": self.served, "to": c, **self._paired_fields(c, paired),
                                                 "why": why, "by": None if by is None else str(by),
                                                 "forced": bool(force), "control": True, "t": self._now()})
@@ -2075,7 +2259,8 @@ class AdapterLoop:
         return e
 
     def rollback(self, v, *, by=None, why=None) -> dict:
-        """Serve an earlier version again (its certificate and threshold as it left them, unless an alarm came after it
+        """Additive mode: v is a layer index ≥ 1 — the layers ≥ v are detached ("detach"; see the class docstring).
+        Otherwise: serve an earlier version again (its certificate and threshold as it left them, unless an alarm came after it
         retired: then its promise restarts → "restart"; version 0 without a model: nothing alone). A candidate in trial
         is discarded (its δ_v stays spent); waits for a Dispatcher's decision in flight → the "rollback" event."""
         with self._locked():
@@ -2086,8 +2271,8 @@ class AdapterLoop:
             return rb
 
     def _rollback(self, v, *, by, why, control):
-        if self.additive:                                  # TODO(additive B2): rollback(v) = detach layers ≥ v
-            raise ValueError("rollback() of an additive loop is not built yet (stage B2: detach)")
+        if self.additive:                                  # rollback(j) = detach the layers ≥ j (j a layer index)
+            return self._detach_layers(v, self.n, by=by, why=why, control=control)
         if v not in self._vs or self._vs[v]["state"] not in ("retired", "served") or v == self.served:
             raise ValueError(f"version {v} is not a retired version (served: {self.served}; "
                              f"{[x for x, ver in self._vs.items() if ver['state'] == 'retired']} retired)")
@@ -2182,7 +2367,9 @@ class AdapterLoop:
                     "train": lambda d: fresh.train_now(), "error": again,
                     "train_start": lambda d: fresh.train_now(wait=d.get("wait")), "close": lambda d: fresh.close(),
                     "cancel": lambda d: fresh.cancel_training(by=d.get("by"), why=d.get("why")),
-                    "detach": lambda d: fresh._detach(by=d.get("by"), why=d.get("why"), record=d)}
+                    "detach": lambda d: (fresh.rollback(d["layer"], by=d.get("by"), why=d.get("why"))
+                                         if "removed" in d else      # additive: the layers' detach (rollback(j))
+                                         fresh._detach(by=d.get("by"), why=d.get("why"), record=d))}
         for kind, d in items:
             if kind == "stream":
                 if d.get("control") and d.get("event") in controls:
@@ -2308,7 +2495,7 @@ class AdapterLoop:
 
         Takes no lock: it answers while a step (or an inline training inside it) runs on another thread. Its fields
         are read one by one, so two of them may straddle a decision."""
-        b, job, err = self.policy.budget, self._job, self.error
+        b, job, err = self.policy.budget, self._job, self.error   # TODO(additive B3): layers, Λ, λ, P̂(Z), per-zone risk
         state = ("detached" if self.detached else "closed" if self.closed else "error" if err is not None
                  else "training" if job is not None else "paused" if self.paused else "running")
         host = self.host

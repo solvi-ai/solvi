@@ -109,7 +109,7 @@ from ...core.sources import TRUSTED_SOURCES
 from . import gates
 
 SLOW_SOURCES = ("s2", "verified")
-STATES = ("served", "candidate", "retired", "discarded", "evicted", "layer")   # "layer": additive mode
+STATES = ("served", "candidate", "retired", "discarded", "evicted", "layer", "detached")   # layer, detached: additive
 
 
 # ───────────────────────────────────────────────────────────── the budget
@@ -534,6 +534,9 @@ class DefaultPolicy(LoopPolicy):
             return "training in progress"
         if st.candidate is not None:
             return f"version {st.candidate} is in trial"
+        if st.deepest_certified is False:                     # additive: a candidate attaches below a certified layer
+            return f"the deepest layer (version {st.deepest}) is not certified: a candidate cannot attach below it"
+        # TODO(additive B4): the maturity gate (mature_patience, backlog and drift overrides) plugs in here
         have = st.labels.get("train", 0)
         if self.refreeze is None:
             top = max((r.n_train for r in st.versions), default=0)      # discarded versions too: a retrain floor
@@ -636,13 +639,16 @@ class DefaultPolicy(LoopPolicy):
     def promote_checks(self, st, paired: Paired) -> dict:
         """Each promotion condition → {"certified", "novel", "min_share", "margin", "novel_risk", "probe"}, each with
         "ok" (novel_risk / probe only when on). The probe
-        passes only with ≥ probe_min alone answers on novel samples (an unmeasured novel side does not promote)."""
+        passes only with ≥ probe_min alone answers on novel samples (an unmeasured novel side does not promote).
+        Additive mode (st.layers set): the additive gate (decision D1) — certified, novel, novel_risk, probe; no
+        min_share and no margin (nothing to compare with: a layer serves only the zone the layer above escalates)."""
         c = st.candidate_info
         out = {"certified": {"ok": bool(c is not None and c.certified)},
-               "novel": {"ok": paired.n_novel >= self.min_novel, "n_novel": paired.n_novel, "min": self.min_novel},
-               "min_share": {"ok": paired.share_k >= self.min_share, "share_k": paired.share_k},
-               "margin": {"ok": paired.share_k >= paired.share_s + self.margin, "share_k": paired.share_k,
-                          "share_s": paired.share_s, "share_s_own": paired.share_s_own, "thr_s": paired.thr_s}}
+               "novel": {"ok": paired.n_novel >= self.min_novel, "n_novel": paired.n_novel, "min": self.min_novel}}
+        if st.layers is None:
+            out["min_share"] = {"ok": paired.share_k >= self.min_share, "share_k": paired.share_k}
+            out["margin"] = {"ok": paired.share_k >= paired.share_s + self.margin, "share_k": paired.share_k,
+                             "share_s": paired.share_s, "share_s_own": paired.share_s_own, "thr_s": paired.thr_s}
         if self.novel_risk:
             risk = paired.wrong_novel / paired.n_novel if paired.n_novel else None
             ub = gates._wilson(paired.wrong_novel, paired.n_novel, self.wilson)[1] if paired.n_novel else None
@@ -689,6 +695,10 @@ class DefaultPolicy(LoopPolicy):
         if not c.certified and age >= self.stale:
             return f"not certified {age} decisions after its freeze ({c.samples} samples)"
         if c.certified and age >= self.trial and not self.promote(st, paired):
+            if st.layers is not None:                             # additive: the gate, no comparison
+                failed = [k for k, g in self.promote_checks(st, paired).items() if not g["ok"]]
+                return (f"certified, the additive gate did not pass {age} decisions after its freeze ({c.samples} "
+                        f"zone samples, {paired.n_novel} novel; failed: {', '.join(failed)})")
             own = "" if paired.share_s_own is None else f", share_s_own {paired.share_s_own:.4g}"
             own += "" if paired.thr_s is None else f", thr_s {paired.thr_s}"
             return (f"certified, not better {age} decisions after its freeze ({c.samples} samples; share_k "
@@ -712,6 +722,12 @@ class DefaultPolicy(LoopPolicy):
         return max(ok, default=None)
 
     def alarm(self, st, who, report) -> str:
+        if st.layers is not None:                                 # additive: per layer
+            v, j = report.get("version"), report.get("layer")
+            last = max((a["n"] for a in st.alarms if a.get("version") == v), default=None)
+            if j and last is not None and st.n - last <= self.probation:
+                return f"rollback:{j}"                            # two alarms close on layer j ≥ 1: detach it
+            return "recertify"                                    # L0 (or a first alarm): its promise restarts
         last = max((a["n"] for a in st.alarms if a.get("version") == st.served and a["n"] >= st.served_since),
                    default=None)
         if last is not None and st.n - last <= self.probation:
