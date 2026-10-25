@@ -109,7 +109,7 @@ from ...core.sources import TRUSTED_SOURCES
 from . import gates
 
 SLOW_SOURCES = ("s2", "verified")
-STATES = ("served", "candidate", "retired", "discarded", "evicted")
+STATES = ("served", "candidate", "retired", "discarded", "evicted", "layer")   # "layer": additive mode
 
 
 # ───────────────────────────────────────────────────────────── the budget
@@ -191,6 +191,9 @@ class VersionInfo:
     frozen_at: int | None = None
     train_keys: frozenset = frozenset()
     discarded_at: int | None = None
+    layer: int | None = None                           # additive mode: index in the chain (None: not a layer)
+    routing_thr: float | None = None                   # additive mode: its frozen routing threshold Λ (None: none)
+    learning: bool | None = None                       # additive mode: its promise learns (None: replacement mode)
 
     def __post_init__(self):
         if not isinstance(self.train_keys, frozenset):
@@ -232,6 +235,9 @@ class LoopState:
     promises: dict = field(default_factory=dict)
     detector: dict | None = None
     keys: dict | None = None
+    layers: tuple | None = None                        # additive mode: the chain's versions, L0 first (None: off)
+    deepest: int | None = None                         # additive mode: the deepest layer
+    deepest_certified: bool | None = None              # additive mode: the deepest layer's promise is certified
 
     def __post_init__(self):
         if self.mode not in ("stream", "label"):

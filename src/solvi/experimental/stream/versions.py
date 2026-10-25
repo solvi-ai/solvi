@@ -126,14 +126,15 @@ class LearningLoop(AdapterLoop):
     def __init__(self, learner, *, question, max_risk=None, max_error=None, delta=0.05, freeze_min=300, growth=2.0,
                  stale=3000, trial=None, min_share=0.05, margin=0.01, refreeze=1.5, initial=None, detector=None,
                  probation=300, s2_labels=False, source="human", secret=None, seed=0, sampling=None,
-                 promise_options=None, storage=None, versions_dir=None, system=None, feature="text"):
+                 promise_options=None, storage=None, versions_dir=None, system=None, feature="text", additive=False,
+                 max_layers=3):
         policy = lane_policy(freeze_min=freeze_min, growth=growth, stale=stale, trial=trial, min_share=min_share,
                              margin=margin, refreeze=refreeze, s2_labels=s2_labels)
         super().__init__(learner, question=question, policy=policy, max_risk=max_risk, max_error=max_error,
                          delta=delta, initial=initial, detector=detector, monitor=None, probation=probation,
                          source=source, secret=secret, seed=seed, sampling=sampling, promise_options=promise_options,
                          storage=storage, versions_dir=versions_dir, system=system, feature=feature,
-                         _detector_alone=True, _batch=False)
+                         additive=additive, max_layers=max_layers, _detector_alone=True, _batch=False)
 
     freeze_min = property(lambda self: self.policy.first)
     growth = property(lambda self: self.policy.growth)
