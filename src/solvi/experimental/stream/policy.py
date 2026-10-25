@@ -238,6 +238,7 @@ class LoopState:
     layers: tuple | None = None                        # additive mode: the chain's versions, L0 first (None: off)
     deepest: int | None = None                         # additive mode: the deepest layer
     deepest_certified: bool | None = None              # additive mode: the deepest layer's promise is certified
+    zone_share: dict | None = None                     # additive mode: layer version → P̂(Z_v), its zone's share
 
     def __post_init__(self):
         if self.mode not in ("stream", "label"):
