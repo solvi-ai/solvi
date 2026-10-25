@@ -1,6 +1,6 @@
 """solvi.experimental.stream, additive coverage, stage B3 (persistence): the records carry every reached layer's score
 and answer (path, path_would), replay recomputes the routing from them (1–3 layers, detach, per-layer restart), the
-candidate's trace on its zone only, the checkpoint of an additive loop (format v2, the chain, per-layer detectors and
+candidate's trace on its zone only, the checkpoint of an additive loop (format v3, the chain, per-layer detectors and
 probation, the trial) continues exactly as the loop it was saved from, old / mismatched checkpoints, status() zones.
 Spec tests 5, 6, 9 (audit part), 10 (status fields)."""
 import json
@@ -32,6 +32,11 @@ def _f_good(x):
 
 def _f_good2(x):
     return (x[0], x[3])
+
+
+def _f_l0g(x):                                     # right above 0.6, wrong w.p. 0.13 on (0.3, 0.6], always below:
+    ok = x[1] > 0.6 or (x[1] > 0.3 and int(x[3] * 1e6) % 100 >= 13)   # it keeps loosening after an attach
+    return (x[0] if ok else "wrong", x[1])
 
 
 class _M:
@@ -166,10 +171,16 @@ def test_every_record_lets_an_auditor_recompute_the_routing_and_the_answer(three
         assert r["owner"] == o and r["layer"] == r["zone"] == len(path) - 1
         if o != chain[-1]:                                                    # not the deepest: at or above Λ
             assert so >= attach[o]
-        alone = not r["probation"] and to is not None and so is not None and so >= to
-        assert r["alone"] == alone
+        owner_rule = not r["probation"] and to is not None and so is not None and so >= to
+        assert r["alone"] == (r["answered_by"] is not None) and (r["alone"] or not owner_rule)
+        if r["alone"]:                                                        # the top-down walk: the first layer
+            j = r["answer_layer"]                                             # at or above its threshold answers
+            assert path[j][0] == r["answered_by"] and path[j][1] >= r["answer_thr"] and not r["trial_zone"]
+            assert j == len(path) - 1 or r["answer_thr"] <= path[j][1] < path[j][2]   # a passed layer: below Λ
+            if j == len(path) - 1:
+                assert owner_rule and r["answer_thr"] == to
         if r["by"] == "local":
-            assert p["answer"] == pw[-1]                                      # the owner's answer, alone
+            assert p["answer"] == pw[r["answer_layer"]]                       # the answering layer's answer, alone
 
 
 def test_the_delta_indices_are_chronological_unique_and_within_delta(three):
@@ -183,7 +194,7 @@ def test_the_delta_indices_are_chronological_unique_and_within_delta(three):
     assert sum(first.values()) <= 0.05 + 1e-12
     for r in _recs(loop):                                                     # no alone answer without a certificate
         if r["alone"]:
-            assert r["path"][-1][2] is not None
+            assert r["answer_thr"] is not None
 
 
 # ───────────────────────────── trace_candidate in additive mode: the candidate's zone only
@@ -232,7 +243,7 @@ def test_a_three_layer_run_replays_and_rescores_every_layer(tmp_path):
     assert any(len(r["path"]) == 3 for r in _recs(loop))
 
 
-def test_an_alarm_detach_and_an_l0_refreeze_replay():
+def test_an_alarm_detach_and_an_l0_restart_replay():
     loop = _loop([GOOD], max_layers=2, detector=RiskDetector(0.05, arl=50), policy=_policy(_Detaching))
     xs = _xs(7, 6000)
     i = _until(loop, xs, lambda lp: len(lp._layers) == 2)
@@ -247,8 +258,34 @@ def test_an_alarm_detach_and_an_l0_refreeze_replay():
         lam = lp._route.get(0)
         return ("b" if x[0] == "a" else "a") if lam is not None and x[1] >= lam and lp.n < n0 + 600 else x[0]
     _run(loop, xs[i:i + 3000], oracle=l0_shift)
-    assert _events(loop, "refreeze") and _events(loop, "restart")[0]["version"] == 0
+    assert _events(loop, "restart")[0]["version"] == 0
+    r0 = _events(loop, "restart")[0]["decision"]
+    assert [e for e in loop._vs[0]["promise"].events if e["event"] == "certified" and e["n"] > 0][-1]["threshold"] \
+        >= loop._route[0]                                                     # re-certified, at or above Λ_0
+    assert any(r["answered_by"] == 0 and r["owner"] == 0 for r in _recs(loop) if r["n"] > r0)
     rep = loop.replay()
+    assert rep["ok"], rep["mismatches"][:3]
+
+
+def test_a_run_with_upstream_answers_and_an_l0_restart_replays_and_rescores(tmp_path):
+    l0g = _M("l0g", _f_l0g)
+    loop = AdapterLoop(_Hand([GOOD]), question="q", policy=_policy(first=50), max_risk=0.05, secret=KEY, initial=l0g,
+                       additive=True, monitor=None, _detector_alone=True, wait=True, clock=_clock, max_layers=2,
+                       detector=RiskDetector(0.05, arl=200), versions_dir=tmp_path / "v")
+    xs = _xs(3, 9000)
+    i = _until(loop, xs, lambda lp: len(lp._layers) == 2)
+    n0 = loop.n
+
+    def l0_shift(lp, x):                                                      # L0's own rows go wrong from n0 + 1500
+        hit = _events(lp, "restart")                                          # until its detector's alarm
+        return ("b" if x[0] == "a" else "a") if x[1] >= lp._route[0] and lp.n >= n0 + 1500 and not hit else x[0]
+    _run(loop, xs[i:i + 5000], oracle=l0_shift)
+    recs = _recs(loop)
+    assert any(r["answered_by"] == 0 and r["owner"] == 1 for r in recs)       # upstream answers in layer 1's zone
+    rs = _events(loop, "restart")
+    assert [e["version"] for e in rs] == [0] and rs[0]["decision"] > n0 + 1500
+    assert any(r["answered_by"] == 0 for r in recs if r["n"] > rs[0]["decision"] + 1000)   # re-certified, serving
+    rep = loop.replay(rescore=True)
     assert rep["ok"], rep["mismatches"][:3]
 
 
@@ -270,7 +307,7 @@ def test_replay_recomputes_the_routing_from_the_recorded_path_and_flags_a_change
 
 # ───────────────────────────── the checkpoint (spec test 6)
 def _snapshot(loop):
-    return (list(loop._layers), dict(loop._route), set(loop._frozen), set(loop._relearn), dict(loop._left_of),
+    return (list(loop._layers), dict(loop._route), dict(loop._left_of),
             loop._refused_why, {v: dict(z) for v, z in loop._zstat.items()}, loop.candidate, loop.left,
             {v: None if d is None else d.dump() for v, d in loop._dets.items()},
             None if loop.detector is None else loop.detector.dump())
@@ -308,11 +345,11 @@ def test_a_checkpoint_mid_zone_with_a_second_candidate_in_trial_continues_exactl
         return len(lp._layers) == 2 and c is not None and len(lp._vs[c]["samples"]) >= 20
     a, b = _resume_check(tmp_path, lambda: _loop([GW, GOOD2, GOOD2], max_layers=3), _xs(1, 12000), second,
                          after=4000)
-    assert b._layers == [0, 1, 2] and b._frozen == {0, 1}                    # layered after the load, both
+    assert b._layers == [0, 1, 2]                                             # layered after the load, both
     assert any(len(r["path"]) == 3 for r in _recs(b))
 
 
-def test_a_checkpoint_during_a_layer_restart_keeps_its_detector_probation_and_relearning(tmp_path):
+def test_a_checkpoint_during_a_layer_restart_keeps_its_detector_and_probation(tmp_path):
     xs = _xs(5, 6000)
     det = lambda: RiskDetector(0.05, arl=50)  # noqa: E731
     p = _promoted_at([GOOD], xs, max_layers=2, detector=det())
@@ -322,7 +359,7 @@ def test_a_checkpoint_during_a_layer_restart_keeps_its_detector_probation_and_re
     assert _events(b, "restart")
 
 
-def test_a_checkpoint_in_l0_relearning_keeps_the_relearn_set(tmp_path):
+def test_a_checkpoint_in_l0s_owned_regime_continues_exactly(tmp_path):
     xs = _xs(7, 6000)
     det = lambda: RiskDetector(0.05, arl=50)  # noqa: E731
 
@@ -332,8 +369,9 @@ def test_a_checkpoint_in_l0_relearning_keeps_the_relearn_set(tmp_path):
         return (("b" if x[0] == "a" else "a") if lam is not None and start is not None and x[1] >= lam
                 and lp.n < start + 600 else x[0])
     a, b = _resume_check(tmp_path, lambda: _loop([GOOD], max_layers=2, detector=det()), xs,
-                         lambda lp: bool(lp._relearn), oracle=l0_shift, after=2500)
-    assert _events(b, "refreeze")
+                         lambda lp: len(lp._layers) == 2 and not lp._base_regime(0), oracle=l0_shift, after=2500)
+    assert _events(b, "restart") and b._base_regime(0)                        # saved in the owned regime, back in
+    #                                                                           the base regime after the load
 
 
 def _manifest(path):
@@ -364,14 +402,17 @@ def test_a_replacement_checkpoint_stays_v1_and_loads_and_protocol_mismatches_are
     _run(al, _xs(0, 800))
     al.save(tmp_path / "a")
     folder, m = _manifest(tmp_path / "a")
-    assert m["format"] == ck.FORMAT_ADDITIVE != ck.FORMAT and "additive" in m["format"]
+    assert m["format"] == ck.FORMAT_ADDITIVE != ck.FORMAT and "additive" in m["format"] and " v3 " in m["format"]
     assert m["config"]["additive"] is True and m["config"]["max_layers"] == 2
     with pytest.raises(ValueError, match="additive loop.*additive=False"):
         AdapterLoop.load(tmp_path / "a", _Hand([GOOD]), secret=KEY, clock=_clock, additive=False)
     assert AdapterLoop.load(tmp_path / "a", _Hand([GOOD]), secret=KEY, clock=_clock, additive=True).additive
-    m2 = dict(m, config={**m["config"], "additive": False})                   # a v2 manifest claiming replacement
+    m2 = dict(m, config={**m["config"], "additive": False})                   # a v3 manifest claiming replacement
     _resign(folder, m2)
     with pytest.raises(ValueError, match="disagree"):
+        AdapterLoop.load(tmp_path / "a", _Hand([GOOD]), secret=KEY, clock=_clock)
+    _resign(folder, dict(m, format=ck._FORMAT_ADDITIVE_V2))                  # before decision 21: refused by name
+    with pytest.raises(ValueError, match="format v2"):
         AdapterLoop.load(tmp_path / "a", _Hand([GOOD]), secret=KEY, clock=_clock)
     _resign(folder, dict(m, format="solvi adapter loop checkpoint v9"))       # a newer library's format
     with pytest.raises(ValueError, match="newer solvi"):
@@ -390,25 +431,30 @@ def test_status_reports_each_zone_and_its_counts_match_the_records(three):
     since = {0: 0, **{e["version"]: e["decision"] for e in _events(loop, "promote")}}
     for row in z["layers"]:
         v = row["version"]
-        assert row["routing_thr"] == loop._route.get(v) and row["learning"] == (v == 2)
+        assert row["routing_thr"] == loop._route.get(v) and row["learning"] == "base"   # every layer learns
         assert row["threshold"] == loop._threshold(v) and row["certified"]
-        got = {"reach": 0, "owned": 0, "alone": 0, "sampled": 0, "s_alone": 0, "s_wrong": 0}
+        got = {"reach": 0, "owned": 0, "alone": 0, "answered": 0, "sampled": 0, "s_answered": 0, "s_wrong": 0}
         for d in _items(loop, "loop"):
             r, p = d["stream"], d["loop"]
-            if r["n"] <= since[v] or v not in [e[0] for e in r["path"]]:
+            vs = [e[0] for e in r["path"]]
+            if r["n"] <= since[v] or v not in vs:
                 continue
             got["reach"] += 1
+            mine = r["answered_by"] == v
+            got["answered"] += mine
             if r["owner"] == v:
                 got["owned"] += 1
                 got["alone"] += r["alone"]
-                if r["sampled"]:
-                    got["sampled"] += 1
-                    got["s_alone"] += r["alone"]
-                    got["s_wrong"] += r["alone"] and (p["label"] is None or p["path_would"][-1] != p["label"])
+            if r["base"]:                                                     # its base-coin samples over its zone
+                got["sampled"] += 1
+                got["s_answered"] += mine
+                got["s_wrong"] += mine and (p["label"] is None or p["path_would"][vs.index(v)] != p["label"])
         assert {k: row[k] for k in got} == got and row["since"] == since[v]
         assert row["zone_share"] == got["reach"] / (loop.n - since[v])
         assert row["risk"]["joint"] == (row["s_wrong"] / row["sampled"] if row["sampled"] else None)
     c = z["composite"]
+    want = sum(row["zone_share"] * row["s_wrong"] / row["sampled"] for row in z["layers"])   # weighted by P̂(Z_v)
+    assert c["joint"] == pytest.approx(want)
     assert c["joint"] is not None and 0 <= c["joint"] <= 1 and c["selective"] is not None
     assert c["joint_bound"] == pytest.approx(0.05 * (1 + z["zone_share"][1] + z["zone_share"][2]))
     assert loop._state().zone_share == z["zone_share"]

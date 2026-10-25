@@ -1,6 +1,7 @@
 """solvi.experimental.stream, additive coverage, stage B1 (the routing core): AdapterLoop(additive=True) attaches a
-candidate below the served chain — zones, owner routing, zone-only learning, frozen promises, attach / unfreeze — and
-additive=False stays the replacement protocol, byte for byte."""
+candidate below the served chain — zones, owner routing, the top-down answer at the live thresholds (decision 21),
+every layer learning on its zone, attach / unfreeze — and additive=False stays the replacement protocol, byte for
+byte."""
 import random
 import warnings
 
@@ -123,17 +124,22 @@ def _attached(n=2500, models=(GOOD,), **kw):
     return loop
 
 
-def test_attach_freezes_the_deepest_layer_at_its_threshold_and_drops_the_comparison():
+def test_attach_sets_the_routing_threshold_drops_the_comparison_and_the_deepest_keeps_learning():
     loop = _attached()
     at = _events(loop, "attach")
     assert len(at) == 1 and at[0]["version"] == 1 and at[0]["zone_of"] == 0
     lam = at[0]["routing_thr"]
-    assert lam == loop._route[0] == loop._threshold(0) and 0.2 < lam < 0.35
+    assert lam == loop._route[0] and loop._threshold(0) <= lam and 0.2 < lam < 0.35   # Λ_0 = λ_0 at the attach
     assert loop._vs[1]["cmp"] is None and loop.candidate == 1
     st = loop._state()
     assert st.layers == (0,) and st.deepest == 0 and st.deepest_certified
-    assert st.version(0).routing_thr == lam and st.version(0).learning is False and st.version(1).learning is True
+    assert st.version(0).routing_thr == lam and st.version(0).learning is True and st.version(1).learning is True
     assert not _events(loop, "promote")                    # stage B1 never layers an additive candidate by itself
+    recs = [r for r in _recs(loop) if r["n"] > at[0]["decision"]]
+    assert all(r["path"][0][2] == lam for r in recs)       # Λ_0 constant: the routing (and the trial zone) fixed
+    ns = [r["served_state"]["n"] for r in recs]
+    assert ns == sorted(ns) and ns[-1] > ns[0]              # L0's promise keeps reading samples
+    assert all(r["threshold"] is None or r["threshold"] <= lam for r in recs)   # λ_0 may loosen, never tighten
 
 
 def test_attach_is_refused_below_an_uncertified_deepest_layer():
@@ -149,7 +155,7 @@ def test_attach_is_refused_below_an_uncertified_deepest_layer():
     loop.train_now(wait=True)
     d = _events(loop, "discard")
     assert d and "attach refused" in d[0]["why"] and not _events(loop, "attach", "freeze")
-    assert loop.candidate is None and loop._route == {} and loop._frozen == set()
+    assert loop.candidate is None and loop._route == {}
 
 
 # ───────────────────────────── test 2: zone disjointness, one owner, Λ constant
@@ -163,8 +169,15 @@ def _check_routing(loop, recs):
         deepest = r["layer"] == len(loop._layers) - 1 or r["owner"] == loop._layers[-1]
         if not deepest:                                     # a non-deepest owner: at or above its Λ
             assert s >= loop._route[v]
-        if r["alone"]:                                      # one alone answer at most, the owner's, at its λ
-            assert thr is not None and s >= thr and r["by"] in ("local", "oracle")
+        assert r["alone"] == (r["answered_by"] is not None)
+        if r["alone"]:                                      # one alone answer, by a layer on the path, at its λ
+            j = r["answer_layer"]
+            assert j <= r["layer"] and path[j][0] == r["answered_by"] and r["by"] in ("local", "oracle")
+            assert r["answer_thr"] is not None and path[j][1] >= r["answer_thr"]
+            if j < r["layer"]:                              # a passed layer answers below its Λ, at its loosened λ
+                assert r["answer_thr"] <= path[j][1] < path[j][2]
+        else:
+            assert r["answer_layer"] is None and r["answer_thr"] is None
         if r["trial_zone"]:                                 # the candidate's zone: escalated, never answered alone
             assert not r["alone"] and r["candidate"] is not None and r["by"] in ("oracle", "person")
 
@@ -181,7 +194,7 @@ def test_every_decision_has_one_owner_and_the_trial_zone_is_the_escalation_zone_
         if r["n"] <= at:
             assert not r["trial_zone"] and r["shadow"] is None          # no candidate
             continue
-        assert r["path"][0][2] == lam == r["threshold"]                 # Λ (= the frozen λ) constant in trial
+        assert r["path"][0][2] == lam >= r["threshold"]                 # Λ constant in trial; λ_0 may loosen
         assert r["trial_zone"] == (r["score"] < lam)
         assert (r["shadow"] is not None) == r["trial_zone"]              # the candidate is scored in its zone only
         zone += r["trial_zone"]
@@ -195,7 +208,6 @@ def test_a_layered_chain_routes_each_decision_to_one_owner_and_the_deeper_layer_
     ev = loop._layer_in(k, loop.n)
     assert ev["event"] == "promote" and ev["additive"] and ev["zone_of"] == 0 and ev["routing_thr"] == loop._route[0]
     assert loop._layers == [0, 1] and loop.candidate is None and loop._vs[1]["state"] == "layer"
-    assert 0 in loop._frozen and 1 not in loop._frozen
     loop.pause()                                                        # no next candidate yet: layer 1 learns
     before = len(_recs(loop))
     outs = _run(loop, _xs(7, 800))
@@ -206,19 +218,18 @@ def test_a_layered_chain_routes_each_decision_to_one_owner_and_the_deeper_layer_
     assert deep and all(r["path"][0][1] < lam0 and r["path"][0][2] == lam0 for r in deep)
     assert all(r["owner"] == 0 and r["path"][0][1] >= lam0 for r in recs if r["layer"] == 0)
     # the deeper layer answers alone in its zone, with its own model's answer
-    local = [(o, r) for o, r in zip(outs, recs) if r["owner"] == 1 and r["by"] == "local"]
+    local = [(o, r) for o, r in zip(outs, recs) if r["answered_by"] == 1 and r["by"] == "local"]
     assert len(local) > 100 and all(o["answer"] in "ab" and o["owner"] == 1 for o, _ in local)
-    # the frozen L0 stays frozen; layer 1 (deepest, learning) reads coin samples only
-    assert all(r["served_state"]["n"] == recs[0]["served_state"]["n"] for r in recs)
-    fed1 = set(loop.fed(1))
-    assert all(r["n"] in fed1 for r in recs if r["owner"] == 1 and r["sampled"]) and fed1
-    assert not any(r["n"] in fed1 for r in recs if r["owner"] == 0)
+    # both layers learn on the base coin: L0 over its whole zone (layer 1's included), layer 1 over its own
+    fed0, fed1 = set(loop.fed(0)), set(loop.fed(1))
+    assert {r["n"] for r in recs if r["base"]} <= fed0 and any(r["n"] in fed0 for r in recs if r["owner"] == 1)
+    assert {r["n"] for r in recs if r["owner"] == 1 and r["base"]} == {r["n"] for r in recs if r["n"] in fed1}
+    assert all(r["base"] == r["sampled"] for r in recs)                  # both certified: ρ is the base rate
     # resumed: the next candidate attaches below layer 1 (Λ_1 := λ_1, layer 1 frozen), Λ_0 untouched
     loop.resume()
     _run(loop, _xs(8, 400))
     at = _events(loop, "attach")[-1]
     assert at["version"] == 2 and at["zone_of"] == 1 and loop._route == {0: lam0, 1: at["routing_thr"]}
-    assert loop._frozen == {0, 1}
     rest = [r for r in _recs(loop) if r["n"] > at["decision"]]
     _check_routing(loop, rest)
     assert all(r["trial_zone"] == (r["layer"] == 1 and r["path"][-1][1] < at["routing_thr"]) for r in rest)
@@ -230,7 +241,7 @@ def test_a_layered_chain_routes_each_decision_to_one_owner_and_the_deeper_layer_
 
 
 # ───────────────────────────── test 3: trial reads
-def test_the_candidate_reads_every_zone_decision_and_the_frozen_layer_reads_nothing():
+def test_the_candidate_reads_every_zone_decision_and_the_layer_above_reads_its_coin_samples():
     loop = _attached()
     at = _events(loop, "attach")[0]["decision"]
     recs = [r for r in _recs(loop) if r["n"] > at]
@@ -240,9 +251,11 @@ def test_the_candidate_reads_every_zone_decision_and_the_frozen_layer_reads_noth
     assert st["n"] + st["dropped"] == len(zone_n)           # read, or dropped before its grid was fixed
     assert st["seen"] == len(zone_n)                        # its grid reads zone scores only
     assert len(loop._vs[1]["samples"]) == len(zone_n)
-    s0 = [r["served_state"] for r in recs]
-    assert len({(s["n"], s["threshold"], s["evidence_fp"]) for s in s0}) == 1   # frozen: no learn, λ fixed
-    assert not [n for n in loop.fed(0) if n > at]
+    # L0 (base regime) reads the base coin over its whole zone, the trial zone included — not the owner's ρ there
+    assert [n for n in loop.fed(0) if n > at] == [r["n"] for r in recs if r["base"]]
+    assert any(r["trial_zone"] and r["base"] for r in recs)
+    assert any(r["trial_zone"] and not r["base"] and r["label_source"] for r in recs)   # labelled, not L0's sample
+    assert all(r["rho_base"] <= r["rho"] and (not r["base"] or r["sampled"]) for r in recs)
 
 
 def test_a_missing_label_in_the_zone_counts_as_a_loss():
@@ -258,7 +271,7 @@ def test_a_missing_label_in_the_zone_counts_as_a_loss():
     assert sum(r["missing"] for r in recs) > 0 and loop.fed(1)[-1] == recs[-1]["n"]
 
 
-def test_a_discard_unfreezes_the_layer_above_and_it_learns_again():
+def test_a_discard_drops_the_routing_threshold_and_the_layer_above_learns_throughout():
     loop = _loop([BAD], policy=_policy(stale=500))
     _run(loop, _xs(0, 1500))
     at, un = _events(loop, "attach"), _events(loop, "unfreeze")
@@ -266,13 +279,53 @@ def test_a_discard_unfreezes_the_layer_above_and_it_learns_again():
     d = _events(loop, "discard")[0]
     assert d["decision"] == un[0]["decision"] and "not certified" in d["why"]
     a, u = at[0]["decision"], un[0]["decision"]
-    assert not [n for n in loop.fed(0) if a < n <= u]       # frozen during the trial
-    later = [n for n in loop.fed(0) if n > u]
-    assert later                                            # learns again after the unfreeze (same index)
+    assert [n for n in loop.fed(0) if a < n <= u]           # learns during the trial (decision 21)
+    assert [n for n in loop.fed(0) if n > u]                # and after the unfreeze
     rec_a = next(r for r in _recs(loop) if r["n"] == a)
-    assert un[0]["v_index"] == rec_a["served_state"]["v_index"]   # the same index: a frozen process never bet
+    assert un[0]["v_index"] == rec_a["served_state"]["v_index"]   # the same index: no restart, one test
     rec_u = next(r for r in _recs(loop) if r["n"] == u + 1)
     assert rec_u["candidate"] in (None, 2) and (rec_u["candidate"] is not None or not rec_u["trial_zone"])
+
+
+# ───────────────────────────── decision 21: the upstream layer keeps loosening and answers its band inside Z_1
+# L0G: right above u = 0.6, wrong with probability 0.13 on (0.3, 0.6] and always below — its joint risk at λ ∈ [0.3,
+# 0.6] is 0.13·(0.6 − λ): the strict points certify fast, the loose ones slowly (it keeps loosening after an attach)
+L0G = _M("l0g", lambda x: (x[0] if x[1] > 0.6 or (x[1] > 0.3 and int(x[2] * 1e6) % 100 >= 13) else "wrong", x[1]))
+
+
+def _early_attach():
+    # training as soon as L0 certifies (first=50, no maturity gate): Λ_0 is a strict point, λ_0 loosens after it
+    loop = AdapterLoop(_Hand([GOOD]), question="q", policy=_policy(first=50), max_risk=0.05, secret=KEY, initial=L0G,
+                       additive=True, monitor=None, _detector_alone=True, wait=True, clock=lambda: 0.0, max_layers=2)
+    _run(loop, _xs(0, 6000))
+    return loop
+
+
+def test_a_band_row_inside_layer_1s_zone_is_answered_by_l0_at_its_loosened_threshold():
+    loop = _early_attach()
+    at = _events(loop, "attach")[0]
+    lam0 = at["routing_thr"]
+    assert loop._layers == [0, 1] and loop._route == {0: lam0} and loop._threshold(0) < lam0   # λ_0 loosened
+    recs = _recs(loop)
+    _check_routing(loop, [r for r in recs if r["n"] > _events(loop, "promote")[0]["decision"]])   # the final chain
+    band = [r for r in recs if r["owner"] == 1 and r["answered_by"] == 0]
+    assert band                                             # owner 1, answered alone by L0 (its band [λ_0, Λ_0))
+    items = {d["stream"]["n"]: d["loop"] for k, d in loop.log if k == "loop"}
+    for r in band:
+        assert r["alone"] and r["answer_layer"] == 0 and r["path"][0][2] == lam0
+        assert r["answer_thr"] <= r["path"][0][1] < lam0 and r["answer_thr"] == r["threshold"]
+        lp = items[r["n"]]
+        if r["sampled"]:                                    # the label only by the coin
+            assert r["by"] == "oracle" and lp["label"] is not None
+        else:
+            assert r["by"] == "local" and lp["label"] is None and lp["answer"] == lp["path_would"][0]
+    assert any(not r["sampled"] for r in band)
+    # nobody answers in the trial zone, though L0's loosened λ_0 would take part of it
+    trial = [r for r in recs if r["trial_zone"]]
+    assert any(r["threshold"] is not None and r["path"][0][1] >= r["threshold"] for r in trial)
+    assert not any(r["alone"] for r in trial) and all(r["answered_by"] is None for r in trial)
+    rep = loop.replay()
+    assert rep["ok"], rep["mismatches"][:3]
 
 
 # the checkpoint of an additive loop (stage B3): tests/test_stream_additive_b3.py

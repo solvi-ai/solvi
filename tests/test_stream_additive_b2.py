@@ -1,7 +1,8 @@
 """solvi.experimental.stream, additive coverage, stage B2 (gate + drift): the additive gate (certified, novel,
 novel_risk, probe — no share / margin comparison) layers a certified candidate below the deepest layer; the
 max_layers cap and an uncertified deepest layer refuse a training ("train_refused"); one RiskDetector per layer, an
-alarm restarts only its layer (its zone escalates until it re-certifies, a frozen layer is frozen again after);
+alarm restarts only its layer (it answers nowhere and relearns on the rows it owns, with no bet below its Λ, until it
+re-certifies);
 rollback(j) detaches the layers ≥ j; on an attached Dispatcher a decision owned by a deeper layer is decided with
 that layer's version installed. Spec tests 4, 7, 8."""
 import random
@@ -179,7 +180,7 @@ def test_three_layers_nest_and_the_cap_refuses_the_next_training():
     _run(loop, _xs(1, 12000))
     assert loop._layers == [0, 1, 2], (_events(loop, "promote", "discard"), loop._layers)
     lam0, lam1 = loop._route[0], loop._route[1]
-    assert set(loop._route) == {0, 1} and loop._frozen == {0, 1}
+    assert set(loop._route) == {0, 1}
     last = _events(loop, "promote")[-1]["decision"]
     for r in _recs(loop):
         if r["n"] <= last:
@@ -222,26 +223,45 @@ def test_a_shift_in_layer_1s_zone_restarts_only_layer_1_and_it_serves_again_afte
     assert any(r["owner"] == 1 and r["alone"] for r in recs if r["n"] > n0 + 2500)   # recertified: serves again
 
 
-def test_a_shift_in_l0s_zone_restarts_l0_only_layer_1_keeps_serving_and_l0_is_refrozen():
-    loop = _layered(detector=RiskDetector(0.05, arl=50))
+def test_a_shift_in_l0s_zone_restarts_l0_only_layer_1_keeps_serving_and_l0_recertifies_at_or_above_its_lambda():
+    loop = _layered(detector=RiskDetector(0.05, arl=50), max_layers=2)        # the cap: no next candidate
+    loop.resume()
     lam0 = loop._route[0]
     n0 = loop.n
     flip = lambda x: ("b" if x[0] == "a" else "a") if x[1] >= lam0 and loop.n < n0 + 600 else x[0]  # noqa: E731
-    _run(loop, _xs(6, 6000), oracle=flip)
+    p0 = loop._vs[0]["promise"]
+    below = [i for i, lam in enumerate(p0.grid) if lam < lam0]
+    fresh = p0._new_bet().vector()
+    owned_regime, back = [], None
+    for x in _xs(6, 6000):
+        loop.step(x, lambda x=x: flip(x))
+        restarted = any(e["event"] == "restart" and e["version"] == 0 for e in _events(loop))
+        if restarted and back is None:
+            if loop._base_regime(0):
+                back = loop.n                                                   # base regime again (certified, out
+            else:                                                               # of probation)
+                owned_regime.append(loop.n)                                     # the owned regime: no bet below Λ_0
+                assert all(p0._proc[i].vector() == fresh for i in below), loop.n
     al = _events(loop, "alarm")
     assert al and al[0]["version"] == 0 and al[0]["layer"] == 0
     a = al[0]["decision"]
-    assert loop._route == {0: lam0}                                             # Λ_0 fixed
+    assert loop._route == {0: lam0} and loop._layers == [0, 1]                  # Λ_0 fixed, layer 1 untouched
+    assert owned_regime and back is not None
     recs = [r for r in _recs(loop) if r["n"] > a]
-    assert not any(r["alone"] for r in recs if r["owner"] == 0 and r["n"] < a + 200)   # L0's zone escalates
+    assert not any(r["answered_by"] == 0 for r in recs if r["n"] in owned_regime)   # L0 answers nowhere
     l1 = [r for r in recs if r["owner"] == 1 and r["n"] < a + 300]
-    assert l1 and sum(r["alone"] for r in l1) > 0.5 * len(l1)                  # layer 1 keeps serving
-    rf = _events(loop, "refreeze")
-    assert rf and rf[0]["version"] == 0 and 0 in loop._frozen and not loop._relearn   # frozen again once certified
-    fed0 = loop.fed(0)
-    assert [n for n in fed0 if a < n <= rf[0]["decision"]]                     # it learned between
-    assert not [n for n in fed0 if n > rf[0]["decision"]]                      # and not after
-    assert any(r["owner"] == 0 and r["alone"] for r in _recs(loop) if r["n"] > rf[0]["decision"])
+    assert l1 and sum(r["answered_by"] == 1 for r in l1) > 0.5 * len(l1)       # layer 1 keeps serving
+    fed0 = set(loop.fed(0))
+    in_owned = [r for r in recs if r["n"] in fed0 and r["n"] <= back]
+    assert in_owned and all(r["owner"] == 0 for r in in_owned)                 # relearns on its owned rows only
+    restart_n = [e for e in p0.events if e["event"] == "recertify"][-1]["n"]
+    first = next(e for e in p0.events if e["event"] == "certified" and e["n"] > restart_n)
+    assert first["threshold"] >= lam0                                          # re-certified at or above Λ_0
+    after = [r for r in recs if r["n"] > back]
+    assert any(r["n"] in fed0 and r["owner"] == 1 for r in after)              # then its whole zone again
+    assert any(r["answered_by"] == 0 for r in after)                            # and it serves again
+    rep = loop.replay()
+    assert rep["ok"], rep["mismatches"][:3]
 
 
 class _Detaching(DefaultPolicy):
@@ -258,7 +278,7 @@ def test_an_alarm_answered_by_rollback_detaches_the_layer_and_the_one_above_lear
     assert len(det) == 1 and det[0]["removed"] == [1] and det[0]["layer"] == 1 and det[0]["version"] == 0
     assert det[0]["routing_thr"] == lam0 and "control" not in det[0]
     d = det[0]["decision"]
-    assert loop._layers == [0] and loop._route == {} and loop._frozen == set() and loop._vs[1]["state"] == "detached"
+    assert loop._layers == [0] and loop._route == {} and loop._vs[1]["state"] == "detached"
     assert loop._vs[1]["model"] is None and 1 not in loop._dets
     assert all(r["owner"] == 0 and len(r["path"]) == 1 for r in _recs(loop) if r["n"] > d)
     assert [n for n in loop.fed(0) if n > d]                                   # L0 learns again (deepest)
@@ -274,10 +294,10 @@ def test_the_rollback_control_detaches_the_layers_at_and_below_an_index():
     lam0 = loop._route[0]
     e = loop.rollback(2, by="op", why="test")
     assert e["event"] == "detach" and e["removed"] == [2] and e["control"] and e["version"] == 1
-    assert loop._layers == [0, 1] and loop._route == {0: lam0} and loop._frozen == {0}
+    assert loop._layers == [0, 1] and loop._route == {0: lam0}
     loop.resume() if loop.paused else None
     e = loop.rollback(1)
-    assert e["removed"] == [1] and loop._layers == [0] and loop._route == {} and not loop._frozen
+    assert e["removed"] == [1] and loop._layers == [0] and loop._route == {}
     assert loop.candidate is None and loop._refused_why is None
 
 
@@ -297,7 +317,9 @@ def test_a_dispatcher_decides_a_deeper_layers_zone_with_that_layers_version_inst
     for d, fp in zip(out, used):
         lr = d.learning
         assert lr["served"] == 0 and lr["fingerprint"] == loop._vs[0]["fingerprint"]
-        assert fp == lr["owner_fingerprint"], lr                 # System 1 decided with the owner's version
+        inst = lr["answered_by"] if lr["answered_by"] is not None else lr["owner"]
+        assert fp == loop._vs[inst]["fingerprint"], lr           # System 1 decided with the answering layer's version
+        assert lr["owner_fingerprint"] == loop._vs[lr["owner"]]["fingerprint"]   # (escalated: the owner's)
     alone = [d for d, _ in deep if d.learning["alone"]]
     assert alone and all(d.by == "s1" for d in alone)
     assert disp.system.holder.ver.fingerprint() == loop._vs[0]["fingerprint"]   # L0 installed again after each
