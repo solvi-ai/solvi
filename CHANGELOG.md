@@ -8,16 +8,21 @@
   `False`). The loop serves a chain of layers: a decision walks it to the first layer whose frozen routing
   threshold it does not pass (its owner; the zones are fixed by these thresholds), and the first layer on that path,
   from L0 down, at or above its live threshold answers alone — an upstream layer answers inside a deeper zone where
-  that layer escalates — else the oracle (never a layer deeper than the owner). Every layer keeps learning on coin
+  its own live threshold allows, before the deeper layer — else the oracle (never a layer deeper than the owner).
+  Every layer keeps learning on coin
   samples of its whole zone (a restarted one on the decisions it owns, with no bet below its routing threshold). A
   candidate is attached below the certified deepest layer, whose routing threshold is then frozen; during its trial
   every decision of its zone is labelled, and its certificate is read on that zone only; `DefaultPolicy`'s additive gate
   (certified, novel, novel-risk, probe; no share or margin comparison) makes it the deepest layer. `max_layers=3` caps
   the chain (then no training starts, "train_refused"). One `RiskDetector` per layer: an alarm restarts only that
   layer; `rollback(j)` detaches layer j and the deeper ones. The guarantee is per zone, at level α, with one δ budget
-  over every layer and restart; with `max_error=` the stream-wide error stays ≤ α, with `max_risk=` the stream-wide
-  joint risk is bounded by α·(1 + Σ_{j≥1} P(Z_j)) (up to 2α with one layer), reported in `status()["zones"]` with each
-  zone's share and realised risk. Records carry `owner`, `layer`, `zone`, `path`, `trial_zone`, `answered_by`,
+  over every layer and restart; stream-wide nothing is ≤ α: with `max_risk=` the joint risk is bounded by
+  α·(1 + Σ_{j≥1} P(Z_j)) (up to 2α with one layer), with `max_error=` the error among the alone answers by
+  α·(1 + Σ_{k≥1} P(overlap_k) / P(answered)) (overlap_k: the rows layer k would answer that an upstream layer took),
+  reported in `status()["zones"]` with each zone's share and realised risk. `status()["zones"]["layers"]` rows:
+  `learning` is `"base"` or `"owned"` (the regime), `s_alone` is renamed `s_answered`, and `answered` (the decisions
+  the layer answered alone anywhere in its zone) is new. Records carry `owner`, `layer`, `zone`, `path`, `trial_zone`,
+  `answered_by`,
   `answer_layer`, `answer_thr`, `base`, `rho_base` and `path_would`; `replay()` recomputes the routing and the answer
   and `rescore=True` rescores every layer; the checkpoint of an additive loop is format v3 (a replacement loop's stays
   v1; an older library refuses v3 by name, and v2 — frozen layers, a pre-release form — is refused by name).

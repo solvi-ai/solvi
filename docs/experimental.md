@@ -793,7 +793,8 @@ stays `additive=False`, the replacement protocol above, with the same records an
 - *Who answers.* Outside a trial zone, the first layer on the decision's path, from L0 down, whose score is ≥ its
   live threshold λ_j and which is not in probation answers alone (the owner at λ_owner, and never below its Λ while a
   candidate is in trial below it). Every λ_j keeps loosening after an attach, so an upstream layer answers inside a
-  deeper zone wherever the deeper layer would escalate and its own λ_j allows. If no layer answers, the decision is
+  deeper zone wherever its own λ_j allows, before the deeper layer is asked (whether or not that layer would answer).
+  If no layer answers, the decision is
   escalated to the oracle (never to a layer deeper than the owner). Inside a trial zone nobody answers.
 - *Attach and trial.* A candidate is attached below the deepest layer d only when d is certified: Λ_d := λ_d (d
   keeps learning; only its routing is fixed), and the candidate's zone is {score_d < Λ_d}.
@@ -815,15 +816,18 @@ stays `additive=False`, the replacement protocol above, with the same records an
   layer costs one more scoring on the decisions that reach it and, with LoRA, one more staged adapter.
 - *The guarantee is per zone.* Every layer's certificate is on its own zone, the decisions that reach it, at level α,
   read on coin samples of that zone; the zones are fixed by routing thresholds frozen at attach; a layer answers
-  inside a deeper zone only where the deeper layer escalates. Each layer's certificate is valid on its own zone's
+  inside a deeper zone where its live λ_j allows (top-down). Each layer's certificate is valid on its own zone's
   population: P(a layer ever answers
   alone at a threshold whose risk on its zone is above α) ≤ δ_v for its index, and, with one `DeltaBudget` over every
   layer, candidate and restart, ≤ δ for all of them together. With `max_error=` (selective) the stream-wide error among
-  the answers given alone is a mixture of per-zone errors, so it stays ≤ α. With `max_risk=` (joint) the stream-wide
+  the answers given alone is **not** bounded by α: an upstream layer takes the rows of a deeper zone it reaches first,
+  which may be the rows the deeper layer is right on, so the deeper layer's certified error is spread over fewer
+  answers. The bound is α·(1 + Σ_{k≥1} P(overlap_k) / P(answered)), overlap_k = the rows layer k would answer that an
+  upstream layer took. With `max_risk=` (joint) the stream-wide
   joint risk is a sum over zones and is bounded only by **α·(1 + Σ_{j≥1} P(Z_j))** — up to 2α with one layer whose
   zone is the whole stream. P(Z_j) is read from the inputs alone and reported in `status()["zones"]`
   (`zone_share`, with the composite stream-wide risk of both kinds and `joint_bound`, reported, not promised). If you
-  need a stream-wide joint risk ≤ α, use the selective kind, or give `max_risk=α / max_layers` (each P(Z_j) ≤ 1, so
+  need a stream-wide joint risk ≤ α, give `max_risk=α / max_layers` (each P(Z_j) ≤ 1, so
   the sum stays ≤ α).
 - *Drift, per layer.* Each layer has its own `RiskDetector` on the base-coin samples of its zone (did it answer, was
   it wrong: the quantity its certificate bounds); the score monitor reads L0's scores only. An alarm on layer j

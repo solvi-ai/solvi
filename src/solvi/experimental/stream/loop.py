@@ -393,8 +393,10 @@ class AdapterLoop:
     payload's "path_would" — replay recomputes the routing and the answer from them; status() "zones" (per layer Λ, λ,
     regime, P̂(Z), realised risk; the composite stream-wide risk, reported). Checkpoint: format v3 with the chain (a
     replacement loop's stays v1). The guarantee is per zone, at level α (one δ budget over every layer and
-    restart); with max_error= the stream-wide error stays ≤ α, with max_risk= the stream-wide joint risk is bounded only
-    by α·(1 + Σ_{j≥1} P(Z_j)) (docs/experimental.md, "Additive coverage")."""
+    restart). Stream-wide nothing is ≤ α: with max_error= the error among the alone answers is bounded by
+    α·(1 + Σ_{k≥1} P(overlap_k) / P(answered)) (overlap_k: rows layer k would answer that an upstream layer took — the
+    upstream layer answers first), with max_risk= the joint risk by α·(1 + Σ_{j≥1} P(Z_j)); max_risk=α / max_layers
+    keeps the joint one ≤ α (docs/experimental.md, "Additive coverage")."""
 
     def __init__(self, learner, *, question, policy=None, max_risk=None, max_error=None, delta=0.05, initial=None,
                  detector=None, monitor="auto", probation=300, source="human", secret=None, seed=0, sampling=None,
@@ -1040,7 +1042,7 @@ class AdapterLoop:
         ev.append(e)
         return e, ev
 
-    def _zone_learn(self, n, key, route, sampled, label, would_k, score_k, c):
+    def _zone_learn(self, n, key, route, sampled, label, would_k, score_k, c, base_of):
         """Additive mode, the promises' reads of one decision (decision 21, R4): every layer reached observes its score
         (the auto grid). A layer in the base regime (`_base_regime`) learns on every decision of its zone whose coin is
         below the shared base rate r_t ("base" — not the owner's ρ: one event for the whole zone, decided by the past,
@@ -1049,7 +1051,9 @@ class AdapterLoop:
         deepest, bets only at grid points ≥ its Λ (`StreamPromise.learn(floor=)`: its owned rows are a biased sample of
         its zone below Λ); the points below wait at their wealth until it is back in the base regime. The candidate (its
         zone only) observes and learns on every zone decision — all of them are escalated, so each has its label (a
-        missing one counts as a loss)."""
+        missing one counts as a loss). base_of: version → `_base_regime` at the start of the step (the snapshot
+        the step's detectors read too: a promise that re-certifies on this decision changes its regime from the next
+        one)."""
         for v, _, score in route["path"]:
             p = self._vs[v]["promise"]
             if p is not None:
@@ -1062,7 +1066,7 @@ class AdapterLoop:
             ver = self._vs[v]
             if ver["promise"] is None:
                 continue
-            if self._base_regime(v):
+            if base_of[v]:
                 if not route["base"]:
                     continue
                 floor = None
@@ -1519,8 +1523,10 @@ class AdapterLoop:
             if self._inject is not None and self._inject["call"] == 0:
                 raise _Replayed(self._inject["why"])
             cmp = None if c is None else self._vs[c].get("cmp")
-            if route is not None:                          # additive: the zone reads (no comparison certificate)
-                self._zone_learn(n, key, route, sampled, label, would_k, score_k, c)
+            base_of = None
+            if route is not None:                          # additive: the zone reads (no comparison certificate);
+                base_of = {v: self._base_regime(v) for v, _, _ in route["path"]}   # regimes before this step's reads
+                self._zone_learn(n, key, route, sampled, label, would_k, score_k, c, base_of)
                 self._zone_count(route, label)
             for v, score in ((sv, score_s), (c, score_k)) if route is None else ():
                 if v is not None and self._vs[v]["promise"] is not None:
@@ -1556,7 +1562,7 @@ class AdapterLoop:
                 a_v = None if route["answer"] is None else route["answer"][1]   # base-coin samples of its zone: did
                 for v, would, _ in route["path"] if route["base"] else ():     # it answer, was it wrong
                     det_v, pv = self._det_of(v), self._vs[v]["promise"]
-                    if det_v is None or pv is None or not self._base_regime(v):
+                    if det_v is None or pv is None or not base_of[v]:
                         continue
                     wrong = label is None or would != label
                     if pv.kind == "joint":
