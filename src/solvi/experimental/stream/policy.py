@@ -83,6 +83,17 @@ own counters in `self` and must pickle (the loop's checkpoint saves it).
   zero-risk candidate at 12 decisions per sample (≈ 1 700), 3 000 lets a 1 %-risk point of the first candidate
   certify at any of these rates (≤ 2 840) and the 2nd–4th up to 10 decisions per sample. The clock runs from the
   freeze: an alarm's restart drops the paired samples but does not restart it.
+- maturity gate (`mature_patience`, "auto": 150 in additive mode, off in replacement mode; an int: on in both; None:
+  off) — no training while the gated certificate (the deepest layer in additive mode, the served version otherwise) is
+  still loosening: a "certified" / "loosened" event within its last `mature_patience` coin samples, or its first
+  uncertified grid point's log-wealth set a new running maximum within them (it is still climbing). Freezing a
+  threshold that would still loosen gives up coverage the version would have earned (in additive mode the attach
+  freezes the deepest layer's threshold for good). Overrides: an alarm on that version since the latest freeze (drift
+  response unchanged: alarm → restart → train), or ≥ `backlog_max` (None: 2 × `first`, 600) accepted labels since the
+  latest freeze (the labels are paid for). The label floors and the budget still apply after it. The gate's inputs
+  and the reason it opened (`maturity_gate(st)["trigger"]`: "mature" / "alarm" / "backlog") are in why_not_train and
+  in the loop's "train_start" / "train" events ("gate"). On by default in additive mode only: in replacement mode it
+  changes when trainings start, and replacement records stay as before unless asked (DESIGN_DELTA_CADENCE §3).
 - alarm — "recertify"; a second alarm on the current serving of the served version (alarms at n ≥ served_since)
   within `probation` (300) decisions → "rollback:<v>", v the highest retired version below the served one with no
   alarm on record (the versions rolled back from were alarmed); no such version → "recertify".
@@ -212,7 +223,12 @@ class LoopState:
     in flight ({"id", "started", "eta"}) or None; now: the wall clock; paused; mode: "stream" (a Dispatcher, the stream
     promise) or "label" (a System alone: the pre-freeze gates only); promises, detector: their state dumps, for a
     policy that reads them; keys: the distinct content keys with a label, by split (a relabelled key counts once, as
-    the pre-freeze report's latest label per key; None: a state built without them, `labels` stands in).
+    the pre-freeze report's latest label per key; None: a state built without them, `labels` stands in). maturity:
+    the inputs of `DefaultPolicy.maturity_gate` — version (the deepest layer in additive mode, else the served
+    version), samples (its promise's samples read), changed_at (the samples at its latest "certified" / "loosened"
+    event since its latest restart; None: none), peak_at (`StreamPromise.peak_at`), last_freeze (the decision of the
+    latest training's freeze or birth discard, 0: none), labels_since_freeze (accepted labels after it), alarm (an
+    alarm on that version after it); None in label mode or when that version has no promise.
 
     `stream.loop.AdapterLoop` passes copies of the dict fields and resets `holdout` at a promotion or a rollback (the
     new served version does not inherit the old one's errors). The state has dict fields, so `hash(st)` raises: do not
@@ -239,6 +255,7 @@ class LoopState:
     deepest: int | None = None                         # additive mode: the deepest layer
     deepest_certified: bool | None = None              # additive mode: the deepest layer's promise is certified
     zone_share: dict | None = None                     # additive mode: layer version → P̂(Z_v), its zone's share
+    maturity: dict | None = None                       # the maturity gate's inputs (`DefaultPolicy.maturity_gate`)
 
     def __post_init__(self):
         if self.mode not in ("stream", "label"):
@@ -472,7 +489,8 @@ class DefaultPolicy(LoopPolicy):
     off; the labels it needs before it may roll back); novel_only: the promotion's paired comparison counts only samples
     on keys the candidate never trained on (False: every sample, its train keys too — for controls; weakens the
     guarantee: a memoriser's trained items then count for it). In label mode pre_freeze=False is refused by the loop:
-    there the pre-freeze gates are the only measurement before a version is served."""
+    there the pre-freeze gates are the only measurement before a version is served. mature_patience, backlog_max: the
+    maturity gate (see the module docstring)."""
 
     def __init__(self, budget: Budget | None = None, *, s2_labels: bool = False, calib: float = 0.15,
                  holdout: float = 0.15, first: int = 300, growth: float = 1.5, window: int = 200, target_share=0.5,
@@ -481,7 +499,7 @@ class DefaultPolicy(LoopPolicy):
                  probe_min: int = 30, stale: int = 3000, trial: int = 3000, probation: int = 300, r: int = 8,
                  lr: float = 3e-4, min_updates: int = 200, max_updates: int = 3000, refreeze=None, probe: bool = True,
                  pre_freeze: bool = True, novel_risk: bool = True, min_calib: int | None = None, watch: bool = True,
-                 watch_min: int = 100, novel_only: bool = True):
+                 watch_min: int = 100, novel_only: bool = True, mature_patience="auto", backlog_max: int | None = None):
         super().__init__(budget)
         gates.split("", calib=calib, holdout=holdout)                     # the shares, checked once
         for name, v in (("first", first), ("window", window), ("min_holdout", min_holdout), ("min_novel", min_novel),
@@ -518,6 +536,13 @@ class DefaultPolicy(LoopPolicy):
         self.min_calib = min_calib
         self.watch_on, self.watch_min = bool(watch), watch_min
         self.novel_only = bool(novel_only)
+        mp = mature_patience
+        if not (mp is None or mp == "auto" or (isinstance(mp, int) and not isinstance(mp, bool) and mp >= 1)):
+            raise ValueError(f"mature_patience is 'auto', None or a number of coin samples ≥ 1, not {mp!r}")
+        if backlog_max is not None and (isinstance(backlog_max, bool) or not isinstance(backlog_max, int)
+                                        or backlog_max < 1):
+            raise ValueError(f"backlog_max is a number of labels ≥ 1 or None, not {backlog_max!r}")
+        self.mature_patience, self.backlog_max = mature_patience, backlog_max
 
     # --- collecting
     def accept(self, st, x, y, source) -> bool:
@@ -537,7 +562,12 @@ class DefaultPolicy(LoopPolicy):
             return f"version {st.candidate} is in trial"
         if st.deepest_certified is False:                     # additive: a candidate attaches below a certified layer
             return f"the deepest layer (version {st.deepest}) is not certified: a candidate cannot attach below it"
-        # TODO(additive B4): the maturity gate (mature_patience, backlog and drift overrides) plugs in here
+        gate = self.maturity_gate(st)
+        if gate is not None and gate["trigger"] is None:
+            return (f"maturity gate: version {gate['version']} is not mature (samples {gate['samples']}, last "
+                    f"certified/loosened at {gate['changed_at']}, first uncertified point's peak at {gate['peak_at']}, "
+                    f"patience {gate['patience']}); no alarm since the freeze at decision {gate['last_freeze']}; "
+                    f"{gate['backlog']} label(s) since it < {gate['backlog_max']}")
         have = st.labels.get("train", 0)
         if self.refreeze is None:
             top = max((r.n_train for r in st.versions), default=0)      # discarded versions too: a retrain floor
@@ -572,6 +602,33 @@ class DefaultPolicy(LoopPolicy):
         if not sig["short"]:
             return f"no improvement signal: {sig['why']}"
         return None
+
+    def maturity_gate(self, st) -> dict | None:
+        """The maturity gate on `st` (see the module docstring): None when off (mature_patience None, "auto" in
+        replacement mode, label mode, no gated promise), else its inputs and `trigger` — "mature", "alarm" (override
+        A), "backlog" (override B) or None (closed: no training)."""
+        patience = getattr(self, "mature_patience", None)           # a policy pickled before the gate: off
+        if patience == "auto":
+            patience = 150 if st.layers is not None else None
+        m = st.maturity
+        if patience is None or m is None or st.mode == "label":
+            return None
+        backlog_max = getattr(self, "backlog_max", None) or 2 * self.first
+        samples, changed, peak = m["samples"], m["changed_at"], m["peak_at"]
+        loosening = changed is not None and samples - changed < patience
+        climbing = peak is not None and samples - peak < patience
+        backlog = int(m["labels_since_freeze"])
+        if not (loosening or climbing):
+            trigger = "mature"
+        elif m["alarm"]:
+            trigger = "alarm"
+        elif backlog >= backlog_max:
+            trigger = "backlog"
+        else:
+            trigger = None
+        return {"version": m["version"], "patience": patience, "samples": samples, "changed_at": changed,
+                "peak_at": peak, "loosening": loosening, "climbing": climbing, "alarm": bool(m["alarm"]),
+                "last_freeze": m["last_freeze"], "backlog": backlog, "backlog_max": backlog_max, "trigger": trigger}
 
     def calib_floor(self, alpha) -> int:
         """The calib labels a freeze needs: min_calib, or (None) `gates.calib_min(alpha, wilson)`, the fewest with

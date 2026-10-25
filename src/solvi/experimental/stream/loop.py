@@ -15,7 +15,9 @@
 This is the lane's `LearningLoop` (`stream.versions`) with its constants turned into `LoopPolicy` hooks
 (`stream.policy`); `LearningLoop` is now this class with `DefaultPolicy` set to the lane's constants. The protocol
 is the lane's: version 0 is "no model" (or `initial=`, with its own `StreamPromise`); every version frozen after it
-gets its own `StreamPromise`, fed only by coin samples drawn after its freeze, δ from one `DeltaBudget`; the calibration
+gets its own `StreamPromise`, fed only by coin samples drawn after its freeze, δ from one `DeltaBudget` (each index
+taken at the promise's first sample, not at its freeze or restart: a candidate or restart that never reads a sample
+spends nothing); the calibration
 coin is HMAC(secret, "sample|question|seed|n"); each decision is scored by the served version and, in shadow, by the
 candidate before its label is read; labels reach the learner only after the promises read them. See `stream.versions`
 for the statement and the records.
@@ -254,12 +256,25 @@ def _alone(score, thr) -> bool:
     return score is not None and math.isfinite(thr) and math.isfinite(float(score)) and score >= thr
 
 
-def _mirror_budget(budget, v):
-    """A private `DeltaBudget` with the delta and schedule of `budget` whose next() hands out index v: the comparison
-    certificate's δ_v is the candidate's own, and the loop's budget is not moved (nothing is spent from it)."""
-    b = DeltaBudget(budget.delta, budget.schedule)
-    b.v = int(v) - 1
-    return b
+class _Mirror:
+    """The comparison certificate's budget: its next() hands out the candidate promise's own (v, δ_v) — charging the
+    candidate first if it has no index yet (lazy δ charge: both read the same samples, so the candidate bets on this
+    sample too) — and moves nothing else: the comparison spends nothing of its own from the loop's budget."""
+
+    def __init__(self, promise):
+        self.promise = promise
+        self.delta, self.schedule = promise.budget.delta, promise.budget.schedule
+
+    def delta_at(self, v):
+        return self.promise.budget.delta_at(v)
+
+    def next(self):
+        self.promise._charge()
+        return self.promise.v, self.promise.delta_v
+
+    @property
+    def v(self):
+        return self.promise.v or 0
 
 
 class _Replayed(Exception):
@@ -563,12 +578,12 @@ class AdapterLoop:
 
     def _comparison(self, p):
         """The served version's comparison certificate for a candidate whose promise is p: a `StreamPromise` with the
-        loop's settings and p's (v, δ_v), on a private mirror of the budget (`_mirror_budget`) — it spends nothing from
+        loop's settings and p's (v, δ_v), on a mirror of the candidate's index (`_Mirror`) — it spends nothing from
         the loop's budget. It reads the served version's score on exactly the decisions and samples p reads (same
         grid rule, same samples, same δ), so the promotion compares the two versions certified the same way on the same
         data. It only ranks: nothing is ever answered at its threshold, so it is outside the δ accounting (see
         `_paired`)."""
-        return StreamPromise(**self._pkw, budget=_mirror_budget(self.budget, p.v))
+        return StreamPromise(**self._pkw, budget=_Mirror(p))
 
     @contextlib.contextmanager
     def _locked(self):
@@ -619,12 +634,40 @@ class AdapterLoop:
                          alarms=tuple(dict(a) for a in self._alarms), served_history=tuple(self._history),
                          served_since=self._served_since, trainings=tuple(self._trainings),
                          job=None if self._job is None else dict(self._job), now=self._now(), paused=self.paused,
-                         mode=self.mode, promises=promises,
+                         mode=self.mode, promises=promises, maturity=self._maturity(),
                          detector=None if self.detector is None else self.detector.state(),
                          **({} if not self.additive else
                             {"layers": tuple(self._layers), "deepest": self._layers[-1],
                              "deepest_certified": math.isfinite(self._threshold(self._layers[-1])),
                              "zone_share": self._zone_share()}))
+
+    def _maturity(self) -> dict | None:
+        """`LoopState.maturity`: the maturity gate's inputs on the deepest layer (additive) or the served version
+        (DefaultPolicy.maturity_gate); None in label mode or when that version has no promise."""
+        if self.mode == "label":
+            return None
+        g = self._layers[-1] if self.additive else self.served
+        p = self._vs[g]["promise"]
+        if p is None:
+            return None
+        changed = None
+        for e in reversed(p.events):                       # the latest change since the latest restart
+            if e["event"] == "recertify":
+                break
+            if e["event"] in ("certified", "loosened"):
+                changed = e["n"]
+                break
+        last = max((ver["frozen_at"] or 0 for v, ver in self._vs.items() if v != 0), default=0)
+        lo, hi = 0, len(self._rows)                        # labels are stored in decision order: the first after it
+        while lo < hi:
+            mid = (lo + hi) // 2
+            if self._rows[mid].t <= last:
+                lo = mid + 1
+            else:
+                hi = mid
+        return {"version": g, "samples": p.n, "changed_at": changed, "peak_at": p.peak_at(), "last_freeze": last,
+                "labels_since_freeze": len(self._rows) - lo,
+                "alarm": any(a["version"] == g and a["n"] >= last for a in self._alarms)}
 
     def _paired(self, c) -> Paired:
         """The candidate's Paired (see the module docstring). A policy with `novel_only` False
@@ -1809,12 +1852,11 @@ class AdapterLoop:
                 "wrong_novel": paired.wrong_novel, "n_seen": paired.n_seen}
 
     def _restart(self, v, n, why="alarm") -> list:
-        """Version v's promise from scratch (the next (v, δ_v), threshold +inf, wealth 1) and, for a candidate, its
-        paired samples dropped. → its "recertify" and a "restart" event."""
+        """Version v's promise from scratch (the next (v, δ_v) at its first sample, threshold +inf, wealth 1) and, for a
+        candidate, its paired samples dropped. → its "recertify" and a "restart" event."""
         ver = self._vs[v]
-        ver["promise"].restart(why)                        # TODO(additive B4): lazy δ charge (index at the first learn)
+        ver["promise"].restart(why)                        # lazy δ charge: its next index at its first post-restart bet
         if ver.get("cmp") is not None:                     # the comparison restarts with the candidate, at its new δ_v
-            ver["cmp"].budget.v = ver["promise"].v - 1
             ver["cmp"].restart(why)
         ver["samples"], ver["stale"] = [], False
         ev = self._promise_events()
@@ -1946,6 +1988,8 @@ class AdapterLoop:
         if refused:
             job.state, job.why = "refused", refused
             return job, []
+        mg = getattr(self.policy, "maturity_gate", None)    # the maturity gate's inputs and trigger (None: off)
+        gate = mg(st) if trigger == "schedule" and callable(mg) else None
         self._changing = True                              # from here a control's state changes
         self._attempt += 1                                 # only trainings that start get an id
         job.id = f"{k}.{self._attempt}"
@@ -1968,6 +2012,8 @@ class AdapterLoop:
                "hist": len(self._history)}
         self._run = run
         extra = {"control": True, "wait": wait} if trigger == "train_now" else {}
+        if gate is not None:
+            run["gate"] = extra["gate"] = gate
         ev = [self._event("train_start", self.served, n, job=job.id, trigger=trigger, rows=len(job.rows),
                           hyper=job.hyper, t=job.started, inline=inline, served_at_start=self.served, **extra)]
         if self._fps is not None:                          # replay: nothing runs
@@ -2058,7 +2104,8 @@ class AdapterLoop:
             frozen = out["frozen"]
         n_train = run["n_train"] if self._batch else self._split_n["train"]
         base = {"job": job.id, "trigger": trigger, "rows": len(job.rows), "hyper": job.hyper, "t": job.started,
-                "started_at": run["n"], "applied": where, "served_at_start": run["sv"]}
+                "started_at": run["n"], "applied": where, "served_at_start": run["sv"],
+                **({"gate": run["gate"]} if run.get("gate") is not None else {})}
         if refused is not None:
             job.state, job.why = "refused", refused
             return job, [self._event("train", self.served, n, state="refused", why=refused, fingerprint=None,

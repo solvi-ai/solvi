@@ -240,18 +240,21 @@ def test_a_served_version_without_a_model_gets_no_comparison_certificate():
 
 
 def test_an_alarm_in_trial_restarts_the_comparison_at_the_candidates_new_delta():
-    """An alarm restarts the candidate's promise at the next (v, δ_v); its comparison certificate restarts with it at
-    the same (v, δ_v), on its private budget (the loop's budget moves only for the candidate's restart)."""
+    """An alarm restarts the candidate's promise; its next (v, δ_v) is taken lazily at its first post-alarm sample
+    (stage B4: a restart that never bets spends nothing); its comparison certificate restarts with it and takes the
+    same (v, δ_v) through its mirror budget (the loop's budget moves only for the candidate's restart)."""
     a, c, data, n = _in_trial_certified()
     p, cmp = a._vs[c]["promise"], a._vs[c]["cmp"]
     v0, spent = p.v, a.budget.v
     a._restart(c, a.n, "alarm")
-    assert p.v > v0 and (cmp.v, cmp.delta_v) == (p.v, p.delta_v) and cmp.budget is not a.budget
-    assert math.isinf(cmp.threshold) and cmp.n == 0 and a.budget.v == p.v == spent + 1
-    for x in data[n:n + 200]:
+    assert p.v is None and cmp.v is None and cmp.budget is not a.budget and a.budget.v == spent   # nothing spent yet
+    assert math.isinf(cmp.threshold) and cmp.n == 0
+    for x in data[n:n + 400]:
         a.step(x, lambda x=x: x[0])
-    if a.candidate == c:
-        assert (cmp.v, cmp.delta_v) == (p.v, p.delta_v)
+        if p.n:
+            break
+    assert p.n and p.v > v0 and a.budget.v == p.v == spent + 1
+    assert (cmp.v, cmp.delta_v) == (p.v, p.delta_v)
 
 
 def test_a_checkpoint_without_a_comparison_certificate_falls_back_to_the_own_threshold(tmp_path, monkeypatch):

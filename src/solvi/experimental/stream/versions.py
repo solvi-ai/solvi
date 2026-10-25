@@ -17,8 +17,8 @@ budget), fed from decision 1 (its freeze is before the stream); its fingerprint 
 live learner starts empty either way. The live learner (`stream.learner.Learner`) takes every accepted oracle label and
 is never served. When no candidate exists and the live learner has taken ≥ max(freeze_min, growth × the served version's
 labels at its freeze, the refreeze floor) labels (300, 2: constants from the adapted design), a snapshot is frozen as the candidate, with
-its own `StreamPromise` drawing the next (v, δ_v) from the loop's one `DeltaBudget` (Σ δ_v ≤ δ over every version ever
-frozen). Each decision is scored by the served version and, in shadow, by the candidate, before its label is read.
+its own `StreamPromise` drawing the next (v, δ_v) from the loop's one `DeltaBudget` at its first sample (lazy charge;
+Σ δ_v ≤ δ over every version ever frozen). Each decision is scored by the served version and, in shadow, by the candidate, before its label is read.
 
 Calibration. A version's promise reads only samples drawn after its freeze: the samples of decision n go to the
 served version's promise and the candidate's — each frozen before n — and only then does the label reach the live
@@ -48,7 +48,8 @@ The detector (opt-in, `detector=RiskDetector(alpha=<the promised rate>)`, stage 
 whose served version had a threshold in force, outside probation, feeds it the deployed loss as the Dispatcher's
 driver does (joint: answered alone and wrong; selective: wrong, fed only when answered alone; a missing label is
 wrong). On an alarm: a "stream" event "alarm" (R, the detector's n, why), the detector is reset, the served
-version's promise restarts (the next (v, δ_v) from the loop's budget, threshold +inf), and so does the candidate's,
+version's promise restarts (the next (v, δ_v) from the loop's budget at its first post-alarm sample, threshold
++inf), and so does the candidate's,
 certified or not, its paired samples dropped: the alarm is evidence that the conditional loss moved, so a certificate
 earned before it is about another regime (seen in the stage-4 smoke: a candidate certified before a shift was promoted
 at the alarm, ℓ_s being 0, and served the moved world at a true risk above α). Each restart is a "restart" event (why

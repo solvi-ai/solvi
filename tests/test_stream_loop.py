@@ -254,10 +254,14 @@ def test_delta_spent_over_fifty_versions_is_at_most_delta():
     _run_fake(loop, _fake_data(4, 300))
     vs = [v for v in loop.versions() if v["version"] >= 1]
     assert len(vs) >= 50
-    for v in vs:
+    # lazy δ charge (stage B4): a version discarded (stale=5 decisions, before its grid opens at 200) before its first
+    # sample took no index and spent nothing — here every one of them (before B4: 50+ indices spent for nothing)
+    charged = [v for v in vs if v["v_index"] is not None]
+    assert all(v["delta_v"] is None for v in vs if v["v_index"] is None)
+    for v in charged:
         assert v["delta_v"] == pytest.approx(6 * 0.05 / (math.pi ** 2 * v["v_index"] ** 2), rel=1e-12)
     assert loop.delta_spent <= 0.05
-    assert len({v["v_index"] for v in vs}) == len(vs)      # one index per version
+    assert len({v["v_index"] for v in charged}) == len(charged) == loop.budget.v   # one index per charged version
 
 
 def test_slow_path_labels_are_refused_without_the_opt_in_and_recorded_as_s2_with_it():
@@ -459,7 +463,10 @@ def test_an_alarm_restarts_the_served_promise_and_opens_probation():
     assert rec[a]["probation"] and rec[a]["left"] == 299 and rec[a]["rho"] == 1.0
     assert not rec[a - 1]["probation"]
     rest = [e for e in _events(loop, "recertify") if e["decision"] == a]
-    assert rest and rest[0]["v_index"] == 2 and rest[0]["threshold"] is None
+    # lazy δ charge (stage B4): the restart takes its index (2) at its first post-alarm sample, not at the alarm
+    assert rest and rest[0]["v_index"] is None and rest[0]["threshold"] is None
+    later = [d["stream"]["served_state"]["v_index"] for k, d in loop._items() if k == "loop"][a:]
+    assert next(v for v in later if v is not None) == 2
     assert loop.delta_spent <= 0.05
     assert sum(o["by"] == "local" and o["answer"] != "moved" for o in outs[1200:]) < 100
     r = loop.replay()

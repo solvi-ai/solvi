@@ -22,7 +22,8 @@ The step (`StreamDriver`). Per decision, after System 1 answered (the promise ob
 `before()` → (ρ_t, probation) from the past; the Dispatcher draws the coin and dispatches; `after(...)` → the record
 this decision carries and the `stream` events it caused: the sample goes to the promise (`learn`), its deployed loss to
 the detector (only while a threshold was in force and outside probation), an alarm restarts the promise (the next
-(v, δ_v) from its budget, threshold +inf) and opens probation (on_drift="recertify"), and the alone flag enters the
+(v, δ_v) from its budget at its first post-alarm sample — lazy charge —, threshold +inf) and opens probation
+(on_drift="recertify"), and the alone flag enters the
 rate's window. The same records in the same order rebuild the same state (`Dispatcher.replay_stream`).
 
 Labels in sampling order. A decision completed later (a ticket) may get its label after later decisions: the
