@@ -367,26 +367,32 @@ class AdapterLoop:
     additive (experimental, default False — the replacement protocol above, unchanged): a candidate serves the escalation
     zone *below* the served chain instead of replacing it. The loop serves a chain of layers [L0, L1, …] (L0 = the
     served version); layer j has its live threshold λ_j (its promise's) and, when it is not the deepest, a frozen
-    routing threshold Λ_j; a decision walks j = 0, 1, … to the first layer it does not pass (score_j ≥ Λ_j, or the
-    deepest) — its owner, which answers alone iff score ≥ λ_owner (never a deeper layer: an owner that does not answer
-    escalates to the oracle). Only the deepest layer's promise learns (on coin samples, as the served promise does in
-    replacement mode); every other layer's promise is frozen. Attach (a freeze in additive mode): Λ_d := λ_d of the
-    deepest layer d, d's promise is frozen, the candidate's zone is {score_d < Λ_d}; every zone decision is escalated
-    and the candidate's promise learns on every one of them (no coin filter; a missing label counts as a loss), it is
-    scored on zone decisions only and has no comparison certificate. A discard unfreezes d. Layering (the policy's
-    promote, DefaultPolicy's additive gate: certified, novel, novel_risk, probe — no share or margin comparison; or the
+    routing threshold Λ_j, frozen when the layer below it was attached; a decision walks j = 0, 1, … to the first layer
+    it does not pass (score_j ≥ Λ_j, or the deepest) — its owner; the zones Z_j (the decisions that reach j) are fixed
+    by the Λ. Answering (decision 21): outside a trial zone the first layer on the path, from L0 down, with score ≥ its
+    live λ_j (the owner: ≥ `_thr_owner`) and not in probation answers alone — so an upstream layer whose λ loosened
+    below its Λ answers inside a deeper zone where the deeper layer escalates; none → the oracle (never a layer
+    deeper than the owner). Every layer keeps learning: certified and not in probation (the base regime), on the
+    decisions of its whole zone whose coin is below the shared base rate; otherwise (the owned regime) on the decisions
+    it owns, with no bet below its Λ. Attach (a freeze in additive mode): Λ_d := λ_d of the deepest layer d (d keeps
+    learning), the candidate's zone is {score_d < Λ_d}; every zone decision is escalated (nobody answers there) and
+    the candidate's promise learns on every one of them (no coin filter; a missing label counts as a loss), it is
+    scored on zone decisions only and has no comparison certificate. A discard drops Λ_d ("unfreeze"). Layering (the
+    policy's promote, DefaultPolicy's additive gate: certified, novel, novel_risk, probe — no share or margin comparison; or the
     promote() control): the certified candidate becomes the deepest layer from the next decision ("promote" with
     additive=True). max_layers: the chain's depth cap (base + layers); at the cap, and while the deepest layer is not
     certified, the schedule starts no training ("train_refused", once per reason) and train_now is refused at the cap.
-    Drift: one RiskDetector per layer on its own coin-sampled answers, the score monitor on L0's scores; an alarm on
-    layer j restarts only j's promise and puts only j in probation (its zone escalates until it re-certifies; a frozen
-    layer learns until then and is frozen again, "refreeze"); rollback(j) — a layer index — detaches the layers ≥ j
-    ("detach"), layer j−1 becomes the deepest and learns again. Attached to a Dispatcher, a decision owned by a deeper
-    layer is decided by System 1 with that layer's version installed for the call (`serving`). Needs stream mode and an
-    initial model. Records: owner, layer, zone, path [[v, score, thr in force]], trial_zone in the stream record, every
-    reached layer's answer in the payload's "path_would" — replay recomputes the routing from them; status() "zones"
-    (per layer Λ, λ, P̂(Z), realised risk; the composite stream-wide risk, reported). Checkpoint: format v2 with the
-    chain (a replacement loop's stays v1). The guarantee is per zone, at level α (one δ budget over every layer and
+    Drift: one RiskDetector per layer on its base-coin samples of its zone (did it answer, was it wrong), the score
+    monitor on L0's scores; an alarm on layer j restarts only j's promise and puts only j in probation (it answers
+    nowhere and relearns in the owned regime until it re-certifies); rollback(j) — a layer index — detaches the layers
+    ≥ j ("detach"), layer j−1 becomes the deepest. Attached to a Dispatcher, a decision answered by a layer below L0
+    (or, escalated, owned by one) is decided by System 1 with that layer's version installed for the call
+    (`serving`).
+    Needs stream mode and an initial model. Records: owner, layer, zone, path [[v, score, thr in force]], trial_zone,
+    answered_by, answer_layer, answer_thr, base, rho_base in the stream record, every reached layer's answer in the
+    payload's "path_would" — replay recomputes the routing and the answer from them; status() "zones" (per layer Λ, λ,
+    regime, P̂(Z), realised risk; the composite stream-wide risk, reported). Checkpoint: format v3 with the chain (a
+    replacement loop's stays v1). The guarantee is per zone, at level α (one δ budget over every layer and
     restart); with max_error= the stream-wide error stays ≤ α, with max_risk= the stream-wide joint risk is bounded only
     by α·(1 + Σ_{j≥1} P(Z_j)) (docs/experimental.md, "Additive coverage")."""
 
@@ -433,8 +439,6 @@ class AdapterLoop:
         self._chain_rev = 0                                # additive: +1 at every change of the chain or of a Λ (a
         #                                                    Dispatcher's _pre routed on the chain it read: `_post`)
         self._route: dict = {}                             # additive: version → its frozen routing threshold Λ
-        self._frozen: set = set()                          # additive: versions whose promise does not learn
-        self._relearn: set = set()                         # additive: frozen layers restarted, learning until certified
         self._dets: dict = {}                              # additive: version → its RiskDetector (L0's: self.detector)
         self._left_of: dict = {}                           # additive: version → its probation left (L0's: self.left)
         self._refused_why = None                           # additive: the loop's last train refusal ("train_refused")
@@ -607,7 +611,7 @@ class AdapterLoop:
                                   **({} if not self.additive else
                                      {"layer": self._layers.index(v) if v in self._layers else None,
                                       "routing_thr": self._route.get(v),
-                                      "learning": ver["promise"] is not None and v not in self._frozen
+                                      "learning": ver["promise"] is not None   # every layer learns (B)
                                       and ver["state"] in ("served", "candidate", "layer")})))
         promises = {v: self._vs[v]["promise"].state() for v in (self.served, self.candidate)
                     if v is not None and self._vs[v]["promise"] is not None}
@@ -747,8 +751,9 @@ class AdapterLoop:
         "owner": the version that owns it, "layer": its index, "zone": whether x is in the zone of the candidate in
         trial}; None in replacement mode. L0's (would, score) are the step's; a deeper layer is scored here, only when
         the decision reaches it. Layer j is passed when it is not the deepest and its score is below its frozen routing
-        threshold Λ_j (input side only: no label enters the routing). The candidate's zone: the decision reached the
-        deepest layer d and d's score is below Λ_d (frozen at the attach). scored: version → (would, score) read from
+        threshold Λ_j (input side only: no label enters the routing; the zones never move while the chain does not).
+        Who answers is `_answer_of`'s (a passed layer may, at its live λ_j). The candidate's zone: the decision reached
+        the deepest layer d and d's score is below Λ_d (frozen at the attach). scored: version → (would, score) read from
         the records instead of scoring (replay: `_recorded_path`)."""
         if not self.additive:
             return None
@@ -772,6 +777,14 @@ class AdapterLoop:
         """Additive mode: the thresholds in force at the draw along a routed path — Λ_v for a passed layer, the owner's
         threshold in force (`_thr_owner`) for the last."""
         return [self._route[v] for v, _, _ in path[:-1]] + [self._thr_owner(path[-1][0])]
+
+    def _answered(self, n, route) -> dict:
+        """Additive mode: decision n's route with the thresholds in force now ("thr"), who answers it ("answer",
+        `_answer_of`) and the base coin ("base": coin(n) below the shared base rate "rho_base", the base-regime layers'
+        learning event — equal to "sampled" when the owner's ρ is the base rate) — from the state before it."""
+        route = dict(route, thr=self._route_thr(route["path"]))
+        rb = self.rate.rate(full=False)
+        return dict(route, answer=self._answer_of(route), base=self._coin(n) < rb, rho_base=rb)
 
     @staticmethod
     def _recorded_path(path, woulds):
@@ -802,13 +815,13 @@ class AdapterLoop:
 
     def _attach(self, k, n) -> dict:
         """Additive mode, candidate k frozen: the deepest layer d's routing threshold Λ_d := λ_d (now, certified: the
-        apply refused otherwise) and d's promise frozen; k's zone is {score_d < Λ_d} → the "attach" event."""
+        apply refused otherwise); k's zone is {score_d < Λ_d}, fixed until a discard or a detach. d's promise keeps
+        learning (its answer threshold λ_d may loosen below Λ_d; the routing does not move) → the "attach" event."""
         d = self._layers[-1]
         lam = self._threshold(d)
         if not math.isfinite(lam):                         # cannot happen: _attach_refused said so before the freeze
             raise RuntimeError(f"attach of version {k} below the uncertified layer {d}")
         self._route[d] = lam
-        self._frozen.add(d)
         self._chain_rev += 1
         return self._event("attach", k, n, zone_of=d, routing_thr=lam)
 
@@ -844,22 +857,21 @@ class AdapterLoop:
 
     def _unfreeze(self, n) -> dict:
         """Additive mode, the candidate attached below the deepest layer d was discarded: d's routing threshold is
-        dropped and its promise learns again from its state (same index: a frozen process never bet) → "unfreeze"."""
+        dropped (d owns its whole zone again) → "unfreeze" (the name kept: d's promise never stopped learning)."""
         d = self._layers[-1]
         lam = self._route.pop(d, None)
-        self._frozen.discard(d)
-        self._relearn.discard(d)                           # the deepest learns anyway
         self._chain_rev += 1
         return self._event("unfreeze", d, n, routing_thr=lam)
 
     def _layer_in(self, k, n, **extra) -> dict:
         """Additive mode: the certified candidate k becomes the deepest layer from the next decision — it answers alone
         in its zone at its own threshold and its promise keeps learning on coin samples (the trial's read of every
-        zone decision ends); the layer above keeps its Λ and stays frozen; k gets its own detector (a fresh copy of
-        L0's) → the "promote" event (additive). Called from `_protocol` behind the policy's promote (DefaultPolicy:
+        zone decision ends); the layer above keeps its Λ (routing) and keeps learning (answering); k gets its own
+        detector (a fresh copy of L0's) → the "promote" event (additive). Called from `_protocol` behind the policy's promote (DefaultPolicy:
         the additive gate, decision D1) and from the promote() control. Nothing is installed on the System: L0 stays
         installed, and on an attached Dispatcher a decision owned by a deeper layer is decided with that layer's
-        version installed for the System 1 call only (`_pre` → "owner"; Dispatcher._ask_loop, `serving`)."""
+        version installed for the System 1 call only (`_pre` → "answered_by", else "owner"; Dispatcher._ask_loop,
+        `serving`)."""
         if k != self.candidate or not math.isfinite(self._threshold(k)):
             raise ValueError(f"version {k} is not a certified candidate in trial")
         d = self._layers[-1]
@@ -876,23 +888,30 @@ class AdapterLoop:
     @staticmethod
     def _zcount(since) -> dict:
         """Additive mode: a layer's counts from the decision it joined the chain (`since`; L0: 0) — "reach": decisions
-        that reached it (its zone Z_v), "owned" / "alone": those it owned / answered alone by its rule; on the
-        coin-sampled owned ones "sampled", "s_alone" and "s_wrong" (alone and wrong, a missing label wrong — as its
-        detector reads them). Rebuilt by replay, kept by the checkpoint; every one is recomputable from the records
-        (owner, path, alone, sampled, label and the payload's path_would)."""
-        return {"since": int(since), "reach": 0, "owned": 0, "alone": 0, "sampled": 0, "s_alone": 0, "s_wrong": 0}
+        that reached it (its zone Z_v); "owned": those it owned, "alone": the owned ones some layer answered alone;
+        "answered": the decisions it answered alone (anywhere in its zone); on its base-coin samples over its zone
+        (coin below the shared base rate, every one labelled) "sampled", "s_answered" and "s_wrong" (it answered and
+        was wrong, a missing label wrong — the quantity its certificate bounds). Rebuilt by replay, kept by the
+        checkpoint; every one is recomputable from the records (path, owner, answer_layer, base, label and the
+        payload's path_would)."""
+        return {"since": int(since), "reach": 0, "owned": 0, "alone": 0, "answered": 0, "sampled": 0,
+                "s_answered": 0, "s_wrong": 0}
 
-    def _zone_count(self, route, sampled, alone, label):
-        for v, _, _ in route["path"]:
-            self._zstat[v]["reach"] += 1
-        o, would_o, _ = route["path"][-1]
-        z = self._zstat[o]
+    def _zone_count(self, route, label):
+        ans, base = route["answer"], route["base"]
+        a_v = None if ans is None else ans[1]
+        for v, would, _ in route["path"]:
+            z = self._zstat[v]
+            z["reach"] += 1
+            mine = v == a_v
+            z["answered"] += mine
+            if base:                                       # base ⇒ sampled at the owner's ρ ≥ r_t: labelled
+                z["sampled"] += 1
+                z["s_answered"] += mine
+                z["s_wrong"] += mine and (label is None or would != label)
+        z = self._zstat[route["owner"]]
         z["owned"] += 1
-        z["alone"] += bool(alone)
-        if sampled:
-            z["sampled"] += 1
-            z["s_alone"] += bool(alone)
-            z["s_wrong"] += bool(alone and (label is None or would_o != label))
+        z["alone"] += ans is not None
 
     def _zone_share(self) -> dict:
         """Additive mode: layer version → P̂(Z_v), the share of the decisions since v joined the chain that reached it
@@ -905,34 +924,36 @@ class AdapterLoop:
         return out
 
     def _zones(self) -> dict:
-        """Additive mode: status()'s "zones" — per layer its Λ, λ, P̂(Z), its realised risk on its own coin samples,
-        and the composite stream-wide risk of both kinds (estimates, reported, not promised: each layer's numbers are
-        over its own window since it joined; the promise is per zone, at level α — the joint kind's stream-wide bound
-        is α·(1 + Σ_{j≥1} P(Z_j)))."""
+        """Additive mode: status()'s "zones" — per layer its Λ, λ, P̂(Z), its regime ("base": it learns on coin samples
+        of its whole zone; "owned": restarted or in probation, it learns on the rows it owns), its realised risk on
+        its base-coin samples (P̂(it answers ∧ wrong | Z_v), the selective one among its answers), and the composite
+        stream-wide risk of both kinds, weighted by the zone shares (each decision is answered by one layer at most).
+        Estimates, reported, not promised: each layer's numbers are over its own window since it joined; the promise
+        is per zone, at level α — the joint kind's stream-wide bound is α·(1 + Σ_{j≥1} P(Z_j))."""
         share = self._zone_share()
         layers = []
         for j, v in enumerate(self._layers):
             z = dict(self._zstat[v])
             thr = self._threshold(v)
             joint = None if not z["sampled"] else z["s_wrong"] / z["sampled"]
-            sel = None if not z["s_alone"] else z["s_wrong"] / z["s_alone"]
+            sel = None if not z["s_answered"] else z["s_wrong"] / z["s_answered"]
             nxt = share.get(self._layers[j + 1]) if j + 1 < len(self._layers) else 0.0
             own = None if share[v] is None or nxt is None else max(0.0, share[v] - nxt)
             layers.append({"version": v, "layer": j, "routing_thr": self._route.get(v),
                            "threshold": None if math.isinf(thr) else thr, "certified": math.isfinite(thr),
-                           "learning": v not in self._frozen, "probation": self._prob(v),
+                           "learning": "base" if self._base_regime(v) else "owned", "probation": self._prob(v),
                            "zone_share": share[v], "owned_share": own, **z,
                            "risk": {"joint": joint, "selective": sel}})
-        joint = alone = 0.0                                # Σ_j P̂(owned_j)·(wrong_j, alone_j per sample)
+        joint = alone = 0.0                                # Σ_j P̂(Z_j)·(wrong_j, answered_j per base sample)
         ok = True
         for row in layers:
-            if not row["owned"]:
+            if not row["answered"]:
                 continue
-            if row["owned_share"] is None or not row["sampled"]:
-                ok = False                                 # a zone with answers and no sample: no estimate
+            if row["zone_share"] is None or not row["sampled"]:
+                ok = False                                 # a layer with answers and no sample: no estimate
                 continue
-            joint += row["owned_share"] * row["s_wrong"] / row["sampled"]
-            alone += row["owned_share"] * row["s_alone"] / row["sampled"]
+            joint += row["zone_share"] * row["s_wrong"] / row["sampled"]
+            alone += row["zone_share"] * row["s_answered"] / row["sampled"]
         d = self._layers[-1]
         return {"layers": layers, "deepest": d, "deepest_certified": math.isfinite(self._threshold(d)),
                 "zone_share": share,
@@ -942,9 +963,10 @@ class AdapterLoop:
                 "max_layers": self.max_layers}
 
     def _thr_owner(self, o):
-        """The threshold in force for owner o: its live λ_o, never below its routing threshold Λ_o when it has one (a
-        deepest layer with a candidate attached below it: a restarted and re-certified λ_o may sit below Λ_o, and the
-        candidate's zone {score_o < Λ_o} stays escalated in trial; a non-deepest owner's score is ≥ Λ_o anyway)."""
+        """The threshold in force for owner o: its live λ_o, never below its routing threshold Λ_o when it has one. The
+        cap matters only for the deepest layer with a candidate in trial below it: its λ_o keeps loosening and may sit
+        below Λ_o, and the candidate's zone {score_o < Λ_o} stays escalated in trial; a non-deepest owner's score is
+        ≥ Λ_o anyway."""
         thr = self._threshold(o)
         lam = self._route.get(o)
         return thr if lam is None else max(thr, lam)
@@ -953,6 +975,28 @@ class AdapterLoop:
         """The owner's (would, score, threshold in force) of a routed decision."""
         o, would, score = route["path"][-1]
         return would, score, self._thr_owner(o)
+
+    def _base_regime(self, v) -> bool:
+        """Additive mode: layer v is in the base regime — certified (λ_v finite) and not in probation: its promise
+        learns on the base-coin samples of its whole zone, and it may answer anywhere in it. Otherwise (restarted and not yet
+        re-certified, or in probation) the owned regime: it learns on the rows it owns, with no bet below its Λ
+        (`_zone_learn`)."""
+        return math.isfinite(self._threshold(v)) and not self._prob(v)
+
+    def _answer_of(self, route):
+        """Additive mode: who answers decision `route` alone (decision 21, the top-down walk) → (layer index, version,
+        threshold) or None (escalated). Inside a trial zone nobody answers (every trial-zone decision is labelled: the
+        candidate's read of its whole zone). Elsewhere the first layer on the path, from L0 down, not in probation with
+        score ≥ its threshold in force: its live λ_v for a passed layer (the routing stays at Λ_v; λ_v may have
+        loosened below it), `_thr_owner` for the owner. Reads only the path's scores and the live thresholds."""
+        if route["zone"]:
+            return None
+        last = len(route["path"]) - 1
+        for j, (v, _, score) in enumerate(route["path"]):
+            thr = self._thr_owner(v) if j == last else self._threshold(v)
+            if not self._prob(v) and score is not None and math.isfinite(thr) and score >= thr:
+                return j, v, thr
+        return None
 
     def _prob(self, v) -> bool:
         """Additive mode: whether layer v is in probation (after an alarm on it: per layer, decision D4's reading —
@@ -964,8 +1008,8 @@ class AdapterLoop:
         return self.detector if v == self._layers[0] else self._dets.get(v)
 
     def _detach_layers(self, j, n, *, by=None, why=None, control=False) -> tuple:
-        """Additive mode, rollback(j): remove layers ≥ j (j a layer index ≥ 1); layer j−1 becomes the deepest, its Λ is
-        dropped and its promise learns again from its state (same index). A candidate in trial is discarded (it was
+        """Additive mode, rollback(j): remove layers ≥ j (j a layer index ≥ 1); layer j−1 becomes the deepest and its Λ
+        is dropped (it owns its whole zone again). A candidate in trial is discarded (it was
         attached below a removed layer). The removed versions are released (state "detached", their files stay).
         → (the "detach" event, all events)."""
         if isinstance(j, bool) or not isinstance(j, int) or not 1 <= j < len(self._layers):
@@ -983,15 +1027,11 @@ class AdapterLoop:
             self._release(ver.get("served_as"), ver["model"])
             ver["state"], ver["model"], ver["served_as"] = "detached", None, None
             self._route.pop(v, None)
-            self._frozen.discard(v)
-            self._relearn.discard(v)
             self._dets.pop(v, None)
             self._left_of.pop(v, None)
             self._zstat.pop(v, None)
         p = self._layers[-1]
         lam = self._route.pop(p, None)
-        self._frozen.discard(p)
-        self._relearn.discard(p)
         self._refused_why = None
         extra = {"layer": j, "removed": removed, "routing_thr": lam, "by": None if by is None else str(by), "why": why}
         if control:
@@ -1001,9 +1041,15 @@ class AdapterLoop:
         return e, ev
 
     def _zone_learn(self, n, key, route, sampled, label, would_k, score_k, c):
-        """Additive mode, the promises' reads of one decision: every layer reached observes its score; the owner's
-        promise learns on a coin sample unless it is frozen; the candidate (its zone only) observes and learns on every
-        zone decision — all of them are escalated, so each has its label (a missing one counts as a loss)."""
+        """Additive mode, the promises' reads of one decision (decision 21, R4): every layer reached observes its score
+        (the auto grid). A layer in the base regime (`_base_regime`) learns on every decision of its zone whose coin is
+        below the shared base rate r_t ("base" — not the owner's ρ: one event for the whole zone, decided by the past,
+        independent of the input, and labelled since ρ ≥ r_t), with its own (score, answer) from the path. A layer in
+        the owned regime learns only on the decisions it owns (all labelled: its rate is full) and, when it is not the
+        deepest, bets only at grid points ≥ its Λ (`StreamPromise.learn(floor=)`: its owned rows are a biased sample of
+        its zone below Λ); the points below wait at their wealth until it is back in the base regime. The candidate (its
+        zone only) observes and learns on every zone decision — all of them are escalated, so each has its label (a
+        missing one counts as a loss)."""
         for v, _, score in route["path"]:
             p = self._vs[v]["promise"]
             if p is not None:
@@ -1011,18 +1057,23 @@ class AdapterLoop:
         if route["zone"]:
             self._vs[c]["promise"].observe(score_k)
         o, would_o, score_o = route["path"][-1]
-        ev = []
-        if sampled and o not in self._frozen and self._vs[o]["promise"] is not None:
-            ver = self._vs[o]
+        d = self._layers[-1]
+        for v, would, score in route["path"]:
+            ver = self._vs[v]
+            if ver["promise"] is None:
+                continue
+            if self._base_regime(v):
+                if not route["base"]:
+                    continue
+                floor = None
+            elif v == o and sampled:                       # an owned-regime owner: its rate is full, always sampled
+                floor = self._route.get(v) if v != d else None
+            else:
+                continue
             if not n > ver["frozen_at"]:                   # cannot happen: a version is frozen at the end of a step
-                raise RuntimeError(f"decision {n} would calibrate version {o} frozen at {ver['frozen_at']}")
-            ver["promise"].learn(score_o, would_o, label)
+                raise RuntimeError(f"decision {n} would calibrate version {v} frozen at {ver['frozen_at']}")
+            ver["promise"].learn(score, would, label, floor=floor)
             ver["fed"].append(n)
-            if o in self._relearn and math.isfinite(self._threshold(o)):   # re-certified after its restart: frozen
-                self._relearn.discard(o)                   # again at its new threshold (a stopping time: valid)
-                self._frozen.add(o)
-                ev.append(self._event("refreeze", o, n, layer=self._layers.index(o),
-                                      routing_thr=self._route.get(o)))
         if route["zone"]:
             ver = self._vs[c]
             if not n > ver["frozen_at"]:
@@ -1031,18 +1082,22 @@ class AdapterLoop:
             ver["fed"].append(n)
             ver["samples"].append((score_k, score_o, label is None or would_k != label,
                                    label is None or would_o != label, key in ver["keys"]))
-        return ev
 
     def _route_record(self, route) -> dict:
-        """The record's view of a routed decision: owner, layer, zone (the owner's zone index), path [[v, score, thr in
-        force]] (Λ_v for a passed layer, λ_v for the owner), trial_zone (in the candidate's zone).
-        Replay recomputes the routing from these path scores (`_recorded_path`); the answers are in the payload's
-        "path_would"."""
+        """The record's view of a routed decision: owner, layer, zone (the owner's zone index), path [[v, score, thr]]
+        (Λ_v for a passed layer — the routing — and the owner's threshold in force), trial_zone (in the candidate's
+        zone); who answered it (decision 21): answered_by (version; None: escalated), answer_layer (its index on the
+        path), answer_thr (its threshold in force); base (the coin below the shared base rate rho_base: the
+        base-regime layers' learning event). Replay recomputes the routing from these path scores
+        (`_recorded_path`); the answers are in the payload's "path_would"."""
         path = []
         for (v, _, score), thr in zip(route["path"], route["thr"]):   # the thresholds in force at the draw (a
             path.append([v, _num(score), None if math.isinf(thr) else thr])   # detach in the step drops a Λ)
+        ans = route["answer"]
         return {"owner": route["owner"], "layer": route["layer"], "zone": route["layer"], "path": path,
-                "trial_zone": route["zone"]}
+                "trial_zone": route["zone"], "answered_by": None if ans is None else ans[1],
+                "answer_layer": None if ans is None else ans[0], "answer_thr": None if ans is None else ans[2],
+                "base": route["base"], "rho_base": route["rho_base"]}
 
     def _trial(self, x, would_k, score_k, route=None):
         """trace_candidate: the candidate's (would, score) on x for the records (the shadow's when the step read it,
@@ -1115,19 +1170,24 @@ class AdapterLoop:
             if route is None:
                 prob, rho, sampled, alone = self._draw(n, score_s, self._threshold(self.served))
                 would_k, score_k = self._shadow(x, sampled)
-            else:                                          # additive: the owner's coin and rule
+            else:                                          # additive: the owner's coin, the top-down answer
+                route = self._answered(n, route)
                 _, score_o, thr_o = self._owner(route)
-                prob, rho, sampled, alone = self._draw(n, score_o, thr_o, prob=self._prob(route["owner"]))
+                prob, rho, sampled, _ = self._draw(n, score_o, thr_o, prob=self._prob(route["owner"]))
+                alone = route["answer"] is not None
                 would_k, score_k = self._zone_shadow(x, route)
             out = {"n": n, "served": self.served, "candidate": self.candidate, "hist": len(self._history),
                    "chain": self._chain_rev,
                     "scores": (would_s, score_s, would_k, score_k), "key": self._key(x), "sampled": sampled,
                     "trial": self._trial(x, would_k, score_k, route),
                     "alone": alone, "probation": prob, "rho": rho, "fingerprint": s["fingerprint"]}
-            if route is not None:                          # an owner below L0: the Dispatcher decides with its version
-                out["route"] = route                       # installed for System 1's call (`serving`)
-                out["owner"], out["layer"] = route["owner"], route["layer"]
+            if route is not None:                          # the answering layer (else the owner) below L0: the
+                out["route"] = route                       # Dispatcher decides with its version installed for System
+                out["owner"], out["layer"] = route["owner"], route["layer"]   # 1's call (`serving`)
                 out["owner_fingerprint"] = self._vs[route["owner"]]["fingerprint"]
+                ans = route["answer"]
+                out["answered_by"] = None if ans is None else ans[1]
+                out["answer_layer"] = None if ans is None else ans[0]
             return out
 
     def _post(self, pre, x, label, source, label_of=None) -> dict:
@@ -1390,13 +1450,13 @@ class AdapterLoop:
         n = self.n + 1
         sv, c = self.served, self.candidate
         thr_s = self._threshold(sv)
-        if self.additive:                                  # the owner's coin and answer (one coin per decision)
+        if self.additive:                                  # the owner's coin (one per decision), the top-down answer
             if route is None:                              # replay: rebuilt from the recorded path scores
                 route = self._route_of(x, would_s, score_s, scored=scored)
-            else:                                          # a Dispatcher's _pre route (same chain): the thresholds
-                route = dict(route, thr=self._route_thr(route["path"]))   # in force now (a restart since _pre)
-            _, score_o, thr_o = self._owner(route)
-            prob, rho, sampled, alone = self._draw(n, score_o, thr_o, prob=self._prob(route["owner"]))
+            route = self._answered(n, route)               # a Dispatcher's _pre route (same chain): the thresholds
+            _, score_o, thr_o = self._owner(route)         # in force now (a restart since _pre)
+            prob, rho, sampled, _ = self._draw(n, score_o, thr_o, prob=self._prob(route["owner"]))
+            alone = route["answer"] is not None
         else:
             prob, rho, sampled, alone = self._draw(n, score_s, thr_s)
         label, lsrc, lof, split = None, None, None, None
@@ -1459,11 +1519,9 @@ class AdapterLoop:
             if self._inject is not None and self._inject["call"] == 0:
                 raise _Replayed(self._inject["why"])
             cmp = None if c is None else self._vs[c].get("cmp")
-            zev = []
             if route is not None:                          # additive: the zone reads (no comparison certificate)
-                o_thr = route["thr"][-1]                   # the owner's threshold in force at the draw
-                zev = self._zone_learn(n, key, route, sampled, label, would_k, score_k, c)
-                self._zone_count(route, sampled, alone, label)
+                self._zone_learn(n, key, route, sampled, label, would_k, score_k, c)
+                self._zone_count(route, label)
             for v, score in ((sv, score_s), (c, score_k)) if route is None else ():
                 if v is not None and self._vs[v]["promise"] is not None:
                     self._vs[v]["promise"].observe(score)
@@ -1484,7 +1542,7 @@ class AdapterLoop:
                     self._vs[c]["samples"].append((score_k, score_s, label is None or would_k != label,
                                                    label is None or would_s != label, key in self._vs[c]["keys"]))
             det_rep, mon_rep, ps = None, None, self._vs[sv]["promise"]
-            det_v = sv                                     # the version the detector's alarm is about
+            det_reps = {}                                  # additive: layer version → its detector's alarm report
             if route is None:
                 if sampled and det is not None and ps is not None and math.isfinite(thr_s) and not prob:
                     wrong = label is None or would_s != label
@@ -1494,17 +1552,19 @@ class AdapterLoop:
                         loss, fed = (1.0 if wrong else 0.0), alone
                     if fed and det.update(loss):
                         det_rep = det.report()
-            else:                                          # additive: the owner's detector on its own coin samples
-                det_v = route["owner"]
-                det_o, po = self._det_of(det_v), self._vs[det_v]["promise"]
-                if sampled and det_o is not None and po is not None and math.isfinite(o_thr) and not prob:
-                    wrong = label is None or route["path"][-1][1] != label
-                    if po.kind == "joint":
-                        loss, fed = (1.0 if (alone and wrong) else 0.0), True
+            else:                                          # additive (R6): each base-regime layer's detector on its
+                a_v = None if route["answer"] is None else route["answer"][1]   # base-coin samples of its zone: did
+                for v, would, _ in route["path"] if route["base"] else ():     # it answer, was it wrong
+                    det_v, pv = self._det_of(v), self._vs[v]["promise"]
+                    if det_v is None or pv is None or not self._base_regime(v):
+                        continue
+                    wrong = label is None or would != label
+                    if pv.kind == "joint":
+                        loss, fed = (1.0 if (v == a_v and wrong) else 0.0), True
                     else:
-                        loss, fed = (1.0 if wrong else 0.0), alone
-                    if fed and det_o.update(loss):
-                        det_rep = det_o.report()
+                        loss, fed = (1.0 if wrong else 0.0), v == a_v
+                    if fed and det_v.update(loss):
+                        det_reps[v] = det_v.report()
             mon_prob = prob if route is None else self.left > 0   # additive: the monitor is L0's (decision D4)
             if self.monitor is not None and not mon_prob and score_s is not None and math.isfinite(float(score_s)):
                 self._at("monitor")
@@ -1528,17 +1588,17 @@ class AdapterLoop:
                     self._holdout.append((_alone(score_s, thr_s), would_s != label))
             self.rate.push(alone)
             if alone and not sampled:
-                answer, by = (would_s if route is None else route["path"][-1][1]), "local"
+                answer, by = (would_s if route is None else route["path"][route["answer"][0]][1]), "local"
             elif label is not None:
                 answer, by = label, "oracle"
             else:
                 answer, by = None, "person"
             if n == 1 and self._vs[0]["model"] is not None:
                 events.append(self._event("start", 0, n, fingerprint=self._vs[0]["fingerprint"], why=None))
-            events += self._promise_events() + zev
-            if det_rep is not None or mon_rep is not None:
+            events += self._promise_events()
+            if det_rep is not None or det_reps or mon_rep is not None:
                 events += (self._on_alarm(n, sv, c, det_rep, mon_rep) if route is None
-                           else self._on_alarm_layers(n, det_v, det_rep, mon_rep))
+                           else self._on_alarm_layers(n, det_reps, mon_rep))
             if self.mode == "label" and self._watch is not None:
                 wrec, ev_w = self._watched(n, sv, thr_s, would_s, score_s, label, split, watch)
                 events += ev_w
@@ -1558,7 +1618,8 @@ class AdapterLoop:
         out = {"n": n, "answer": answer, "by": by, "served": sv, "candidate": c, "sampled": sampled, "label": label,
                "label_source": lsrc, "events": [e["event"] for e in events]}
         if route is not None:
-            out.update(owner=route["owner"], layer=route["layer"], trial_zone=route["zone"])
+            out.update(owner=route["owner"], layer=route["layer"], trial_zone=route["zone"],
+                       answered_by=None if route["answer"] is None else route["answer"][1])
         return out
 
     def _payload(self, x, would_s, would_k, label, answer, watch, c=None, trial=None, route=None):
@@ -1720,17 +1781,18 @@ class AdapterLoop:
             ev += self._rollback(target, by="policy", why=f"alarm ({who})", control=False)[1]
         return ev
 
-    def _on_alarm_layers(self, n, det_v, det_rep, mon_rep) -> list:
-        """Additive mode: an alarm per layer. The detector's is about the owner det_v (its own coin samples); the score
-        monitor's about L0 (decision D4: the monitor reads L0's scores only). Each alarmed layer asks policy.alarm (the
-        report carries "version" and "layer"); "recertify" restarts only that layer's promise (λ = +inf: its zone
-        escalates to the oracle, every zone decision is labelled — rate full — until it re-certifies; a frozen layer
-        learns until then and is frozen again, "refreeze") and puts only that layer in probation; Λ and the other
-        layers are untouched. "rollback:<j>" detaches the layers ≥ j (j a layer index). "ignore" as in replacement."""
+    def _on_alarm_layers(self, n, det_reps, mon_rep) -> list:
+        """Additive mode: an alarm per layer. det_reps: layer version → its detector's report (each detector reads its
+        layer's base-coin samples of its zone); the score monitor's alarm is about L0 (decision D4: the monitor reads
+        L0's scores only). Each alarmed layer asks policy.alarm (the report carries "version" and "layer"), from L0
+        down; "recertify" restarts only that layer's promise (λ = +inf: it answers nowhere, the decisions it owns
+        escalate to the oracle and are labelled — rate full — and it relearns on them in the owned regime until it
+        re-certifies) and puts only that layer in probation; Λ and the other layers are untouched. "rollback:<j>"
+        detaches the layers ≥ j (j a layer index). "ignore" as in replacement."""
         l0 = self._layers[0]
         who_of = {}
-        if det_rep is not None:
-            who_of.setdefault(det_v, []).append("detector")
+        for v in det_reps:
+            who_of.setdefault(v, []).append("detector")
         if mon_rep is not None:
             who_of.setdefault(l0, []).append("monitor")
         ev = []
@@ -1738,7 +1800,7 @@ class AdapterLoop:
             if v not in self._layers:                      # detached by the alarm handled before it
                 continue
             j = self._layers.index(v)
-            dr = det_rep if "detector" in who_of[v] else None
+            dr = det_reps.get(v)
             mr = mon_rep if "monitor" in who_of[v] else None
             who = "+".join(who_of[v])
             self._at("policy.alarm")
@@ -1854,10 +1916,7 @@ class AdapterLoop:
             ver["cmp"].restart(why)
         ver["samples"], ver["stale"] = [], False
         ev = self._promise_events()
-        if self.additive and v in self._layers:            # a frozen layer learns until it re-certifies
-            if v in self._frozen:
-                self._frozen.discard(v)
-                self._relearn.add(v)
+        if self.additive and v in self._layers:            # owned regime until it re-certifies (`_base_regime`)
             return ev + [self._event("restart", v, n, why=why, layer=self._layers.index(v))]
         return ev + [self._event("restart", v, n, why=why)]
 

@@ -88,8 +88,9 @@ own counters in `self` and must pickle (the loop's checkpoint saves it).
   still loosening: a "certified" / "loosened" event within its last `mature_patience` coin samples, or its first
   uncertified grid point's log-wealth set a new running maximum within them (it is still climbing). Freezing a
   threshold that would still loosen gives up coverage the version would have earned (in additive mode the attach
-  freezes the deepest layer's threshold for good). Overrides: an alarm on that version since the latest freeze (drift
-  response unchanged: alarm → restart → train), or ≥ `backlog_max` (None: 2 × `first`, 600) accepted labels since the
+  freezes the deepest layer's routing threshold Λ; its answer threshold keeps loosening, so what an early attach
+  changes is who answers, not the coverage — kept as pre-registered). Overrides: an alarm on that version since the
+  latest freeze (drift response unchanged: alarm → restart → train), or ≥ `backlog_max` (None: 2 × `first`, 600) accepted labels since the
   latest freeze (the labels are paid for). The label floors and the budget still apply after it. The gate's inputs
   and the reason it opened (`maturity_gate(st)["trigger"]`: "mature" / "alarm" / "backlog") are in why_not_train and
   in the loop's "train_start" / "train" events ("gate"). On by default in additive mode only: in replacement mode it
@@ -204,7 +205,8 @@ class VersionInfo:
     discarded_at: int | None = None
     layer: int | None = None                           # additive mode: index in the chain (None: not a layer)
     routing_thr: float | None = None                   # additive mode: its frozen routing threshold Λ (None: none)
-    learning: bool | None = None                       # additive mode: its promise learns (None: replacement mode)
+    learning: bool | None = None                       # additive mode: its promise learns — True for every layer and
+    #                                                    the candidate since decision 21 (None: replacement mode)
 
     def __post_init__(self):
         if not isinstance(self.train_keys, frozenset):

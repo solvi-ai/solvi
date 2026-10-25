@@ -85,8 +85,12 @@ from .serving import HeadVersion
 FORMAT = "solvi adapter loop checkpoint v1"
 # An additive loop's checkpoint (AdapterLoop(additive=True)) has its own format: a library without additive coverage
 # refuses it with this string in its message; a replacement loop's checkpoint stays v1, byte for byte as before.
-FORMAT_ADDITIVE = ("solvi adapter loop checkpoint v2 (additive coverage: load it with a solvi whose AdapterLoop takes "
+# v3 (decision 21): every layer keeps learning and answers at its live threshold; a v2 checkpoint (frozen layers) is
+# refused by name — its records carry the owner-only answering, and a loop resumed from it would not replay across.
+FORMAT_ADDITIVE = ("solvi adapter loop checkpoint v3 (additive coverage: load it with a solvi whose AdapterLoop takes "
                    "additive=True)")
+_FORMAT_ADDITIVE_V2 = ("solvi adapter loop checkpoint v2 (additive coverage: load it with a solvi whose AdapterLoop "
+                       "takes additive=True)")
 _FORMATS = (FORMAT, FORMAT_ADDITIVE)
 CURRENT = "CURRENT"
 _META = ("manifest.json", "manifest.sig")
@@ -230,13 +234,12 @@ def _state(loop) -> dict:
 
 
 def _additive_state(loop) -> dict:
-    """An additive loop's chain: the layers (versions, L0 first), the routing thresholds Λ by version, the frozen and
-    the restarted-and-relearning layers, each layer's RiskDetector (L0's is the loop's `detector`) and probation left
+    """An additive loop's chain: the layers (versions, L0 first), the routing thresholds Λ by version, each layer's
+    RiskDetector (L0's is the loop's `detector`) and probation left
     (L0's is the loop's `left`), the last train refusal and each layer's zone counts. A candidate in trial is the
     loop's `candidate` (its promise, samples and no comparison certificate are in its version row)."""
     return {"layers": list(loop._layers),
             "route": {str(v): float(lam) for v, lam in sorted(loop._route.items())},
-            "frozen": sorted(loop._frozen), "relearn": sorted(loop._relearn),
             "detectors": {str(v): None if d is None else d.dump() for v, d in sorted(loop._dets.items())},
             "left_of": {str(v): int(k) for v, k in sorted(loop._left_of.items())},
             "refused_why": loop._refused_why,
@@ -389,6 +392,11 @@ def _verified(folder: Path, secret) -> tuple:
     m = json.loads(mbytes)
     fmt = m.get("format")
     if fmt not in _FORMATS:
+        if fmt == _FORMAT_ADDITIVE_V2:
+            raise ValueError(f"{folder}: an additive loop checkpoint of format v2 (frozen layers, the owner answers "
+                             "alone): this solvi's additive loop answers top-down with every layer learning (format "
+                             "v3), and a v2 run cannot be continued or replayed by it — load it with the solvi that "
+                             "wrote it")
         if isinstance(fmt, str) and fmt.startswith("solvi adapter loop checkpoint"):
             raise ValueError(f"{folder}: an adapter loop checkpoint of a format this solvi does not read ({fmt!r}): "
                              "it was written by a newer solvi — load it with that version")
@@ -452,7 +460,7 @@ def load_loop(cls, dir, learner, *, system=None, storage=None, versions_dir=None
     served, clock: as the constructor's; secret: the loop's secret (required when it had one); groups: the
     grouping function of version 0's thresholds per group, when it was calibrated with one; additive: what the caller
     expects (None: whatever the checkpoint is) — a replacement checkpoint (v1) loaded with additive=True, or an additive
-    one (v2) with additive=False, is refused: a loop never changes its protocol at a load (a replacement loop's chain
+    one (v3) with additive=False, is refused: a loop never changes its protocol at a load (a replacement loop's chain
     cannot be rebuilt into layers; start an additive loop from its served version as version 0 instead)."""
     if isinstance(secret, str):
         secret = secret.encode()
@@ -467,7 +475,7 @@ def load_loop(cls, dir, learner, *, system=None, storage=None, versions_dir=None
     saved_additive = m["format"] == FORMAT_ADDITIVE
     if additive is not None and bool(additive) != saved_additive:
         raise ValueError(
-            "this checkpoint is of an additive loop (format v2): it loads as one, not with additive=False"
+            "this checkpoint is of an additive loop (format v3): it loads as one, not with additive=False"
             if saved_additive else
             "this checkpoint is of a replacement loop (format v1): it loads as one, not with additive=True — a loop "
             "never changes its protocol at a load; start an additive loop with its served version as initial=")
@@ -576,7 +584,6 @@ def _restore_additive(loop, st):
         raise ValueError("an additive checkpoint without its chain state (state.json has no \"additive\")")
     loop._layers = [int(v) for v in a["layers"]]
     loop._route = {int(v): float(lam) for v, lam in a["route"].items()}
-    loop._frozen, loop._relearn = {int(v) for v in a["frozen"]}, {int(v) for v in a["relearn"]}
     dets = {}
     for v, d in a["detectors"].items():
         if d is None:

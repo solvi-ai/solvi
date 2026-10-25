@@ -1107,8 +1107,10 @@ class Dispatcher:
                 pre = loop._pre(x)
             except Exception as e:  # noqa: BLE001 — a stopped or failing loop: the dispatch goes on without it
                 pre = {"stopped": f"{type(e).__name__}: {e}"}
-            owner = pre.get("owner")                 # an additive loop's layer below the served version owns it:
-            if owner is not None and owner != pre.get("served"):     # System 1 decides with that layer installed
+            owner = pre.get("answered_by")           # an additive loop's layer below the served version answers it
+            if owner is None:                        # (else, escalated, owns it): System 1 decides with that
+                owner = pre.get("owner")             # layer installed
+            if owner is not None and owner != pre.get("served"):
                 with loop.serving(owner):
                     b = self._start(state, pre)
             else:
@@ -1238,8 +1240,8 @@ class Dispatcher:
         if "stopped" in pre:
             return {"stopped": pre["stopped"]}
         out = {k: pre[k] for k in ("n", "served", "candidate", "fingerprint", "alone", "sampled", "rho", "probation")}
-        for k in ("owner", "layer", "owner_fingerprint"):   # an additive loop: the layer that owned the decision
-            if k in pre:
+        for k in ("owner", "layer", "owner_fingerprint", "answered_by", "answer_layer"):   # additive: the layer
+            if k in pre:                                   # that owned the decision, the one that answered it
                 out[k] = pre[k]
         inp = self._stream_inputs(action, paid, r1, would1, th)
         try:
@@ -1251,7 +1253,7 @@ class Dispatcher:
                    events=step["events"])
         if not step["same"]:
             out["step"] = {"served": step["served"], "candidate": step["candidate"]}
-            for k in ("owner", "layer"):                 # additive: the chain changed since _pre — the step's routing
+            for k in ("owner", "layer", "answered_by"):  # additive: the chain changed since _pre — the step's routing
                 if k in step:
                     out["step"][k] = step[k]
         return out
@@ -1740,7 +1742,8 @@ class Dispatcher:
             if self.loop is None:
                 bad.append(("learning", "a decision made with an adapter loop, and the dispatcher has none attached"))
             else:
-                ctx = self.loop.serving(lr.get("owner", lr["served"]))   # additive: the owning layer's version
+                inst = lr.get("answered_by")       # additive: the answering layer's version, else the owner's
+                ctx = self.loop.serving(lr.get("owner", lr["served"]) if inst is None else inst)
         try:
             with ctx:
                 rep1 = d.s1.trace.replay(self.system, trust_models=trust_models)

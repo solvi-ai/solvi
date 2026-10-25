@@ -215,9 +215,11 @@ class StreamPromise:
                     self._set_grid(pts)
         return self.state()
 
-    def learn(self, signal, answer, label) -> dict:
+    def learn(self, signal, answer, label, floor=None) -> dict:
         """One labelled sample: the decision's score, the answer it would give alone, its label (None: missing — a loss
-        wherever it would have been answered alone). Before the grid is fixed the sample is not read (`dropped`)."""
+        wherever it would have been answered alone). Before the grid is fixed the sample is not read (`dropped`).
+        floor: grid points below it do not bet on this sample (no wealth or peak change; `n` counts the sample once) —
+        an additive layer relearning on the rows it owns ({score ≥ Λ}), a biased sample of its zone below Λ."""
         if self.grid is None:
             self.dropped += 1
             return self.state()
@@ -230,6 +232,8 @@ class StreamPromise:
         for i, lam in enumerate(self.grid):
             if self._cert[i]:
                 continue                                   # certified: betting stops (Ville bounds the running max)
+            if floor is not None and lam < floor:
+                continue                                   # below the floor: no bet (its wealth waits at its value)
             alone = s >= lam
             if self.kind == "selective":
                 if not alone:
