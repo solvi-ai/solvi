@@ -14,7 +14,9 @@ promises:
     threshold Λ_0 (its errors in a band just below it), a good layer 1 attached and serving below Λ_0 — L0 keeps
     betting at those points on coin samples of its whole zone, and is falsely certified there in at most δ_v of runs.
     Negative control, computed from the same records: the same promise fed only the rows L0 owns (the 82e0ad5 learning
-    rule without its freeze) — certified there in nearly every run (the toy: 399 / 400);
+    rule without its freeze) — certified there in 269 of the 400 slow-suite runs (de16711 + the review fixes), far
+    above the bar. Λ_0 is 0.6 unless L0 was already falsely certified below 0.6 before the attach (43 / 400; such a
+    run counts as a false certification);
 (f) the owned regime's floor: the same L0 restarted after layer 1 serves relearns on its owned rows with no bet below
     Λ_0 (those points' wealth stays at its start until the base regime), re-certifies at or above Λ_0, and is then
     falsely certified below Λ_0 in at most δ_v of runs (its post-restart index);
@@ -275,22 +277,31 @@ def _run_upstream(seed, n=8000):
     every decision)."""
     from solvi.experimental.stream import StreamPromise
     loop = _upstream_loop()
+    p0 = loop._vs[0]["promise"]
+    before = None                                          # a false certification before the attach (Λ_0 below 0.6)
     for x in _xs(seed, n):
         loop.step(x, lambda x=x: x[0])
+        if before is None and len(loop._layers) == 2:
+            before = _false_below(p0, p0.v)
     ctrl = StreamPromise(max_risk=ALPHA_U, budget=DeltaBudget(DELTA_U), grid=GRID)
     for k, d in loop.log:
         if k == "loop" and d["stream"]["owner"] == 0 and d["stream"]["sampled"]:
             ctrl.learn(d["stream"]["score"], d["loop"]["path_would"][0], d["loop"]["label"])
-    p0 = loop._vs[0]["promise"]
     lam0 = loop._route.get(0)
     return {"layered": len(loop._layers) == 2, "lam0": lam0, "index": p0.v, "delta_v": p0.delta_v,
-            "false": _false_below(p0, p0.v), "ctrl_false": _false_below(ctrl, ctrl.v), "samples": p0.n}
+            "false": _false_below(p0, p0.v), "false_before_attach": bool(before),
+            "ctrl_false": _false_below(ctrl, ctrl.v), "samples": p0.n}
 
 
 def _check_upstream(runs):
     n = len(runs)
     on = [r for r in runs if r["layered"]]
-    assert len(on) >= 0.9 * n and all(r["lam0"] == BAD_BELOW for r in on)    # layer 1 served below Λ_0 = 0.6
+    assert len(on) >= 0.9 * n                                                  # layer 1 served (almost) every run
+    # Λ_0 is λ_0 at the attach: 0.6, unless L0 was already falsely certified below 0.6 before it (the same e-process
+    # on the same null — before the attach its zone is the whole stream; such a run counts in `false` below)
+    assert all(r["lam0"] == BAD_BELOW or (r["lam0"] < BAD_BELOW and r["false_before_attach"]) for r in on)
+    at_bad = sum(r["lam0"] == BAD_BELOW for r in on)
+    assert at_bad >= 0.75 * len(on)                                            # the reach rule is what most runs test
     assert {r["index"] for r in runs} == {1}                                   # L0's one index, no restart
     d = runs[0]["delta_v"]
     false = sum(r["false"] for r in runs)
@@ -298,7 +309,8 @@ def _check_upstream(runs):
     assert false <= _binom_upper(d, n), (false, n, d)
     if n >= 50:                                                                # the control has power: the owner-only
         assert ctrl > _binom_upper(d, n), (ctrl, n)                            # feed fails the bar the reach rule meets
-    return {"runs": n, "layered": len(on), "delta_v": round(d, 4), "false": false,
+    return {"runs": n, "layered": len(on), "lam0_at_0.6": at_bad, "delta_v": round(d, 4), "false": false,
+            "false_before_attach": sum(r["false_before_attach"] for r in runs),
             "bar": round(_binom_upper(d, n), 1), "owner_only_control_false": ctrl,
             "samples_median": sorted(r["samples"] for r in runs)[n // 2]}
 
@@ -399,6 +411,8 @@ def _check_shrink(runs):
     assert risk[0] <= ALPHA_J and risk[1] <= ALPHA_J, risk                    # each fixed zone: ≤ α
     assert stream <= ALPHA_J * (1 + share), (stream, share)
     left = [sum(r["left"][i] for r in on) for i in (0, 1)]
+    if len(runs) >= 50:                                    # the direction reading (A) gets wrong: the rows L0 leaves
+        assert left[1] / left[0] > risk[1], (left, risk)   # layer 1 are worse than its whole zone
     return {"runs": len(runs), "layered": len(on), "risk_zone": {j: round(x, 4) for j, x in risk.items()},
             "zone_share": round(share, 3), "stream_joint": round(stream, 4), "bound": round(ALPHA_J * (1 + share), 4),
             "layer1_on_the_rows_l0_leaves_it": round(left[1] / max(1, left[0]), 4)}
