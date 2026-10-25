@@ -130,6 +130,55 @@ def test_learning_loop_is_the_adapter_loop_with_the_default_policy_at_the_lanes_
     assert _events(a, "promote") and a.replay()["ok"]
 
 
+def test_trace_candidate_records_the_candidates_score_on_every_trial_decision_and_changes_nothing_else(tmp_path):
+    r = random.Random(1)
+    voc = {c: [f"{c}w{i}" for i in range(12)] for c in "abcde"}
+    data = []
+    for i in range(1500):
+        c = r.choice("abcde")
+        data.append((" ".join(r.sample(voc[c], 3) + [f"u{i}"]), c))
+    runs = {}
+    for on in (False, True):
+        loop = AdapterLoop(HashedTextLearner(), question="q", policy=lane_policy(), max_risk=0.05, secret=KEY,
+                           monitor=None, _detector_alone=True, _batch=False, trace_candidate=on, clock=lambda: 0.0)
+        for x, y in data:
+            loop.step(x, lambda y=y: y)
+        runs[on] = loop
+    off, on = runs[False], runs[True]
+    assert len(off.log) == len(on.log)
+    trial = 0
+    for (ko, do), (kn, dn) in zip(off.log, on.log):
+        assert ko == kn
+        if ko == "stream":
+            def timed(e):                                  # a training's measured seconds are wall time
+                return {f: (timed(v) if isinstance(v, dict) else v) for f, v in e.items() if f != "seconds"}
+            assert timed(do) == timed(dn)                  # the same events: the protocol never reads the trace
+            continue
+        so, sn, lo, ln = do["stream"], dn["stream"], do["loop"], dn["loop"]
+        assert "candidate_score" not in so and "candidate_would" not in lo
+        if sn["candidate"] is None:                        # no trial: the keys are absent
+            assert "candidate_score" not in sn and "candidate_would" not in ln
+        else:
+            trial += 1
+            assert sn["candidate_score"] is not None and ln["candidate_would"] is not None
+            if sn["shadow"] is not None:                   # where the protocol read the shadow, the same values
+                assert (sn["candidate_score"], ln["candidate_would"]) == (sn["shadow"], ln["shadow_would"])
+        assert {k: v for k, v in sn.items() if k != "candidate_score"} == so
+        assert {k: v for k, v in ln.items() if k != "candidate_would"} == lo
+    unread = sum(1 for k, d in on.log if k == "loop" and d["stream"]["candidate"] is not None
+                 and d["stream"]["shadow"] is None)
+    assert trial > 0 and unread > 0 and _events(on, "promote")
+    assert on.replay()["ok"] and off.replay()["ok"]
+    # a record whose trace was dropped no longer replays
+    i = next(i for i, (k, d) in enumerate(on.log) if k == "loop" and "candidate_score" in d["stream"])
+    k, d = on.log[i]
+    on.log[i] = (k, {**d, "stream": {f: v for f, v in d["stream"].items() if f != "candidate_score"}})
+    assert not on.replay()["ok"]
+    on.log[i] = (k, d)
+    on.save(tmp_path / "ck")                               # the option is carried by the checkpoint
+    assert AdapterLoop.load(tmp_path / "ck", HashedTextLearner(), secret=KEY).trace_candidate is True
+
+
 # ───────────────────────────── the memorisation probe on a live loop
 class _Memo:
     """Frozen: right with score 0.99 on the keys it trained on; elsewhere on 8 % of keys a random answer with score
