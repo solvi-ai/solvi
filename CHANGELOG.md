@@ -3,6 +3,22 @@
 ## 1.4.0 — unreleased
 
 ### Added
+- **`AdapterLoop(additive=True)`: additive coverage — a certified candidate serves the zone the served version
+  escalates, instead of replacing it** (`solvi.experimental.stream`; also `LearningLoop`; experimental, default
+  `False`). The loop serves a chain of layers: a decision walks it to the first layer whose frozen routing
+  threshold it does not pass, and that layer answers alone or escalates to the oracle (never to a deeper layer). A
+  candidate is attached below the certified deepest layer, whose threshold is then frozen; during its trial every
+  decision of its zone is labelled, and its certificate is read on that zone only; `DefaultPolicy`'s additive gate
+  (certified, novel, novel-risk, probe; no share or margin comparison) makes it the deepest layer. `max_layers=3` caps
+  the chain (then no training starts, "train_refused"). One `RiskDetector` per layer: an alarm restarts only that
+  layer; `rollback(j)` detaches layer j and the deeper ones. The guarantee is per zone, at level α, with one δ budget
+  over every layer and restart; with `max_error=` the stream-wide error stays ≤ α, with `max_risk=` the stream-wide
+  joint risk is bounded by α·(1 + Σ_{j≥1} P(Z_j)) (up to 2α with one layer), reported in `status()["zones"]` with each
+  zone's share and realised risk. Records carry `owner`, `layer`, `zone`, `path`, `trial_zone` and `path_would`;
+  `replay()` recomputes the routing and `rescore=True` rescores every layer; the checkpoint of an additive loop is
+  format v2 (a replacement loop's stays v1; an older library refuses v2 by name). `additive=False` writes the same
+  records and events as before. Checked on synthetic streams with known per-zone risk; no stand has run it, and no
+  gain is claimed.
 - **`DefaultPolicy(novel_only=...)`: the promotion's novel-only paired comparison can be switched off, for controls**
   (`solvi.experimental.stream`). Default `True`, unchanged: the comparison counts only post-freeze samples on keys the
   candidate never trained on. With `False` it counts every sample, the candidate's train keys too (the seen fields
@@ -691,6 +707,21 @@ labels, 10 % of the labels discordant) rolled back in 10 / 28 / 70 % of runs by 
   answers in both arms); on one machine the median ask was about 39% shorter (one run, 4,000 asks per arm).
 
 ### Changed
+- **The δ index is taken at a promise's first sample, not when it is built or restarted (lazy δ charge)**
+  (`solvi.experimental.stream`, `StreamPromise`, `AdapterLoop` / `LearningLoop`, both modes). **Behaviour change.**
+  A candidate discarded, or a restart rolled back, before its first labelled sample now spends no index, so later
+  versions get a smaller index (a larger δ_v, slightly fewer samples to certify) than before; indices stay in the
+  order they are taken and Σ δ_v ≤ δ as before. What you see: `StreamPromise.v` / `delta_v` are `None` until the
+  first sample after the grid is fixed, `restart()` returns `(None, None)`, "recertify" and "alarm" records carry
+  `v_index: None` until the next sample, a promise with no index yet dumps as format v2 (a charged one stays v1), and
+  a finite threshold without an index is refused (in `learn`, `threshold_of` / `allows` and `restore`).
+- **`DefaultPolicy(mature_patience="auto", backlog_max=None)`: a maturity gate on when a training starts**
+  (`solvi.experimental.stream`). No training while the deepest layer (additive mode) or the served version is still
+  loosening its threshold, or its first uncertified point's evidence is still climbing, within its last 150 coin
+  samples; an alarm on it since the latest freeze, or ≥ `backlog_max` (default 2 × `first`) labels since then, opens
+  the gate anyway. "auto" is on in additive mode and **off in replacement mode** (replacement runs train when they did
+  before); an int turns it on in both modes, `None` off. The reason the gate opened is in the "train_start" / "train"
+  events (`gate`) and in `why_not_train`.
 - **The promotion compares the candidate and the served version certified the same way on the same samples**
   (`solvi.experimental.stream`, `AdapterLoop` / `LearningLoop`). **Behaviour change.** ℓ_s, the served version's
   share alone in the paired rule ℓ_k ≥ ℓ_s + `margin`, is now read at the threshold of a comparison certificate: a
