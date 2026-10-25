@@ -114,7 +114,8 @@ def test_additive_false_writes_the_same_records_and_events_as_the_default():
 
 # ───────────────────────────── attach: the deepest layer certified, Λ frozen, the zone escalated
 def _attached(n=2500, models=(GOOD,), **kw):
-    loop = _loop(list(models), **kw)
+    kw.setdefault("policy", _policy(min_novel=10 ** 9))   # the gate never passes: the candidate stays in trial (B2
+    loop = _loop(list(models), **kw)                       # layers a certified candidate by itself)
     _run(loop, _xs(0, n))
     return loop
 
@@ -134,7 +135,15 @@ def test_attach_freezes_the_deepest_layer_at_its_threshold_and_drops_the_compari
 
 def test_attach_is_refused_below_an_uncertified_deepest_layer():
     # training at 50 labels: L0's grid needs 200 decisions, so it is not certified at the freeze
+    # stage B2: the schedule starts no training below an uncertified deepest layer ("train_refused", once)
     loop = _attached(n=150, policy=_policy(first=50))
+    tr = _events(loop, "train_refused")
+    assert [e["why"] for e in tr] == ["deepest_uncertified"] and tr[0]["decision"] == 1 and tr[0]["version"] == 0
+    assert not _events(loop, "train", "attach", "freeze") and loop.candidate is None
+    st = loop._state()
+    assert st.deepest_certified is False and "not certified" in loop.policy.why_not_train(st)
+    # train_now ignores the schedule: its candidate is refused at the apply (the backstop) and discarded at birth
+    loop.train_now(wait=True)
     d = _events(loop, "discard")
     assert d and "attach refused" in d[0]["why"] and not _events(loop, "attach", "freeze")
     assert loop.candidate is None and loop._route == {} and loop._frozen == set()
@@ -234,7 +243,7 @@ def test_the_candidate_reads_every_zone_decision_and_the_frozen_layer_reads_noth
 
 
 def test_a_missing_label_in_the_zone_counts_as_a_loss():
-    loop = _loop([GOOD])
+    loop = _loop([GOOD], policy=_policy(min_novel=10 ** 9))
     xs = _xs(0, 2500)
     _run(loop, xs[:600])
     assert loop.candidate == 1
@@ -263,13 +272,9 @@ def test_a_discard_unfreezes_the_layer_above_and_it_learns_again():
     assert rec_u["candidate"] in (None, 2) and (rec_u["candidate"] is not None or not rec_u["trial_zone"])
 
 
-# ───────────────────────────── what stage B1 does not build yet: refused, not silently wrong
-def test_the_controls_and_the_checkpoint_of_an_additive_loop_are_refused_until_their_stage(tmp_path):
+# ───────────────────────────── what stage B2 does not build yet: refused, not silently wrong
+def test_the_checkpoint_of_an_additive_loop_is_refused_until_its_stage(tmp_path):
     loop = _attached(n=800)
-    with pytest.raises(ValueError, match="stage B2"):
-        loop.promote(force=True)
-    with pytest.raises(ValueError, match="stage B2"):
-        loop.rollback(0)
     with pytest.raises(NotImplementedError, match="stage B3"):
         loop.save(tmp_path / "ck")
 
