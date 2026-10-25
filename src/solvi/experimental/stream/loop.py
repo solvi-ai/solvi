@@ -407,7 +407,9 @@ class AdapterLoop:
     initial model. Records: owner, layer, zone, path [[v, score, thr in force]], trial_zone in the stream record, every
     reached layer's answer in the payload's "path_would" — replay recomputes the routing from them; status() "zones"
     (per layer Λ, λ, P̂(Z), realised risk; the composite stream-wide risk, reported). Checkpoint: format v2 with the
-    chain (a replacement loop's stays v1). TODO(additive B5): the synthetic validity test and the docs."""
+    chain (a replacement loop's stays v1). The guarantee is per zone, at level α (one δ budget over every layer and
+    restart); with max_error= the stream-wide error stays ≤ α, with max_risk= the stream-wide joint risk is bounded only
+    by α·(1 + Σ_{j≥1} P(Z_j)) (docs/experimental.md, "Additive coverage")."""
 
     def __init__(self, learner, *, question, policy=None, max_risk=None, max_error=None, delta=0.05, initial=None,
                  detector=None, monitor="auto", probation=300, source="human", secret=None, seed=0, sampling=None,
@@ -426,8 +428,8 @@ class AdapterLoop:
         if additive and initial is None:
             raise ValueError("additive coverage needs an initial model (version 0): a layer is attached below a "
                              "certified layer, and version 0 without a model is never certified")
-        # The joint kind is allowed (decision D2) — nothing to refuse here. TODO(additive B5): the docs state the
-        # per-zone guarantee and the stream-wide joint factor α·(1 + Σ P(Z_j)).
+        # The joint kind is allowed: its guarantee is per zone, and the stream-wide joint risk is bounded by
+        # α·(1 + Σ_{j≥1} P(Z_j)) (documented, reported in status()["zones"]) — nothing to refuse here.
         if mode == "label" and (detector is not None or (monitor is not None and monitor != "auto")):
             raise ValueError("label mode has no coin samples: no detector and no score monitor (its guarantee is "
                              "act_guard's fixed-set one on the calib labels)")

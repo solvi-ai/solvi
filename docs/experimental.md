@@ -485,7 +485,7 @@ from solvi.experimental.stream import StreamPromise
 sp = StreamPromise(max_risk=0.05, delta=0.05)          # or max_error= (the error among the answers given alone)
 system.guarantee("intent", promise=sp, signal="act")    # installed as OpenSetGate is
 sp.learn(score, would_be_answer, label)                 # one labelled sample; label None: missing, counted as a loss
-sp.restart("alarm")                                     # uncertified again, the next δ_v from the budget
+sp.restart("alarm")                                     # uncertified again; the next δ_v at its first sample
 ```
 
 One e-process per grid point against "the risk at this threshold is above α": by default a mixture of constant bets
@@ -589,7 +589,7 @@ Version 0 is "no model" by default: it answers nothing alone, has no certificate
 is an existing frozen model instead — the fitted System 1, e.g. `FrozenFast.of_system(system, question)` — with its own
 `StreamPromise` (the budget's first δ_v), fed from decision 1, so the loop starts from what is already deployed. The
 live learner is never served. Once it has taken max(300, 2 × the served version's labels at its freeze) labels, a copy is frozen as the
-candidate with its own `StreamPromise`, its (v, δ_v) drawn from the loop's one `DeltaBudget`, so every version ever
+candidate with its own `StreamPromise`, its (v, δ_v) drawn from the loop's one `DeltaBudget` at its first sample, so every version ever
 frozen holds together with probability ≥ 1 − δ. Each decision is scored by the served version and, in shadow, by the
 candidate before its label is read. A sampled decision reaches the promises of the served version and the candidate,
 both frozen before it, and only then trains the live learner: a version never reads a sample from before its freeze
@@ -777,6 +777,69 @@ while a loop serves it is refused at construction: a combination reads its membe
 tests run on a stand-in learner and the tiny random checkpoint; nothing here says the loop improves a system, and
 apart from the one throughput number above the cost to live decisions (one more scoring of the served version per
 decision) was not measured.
+
+**Additive coverage (experimental, 1.4).** `AdapterLoop(..., additive=True, max_layers=3)` changes what a certified
+candidate does: instead of replacing the served version, it serves the zone the served version escalates. The default
+stays `additive=False`, the replacement protocol above, with records and events unchanged; additive mode needs stream
+mode and an `initial` model.
+
+- *The chain and its zones.* The loop serves a chain of layers L0, L1, … (L0 is the served version). Every layer has
+  its own `StreamPromise` and live threshold λ_j; every layer but the deepest also has a routing threshold Λ_j, frozen
+  when the next layer was attached. Zone Z_0 is every decision; Z_{j+1} is the part of Z_j with score_j < Λ_j. A
+  decision walks the chain to the first layer it does not pass (score_j ≥ Λ_j, or the deepest layer): that layer owns
+  it and answers alone iff its score is ≥ λ_j. Otherwise the decision is escalated to the oracle, never to a deeper
+  layer, so zone populations do not shift when a layer restarts. The routing reads only frozen models' scores and
+  constants, never a label.
+- *Attach and trial.* A candidate is attached below the deepest layer d only when d is certified: Λ_d := λ_d, d's
+  promise is frozen (it stops learning; its certificate still holds), and the candidate's zone is {score_d < Λ_d}.
+  During its trial every zone decision is escalated and labelled, and the candidate's promise learns on every one of
+  them (no coin: a uniform sample of its zone); it is scored on zone decisions only. There is no comparison with the
+  served version: a layer can only add coverage. A candidate discarded (stale, or a failed probe) unfreezes d.
+- *Layering.* `DefaultPolicy`'s additive gate is four checks: certified, novel samples (≥ `min_novel`), the novel-risk
+  Wilson bound ≤ α, and the probe; the share and margin comparison of replacement mode does not apply. A candidate
+  that passes becomes the deepest layer from the next decision ("promote" with `additive=True`); its promise goes on
+  learning at the coin rate. `max_layers` caps the chain, base included (default 3); at the cap, and while the
+  deepest layer is not certified, no training starts ("train_refused") and `train_now` is refused at the cap. Each
+  layer costs one more scoring on the decisions that reach it and, with LoRA, one more staged adapter.
+- *The guarantee is per zone.* Each layer's certificate is valid on its own zone's population: P(a layer ever answers
+  alone at a threshold whose risk on its zone is above α) ≤ δ_v for its index, and, with one `DeltaBudget` over every
+  layer, candidate and restart, ≤ δ for all of them together. With `max_error=` (selective) the stream-wide error among
+  the answers given alone is a mixture of per-zone errors, so it stays ≤ α. With `max_risk=` (joint) the stream-wide
+  joint risk is a sum over zones and is bounded only by **α·(1 + Σ_{j≥1} P(Z_j))** — up to 2α with one layer whose
+  zone is the whole stream. P(Z_j) is read from the inputs alone and reported in `status()["zones"]`
+  (`zone_share`, with the composite stream-wide risk of both kinds and `joint_bound`, reported, not promised). If you
+  need a stream-wide joint risk ≤ α, use the selective kind, or give `max_risk=α / max_layers` (each P(Z_j) ≤ 1, so
+  the sum stays ≤ α).
+- *Drift, per layer.* Each layer has its own `RiskDetector` on its own coin-sampled answers; the score monitor reads
+  L0's scores only. An alarm on layer j restarts only j's promise and puts only j in probation (its zone escalates
+  until it re-certifies; a frozen layer learns until then and is frozen again, "refreeze"); Λ_j and the other layers
+  are unchanged. `rollback(j)`, with a layer index, detaches layer j and every deeper layer ("detach"); layer j−1
+  becomes the deepest and learns again.
+- *Lazy δ charge (both modes).* A promise takes its (v, δ_v) at its first sample, not when it is built or restarted.
+  Indices stay in the order they are taken; a candidate discarded or a restart rolled back before its first sample
+  spends nothing.
+- *When to train (maturity gate).* `DefaultPolicy(mature_patience="auto", backlog_max=None)`: no training while the
+  deepest layer (additive) or the served version (replacement) is still loosening — a "certified"/"loosened" event,
+  or a new running maximum of its first uncertified point's evidence, within its last 150 coin samples. An attach
+  freezes that layer's threshold for good, so attaching too early gives up coverage it would have earned. Overrides:
+  an alarm on it since the latest freeze, or ≥ `backlog_max` (default 2 × `first`) labels since the latest freeze.
+  "auto" is on in additive mode and off in replacement mode; an int turns it on in both, `None` off. The reason the
+  gate opened is in the "train_start"/"train" events (`gate`).
+- *Records, replay, checkpoint.* In additive mode every decision's stream record carries `owner`, `layer`, `zone`,
+  `path` ([version, score, threshold in force] for every layer reached) and `trial_zone`; the loop payload carries
+  `path_would` (each reached layer's answer). With `trace_candidate=True` the candidate's score and answer are recorded
+  on its zone only. `replay()` recomputes the routing from the recorded path; `rescore=True` rescores every layer from
+  its file in `versions_dir`. `save()` writes checkpoint format v2 with the chain (layers, routing thresholds,
+  frozen layers, one detector per layer); a replacement loop's checkpoint stays v1, and `load(additive=)` refuses a
+  protocol mismatch. Attached to a Dispatcher, a decision owned by a deeper layer is decided with that layer's version
+  installed for the call.
+
+Checked on synthetic streams with known per-zone risk (`tests/test_stream_additive_validity.py`; 400 seeds per case
+with `-m slow`): candidates whose true zone risk is α at every threshold were falsely certified no more often than
+δ_v, a run's false certifications over every index (the base, candidates, a restart) no more often than δ, a
+candidate with zone risk 1 % certified within the documented sample counts, and with the joint kind each zone's
+realised risk stayed ≤ α and the stream-wide risk within α·(1 + P(Z_1)). Unmeasured: no stand has run additive mode;
+nothing here says it gains coverage on real data.
 
 Measured once on real streams (the stand's script is not in the repository): three public intent sets with a TF-IDF +
 logistic-regression answerer, 20 seeds per set, a shift to held-out intents, corrupted text and noisy labels; the
