@@ -82,6 +82,22 @@ class _Flag:
 
 
 # ───────────────────────────── the lane's LearningLoop is AdapterLoop + DefaultPolicy at its constants
+def _lazy(g, o, masked):
+    """g with o's v_index / delta_v / state_fp wherever g has no index yet and o has one (the lazy δ charge, B4: the
+    only fields of the old log it changes); the indices masked are collected in `masked`."""
+    if isinstance(g, dict) and isinstance(o, dict):
+        out = {k: _lazy(v, o.get(k), masked) for k, v in g.items()}
+        if "v_index" in g and g["v_index"] is None and o.get("v_index") is not None:
+            masked.add(o["v_index"])
+            for k in ("v_index", "delta_v", "state_fp"):
+                if k in o:
+                    out[k] = o[k]
+        return out
+    if isinstance(g, list) and isinstance(o, list) and len(g) == len(o):
+        return [_lazy(x, y, masked) for x, y in zip(g, o)]
+    return g
+
+
 def test_learning_loop_is_the_adapter_loop_with_the_default_policy_at_the_lanes_constants():
     loop = LearningLoop(HashedTextLearner(), question="q", max_risk=0.05, secret=KEY, growth=1.5, trial=700)
     assert isinstance(loop, AdapterLoop) and type(loop.policy) is DefaultPolicy
@@ -116,7 +132,7 @@ def test_learning_loop_is_the_adapter_loop_with_the_default_policy_at_the_lanes_
         else:
             got.append([k, {**d, "stream": {f: v for f, v in d["stream"].items() if f not in new_fields["loop"]}}])
     assert len(got) == len(old) == 1506
-    unscored = 0
+    unscored, masked = 0, set()
     for n, (g, o) in enumerate(zip(got, old)):
         if g[0] == "loop" and g[1]["stream"]["shadow"] is None and o[1]["stream"]["shadow"] is not None:
             # the candidate is scored in shadow only while its grid is not fixed and on coin-sampled decisions now;
@@ -125,8 +141,15 @@ def test_learning_loop_is_the_adapter_loop_with_the_default_policy_at_the_lanes_
             assert not g[1]["stream"]["sampled"], n
             o = [o[0], {**o[1], "stream": {**o[1]["stream"], "shadow": None},
                         "loop": {**o[1]["loop"], "shadow_would": None}}]
+        g = _lazy(g, o, masked)
         assert g == o, n
     assert unscored > 0
+    # the lazy δ charge (stage B4): a promise has no index between its freeze and its first sample; the index it then
+    # takes is the one the old class gave it at the freeze (the same issue order)
+    taken = {d.get("v_index") for _, d in a.log} | {s.get("v_index") for _, d in a.log if "stream" in d
+                                                     for s in (d["stream"].get("served_state"),
+                                                               d["stream"].get("candidate_state")) if s}
+    assert masked and masked <= taken
     assert _events(a, "promote") and a.replay()["ok"]
 
 

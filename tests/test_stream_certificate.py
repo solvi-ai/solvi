@@ -49,12 +49,13 @@ def test_a_fresh_promise_certifies_after_85_clean_samples_then_116_after_a_resta
         sp.learn(1.0, "a", "a")
         k += 1
     assert k == 85 and sp.threshold == 0.0 and [e["event"] for e in sp.events] == ["grid", "certified"]
-    assert sp.restart("alarm") == (2, budget.delta_at(2)) and math.isinf(sp.threshold) and sp.n == 0
+    # lazy δ charge (stage B4): the restart's index is taken at its first sample, not by restart()
+    assert sp.restart("alarm") == (None, None) and math.isinf(sp.threshold) and sp.n == 0 and budget.v == 1
     k = 0
     while math.isinf(sp.threshold):
         sp.learn(1.0, "a", "a")
         k += 1
-    assert k == 116 and sp.events[-2]["event"] == "recertify" and sp.events[-2]["why"] == "alarm"
+    assert k == 116 and sp.events[-2]["event"] == "recertify" and sp.events[-2]["why"] == "alarm" and sp.v == 2
     assert budget.spent == pytest.approx(budget.delta_at(1) + budget.delta_at(2))
     assert budget.spent < 0.05
 

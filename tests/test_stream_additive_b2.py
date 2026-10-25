@@ -56,6 +56,9 @@ class _Hand:
 
 
 def _policy(cls=DefaultPolicy, **kw):
+    # the routing / layering mechanics run without the maturity gate (stage B4, on by default in additive mode):
+    # their training timing stays the one they were written for; the gate has its own tests (test_stream_additive_b4)
+    kw.setdefault("mature_patience", None)
     return cls(Budget(min_interval_s=0.0, per_day=10 ** 6), calib=0.0, holdout=0.0, pre_freeze=False, probe=False,
                **kw)
 

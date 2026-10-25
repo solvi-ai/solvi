@@ -7,7 +7,7 @@ the sampling inside the Dispatcher, the agent as the oracle and the closed learn
     system.guarantee("intent", promise=sp, signal="act")      # installed as OpenSetGate is; +inf until certified
     sp.learn(score, would_be_answer, label)                   # one labelled sample (label None: missing, a loss)
     sp.threshold                                              # the loosest certified grid point (only loosens)
-    sp.restart("alarm")                                       # next (v, δ_v) from the budget; uncertified again
+    sp.restart("alarm")                                       # uncertified again; next (v, δ_v) at its first sample
 
 An anytime-valid learn-then-test certificate on a threshold grid: one e-process per grid point (a mixture of constant
 bets, or bets="agrapa" — `experimental._evalue.MeanBound` mirrored), fixed-sequence over the grid from strict to loose,

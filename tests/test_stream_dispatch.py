@@ -196,7 +196,9 @@ def test_end_to_end_with_the_gold_label_as_the_slow_path(tmp_path):
         warnings.simplefilter("always")
         for x in _stream(1700, shift):
             out.append(d.ask(x))
-    alarms = [r for r in out if r.stream["certificate"]["v_index"] > r.stream["certificate"]["decided_under"]]
+    # an alarm's decision: decided under an index, left without one (the restart's index is taken lazily, B4)
+    alarms = [r for r in out if r.stream["certificate"]["decided_under"] is not None
+              and (r.stream["certificate"]["v_index"] or 0) != r.stream["certificate"]["decided_under"]]
     # certified before the shift, alone answers given, ρ fell below 1 (but not below the floor)
     first_cert = next(i for i, r in enumerate(out) if r.stream["certificate"]["threshold"] is not None)
     assert first_cert < shift and any(r.by == "s1" for r in out[:shift])
@@ -218,7 +220,8 @@ def test_end_to_end_with_the_gold_label_as_the_slow_path(tmp_path):
     assert len(alarms) >= 1
     k = out.index(alarms[0])
     assert k >= shift and out[k].stream["certificate"]["threshold"] is None
-    assert out[k].stream["certificate"]["v_index"] == 2 and out[k].stream["certificate"]["probation"] == 100
+    assert out[k].stream["certificate"]["v_index"] is None and out[k].stream["certificate"]["probation"] == 100
+    assert next(r.stream["certificate"]["v_index"] for r in out[k:] if r.stream["certificate"]["v_index"]) == 2
     prob = out[k + 1:k + 101]
     assert all(r.stream["sample"]["probation"] and r.stream["sample"]["rho"] == 1.0 and r.by != "s1" for r in prob)
     assert sp.budget.spent <= sp.budget.delta and sp.budget.v >= 2
