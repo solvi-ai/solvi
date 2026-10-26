@@ -3,6 +3,20 @@
 ## 1.4.0 — unreleased
 
 ### Added
+- **Exact values through a side channel (experimental)** (`solvi.experimental.numguard`). The model writes `[k]`
+  for the k-th numeral of the input (`annotate` numbers them for the prompt), `<calc>` / `<date>` calls that code
+  computes exactly (`Decimal` with 50 digits, calendar arithmetic: days, weeks, months to the month's end, years,
+  days between, the weekday) and `@k` for a call's result; `fill` writes the values in, an input numeral as the input
+  writes it. `check` names the source of every number left in a text — an input numeral (sign ignored unless
+  `signed=True`, scale words normalised, a whole-scale rescale only with `rescale=True`, rounding only with
+  `rounding=True`, each reported in `how`), a call's result or a tool output passed in, a constant
+  (`DEFAULT_CONSTANTS`, `SMALL`, `years()`, or a predicate) — or marks it `unsourced`; dates and the years of dates
+  are matched; identifiers ("A-10457", "COVID-19") are skipped or, with `ids="check"`, wanted verbatim in the input.
+  `NumberGuard(on_fail="refuse" | "raise" | "report")` runs both; `run_with_retry(generate, source)` asks once more
+  through any callable with the errors and the unsourced numbers. Measured once with a prototype of the protocol
+  (its script is not in the repository): numbers without a source 0–0.4 % of the numerals in long reports against
+  9–22 % typed and 3.5–10 % with native tool calling, at 4–8 % of numerals pointing at the wrong input number and
+  refusals; a provenance guarantee, not a correctness one.
 - **`DefaultPolicy(novel_only=...)`: the promotion's novel-only paired comparison can be switched off, for controls**
   (`solvi.experimental.stream`). Default `True`, unchanged: the comparison counts only post-freeze samples on keys the
   candidate never trained on. With `False` it counts every sample, the candidate's train keys too (the seen fields

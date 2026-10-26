@@ -176,6 +176,7 @@ nav:
           - solvi.experimental.audit: api/audit_watch.md
           - solvi.experimental.process: api/process.md
           - solvi.experimental.stream: api/stream.md
+          - solvi.experimental.numguard: api/numguard.md
   - Changelog: changelog.md
   - Roadmap: roadmap.md
 

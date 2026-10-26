@@ -318,6 +318,8 @@ STATUS: dict[str, dict] = {
                "(max_drop) and repeated tickets for the "
                "oracle's own noise are not built; a person's audit label does not yet replace the slow path's label",
                "script": None},
+    "numguard": {"since": "1.4", "what": "exact values through a side channel: the model writes pointers ([k] for the k-th numeral of the input, <calc> / <date> calls computed exactly by code, @k for a call's result), code fills in the values, and a guard names the source of every number left in the text (an input numeral, a call's result, an allowed constant) or marks it unsourced, then refuses, raises or reports; a hook asks the model once more with what failed",
+                 "missing": "measured once with a prototype of the same protocol (its script is not in the repository) on three open models of 8B to 120B parameters, 100 long synthetic reports and 500 finance questions: numbers without a source fell to 0–0.4 % of the numerals in the reports, against 9–22 % when the model typed its numbers and 3.5–10 % with native tool calling; the price was 4–8 % of numerals pointing at the wrong input number and refusals (6–9 % of questions on the 8B model, 14–20 % of reports on the two smaller ones); it guarantees provenance, not correctness; still missing: a benchmark script in benchmarks/ run with this module, the same check on real documents, and wiring into a System's decisions", "script": None},
 }
 for _s in STATUS.values():
     _s["deadline"] = DEADLINE
