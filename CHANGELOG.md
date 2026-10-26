@@ -18,6 +18,15 @@
   (its script is not in the repository, with `MEASURED_CONSTANTS`): numbers without a source 0–0.4 % of the numerals in long reports against
   9–22 % typed and 3.5–10 % with native tool calling, at 4–8 % of numerals pointing at the wrong input number and
   refusals; a provenance guarantee, not a correctness one.
+- **numguard typed calls: `<table>`, `<cmp>`, `<scale>`, `<count>`** (`solvi.experimental.numguard`). They share
+  the `@k` numbering with `<calc>` / `<date>` and run on their own as `table_calc`, `cmp_calc`, `scale_calc`,
+  `count_calc`: a table cell by row and column (numbers or labels) and sum / avg / count / max / min / argmax /
+  argmin over a column with a row range and a `where` filter (pipe tables of the source, `parse_tables`, or
+  `tables=`; a caption "in thousands" applied under `norm`); comparisons with and / or / not, shown as yes / no
+  (`booleans=`); thousand / million / percent / bp / time-unit conversions in `Decimal`, days against months only
+  with a rule; counts and membership. Wrong types, pointers out of range, mixed units or scale words, empty ranges
+  and averages over no rows raise `ProgramError`. `check` reports their numbers with the mode as `how` and the
+  source cells as `cells`.
 - **`DefaultPolicy(novel_only=...)`: the promotion's novel-only paired comparison can be switched off, for controls**
   (`solvi.experimental.stream`). Default `True`, unchanged: the comparison counts only post-freeze samples on keys the
   candidate never trained on. With `False` it counts every sample, the candidate's train keys too (the seen fields

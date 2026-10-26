@@ -5,8 +5,12 @@ A model that types numbers into free text makes some of them up. Here it writes 
 
 - `[k]` — the k-th numeral of the input text (1-based, in reading order; `annotate(source)` shows the numbering);
 - `<calc>expr</calc>` / `<date>expr</date>` — a call computed exactly by code (`Decimal` arithmetic, calendar
-  arithmetic); the calls are numbered in order of appearance, calc and date together, and `@k` (or `{@k}`) is the
-  value of the k-th call.
+  arithmetic); the calls are numbered in order of appearance, all kinds together, and `@k` (or `{@k}`) is the
+  value of the k-th call;
+- `<table>` (a cell, or sum / avg / count / max / min / argmax / argmin over a column of a table in the source),
+  `<cmp>` (comparisons and and / or / not, a yes/no), `<scale>` (thousand ↔ million, percent ↔ fraction, days ↔
+  weeks, months ↔ years) and `<count>` (how many items match, membership) — typed calls computed by code the same
+  way (`table_calc`, `cmp_calc`, `scale_calc`, `count_calc` on their own).
 
 `fill` replaces the pointers with the exact values (an input numeral as the input writes it: "$1,234", "12.5%",
 "4.2 million") and each call with its result; `check` reads every number left in a text and names its source — an
@@ -43,7 +47,8 @@ warn_on_import(__name__)
 
 __all__ = ["Numeral", "Inserted", "CallResult", "Filled", "NumberCheck", "Verdict", "Outcome", "NumberGuard",
            "UnsourcedNumbers", "ProgramError", "numerals", "annotate", "calc", "date_calc", "fill", "check",
-           "MEASURED_CONSTANTS", "SMALL", "years"]
+           "MEASURED_CONSTANTS", "SMALL", "years", "Table", "Cell", "parse_tables", "table_calc",
+           "cmp_calc", "scale_calc", "count_calc"]
 
 # ============================================================================================== constants
 SMALL = frozenset(Decimal(i) for i in range(13)) | {Decimal(100)}
@@ -410,8 +415,777 @@ def date_calc(expr: str) -> dt.date | int | str:
     return _WEEKDAYS[cur.weekday()] if wd else cur
 
 
+# ============================================================================================== tables
+_CAPTION_RE = re.compile(r"\bin\s+(thousands|millions|billions|trillions)\b|(?<![\w'])(?:'000s?|000s|000's)(?!\w)",
+                         re.I)
+_SEP_ROW = re.compile(r"\|?\s*:?-{2,}:?\s*(?:\|\s*:?-{2,}:?\s*)*\|?")
+_BLANK = frozenset({"", "-", "–", "—", "n/a", "na", "n.a.", "nm", "n.m."})
+_CELL_REST = re.compile(r"[\s$€£¥₽%*†‡]*(?:[A-Z]{3})?[\s*†‡]*")
+
+
+@dataclass(frozen=True)
+class Cell:
+    """A table cell a result came from: table `table<table>`, its 1-based data row and column (the header row and the
+    row-label column are not counted), their labels and the cell as written."""
+    table: int
+    row: int
+    col: int
+    row_label: str
+    col_label: str
+    surface: str
+
+    def to_dict(self) -> dict:
+        return {"table": self.table, "row": self.row, "col": self.col, "row_label": self.row_label,
+                "col_label": self.col_label, "surface": self.surface}
+
+
+@dataclass
+class Table:
+    """A table for `<table>` and `<count>`: `rows` row-major, the header row first (the column labels); with
+    `row_labels=True` the first column holds the row labels. `scale` multiplies the money cells under `norm` (1,000
+    for a caption "in thousands"; percent cells are not scaled). Cells are text ("$1,250", "(3.2)", "12.5%", "—"),
+    read like the input's numerals: a parenthesised number is negative, a dash or "n/a" is blank. Short rows are
+    padded with blanks."""
+    rows: list
+    row_labels: bool = True
+    scale: int = 1
+    caption: str = ""
+
+    def __post_init__(self):
+        rows = [[str(c).strip() for c in r] for r in self.rows]
+        if len(rows) < 2:
+            raise ValueError("a table needs a header row and at least one data row")
+        width = max(len(r) for r in rows)
+        if width < (2 if self.row_labels else 1):
+            raise ValueError("a table with row labels needs at least two columns")
+        self.rows = [r + [""] * (width - len(r)) for r in rows]
+
+    @property
+    def columns(self) -> list[str]:
+        """The column labels (without the row-label column's header)."""
+        return self.rows[0][1:] if self.row_labels else list(self.rows[0])
+
+    @property
+    def labels(self) -> list[str]:
+        """The row labels ([] without a row-label column)."""
+        return [r[0] for r in self.rows[1:]] if self.row_labels else []
+
+    @property
+    def shape(self) -> tuple[int, int]:
+        """(data rows, data columns)."""
+        return len(self.rows) - 1, len(self.columns)
+
+    def text(self, row: int, col: int) -> str:
+        """The cell at 1-based data row and column, as written (column 0: the row label)."""
+        return self.rows[row][col - (0 if self.row_labels else 1)]
+
+    def describe(self, name: str = "table1") -> str:
+        """The table's pointers for a prompt: its rows and columns with their numbers and labels."""
+        nr, nc = self.shape
+        cols = ", ".join(f"{j} {c!r}" for j, c in enumerate(self.columns, 1))
+        rows = ", ".join(f"{i} {r!r}" for i, r in enumerate(self.labels, 1)) or f"1..{nr} (no labels)"
+        sc = f"; values in {_SCALE_NAME[self.scale]}" if self.scale != 1 else ""
+        return f"{name}: {nr} rows ({rows}); {nc} columns ({cols}){sc}"
+
+
+def _is_pipe_row(line: str) -> bool:
+    s = line.strip()
+    return s.startswith("|") or s.count("|") >= 2
+
+
+def _split_pipe(line: str) -> list[str]:
+    s = line.strip()
+    if s.startswith("|"):
+        s = s[1:]
+    if s.endswith("|"):
+        s = s[:-1]
+    return [c.strip() for c in s.split("|")]
+
+
+def parse_tables(text: str, row_labels: bool = True) -> list[Table]:
+    """The pipe (markdown) tables of a text, in order: `table1`, `table2`, ... A run of lines that start with "|" or
+    hold two "|" or more is a table; a `|---|---|` line is skipped; the first row is the header. A caption "in thousands"
+    / "in millions" / "in billions" / "in trillions" (or "'000", "000s") in the last two non-blank lines of the three
+    above the table or in its header row sets `Table.scale`."""
+    lines = text.splitlines()
+    out, i = [], 0
+    while i < len(lines):
+        if not _is_pipe_row(lines[i]):
+            i += 1
+            continue
+        j = i
+        while j < len(lines) and _is_pipe_row(lines[j]):
+            j += 1
+        rows = [_split_pipe(ln) for ln in lines[i:j] if not _SEP_ROW.fullmatch(ln.strip())]
+        if len(rows) >= 2:
+            above = [ln.strip() for ln in lines[max(0, i - 3):i] if ln.strip()][-2:]
+            caption = " ".join(above + rows[0])
+            m = _CAPTION_RE.search(caption)
+            scale = (_SCALE_WORDS[m.group(1).lower()] if m.group(1) else 1000) if m else 1
+            out.append(Table(rows, row_labels, scale, " ".join(above)))
+        i = j
+    return out
+
+
+def _as_tables(tables) -> list[Table]:
+    if tables is None:
+        return []
+    if isinstance(tables, str):
+        return parse_tables(tables)
+    if isinstance(tables, Table):
+        return [tables]
+    out = []
+    for t in tables:
+        out.append(t if isinstance(t, Table) else Table([list(r) for r in t]))
+    return out
+
+
+# ============================================================================================== typed values
+_SCALE_NAME = {1: "units", 10 ** 3: "thousands", 10 ** 6: "millions", 10 ** 9: "billions", 10 ** 12: "trillions"}
+_UNITS = frozenset("%$€£¥₽")
+
+
+@dataclass(frozen=True)
+class _V:
+    """An operand of the typed tools: a number (the written number, its unit, its written scale — None when unknown —
+    and a table's caption scale `base`), a date, a string or a boolean; the cells it came from."""
+    kind: str
+    value: object
+    unit: str = ""
+    scale: int | None = None
+    base: int = 1
+    cells: tuple = ()
+    label: str = ""
+
+    def norm(self) -> Decimal:
+        return self.value * (self.scale or 1) * (1 if self.unit == "%" else self.base)
+
+    def desc(self) -> str:
+        return self.label or (repr(self.value) if self.kind == "str" else str(self.value))
+
+
+def _cell_value(t: Table, ti: int, r: int, c: int) -> _V | None:
+    """A cell as an operand: None when blank."""
+    s = t.text(r, c)
+    cell = Cell(ti, r, c, t.labels[r - 1] if t.row_labels else "", t.columns[c - 1] if c else t.rows[0][0], s)
+    lab = f"table {ti} {cell.row_label or f'row {r}'!r}/{cell.col_label or f'column {c}'!r} ({s!r})"
+    if s.casefold() in _BLANK:
+        return None
+    ns = [n for n in numerals(s) if n.kind != "id"]
+    if len(ns) == 1 and _CELL_REST.fullmatch(s[:ns[0].start] + s[ns[0].end:]):
+        n = ns[0]
+        if n.kind == "date" and isinstance(n.date, dt.date):
+            return _V("date", n.date, cells=(cell,), label=lab)
+        if n.kind == "number":
+            return _V("number", n.number, n.unit if n.unit in _UNITS else "", n.scale, t.scale, (cell,), lab)
+    return _V("str", s, cells=(cell,), label=lab)
+
+
+def _need_number(v: _V, what: str) -> _V:
+    if v.kind != "number":
+        raise ProgramError(f"{what}: {v.desc()} is a {v.kind}, not a number")
+    return v
+
+
+def _same_units(vs, what: str):
+    units = {v.unit for v in vs if v.unit}
+    if len(units) > 1:
+        raise ProgramError(f"{what}: mixed units ({', '.join(sorted(units))})")
+
+
+def _same_scales(vs, what: str, norm: bool):
+    scales = {v.scale for v in vs if v.scale is not None}
+    if len(scales) > 1 and not norm:
+        raise ProgramError(f"{what}: mixed scales ({', '.join(_SCALE_NAME.get(s, str(s)) for s in sorted(scales))}); "
+                           "normalise them (norm in <table>, or <scale>)")
+
+
+def _str_key(s: str) -> str:
+    return " ".join(s.split()).casefold()
+
+
+_CMP_OPS = {"<", "<=", ">", ">=", "==", "!=", "=", "≤", "≥", "≠"}
+_OP_CANON = {"=": "==", "≤": "<=", "≥": ">=", "≠": "!="}
+
+
+def _compare(a: _V, op: str, b: _V, norm: bool = False) -> bool:
+    op = _OP_CANON.get(op, op)
+    what = f"{a.desc()} {op} {b.desc()}"
+    if a.kind != b.kind:
+        raise ProgramError(f"cannot compare {what}: a {a.kind} with a {b.kind}")
+    if a.kind in ("str", "bool"):
+        if op not in ("==", "!="):
+            raise ProgramError(f"cannot compare {what}: {a.kind}s compare only with == and !=")
+        x, y = (_str_key(a.value), _str_key(b.value)) if a.kind == "str" else (a.value, b.value)
+    elif a.kind == "number":
+        _same_units((a, b), f"cannot compare {what}")
+        _same_scales((a, b), f"cannot compare {what}", norm)
+        x, y = (a.norm(), b.norm()) if norm else (a.value, b.value)
+    else:
+        x, y = a.value, b.value
+    return {"<": x < y, "<=": x <= y, ">": x > y, ">=": x >= y, "==": x == y, "!=": x != y}[op]
+
+
+# ============================================================================================== the typed tools' parser
+_PTOK = re.compile(r"""\s*(?:
+ (?P<str>"[^"]*"|'[^']*'|“[^”]*”)
+|(?P<in>\[\d+\])
+|(?P<slot>\{\s*@\d+\s*\}|@\d+)
+|(?P<date>\d{4}-\d{2}-\d{2})
+|(?P<rule>\d+/\d+(?![\d.]))
+|(?P<num>-?\d{1,3}(?:,\d{3})+(?!\d)(?:\.\d+)?%?|-?\d+(?:\.\d+)?%?|-?\.\d+%?)
+|(?P<op>\.\.|<=|>=|==|!=|->|→|[=<>≤≥≠(),:%])
+|(?P<word>[^\W\d]\w*)
+)""", re.X)
+
+
+@dataclass
+class _Env:
+    """What a typed call can point at: the input's numerals, the earlier calls, the tables, the literal policy."""
+    nums: list | None = None
+    calls: list | None = None
+    tables: list = field(default_factory=list)
+    k: int = 0
+    lit_ok: Callable = lambda d: True
+    date_ok: Callable = lambda d: True
+
+
+def _ptokens(expr: str, mode: str) -> list[tuple[str, str]]:
+    s = expr.replace("−", "-")
+    toks, pos = [], 0
+    while pos < len(s):
+        m = _PTOK.match(s, pos)
+        if not m or m.end() == pos:
+            if not s[pos:].strip():
+                break
+            raise ProgramError(f"{mode} cannot read {s[pos:pos + 12]!r}")
+        kind = m.lastgroup
+        toks.append((kind, m.group(kind)))
+        pos = m.end()
+    if not toks:
+        raise ProgramError(f"the {mode} expression is empty")
+    if len(toks) > 400:
+        raise ProgramError(f"the {mode} expression is too long (over 400 tokens)")
+    return toks
+
+
+class _Parser:
+    def __init__(self, expr: str, env: _Env, mode: str):
+        self.toks, self.i, self.env, self.mode = _ptokens(expr, mode), 0, env, mode
+
+    # ---- tokens
+    def peek(self, ahead: int = 0):
+        j = self.i + ahead
+        return self.toks[j] if j < len(self.toks) else (None, None)
+
+    def eat(self):
+        if self.i >= len(self.toks):
+            raise ProgramError(f"the {self.mode} expression ends too early")
+        self.i += 1
+        return self.toks[self.i - 1]
+
+    def is_word(self, *words, ahead: int = 0) -> bool:
+        k, t = self.peek(ahead)
+        return k == "word" and t.lower() in words
+
+    def is_op(self, *ops, ahead: int = 0) -> bool:
+        k, t = self.peek(ahead)
+        return k == "op" and t in ops
+
+    def accept_word(self, *words) -> bool:
+        if self.is_word(*words):
+            self.i += 1
+            return True
+        return False
+
+    def expect_op(self, op: str):
+        k, t = self.peek()
+        if k != "op" or t != op:
+            raise ProgramError(f"{self.mode}: expected {op!r}, found {t!r}" if t else
+                               f"{self.mode}: expected {op!r} at the end")
+        self.i += 1
+
+    def done(self):
+        if self.i != len(self.toks):
+            raise ProgramError(f"{self.mode}: unexpected {self.toks[self.i][1]!r} after the end of the expression")
+
+    # ---- operands
+    def operand(self) -> _V:
+        k, t = self.eat()
+        if k == "str":
+            return _V("str", t[1:-1], label=t)
+        if k == "num":
+            unit = "%" if t.endswith("%") else ""
+            d = _dec(t.rstrip("%").replace("-", "", 1))
+            d = -d if t.startswith("-") else d
+            if not self.env.lit_ok(abs(d)):
+                raise ProgramError(f"the literal {t} is not allowed; point at the input ([k]) or an earlier call (@k)")
+            return _V("number", d, unit, None, label=t)
+        if k == "date":
+            try:
+                d = dt.date.fromisoformat(t)
+            except ValueError:
+                raise ProgramError(f"{t!r} is not a valid date") from None
+            if not self.env.date_ok(d):
+                raise ProgramError(f"the literal date {t} is not allowed; point at the input ([k]) or an earlier call")
+            return _V("date", d, label=t)
+        if k == "in":
+            return self.input(int(t[1:-1]))
+        if k == "slot":
+            return self.slot(int(re.search(r"\d+", t).group()))
+        if k == "word" and t.lower() in ("true", "false"):
+            return _V("bool", t.lower() == "true", label=t.lower())
+        raise ProgramError(f"{self.mode}: expected a value ([k], @k, a number, a date or a \"string\"), found {t!r}")
+
+    def input(self, k: int) -> _V:
+        nums = self.env.nums
+        if nums is None:
+            raise ProgramError(f"[{k}] points at the input: use the call inside fill")
+        if not 1 <= k <= len(nums):
+            raise ProgramError(f"input numeral [{k}] does not exist (the input has [1]..[{len(nums)}])")
+        n = nums[k - 1]
+        if n.kind == "date":
+            if not isinstance(n.date, dt.date):
+                raise ProgramError(f"[{k}] is {n.surface!r}, a date without a year")
+            return _V("date", n.date, label=f"[{k}]")
+        return _V("number", n.number, n.unit if n.unit in _UNITS else "", n.scale, label=f"[{k}] ({n.surface})")
+
+    def slot(self, j: int) -> _V:
+        calls = self.env.calls
+        if calls is None:
+            raise ProgramError(f"@{j} points at an earlier call: use the call inside fill")
+        if not 1 <= j < self.env.k:
+            raise ProgramError(f"@{j} is not an earlier call (calls are numbered in order, all kinds together; this "
+                               f"one is @{self.env.k})")
+        c = calls[j - 1]
+        if c.error:
+            raise ProgramError(f"@{j} failed ({c.error})")
+        v, lab = c.value, f"@{j}"
+        if isinstance(v, bool):
+            return _V("bool", v, cells=c.cells, label=lab)
+        if isinstance(v, (int, Decimal)):
+            return _V("number", Decimal(v), cells=c.cells, label=f"{lab} ({c.shown})")
+        if isinstance(v, dt.date):
+            return _V("date", v, cells=c.cells, label=lab)
+        return _V("str", str(v), cells=c.cells, label=f"{lab} ({v!r})")
+
+    # ---- tables
+    def table(self) -> tuple[int, Table]:
+        ti = 1
+        k, t = self.peek()
+        if k == "word" and re.fullmatch(r"table\d+", t, re.I) and self.is_op(":", ahead=1):
+            ti = int(t[5:])
+            self.i += 2
+        tables = self.env.tables
+        if not tables:
+            raise ProgramError(f"{self.mode} needs a table: the source has none (write it as a pipe table in the "
+                               "source or pass tables=)")
+        if not 1 <= ti <= len(tables):
+            raise ProgramError(f"table {ti} does not exist (the tables are table1..table{len(tables)})")
+        return ti, tables[ti - 1]
+
+    def pointer(self, t: Table, ti: int, axis: str) -> int:
+        """A row or column: a 1-based number, a "label", [k] (the label as the input writes it) or @k."""
+        labels = t.labels if axis == "row" else t.columns
+        n = len(labels) if axis == "column" else t.shape[0]
+        k, s = self.eat()
+        if k == "num" and re.fullmatch(r"\d+", s):
+            idx = int(s)
+            if not 1 <= idx <= n:
+                raise ProgramError(f"table {ti} has no {axis} {idx} (it has {axis}s 1..{n})")
+            return idx
+        if k == "slot":
+            v = self.slot(int(re.search(r"\d+", s).group()))
+            if v.kind == "number" and v.value == v.value.to_integral_value():
+                if not 1 <= v.value <= n:
+                    raise ProgramError(f"table {ti} has no {axis} {v.value} (from {v.label}; it has {axis}s 1..{n})")
+                return int(v.value)
+            if v.kind != "str":
+                raise ProgramError(f"{v.desc()} is not a {axis} number or a label")
+            label = v.value
+        elif k == "in":
+            nums = self.env.nums
+            idx = int(s[1:-1])
+            if nums is None or not 1 <= idx <= len(nums):
+                self.input(idx)                                    # raises the right error
+            label = nums[idx - 1].surface
+        elif k == "str":
+            label = s[1:-1]
+        else:
+            raise ProgramError(f"expected a {axis} (a number, a \"label\", [k] or @k), found {s!r}")
+        if axis == "row" and not t.row_labels:
+            raise ProgramError(f"table {ti} has no row labels; give the row's number")
+        hits = [i for i, lab in enumerate(labels, 1) if _str_key(lab) == _str_key(label)]
+        corner = t.rows[0][0] if t.row_labels else ""
+        if not hits and axis == "column" and corner and _str_key(corner) == _str_key(label):
+            return 0                                               # the row-label column, by its header
+        if not hits:
+            shown = ", ".join(repr(x) for x in labels[:8]) + (", ..." if len(labels) > 8 else "")
+            raise ProgramError(f"table {ti} has no {axis} labelled {label!r} (its {axis}s: {shown})")
+        if len(hits) > 1:
+            raise ProgramError(f"table {ti}: {axis}s {', '.join(map(str, hits))} are all labelled {label!r}; give the "
+                               "number")
+        return hits[0]
+
+    def rows_range(self, t: Table, ti: int) -> list[int]:
+        a = self.pointer(t, ti, "row")
+        self.expect_op("..")
+        b = self.pointer(t, ti, "row")
+        if b < a:
+            raise ProgramError(f"table {ti}: the row range {a}..{b} is empty")
+        return list(range(a, b + 1))
+
+    def value_list(self) -> list[_V]:
+        """`(a, b, ...)` or `column(...)`."""
+        if self.is_op("("):
+            self.eat()
+            if self.is_op(")"):
+                raise ProgramError(f"{self.mode}: an empty list")
+            items = [self.operand()]
+            while self.is_op(","):
+                self.eat()
+                items.append(self.operand())
+            self.expect_op(")")
+            return items
+        k, t = self.peek()
+        if self.is_word("column") or (k == "word" and re.fullmatch(r"table\d+", t, re.I) and self.is_op(":", ahead=1)):
+            return self.column()
+        raise ProgramError(f"{self.mode}: expected a list (a, b, ...) or column(...), found {t!r}")
+
+    def column(self) -> list[_V]:
+        """`[tableN:] column(col[, a..b][, where cond])`: the non-blank cells of a column."""
+        ti, t = self.table()
+        if not self.accept_word("column"):
+            raise ProgramError(f"{self.mode}: expected column(...) after table{ti}:")
+        col, rows, cond, _ = self.selection(t, ti, allow_norm=False)
+        return [v for r in rows if (v := _cell_value(t, ti, r, col)) is not None and cond(r)]
+
+    def selection(self, t: Table, ti: int, allow_norm: bool = True):
+        """`(col[, a..b][, where cond][, norm])` → column, rows, a row predicate, norm."""
+        self.expect_op("(")
+        col = self.pointer(t, ti, "column")
+        rows, cond, norm = list(range(1, t.shape[0] + 1)), (lambda r: True), False
+        while self.is_op(","):
+            self.eat()
+            if self.accept_word("where"):
+                cond = self.cond(t, ti)
+            elif allow_norm and self.accept_word("norm"):
+                norm = True
+            else:
+                rows = self.rows_range(t, ti)
+        self.expect_op(")")
+        return col, rows, cond, norm
+
+    # ---- conditions
+    def pred(self) -> Callable[[_V], bool]:
+        """`OP value`, `between a and b`, `[not] in list` on an operand still to come."""
+        neg = False
+        k, t = self.peek()
+        if k == "op" and t in _CMP_OPS:
+            self.eat()
+            b = self.operand()
+            return lambda a, t=t, b=b: _compare(a, t, b)
+        if self.accept_word("between"):
+            lo = self.operand()
+            if not self.accept_word("and"):
+                raise ProgramError(f"{self.mode}: between needs 'and': x between a and b")
+            hi = self.operand()
+            return lambda a: _compare(a, ">=", lo) and _compare(a, "<=", hi)
+        if self.is_word("not") and self.is_word("in", ahead=1):
+            self.i += 1
+            neg = True
+        if self.accept_word("in"):
+            items = self.value_list()
+            return lambda a: any(_compare(a, "==", x) for x in items) != neg
+        raise ProgramError(f"{self.mode}: expected a comparison (< <= > >= == != between in), found {t!r}")
+
+    def cond(self, t: Table, ti: int) -> Callable[[int], bool]:
+        """A row filter: column comparisons joined by and / or / not, in parentheses or not."""
+        def or_():
+            fs = [and_()]
+            while self.accept_word("or"):
+                fs.append(and_())
+            return fs[0] if len(fs) == 1 else (lambda r: any(f(r) for f in fs))
+
+        def and_():
+            fs = [not_()]
+            while self.accept_word("and"):
+                fs.append(not_())
+            return fs[0] if len(fs) == 1 else (lambda r: all(f(r) for f in fs))
+
+        def not_():
+            if self.accept_word("not"):
+                f = not_()
+                return lambda r: not f(r)
+            if self.is_op("("):
+                self.eat()
+                f = or_()
+                self.expect_op(")")
+                return f
+            col = self.pointer(t, ti, "column")
+            p = self.pred()
+
+            def f(r, col=col, p=p):
+                v = _cell_value(t, ti, r, col)
+                return v is not None and p(v)                     # a blank cell matches no condition
+            return f
+        return or_()
+
+    def bool_expr(self) -> _V:
+        """and / or / not over comparisons of operands (and boolean @k)."""
+        cells: list = []
+
+        def or_():
+            v = and_()
+            while self.accept_word("or"):
+                w = and_()
+                v = v or w
+            return v
+
+        def and_():
+            v = not_()
+            while self.accept_word("and"):
+                w = not_()
+                v = v and w
+            return v
+
+        def not_():
+            if self.accept_word("not"):
+                return not not_()
+            if self.is_op("("):
+                self.eat()
+                v = or_()
+                self.expect_op(")")
+                return v
+            a = self.operand()
+            cells.extend(a.cells)
+            k, t = self.peek()
+            if (k == "op" and t in _CMP_OPS) or self.is_word("between", "in") or (
+                    self.is_word("not") and self.is_word("in", ahead=1)):
+                return self.pred()(a)
+            if a.kind != "bool":
+                raise ProgramError(f"cmp: {a.desc()} is a {a.kind}, not a yes/no; compare it")
+            return a.value
+        v = or_()
+        return _V("bool", bool(v), cells=tuple(dict.fromkeys(cells)))
+
+
+# ============================================================================================== the typed tools
+_AGG = ("sum", "avg", "count", "max", "min", "argmax", "argmin")
+
+
+def _table_run(p: _Parser) -> tuple[object, tuple]:
+    ti, t = p.table()
+    k, op = p.eat()
+    op = op.lower() if k == "word" else op
+    if op == "cell":
+        p.expect_op("(")
+        r = p.pointer(t, ti, "row")
+        p.expect_op(",")
+        c = p.pointer(t, ti, "column")
+        norm = False
+        if p.is_op(","):
+            p.eat()
+            if not p.accept_word("norm"):
+                raise ProgramError("table: cell(row, column[, norm])")
+            norm = True
+        p.expect_op(")")
+        p.done()
+        v = _cell_value(t, ti, r, c)
+        if v is None:
+            raise ProgramError(f"table {ti} row {r} column {c} is blank ({t.text(r, c)!r})")
+        if v.kind == "number":
+            return (v.norm() if norm else v.value), v.cells
+        if norm:
+            raise ProgramError(f"{v.desc()} is not a number; norm applies to numbers")
+        return v.value, v.cells
+    if op not in _AGG:
+        raise ProgramError(f"table allows cell, {', '.join(_AGG)}; found {op!r}")
+    col, rows, cond, norm = p.selection(t, ti)
+    p.done()
+    picked = [(r, _cell_value(t, ti, r, col)) for r in rows if cond(r)]
+    what = f"{op} over table {ti} column {(t.columns[col - 1] if col else t.rows[0][0]) or col!r}"
+    if op == "count":
+        vs = [v for _, v in picked if v is not None]
+        return len(vs), tuple(c for v in vs for c in v.cells)
+    if not picked:
+        raise ProgramError(f"{what}: division by zero (no rows selected)" if op == "avg" else
+                           f"{what}: no rows selected")
+    vs = []
+    for r, v in picked:
+        if v is None:
+            raise ProgramError(f"{what}: table {ti} row {r} column {col} is blank ({t.text(r, col)!r})")
+        vs.append(_need_number(v, what))
+    _same_units(vs, what)
+    _same_scales(vs, what, norm)
+    xs = [v.norm() if norm else v.value for v in vs]
+    with localcontext() as ctx:
+        ctx.prec = _PREC
+        if op in ("sum", "avg"):
+            total = sum(xs, Decimal(0))
+            return (+total if op == "sum" else total / len(xs)), tuple(c for v in vs for c in v.cells)
+    best = max(xs) if op in ("max", "argmax") else min(xs)
+    tied = [(r, v) for (r, _), v, x in zip(picked, vs, xs) if x == best]
+    cells = tuple(c for _, v in tied for c in v.cells)
+    if op in ("max", "min"):
+        return best, cells
+    if len(tied) > 1:
+        names = ", ".join(repr(t.labels[r - 1]) if t.row_labels else str(r) for r, _ in tied)
+        raise ProgramError(f"{what}: a tie, rows {names} share the {op[3:]} {_fmt(best)}")
+    r = tied[0][0]
+    return (t.labels[r - 1] if t.row_labels else r), cells
+
+
+def _cmp_run(p: _Parser) -> tuple[object, tuple]:
+    v = p.bool_expr()
+    p.done()
+    return v.value, v.cells
+
+
+def _count_run(p: _Parser) -> tuple[object, tuple]:
+    k, t = p.peek()
+    is_list = p.is_op("(") or p.is_word("column") or (
+        k == "word" and re.fullmatch(r"table\d+", t, re.I) and p.is_op(":", ahead=1))
+    if is_list:
+        items = p.value_list()
+        if p.accept_word("if", "where"):
+            f = p.pred()
+            items = [x for x in items if f(x)]
+        p.done()
+        return len(items), tuple(c for x in items for c in x.cells)
+    a = p.operand()
+    neg = p.is_word("not") and p.is_word("in", ahead=1)
+    if neg:
+        p.eat()
+    if not p.accept_word("in"):
+        raise ProgramError("count: a list (a, b, ...) or column(...) with an optional 'if <condition>', or "
+                           "'x in <list>'")
+    items = p.value_list()
+    p.done()
+    hit = [x for x in items if _compare(a, "==", x)]
+    return (not hit) if neg else bool(hit), tuple(dict.fromkeys(a.cells + tuple(c for x in hit for c in x.cells)))
+
+
+_SCALE_UNITS = {**{w: ("scale", Decimal(v)) for w, v in _SCALE_WORDS.items()},
+                "units": ("scale", Decimal(1)), "unit": ("scale", Decimal(1)), "ones": ("scale", Decimal(1)),
+                "one": ("scale", Decimal(1)), "k": ("scale", Decimal(10 ** 3)), "mn": ("scale", Decimal(10 ** 6)),
+                "bn": ("scale", Decimal(10 ** 9)), "tn": ("scale", Decimal(10 ** 12)),
+                "percent": ("ratio", Decimal("0.01")), "pct": ("ratio", Decimal("0.01")),
+                "%": ("ratio", Decimal("0.01")), "fraction": ("ratio", Decimal(1)), "ratio": ("ratio", Decimal(1)),
+                "bp": ("ratio", Decimal("0.0001")), "bps": ("ratio", Decimal("0.0001")),
+                "day": ("days", Decimal(1)), "days": ("days", Decimal(1)),
+                "week": ("days", Decimal(7)), "weeks": ("days", Decimal(7)),
+                "month": ("months", Decimal(1)), "months": ("months", Decimal(1)),
+                "quarter": ("months", Decimal(3)), "quarters": ("months", Decimal(3)),
+                "year": ("months", Decimal(12)), "years": ("months", Decimal(12))}
+_RULES = {"360": Decimal(360), "30/360": Decimal(360), "365": Decimal(365), "366": Decimal(366)}   # days a year
+
+
+def _scale_unit(p: _Parser) -> tuple[str, str, Decimal] | None:
+    k, t = p.peek()
+    if (k == "word" or (k == "op" and t == "%")) and t.lower() in _SCALE_UNITS:
+        p.eat()
+        return (t.lower(), *_SCALE_UNITS[t.lower()])
+    return None
+
+
+def _scale_run(p: _Parser) -> tuple[object, tuple]:
+    k, t = p.peek()
+    if k == "num" and t.endswith("%"):                           # "12.5% to fraction"
+        p.toks[p.i] = ("num", t[:-1])
+        p.toks.insert(p.i + 1, ("op", "%"))
+    v = _need_number(p.operand(), "scale")
+    src = _scale_unit(p)
+    if src is None:
+        if v.unit == "%":
+            src = ("%", "ratio", Decimal("0.01"))
+        elif v.scale not in (None, 1):
+            name = _SCALE_NAME[v.scale].rstrip("s")
+            src = (name, "scale", Decimal(v.scale))
+        else:
+            raise ProgramError(f"scale: give the unit {v.desc()} is in (thousand, percent, days, ...)")
+    elif v.unit == "%" and src[1] != "ratio":
+        raise ProgramError(f"scale: {v.desc()} is a percent, not {src[0]}")
+    elif v.scale not in (None, 1) and src[1] == "scale" and src[2] != v.scale:
+        raise ProgramError(f"scale: {v.desc()} is written in {_SCALE_NAME[v.scale]}, not {src[0]}")
+    if not (p.accept_word("to", "in") or (p.is_op("->", "→") and p.eat())):
+        raise ProgramError("scale: write VALUE [UNIT] to UNIT, e.g. [1] million to thousand")
+    dst = _scale_unit(p)
+    if dst is None:
+        raise ProgramError(f"scale: unknown target unit {p.peek()[1]!r} (thousand, million, percent, fraction, bp, "
+                           "days, weeks, months, quarters, years, ...)")
+    rule = None
+    if p.accept_word("rule"):
+        k, r = p.eat()
+        if r not in _RULES:
+            raise ProgramError(f"scale: rule {r!r} is not one of 360 (30/360), 365, 366")
+        rule = _RULES[r]
+    p.done()
+    (sn, sg, sf), (dn, dg, df) = src, dst
+    with localcontext() as ctx:
+        ctx.prec = _PREC
+        x = v.value * sf
+        if sg != dg:
+            pair = {sg, dg}
+            if pair != {"days", "months"}:
+                raise ProgramError(f"scale: {sn} and {dn} are different kinds of unit")
+            if rule is None:
+                raise ProgramError(f"scale: {sn} to {dn} has no exact ratio; give a rule (rule 360: a month is 30 "
+                                   "days; rule 365: a year is 365 days) or use <date> on real dates")
+            x = x * rule / 12 if sg == "months" else x * 12 / rule
+        elif rule is not None:
+            raise ProgramError(f"scale: a rule applies only between days and months/years, not {sn} to {dn}")
+        return +(x / df), v.cells
+
+
+_TOOLS = {"table": _table_run, "cmp": _cmp_run, "count": _count_run, "scale": _scale_run}
+
+
+def _typed(mode: str, expr: str, env: _Env) -> tuple[object, tuple]:
+    try:
+        return _TOOLS[mode](_Parser(expr, env, mode))
+    except (InvalidOperation, ArithmeticError) as e:
+        if isinstance(e, ProgramError):
+            raise
+        raise ProgramError(f"the {mode} expression cannot be computed ({type(e).__name__})") from None
+
+
+def table_calc(expr: str, tables, *, cells: bool = False):
+    """A `<table>` call on its own. `tables`: a text with pipe tables, a `Table`, or a list of tables (each a `Table`
+    or rows, the header first). `[tableN:] cell(row, column[, norm])`;
+    `[tableN:] sum|avg|max|min|count|argmax|argmin(column[, a..b][, where <condition>][, norm])`. A row or column is a 1-based number or a "label"; a condition compares a
+    column with a value (< <= > >= == != between in), joined by and / or / not. Values are the written numbers;
+    `norm` multiplies by each cell's scale word and the table's caption scale. Returns the value (a Decimal, an int
+    for count, a label for argmax / argmin, a date or a string for a cell), or `(value, cells)` with `cells=True`.
+    Raises `ProgramError`."""
+    v, cs = _typed("table", expr, _Env(tables=_as_tables(tables)))
+    return (v, cs) if cells else v
+
+
+def cmp_calc(expr: str) -> bool:
+    """A `<cmp>` call on its own: numbers, ISO dates or "strings" compared with < <= > >= == != (strings only == and
+    !=, case-insensitive), `x between a and b` (inclusive), `x [not] in (a, b, ...)`, joined by and / or / not.
+    Raises `ProgramError` for a number against a date, two different units ("%" against "$") or scale words."""
+    return _typed("cmp", expr, _Env())[0]
+
+
+def scale_calc(expr: str) -> Decimal:
+    """A `<scale>` call on its own: `VALUE [UNIT] to UNIT [rule 360|365|366]`. Units: units, thousand, million,
+    billion, trillion (k, mn, bn, tn); percent (%), fraction, bp; days, weeks, months, quarters, years. Days and
+    weeks against months, quarters and years need a rule (360: a month is 30 days; 365 or 366: a year). Exact
+    `Decimal`; raises `ProgramError`."""
+    return _typed("scale", expr, _Env())[0]
+
+
+def count_calc(expr: str, tables=None):
+    """A `<count>` call on its own: `(a, b, ...) [if <condition>]` or `[tableN:] column(col[, a..b][, where ...]) [if
+    <condition>]` → how many items (non-blank cells) match (an int); `x [not] in <list>` → a bool. Raises
+    `ProgramError`."""
+    return _typed("count", expr, _Env(tables=_as_tables(tables)))[0]
+
+
 # ============================================================================================== fill
-_TAG_RE = re.compile(r"<(calc|date)>(.*?)</\1>", re.S | re.I)
+_TAG_RE = re.compile(r"<(calc|date|table|cmp|scale|count)>(.*?)</\1>", re.S | re.I)
 _IN_RE = re.compile(r"\[(\d+)\]")
 _SLOT_RE = re.compile(r"\{\s*@(\d+)\s*\}|(?<![\w@.])@(\d+)(?=[DWMYdwmy]\b|[^\w]|$)")
 _LIT_RE = re.compile(r"(?<![\w.\[@])(\d+(?:\.\d+)?)(?=\s?[DWMY]\b|[^\w]|$)", re.I)
@@ -419,14 +1193,16 @@ _LIT_RE = re.compile(r"(?<![\w.\[@])(\d+(?:\.\d+)?)(?=\s?[DWMY]\b|[^\w]|$)", re.
 
 @dataclass(frozen=True)
 class CallResult:
-    """The k-th call: its kind, the expression as written, the value (a Decimal, a date, an int of days or a weekday)
-    and the text it was shown as; `error` instead of a value when it failed."""
+    """The k-th call: its kind, the expression as written, the value (a Decimal, a date, an int of days or a count,
+    a weekday or a table label, a bool) and the text it was shown as; `error` instead of a value when it failed;
+    `cells`, the table cells a `<table>` / `<count>` value (or a `<cmp>` / `<scale>` on one) came from."""
     k: int
     kind: str
     expr: str
     value: object = None
     shown: str = ""
     error: str = ""
+    cells: tuple = ()
 
 
 @dataclass(frozen=True)
@@ -447,6 +1223,7 @@ class Filled:
     inserted: list[Inserted]
     errors: list[str]
     source_numerals: list[Numeral]
+    tables: list = field(default_factory=list)
 
 
 def _literal_ok(lit: str, policy, constants, inputs) -> bool:
@@ -467,7 +1244,8 @@ def _is_const(v: Decimal, constants) -> bool:
 def fill(text: str, source: str | list[Numeral], *, answer_marker: str | None = None,
          literals: Literal["constants", "input", "any"] = "constants", constants=SMALL,
          digits: int = 10, places: int | None = None, grouping: bool | None = None,
-         date_format: str | None = None, show_calls: bool = True) -> Filled:
+         date_format: str | None = None, show_calls: bool = True, tables=None,
+         booleans: tuple[str, str] = ("yes", "no")) -> Filled:
     """Run the calls of a model's text and write in the exact values.
 
     `source` is the input text (or its `numerals`). Each `<calc>` / `<date>` call is computed in order (`[k]` is the
@@ -481,14 +1259,24 @@ def fill(text: str, source: str | list[Numeral], *, answer_marker: str | None = 
 
     A literal number inside a call must be a constant (`literals="constants"`), or also an input numeral written
     verbatim (`"input"`), or anything (`"any"`). A pointer out of range, an unknown or failed `@k`, a malformed call or
-    a missing marker is an error in `Filled.errors`; its pointer is left as written."""
+    a missing marker is an error in `Filled.errors`; its pointer is left as written.
+
+    `<table>`, `<cmp>`, `<scale>` and `<count>` calls share the numbering (see `table_calc`, `cmp_calc`,
+    `scale_calc`, `count_calc`); `[k]` and `@k` work inside them, a literal number in a value position follows
+    `literals` (a literal date needs `literals="any"`, or `"input"` and an input date). `tables`: the tables they
+    read (a `Table`, a list of them or of rows; None: the pipe tables of `source`, `table1` first). A bool is shown as
+    `booleans` ("yes" / "no")."""
     nums = [n for n in numerals(source) if n.kind != "id"] if isinstance(source, str) else list(source)
+    tbls = _as_tables(source if tables is None and isinstance(source, str) else tables)
+    in_dates = {n.date for n in nums if isinstance(n.date, dt.date)}
     if grouping is None:
         grouping = isinstance(source, str) and re.search(r"\d,\d{3}(?!\d)", source) is not None
     errors: list[str] = []
     calls: list[CallResult] = []
 
     def show(v) -> str:
+        if isinstance(v, bool):
+            return booleans[0] if v else booleans[1]
         if isinstance(v, Decimal):
             return _fmt(v, digits, places, grouping)
         if isinstance(v, dt.date):
@@ -506,6 +1294,16 @@ def fill(text: str, source: str | list[Numeral], *, answer_marker: str | None = 
         if lab and int(lab.group(1)) == k:
             expr = expr[lab.end():]
         where = f"call @{k} <{kind}>{m.group(2).strip()}</{kind}>"
+        if kind in _TOOLS:
+            env = _Env(nums, calls, tbls, k, lambda d: _literal_ok(str(d), literals, constants, nums),
+                       lambda d: literals == "any" or (literals == "input" and d in in_dates))
+            try:
+                v, cs = _typed(kind, expr, env)
+                calls.append(CallResult(k, kind, expr, v, show(v), cells=cs))
+            except ProgramError as e:
+                errors.append(f"{where}: {e}")
+                calls.append(CallResult(k, kind, expr, error=f"{where}: {e}"))
+            continue
         try:
             rest = _IN_RE.sub(" ", _SLOT_RE.sub(" ", expr))
             for lit in _LIT_RE.findall(rest):
@@ -534,6 +1332,8 @@ def fill(text: str, source: str | list[Numeral], *, answer_marker: str | None = 
                 if c.error:
                     raise ProgramError(f"{where}: @{j} failed ({c.error})")
                 v = c.value
+                if isinstance(v, bool):
+                    raise ProgramError(f"{where}: @{j} is {show(v)!r}, a yes/no, not a number")
                 if kind == "date":
                     if isinstance(v, dt.date):
                         return v.isoformat()
@@ -633,7 +1433,7 @@ def fill(text: str, source: str | list[Numeral], *, answer_marker: str | None = 
             off += lead
             final = final[off:].rstrip()
             ins = [Inserted(i.start - off, i.end - off, i.source, i.index) for i in ins if i.start >= off]
-    return Filled(final, calls, ins, errors, nums)
+    return Filled(final, calls, ins, errors, nums, tbls)
 
 
 # ============================================================================================== check
@@ -648,7 +1448,9 @@ class NumberCheck:
     `how`: "pointer" (written by code), "exact", "sign" (equal but for the sign), "scale_word" (equal once a scale word
     is applied: "4.2 million" against "4,200,000"), "rescaled x1000" / "rescaled /1000" (and 10^6, 10^9: digits off by
     a whole scale, only with `rescale=True`), "rounded" (only with `rounding=True`), "date_year" (the year of a source
-    date), "verbatim" (an identifier found in the input), or "" when unsourced."""
+    date), "verbatim" (an identifier found in the input), "table cell" (a cell of a table passed as `tables`), or ""
+    when unsourced. A number from a `<table>`, `<cmp>`, `<scale>` or `<count>` call has the mode as `how` ("table",
+    ...) where a calc or date call has "pointer" or "exact", and `cells`, the table cells it came from."""
     surface: str
     start: int
     end: int
@@ -656,10 +1458,14 @@ class NumberCheck:
     source: Source
     index: int = 0
     how: str = ""
+    cells: tuple = ()
 
     def to_dict(self) -> dict:
-        return {"surface": self.surface, "start": self.start, "end": self.end, "kind": self.kind,
-                "source": self.source, "index": self.index, "how": self.how}
+        d = {"surface": self.surface, "start": self.start, "end": self.end, "kind": self.kind,
+             "source": self.source, "index": self.index, "how": self.how}
+        if self.cells:
+            d["cells"] = [c.to_dict() for c in self.cells]
+        return d
 
 
 @dataclass
@@ -741,7 +1547,7 @@ def _sig_digits(d: Decimal) -> int:
 
 def check(text: str, source: str | list[Numeral] = "", results: Iterable = (), *, inserted: Iterable[Inserted] = (),
           constants=SMALL, signed: bool = False, rescale: bool = False, rounding: bool = False,
-          ids: Literal["skip", "check"] = "skip", errors: Iterable[str] = ()) -> Verdict:
+          ids: Literal["skip", "check"] = "skip", errors: Iterable[str] = (), tables=None) -> Verdict:
     """Name the source of every number in `text`.
 
     A number is sourced when code wrote it (`inserted`, from `fill`), when it equals an input numeral (sign ignored
@@ -750,7 +1556,10 @@ def check(text: str, source: str | list[Numeral] = "", results: Iterable = (), *
     numbers or a predicate on a `Decimal`). A date is sourced when it equals an input date or a result date; a year
     when it is the year of one. With `rescale=True` a number off by a whole scale (8,220 against 8,220,000) is
     sourced as "rescaled"; with `rounding=True` a number equal to a source rounded to its own decimals (two significant
-    digits at least) as "rounded". Identifiers are skipped, or with `ids="check"` must appear verbatim in the input."""
+    digits at least) as "rounded". Identifiers are skipped, or with `ids="check"` must appear verbatim in the input.
+    `tables`: tables given apart from `source` (a `Table`, a list, or a text with pipe tables); a number equal to one
+    of their cells is an input with index 0 and `how="table cell"` (the tables inside a `source` text are already its
+    numerals)."""
     src_text = source if isinstance(source, str) else ""
     nums = [n for n in numerals(source) if n.kind != "id"] if isinstance(source, str) else list(source)
     pool_num, pool_date = [], []
@@ -759,6 +1568,14 @@ def check(text: str, source: str | list[Numeral] = "", results: Iterable = (), *
             pool_date.append(("input", k, n.date))
         else:
             pool_num.append(("input", k, n.number, n.value))
+    for t in _as_tables(tables):
+        for row in t.rows[1:]:
+            for n in numerals(" ; ".join(row[1:] if t.row_labels else row)):
+                if n.kind == "date":
+                    pool_date.append(("input", 0, n.date))
+                elif n.kind == "number":
+                    pool_num.append(("input", 0, n.number, n.value))
+    modes: dict[int, tuple[str, tuple]] = {}                 # call @k of a typed tool: its mode and cells
     plain = 0
     for r in results:
         if not isinstance(r, CallResult):
@@ -767,6 +1584,8 @@ def check(text: str, source: str | list[Numeral] = "", results: Iterable = (), *
         v = r.value if isinstance(r, CallResult) else r
         if isinstance(r, CallResult) and r.error:
             continue
+        if isinstance(r, CallResult) and r.kind in _TOOLS:
+            modes[r.k] = (r.kind, r.cells)
         if isinstance(v, dt.date):
             pool_date.append(("tool", idx, v))
             continue
@@ -794,7 +1613,8 @@ def check(text: str, source: str | list[Numeral] = "", results: Iterable = (), *
             continue
         by_code = next((i for i in inserted if i.start < n.end and n.start < i.end), None)
         if by_code is not None:
-            checks.append(NumberCheck(n.surface, n.start, n.end, n.kind, by_code.source, by_code.index, "pointer"))
+            mode, cells = modes.get(by_code.index, ("pointer", ())) if by_code.source == "tool" else ("pointer", ())
+            checks.append(NumberCheck(n.surface, n.start, n.end, n.kind, by_code.source, by_code.index, mode, cells))
             continue
         if n.kind == "date":
             hit = None
@@ -802,7 +1622,8 @@ def check(text: str, source: str | list[Numeral] = "", results: Iterable = (), *
                 if d == n.date or (isinstance(n.date, tuple) and isinstance(d, dt.date) and (d.month, d.day) == n.date):
                     hit = (src, idx, "exact")
                     break
-            checks.append(NumberCheck(n.surface, n.start, n.end, "date", *(hit or ("unsourced", 0, ""))))
+            checks.append(_with_mode(NumberCheck(n.surface, n.start, n.end, "date", *(hit or ("unsourced", 0, ""))),
+                                     modes))
             continue
         hit = _match_number(n, pool_num, signed, rescale, rounding)
         if hit is None and n.scale == 1 and n.number == n.number.to_integral_value():
@@ -810,8 +1631,20 @@ def check(text: str, source: str | list[Numeral] = "", results: Iterable = (), *
                         if isinstance(d, dt.date) and d.year == abs(n.number)), None)
         if hit is None and (_is_const(n.number, constants) if n.scale == 1 else _is_const(n.value, constants)):
             hit = ("constant", 0, "exact")
-        checks.append(NumberCheck(n.surface, n.start, n.end, "number", *(hit or ("unsourced", 0, ""))))
+        checks.append(_with_mode(NumberCheck(n.surface, n.start, n.end, "number", *(hit or ("unsourced", 0, ""))),
+                                 modes))
     return Verdict(checks, list(errors))
+
+
+def _with_mode(c: NumberCheck, modes: dict) -> NumberCheck:
+    """A number matched exactly to a typed tool's result gets the mode as `how` and the result's cells; an input
+    numeral with index 0 is a cell of a table given apart."""
+    if c.source == "tool" and c.index in modes and c.how == "exact":
+        mode, cells = modes[c.index]
+        return NumberCheck(c.surface, c.start, c.end, c.kind, c.source, c.index, mode, cells)
+    if c.source == "input" and c.index == 0 and c.how == "exact":
+        return NumberCheck(c.surface, c.start, c.end, c.kind, c.source, 0, "table cell")
+    return c
 
 
 # ============================================================================================== the guard
@@ -870,24 +1703,26 @@ class NumberGuard:
     grouping: bool | None = None
     date_format: str | None = None
     show_calls: bool = True
+    booleans: tuple = ("yes", "no")
 
-    def fill(self, text: str, source: str) -> Filled:
+    def fill(self, text: str, source: str, tables=None) -> Filled:
         return fill(text, source, answer_marker=self.answer_marker, literals=self.literals, constants=self.constants,
                     digits=self.digits, places=self.places, grouping=self.grouping, date_format=self.date_format,
-                    show_calls=self.show_calls)
+                    show_calls=self.show_calls, tables=tables, booleans=self.booleans)
 
     def check(self, text: str, source: str, results: Iterable = (), **kw) -> Verdict:
         """Check a text that was not filled (a model typing its numbers, a native tool caller's answer)."""
         return check(text, source, results, constants=self.constants, signed=self.signed, rescale=self.rescale,
                      rounding=self.rounding, ids=self.ids, **kw)
 
-    def run(self, text: str, source: str, results: Iterable = ()) -> Outcome:
+    def run(self, text: str, source: str, results: Iterable = (), tables=None) -> Outcome:
         """Fill the text, check every number left in it, apply `on_fail`. `results`: values from tools run outside
-        (a native tool call's output) that also count as sources."""
-        f = self.fill(text, source)
+        (a native tool call's output) that also count as sources. `tables`: tables given apart from `source` (None:
+        the pipe tables of `source`)."""
+        f = self.fill(text, source, tables)
         v = check(f.text, f.source_numerals, list(f.calls) + list(results), inserted=f.inserted,
                   constants=self.constants, signed=self.signed, rescale=self.rescale, rounding=self.rounding,
-                  ids=self.ids, errors=f.errors)
+                  ids=self.ids, errors=f.errors, tables=tables)
         if self.ids == "check":                                  # identifiers need the input text itself
             idv = check(f.text, source, (), constants=self.constants, ids="check")
             ids_by_span = {(c.start, c.end): c for c in idv.numbers if c.kind == "id"}
@@ -904,7 +1739,7 @@ class NumberGuard:
         return out
 
     def run_with_retry(self, generate: Callable[[str | None], str], source: str, retries: int = 1,
-                       results: Iterable = ()) -> Outcome:
+                       results: Iterable = (), tables=None) -> Outcome:
         """Ask, guard, and on a failure ask again with what failed. `generate(feedback)` returns the model's text:
         it is called with None first, then with `Verdict.feedback()` (the errors and the unsourced numbers) up to
         `retries` more times. The last attempt goes through `on_fail`; `Outcome.attempts` holds them all."""
@@ -912,7 +1747,7 @@ class NumberGuard:
         attempts: list[Outcome] = []
         feedback = None
         for _ in range(retries + 1):
-            out = report.run(generate(feedback), source, results)
+            out = report.run(generate(feedback), source, results, tables)
             attempts.append(out)
             if out.ok:
                 break
