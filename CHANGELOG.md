@@ -27,6 +27,14 @@
   with a rule; counts and membership. Wrong types, pointers out of range, mixed units or scale words, empty ranges
   and averages over no rows raise `ProgramError`. `check` reports their numbers with the mode as `how` and the
   source cells as `cells`.
+- **numguard: row aggregates, time and speed units, `pi`, a mode registry** (`solvi.experimental.numguard`).
+  `<table>` aggregates over a row (`sum(row "Alpha", "2021".."2023", where "Type" == "actual")`), `argmax` /
+  `argmin` over a row give the column label ("which year had the highest X"); the column syntax is unchanged
+  (`column` may be written). `<count>` takes `row(...)`. `<scale>` adds seconds, minutes, hours and speed (m/s,
+  km/h, km/s, mph), with one division at the end so 1 m/s is exactly 3.6 km/h. `PI` (28 digits, an approximation)
+  is `pi` in calls, opt-in through `constants=SMALL | {PI}`. `MODES` lists every call kind with its slot grammar,
+  result type, validator and executor; `register_mode` adds one that `fill` runs (fail closed on a crash or a
+  result that fails the validator).
 - **`DefaultPolicy(novel_only=...)`: the promotion's novel-only paired comparison can be switched off, for controls**
   (`solvi.experimental.stream`). Default `True`, unchanged: the comparison counts only post-freeze samples on keys the
   candidate never trained on. With `False` it counts every sample, the candidate's train keys too (the seen fields

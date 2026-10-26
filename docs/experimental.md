@@ -874,9 +874,12 @@ NumberGuard().run(reply, source).text
   `Table`, or rows with the header first). The header row gives the column labels, the first column the row labels
   (`Table(..., row_labels=False)` for none). A row or column is a 1-based number, a `"label"` (case and spaces
   ignored; a label used twice wants the number), `[k]` or `@k`. `cell(row, col)`; `sum` / `avg` / `count` / `max` /
-  `min` / `argmax` / `argmin` `(col[, a..b][, where <condition>][, norm])`, prefixed `table2:` for another table. A
-  condition compares a column with a value (`< <= > >= == != between in`), joined by `and` / `or` / `not`; the
-  row-label column is named by its header. Cells read like the input's numerals ("(300)" is −300); a dash or "n/a"
+  `min` / `argmax` / `argmin` `([column] col[, a..b][, where <condition>][, norm])` over a column (`a..b`: rows), or
+  `(row r[, a..b][, where <condition>][, norm])` over a row (`a..b`: columns), prefixed `table2:` for another table.
+  A condition compares a column with a value (`< <= > >= == != between in`), joined by `and` / `or` / `not`; the
+  row-label column is named by its header. Over a row the condition compares another row in each column:
+  `sum(row "Alpha", where "Type" == "actual")`. `argmax` / `argmin` give a label — the row's over a column, the
+  column's over a row: `argmax(row "Revenue", "2019".."2023")` answers "which year had the highest revenue". Cells read like the input's numerals ("(300)" is −300); a dash or "n/a"
   is blank: an aggregate over a blank cell is refused, `count` skips it, a blank cell matches no condition. Values
   are the written numbers; `norm` multiplies each by its scale word and the table's caption scale ("in thousands",
   "in millions", "'000" above the table or in its header; percent cells are not scaled), and without `norm` cells
@@ -886,11 +889,28 @@ NumberGuard().run(reply, source).text
   (inclusive), `x [not] in (a, b, ...)`, and / or / not. A number against a date, "%" against "$", or two scale
   words are refused. The result is a yes/no, shown as `booleans=("yes", "no")`; a yes/no in `<calc>` is refused.
 - `<scale>`: `VALUE [UNIT] to UNIT` over thousand, million, billion, trillion (k, mn, bn, tn), percent, fraction,
-  bp, days, weeks, months, quarters, years. An input numeral brings its own scale word or "%"; a conflicting unit
-  is refused. Days or weeks against months, quarters or years need `rule 360` (a month is 30 days) or `rule 365` /
-  `rule 366` (a year); without one it is refused (use `<date>` on real dates).
-- `<count>`: `(a, b, ...) [if <condition>]` or `column(col[, a..b][, where ...]) [if <condition>]` → how many
-  match; `x [not] in <list>` → a yes/no.
+  bp, seconds (s, sec), minutes (min), hours (h, hr), days, weeks, months, quarters, years, and speed: m/s, km/h
+  (kmh, kph), km/s, mph. An input numeral brings its own scale word or "%"; a conflicting unit is refused. Seconds
+  to weeks against months, quarters or years need `rule 360` (a month is 30 days) or `rule 365` / `rule 366` (a
+  year); without one it is refused (use `<date>` on real dates). The ratio is applied with one division at the end:
+  1 m/s is exactly 3.6 km/h, 36 km/h exactly 10 m/s; a ratio that does not terminate (1 km/h is 1000/3600 m/s) has
+  50 digits.
+- `<count>`: `(a, b, ...) [if <condition>]`, `column(col[, a..b][, where ...]) [if <condition>]` or
+  `row(r[, a..b][, where ...]) [if <condition>]` → how many match; `x [not] in <list>` → a yes/no.
+- `pi`: `PI`, π to 28 significant digits — an approximation, not an exact value. `<calc>pi * [1]^2</calc>` (and `pi`
+  as a value in the typed calls) passes only when `PI` is an allowed constant (`constants=SMALL | {PI}`) or with
+  `literals="any"`; it is not in `SMALL` (exact small integers only) nor in `MEASURED_CONSTANTS` (the set a
+  measurement used). `calc()` on its own has no literal policy and always reads it.
+- **The registry of call kinds:** `MODES` maps each name (`calc`, `date`, `table`, `cmp`, `scale`, `count`) to a
+  `Mode`: its slot grammar in short, its result type, `validator(value) -> bool`, its executor (for a built-in kind
+  the standalone function) and a description — one list for prompts, data converters and routers.
+  `register_mode(name, executor, slots=..., result=..., validator=..., description=...)` adds a kind that `fill`
+  runs: `executor(expr, ctx)` gets a `CallContext` (the input's numerals, the earlier calls, the tables, the call
+  number, the literal policy) and returns a value or raises `ProgramError`; its calls share the `@k` numbering, a
+  result that fails the validator or an executor that crashes is an error (fail closed), `check` reports its numbers
+  with the name as `how`. `executor=None` registers a described kind whose calls fail (a `<logic>` or `<lookup>`
+  that is routed to but not yet run). A built-in kind cannot be replaced or removed; `unregister_mode` removes an
+  extra one. The registry is process-wide.
 - A literal number in a value position (a filter's threshold, a comparison) follows `literals` like a calc literal;
   row and column numbers are pointers, not values. `check` names a number written by a typed call with the mode
   as `how` ("table", "cmp", "scale", "count") and the table cells it came from as `cells`; with `tables=` a number
