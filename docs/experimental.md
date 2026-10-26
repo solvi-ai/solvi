@@ -809,3 +809,47 @@ What the measurement found against these pieces:
 - **Missing:** measured once (the stand's script is not in the repository); see the documented limits in docs/experimental.md: the RiskDetector alarmed far later than the confidence CUSUM (DriftMonitor before its 1.4.0 window z-test change) on shifts to new intents and must not be the only alarm; the LearningLoop gained nothing with gold labels and is kept only as the core of a planned adapter loop; TicketDesk is unmeasured on a stream. LearningLoop on its own is not wired into the Dispatcher (it drives its own coin and oracle; AdapterLoop attaches); the expired-share stop (max_drop) and repeated tickets for the oracle's own noise are not built; a person's audit label does not yet replace the slow path's label
 - **Script:** none in the repository (the measurement's stand ran outside it). **Deadline:** a future release.
 - API: [solvi.experimental.stream](api/stream.md).
+
+## `numguard`
+
+Exact values through a side channel. Numbers and dates are where language models make things up; here the model does
+not type them. It writes `[k]` for the k-th numeral of the input (`annotate(source)` numbers them in the prompt),
+`<calc>…</calc>` / `<date>…</date>` for anything computed (code runs each call exactly, in `Decimal` with 50 digits and
+in calendar arithmetic) and `@k` for the k-th call's result; `fill` writes the values in, the input's numerals as the
+input writes them. `check` then reads every number left in the text and names its source — an input numeral (the sign
+ignored unless `signed=True`; "4.2 million" equals "4,200,000"; a number off by a whole scale, 8,220 against
+8,220,000, only with `rescale=True`, reported as `rescaled x1000`), a call's result or a tool output you pass, or an
+allowed constant — or marks it `unsourced`. `NumberGuard` runs both with one configuration and fails closed
+(`on_fail="refuse"` returns a refusal, `"raise"` raises `UnsourcedNumbers`) or reports (`"report"`);
+`run_with_retry(generate, source)` asks your model once more with the list of what failed (any callable: no LLM client
+in the module). Builds on program-of-thought and calculator-tool work. Since 1.4.
+
+```python
+from solvi.experimental.numguard import SMALL, NumberGuard, annotate
+
+source = "Revenue was $1,250 million in 2023 and $1,100 million in 2022. Invoice dated 2024-03-01, net 45 days."
+prompt_text, _ = annotate(source)   # "Revenue was [1]$1,250 million in [2]2023 ... net [6]45 days."
+reply = "Revenue grew by <calc>[1] - [3]</calc> million. Due <date>[5] + [6]D</date>, a <date>WEEKDAY @2</date>."
+out = NumberGuard().run(reply, source)
+out.text                            # "Revenue grew by 150 million. Due 2024-04-15, a Monday."
+out.verdict.to_dict()               # every number: its source ("tool" @1, "tool" @2, ...) and how it matched
+
+guard = NumberGuard(on_fail="refuse", constants=SMALL)        # integers 0–12 and 100 only as free constants
+out = guard.run_with_retry(lambda feedback: ask_model(prompt_text, feedback), source)
+```
+
+- **What it guarantees is provenance, not correctness.** A pointer at the wrong input numeral is filled and passes;
+  measured, 4–8 % of numerals pointed at the wrong input number. A model that cannot follow the protocol is refused,
+  not corrected.
+- **What it does not check:** numbers written as words ("three"); numbers inside identifiers ("A-10457", "COVID-19",
+  "v2.1", "Q3"), unless `ids="check"`, which wants each identifier verbatim in the input. A parenthesised number reads
+  as negative, as in financial tables.
+- **The default constants are generous.** `DEFAULT_CONSTANTS` (integers 0–100, 365, 360, 52, 1,000, a million, a
+  billion) is the set the measurement used, for literals in calls and free numbers alike: an invented "42 %" passes
+  it. Tighten it with `constants=SMALL`, add years with `years(2000, 2030)`, or pass a predicate.
+- **`[k]` inside a call is the written number**: "4.2 million" gives 4.2, "12.5 %" gives 12.5 (the call's postfix `%`
+  divides by 100). Mixing scales inside one call is the model's error, not the guard's.
+
+- **Missing:** measured once with a prototype of the same protocol (its script is not in the repository) on three open models of 8B to 120B parameters, 100 long synthetic reports and 500 finance questions: numbers without a source fell to 0–0.4 % of the numerals in the reports, against 9–22 % when the model typed its numbers and 3.5–10 % with native tool calling; the price was 4–8 % of numerals pointing at the wrong input number and refusals (6–9 % of questions on the 8B model, 14–20 % of reports on the two smaller ones); it guarantees provenance, not correctness; still missing: a benchmark script in benchmarks/ run with this module, the same check on real documents, and wiring into a System's decisions
+- **Script:** none in the repository (the measurement's stand ran outside it). **Deadline:** a future release.
+- API: [solvi.experimental.numguard](api/numguard.md).
