@@ -318,7 +318,9 @@ Treat the share as a signal to calibrate on labelled examples, not as a proof.
 `NumberGuard` ([experimental](experimental.md#numguard)) the model writes `[k]` for an input numeral and `<calc>` /
 `<date>` calls for what it computes; code fills the exact values in and refuses any number left without a source.
 Measured once with a prototype of the same protocol (its script is not in the repository) on three open models of 8B
-to 120B parameters and 100 long synthetic reports: numbers without a source fell to 0–0.4 % of the numerals, against
+to 120B parameters and 100 long synthetic reports, with the wider constant set `MEASURED_CONSTANTS` (integers 0–100
+and a few common factors pass without a source; the default is the stricter `SMALL`, integers 0–12 and 100): numbers
+without a source fell to 0–0.4 % of the numerals, against
 9–22 % when the model typed its numbers and 3.5–10 % with native tool calling. The price: 4–8 % of numerals pointed at
 the wrong input number, and refusals (14–20 % of reports on the two smaller models). It guarantees provenance, not
 correctness — check the values that matter against the source separately — and a retry with the list of unsourced
