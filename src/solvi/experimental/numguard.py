@@ -25,8 +25,9 @@ your model once more with the list of what failed (any callable: no LLM client h
 
 What it gives is provenance, not correctness: a pointer at the wrong input numeral is filled and passes. Numbers
 written as words ("three") and numbers inside identifiers ("A-10457", "COVID-19", "v2") are not checked (identifiers
-can be checked against the input verbatim with `ids="check"`). Integers 0–100 and a few common factors pass as
-constants by default (`DEFAULT_CONSTANTS`); pass `constants=SMALL` or your own set to tighten it."""
+can be checked against the input verbatim with `ids="check"`). Only integers 0–12 and 100 pass as constants by
+default (`SMALL`); `MEASURED_CONSTANTS` is the wider set the measurements used (integers 0–100 and a few common
+factors), opt-in, and `years()` or your own set or predicate extend either."""
 from __future__ import annotations
 
 import calendar
@@ -42,19 +43,21 @@ warn_on_import(__name__)
 
 __all__ = ["Numeral", "Inserted", "CallResult", "Filled", "NumberCheck", "Verdict", "Outcome", "NumberGuard",
            "UnsourcedNumbers", "ProgramError", "numerals", "annotate", "calc", "date_calc", "fill", "check",
-           "DEFAULT_CONSTANTS", "SMALL", "years"]
+           "MEASURED_CONSTANTS", "SMALL", "years"]
 
 # ============================================================================================== constants
 SMALL = frozenset(Decimal(i) for i in range(13)) | {Decimal(100)}
-"""Integers 0–12 and 100: counts, months, a percent base."""
-DEFAULT_CONSTANTS = frozenset(Decimal(i) for i in range(101)) | frozenset(
+"""Integers 0–12 and 100: counts, months, a percent base. The default constants, for literals in calls and free
+numbers alike."""
+MEASURED_CONSTANTS = frozenset(Decimal(i) for i in range(101)) | frozenset(
     Decimal(x) for x in (365, 360, 52, 1000, 10 ** 6, 10 ** 9))
 """Integers 0–100, days in a year (365, 360), weeks (52), 1,000, a million, a billion: the set the measurements behind
-the docs used, for calc literals and free constants alike."""
+the docs used, for calc literals and free constants alike. Opt-in (`constants=MEASURED_CONSTANTS`): an invented
+number from 13 to 99 passes it."""
 
 
 def years(lo: int = 1900, hi: int = 2100) -> frozenset:
-    """The years lo..hi as constants: `constants=DEFAULT_CONSTANTS | years(2000, 2030)`."""
+    """The years lo..hi as constants: `constants=SMALL | years(2000, 2030)`."""
     return frozenset(Decimal(y) for y in range(lo, hi + 1))
 
 
@@ -462,7 +465,7 @@ def _is_const(v: Decimal, constants) -> bool:
 
 
 def fill(text: str, source: str | list[Numeral], *, answer_marker: str | None = None,
-         literals: Literal["constants", "input", "any"] = "constants", constants=DEFAULT_CONSTANTS,
+         literals: Literal["constants", "input", "any"] = "constants", constants=SMALL,
          digits: int = 10, places: int | None = None, grouping: bool | None = None,
          date_format: str | None = None, show_calls: bool = True) -> Filled:
     """Run the calls of a model's text and write in the exact values.
@@ -737,7 +740,7 @@ def _sig_digits(d: Decimal) -> int:
 
 
 def check(text: str, source: str | list[Numeral] = "", results: Iterable = (), *, inserted: Iterable[Inserted] = (),
-          constants=DEFAULT_CONSTANTS, signed: bool = False, rescale: bool = False, rounding: bool = False,
+          constants=SMALL, signed: bool = False, rescale: bool = False, rounding: bool = False,
           ids: Literal["skip", "check"] = "skip", errors: Iterable[str] = ()) -> Verdict:
     """Name the source of every number in `text`.
 
@@ -855,7 +858,7 @@ class NumberGuard:
     text, "raise" raises `UnsourcedNumbers`. The other fields are `fill`'s and `check`'s options."""
     on_fail: Literal["report", "refuse", "raise"] = "refuse"
     refusal: str = REFUSAL
-    constants: object = DEFAULT_CONSTANTS
+    constants: object = SMALL
     literals: Literal["constants", "input", "any"] = "constants"
     signed: bool = False
     rescale: bool = False

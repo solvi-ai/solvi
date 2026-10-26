@@ -825,7 +825,7 @@ allowed constant — or marks it `unsourced`. `NumberGuard` runs both with one c
 in the module). Builds on program-of-thought and calculator-tool work. Since 1.4.
 
 ```python
-from solvi.experimental.numguard import SMALL, NumberGuard, annotate
+from solvi.experimental.numguard import NumberGuard, annotate
 
 source = "Revenue was $1,250 million in 2023 and $1,100 million in 2022. Invoice dated 2024-03-01, net 45 days."
 prompt_text, _ = annotate(source)   # "Revenue was [1]$1,250 million in [2]2023 ... net [6]45 days."
@@ -834,7 +834,7 @@ out = NumberGuard().run(reply, source)
 out.text                            # "Revenue grew by 150 million. Due 2024-04-15, a Monday."
 out.verdict.to_dict()               # every number: its source ("tool" @1, "tool" @2, ...) and how it matched
 
-guard = NumberGuard(on_fail="refuse", constants=SMALL)        # integers 0–12 and 100 only as free constants
+guard = NumberGuard(on_fail="refuse")            # constants: SMALL (integers 0–12 and 100) by default
 out = guard.run_with_retry(lambda feedback: ask_model(prompt_text, feedback), source)
 ```
 
@@ -844,12 +844,13 @@ out = guard.run_with_retry(lambda feedback: ask_model(prompt_text, feedback), so
 - **What it does not check:** numbers written as words ("three"); numbers inside identifiers ("A-10457", "COVID-19",
   "v2.1", "Q3"), unless `ids="check"`, which wants each identifier verbatim in the input. A parenthesised number reads
   as negative, as in financial tables.
-- **The default constants are generous.** `DEFAULT_CONSTANTS` (integers 0–100, 365, 360, 52, 1,000, a million, a
-  billion) is the set the measurement used, for literals in calls and free numbers alike: an invented "42 %" passes
-  it. Tighten it with `constants=SMALL`, add years with `years(2000, 2030)`, or pass a predicate.
+- **The default constants are strict; the measurement used a wider set.** By default only integers 0–12 and 100
+  (`SMALL`) pass without a source, for literals in calls and free numbers alike. The measurement below used the wider
+  `MEASURED_CONSTANTS` (integers 0–100, 365, 360, 52, 1,000, a million, a billion), in which an invented "42 %"
+  passes; pass it explicitly to reproduce that setup. Add years with `SMALL | years(2000, 2030)`, or pass a predicate.
 - **`[k]` inside a call is the written number**: "4.2 million" gives 4.2, "12.5 %" gives 12.5 (the call's postfix `%`
   divides by 100). Mixing scales inside one call is the model's error, not the guard's.
 
-- **Missing:** measured once with a prototype of the same protocol (its script is not in the repository) on three open models of 8B to 120B parameters, 100 long synthetic reports and 500 finance questions: numbers without a source fell to 0–0.4 % of the numerals in the reports, against 9–22 % when the model typed its numbers and 3.5–10 % with native tool calling; the price was 4–8 % of numerals pointing at the wrong input number and refusals (6–9 % of questions on the 8B model, 14–20 % of reports on the two smaller ones); it guarantees provenance, not correctness; still missing: a benchmark script in benchmarks/ run with this module, the same check on real documents, and wiring into a System's decisions
+- **Missing:** measured once with a prototype of the same protocol (its script is not in the repository) on three open models of 8B to 120B parameters, 100 long synthetic reports and 500 finance questions, with the wider constant set (MEASURED_CONSTANTS; the default is SMALL): numbers without a source fell to 0–0.4 % of the numerals in the reports, against 9–22 % when the model typed its numbers and 3.5–10 % with native tool calling; the price was 4–8 % of numerals pointing at the wrong input number and refusals (6–9 % of questions on the 8B model, 14–20 % of reports on the two smaller ones); it guarantees provenance, not correctness; still missing: a benchmark script in benchmarks/ run with this module, the same check on real documents, and wiring into a System's decisions
 - **Script:** none in the repository (the measurement's stand ran outside it). **Deadline:** a future release.
 - API: [solvi.experimental.numguard](api/numguard.md).

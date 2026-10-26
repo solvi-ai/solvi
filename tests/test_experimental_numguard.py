@@ -8,7 +8,7 @@ import pytest
 
 with warnings.catch_warnings():
     warnings.simplefilter("ignore")
-    from solvi.experimental.numguard import (DEFAULT_CONSTANTS, SMALL, CallResult, NumberGuard, ProgramError,
+    from solvi.experimental.numguard import (MEASURED_CONSTANTS, SMALL, CallResult, NumberGuard, ProgramError,
                                              UnsourcedNumbers, annotate, calc, check, date_calc, fill, numerals, years)
 
 SOURCE = ("Revenue was $1,250 million in 2023 and $1,100 million in 2022. Invoice dated 2024-03-01, net 45 days. "
@@ -167,6 +167,8 @@ def test_a_date_in_calc_or_a_number_as_a_date_is_an_error():
 def test_literals_constants_input_any():
     assert fill("<calc>[1] * 1.07</calc>", SOURCE).errors[0].endswith("point at the input ([k]) or an earlier call (@k)")
     assert fill("<calc>[1] * 100</calc>", SOURCE).errors == []                         # 100 is a constant
+    assert fill("<calc>[1] / 365</calc>", SOURCE).errors != []                         # 365 only in the measured set
+    assert fill("<calc>[1] / 365</calc>", SOURCE, constants=MEASURED_CONSTANTS).errors == []
     assert fill("<calc>1250 - 1100</calc>", SOURCE, literals="input").errors == []
     assert fill("<calc>[1] * 1.07</calc>", SOURCE, literals="any").errors == []
     assert fill("<date>[5] + 400D</date>", SOURCE).errors != []                         # a date literal amount too
@@ -193,9 +195,10 @@ def test_check_sources_a_typed_text():
     assert s["$1,250 million"] == ("input", 1, "exact")
     assert s["-1,100 million"] == ("input", 3, "sign")
     assert s["45"] == ("input", 6, "exact") and s["2023"] == ("input", 2, "exact")
-    assert s["77"] == ("constant", 0, "exact")
+    assert s["77"] == ("unsourced", 0, "")                                            # not in the strict default
     assert s["9,999"] == ("unsourced", 0, "")
-    assert not v.ok and [c.surface for c in v.unsourced] == ["9,999"]
+    assert not v.ok and [c.surface for c in v.unsourced] == ["77", "9,999"]
+    assert by_surface(check("77", SOURCE, constants=MEASURED_CONSTANTS))["77"] == ("constant", 0, "exact")
 
 
 def test_signed_check_refuses_a_flipped_sign():
@@ -233,8 +236,9 @@ def test_results_from_outside_count_as_tool_sources():
 
 def test_constants_are_configurable():
     assert check("year 2031", SOURCE).ok is False
-    assert check("year 2031", SOURCE, constants=DEFAULT_CONSTANTS | years(2000, 2040)).ok
-    assert check("77 items", SOURCE, constants=SMALL).ok is False
+    assert check("year 2031", SOURCE, constants=SMALL | years(2000, 2040)).ok
+    assert check("77 items", SOURCE).ok is False and check("12 items", SOURCE).ok        # SMALL is the default
+    assert check("77 items", SOURCE, constants=MEASURED_CONSTANTS).ok
     assert check("77 items", SOURCE, constants=lambda d: d < 1000).ok
 
 
@@ -274,7 +278,7 @@ def test_guard_modes_refuse_raise_report():
 
 
 def test_a_program_error_fails_the_guard_even_without_numbers():
-    out = NumberGuard(on_fail="report").run("It is [42].", SOURCE)
+    out = NumberGuard(on_fail="report").run("It is [12].", SOURCE)
     assert not out.ok and out.verdict.unsourced == [] and out.verdict.errors
 
 
