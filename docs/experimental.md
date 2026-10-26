@@ -850,6 +850,51 @@ out = guard.run_with_retry(lambda feedback: ask_model(prompt_text, feedback), so
   passes; pass it explicitly to reproduce that setup. Add years with `SMALL | years(2000, 2030)`, or pass a predicate.
 - **`[k]` inside a call is the written number**: "4.2 million" gives 4.2, "12.5 %" gives 12.5 (the call's postfix `%`
   divides by 100). Mixing scales inside one call is the model's error, not the guard's.
+- **Typed calls: tables, comparisons, scales, counts.** Four more call kinds share the `@k` numbering with `<calc>`
+  and `<date>`, take `[k]` and `@k` anywhere a value goes, and raise `ProgramError` with the reason (a wrong type,
+  a pointer out of range, mixed units or scale words, an empty range, an average over no rows):
+
+```python
+source = """Revenue by region (in thousands):
+
+| Region | 2023   | 2022   | Margin |
+|--------|--------|--------|--------|
+| EU     | $1,250 | $1,100 | 12.5%  |
+| US     | (300)  | 2,000  | 8%     |
+"""
+reply = ('Top: <table>argmax("2023")</table>, <table>cell(@1, "2023", norm)</table>; '
+         '<table>sum("2023", where "Margin" >= 10%)</table> thousand from strong margins; '
+         'that is <scale>@3 thousand to million</scale> million; EU ahead: <cmp>@3 > 0 and @1 == "EU"</cmp>; '
+         '<count>column("Margin") if > 5%</count> regions above 5 %.')
+NumberGuard().run(reply, source).text
+# 'Top: EU, 1,250,000; 1,250 thousand from strong margins; that is 1.25 million; EU ahead: yes; 2 regions above 5 %.'
+```
+
+- `<table>`: the tables are the pipe (markdown) tables of the source, `table1` first (`parse_tables`), or `tables=` (a
+  `Table`, or rows with the header first). The header row gives the column labels, the first column the row labels
+  (`Table(..., row_labels=False)` for none). A row or column is a 1-based number, a `"label"` (case and spaces
+  ignored; a label used twice wants the number), `[k]` or `@k`. `cell(row, col)`; `sum` / `avg` / `count` / `max` /
+  `min` / `argmax` / `argmin` `(col[, a..b][, where <condition>][, norm])`, prefixed `table2:` for another table. A
+  condition compares a column with a value (`< <= > >= == != between in`), joined by `and` / `or` / `not`; the
+  row-label column is named by its header. Cells read like the input's numerals ("(300)" is −300); a dash or "n/a"
+  is blank: an aggregate over a blank cell is refused, `count` skips it, a blank cell matches no condition. Values
+  are the written numbers; `norm` multiplies each by its scale word and the table's caption scale ("in thousands",
+  "in millions", "'000" above the table or in its header; percent cells are not scaled), and without `norm` cells
+  with different scale words are refused. `max` / `min` keep every tied cell as a source; `argmax` / `argmin` refuse
+  a tie. `Table.describe()` lists the pointers for a prompt.
+- `<cmp>`: numbers, ISO dates and `"strings"` (only `==` / `!=`, case-insensitive), `x between a and b`
+  (inclusive), `x [not] in (a, b, ...)`, and / or / not. A number against a date, "%" against "$", or two scale
+  words are refused. The result is a yes/no, shown as `booleans=("yes", "no")`; a yes/no in `<calc>` is refused.
+- `<scale>`: `VALUE [UNIT] to UNIT` over thousand, million, billion, trillion (k, mn, bn, tn), percent, fraction,
+  bp, days, weeks, months, quarters, years. An input numeral brings its own scale word or "%"; a conflicting unit
+  is refused. Days or weeks against months, quarters or years need `rule 360` (a month is 30 days) or `rule 365` /
+  `rule 366` (a year); without one it is refused (use `<date>` on real dates).
+- `<count>`: `(a, b, ...) [if <condition>]` or `column(col[, a..b][, where ...]) [if <condition>]` → how many
+  match; `x [not] in <list>` → a yes/no.
+- A literal number in a value position (a filter's threshold, a comparison) follows `literals` like a calc literal;
+  row and column numbers are pointers, not values. `check` names a number written by a typed call with the mode
+  as `how` ("table", "cmp", "scale", "count") and the table cells it came from as `cells`; with `tables=` a number
+  equal to a cell of a table given apart is an input with `how="table cell"`.
 
 - **Missing:** measured once with a prototype of the same protocol (its script is not in the repository) on three open models of 8B to 120B parameters, 100 long synthetic reports and 500 finance questions, with the wider constant set (MEASURED_CONSTANTS; the default is SMALL): numbers without a source fell to 0–0.4 % of the numerals in the reports, against 9–22 % when the model typed its numbers and 3.5–10 % with native tool calling; the price was 4–8 % of numerals pointing at the wrong input number and refusals (6–9 % of questions on the 8B model, 14–20 % of reports on the two smaller ones); it guarantees provenance, not correctness; still missing: a benchmark script in benchmarks/ run with this module, the same check on real documents, and wiring into a System's decisions
 - **Script:** none in the repository (the measurement's stand ran outside it). **Deadline:** a future release.
