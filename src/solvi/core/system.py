@@ -952,7 +952,7 @@ class System:
             pc = path_confidence(self.catalog, trace, rule.inputs, pcache)
             conf = min(pc, r.confidence)
             why = _rule_why(rule, r, vals, by)
-            old = _rule_why(rule, r, vals, by, legacy=True)
+            old = _rule_why(rule, r, vals, by, legacy=True) if _model_quote(r, rule, vals) else why
             return _why_before(self._rule_result(q, r, rule, pc, conf, why, trace), why, old)
         head = self.heads.get(q.name)
         if head is None:

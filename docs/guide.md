@@ -1301,9 +1301,11 @@ logs its progress (`logging.basicConfig(level=logging.INFO)`, or the logger `"so
 output (an invalid reply, no answer from the server) counts there as escalated and not right — never answered alone —
 and the result says how many (`"unusable"`, with a line in `"warnings"`). An answer that echoes the option's line from
 the prompt — `"contradiction: the contract states the opposite"` for options given as `{option: description}` — is read
-as that option when exactly one option is followed by a separator (`:`, ` - `, ` – `, ` — `) and the rest is its own
-description or names no other option (`extra["llm"]["answer_echo"]` keeps what was written); anything else stays an
-invalid output. Yes/no, scores, multi-label questions, spans (`kind="span"`: the passage must be in the text), "not stated"
+as that option when exactly one option is followed by a separator (`:`, ` - `, ` – `, ` — `) and by its own
+description (or its start) that is not, nor starts like, another option's — `"yes: it does not"` with `no` described as
+"it does not" stays invalid; for options without descriptions the rest must name no other option; a bare `"neutral:"`
+stays invalid (`extra["llm"]["answer_echo"]` keeps what was written). Anything else stays an invalid output. These
+calibration changes are `DecisionPart`'s; a combination (`Vote`, `Cascade`, `Route`) calibrates as before. Yes/no, scores, multi-label questions, spans (`kind="span"`: the passage must be in the text), "not stated"
 (`Maybe[...]`) and `evidence=True` work; rankings and numbers are asked as a choice over the options / bins. Where the
 reply has one number (a span, `ask="confidence"`), the prompt says what it means for "not stated" — the model's
 probability that the text does not say it — and solvi reads it as p(not stated): a "not stated" at 0.2 is an unsure one.
