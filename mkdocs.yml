@@ -72,6 +72,7 @@ nav:
       - High level:
           - solvi: api/solvi.md
           - solvi.solutions.decisions: api/auto.md
+          - solvi.solutions.document: api/solutions_document.md
           - solvi.solutions.agent: api/solutions_agent.md
           - solvi.solutions.knowledge: api/solutions_knowledge.md
           - solvi.solutions.guard: api/agents.md

@@ -4,6 +4,8 @@ parts whose every answer is grounded, a hash chain over stored decisions and ind
 The high level, ready to use and configure:
 
     solvi.build(question, examples, ...)   a decision system: System 1 fitted, its guarantee, a slow path, a store
+    solvi.document(schema, model, ...)     a decision over a document: one read per field, each fact found in the text,
+                                            code computes the answer, a calibrated threshold, a replayable record
     solvi.Agent(env, knowledge=km)          an environment agent: System 1 on what the knowledge predicts, System 2 a
                                             search, hard checks from the agenda and the action model, replay
     solvi.Guard(storage=...)                an agent's tool calls checked before they run
@@ -24,6 +26,7 @@ from .core.system import Response, System
 from .core.types import Bins, Estimate, Maybe, Rank, Scale, Span
 from .solutions.agent import Agent
 from .solutions.decisions import build
+from .solutions.document import document
 from .solutions.guard import Guard
 from .solutions.knowledge import Knowledge
 
@@ -38,7 +41,7 @@ def __getattr__(name):
     return _deprecate.old_attribute(__name__, name)
 
 
-# 23 names (LAYOUT §1)
-__all__ = ["build", "Agent", "Guard", "Knowledge", "Budget", "Catalog", "Question", "Answer", "System", "Response", "Quote", "Claim", "Decision",
+# 24 names (LAYOUT §1; "document" added in 1.4 by the author's decision, 2026-10-27)
+__all__ = ["build", "document", "Agent", "Guard", "Knowledge", "Budget", "Catalog", "Question", "Answer", "System", "Response", "Quote", "Claim", "Decision",
            "Fail", "Unknown", "Span", "Maybe", "Rank", "Estimate", "Scale", "Bins", "SolviDeprecationWarning",
            "ExperimentalWarning"]

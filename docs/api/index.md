@@ -13,6 +13,7 @@ internal and have no page.
 |---|---|
 | [`solvi`](solvi.md) | the entry points `build`, `Agent`, `Guard` and `Knowledge`, `Budget`, and the shared vocabulary: catalog, questions and answers, `System` and `Response`, typed answers |
 | [`solvi.solutions.decisions`](auto.md) | one entry point: a question, labelled examples, a promise and a slow path → System 1 fitted, its guarantee and the dispatcher calibrated, the store wired, the choices explained (`solvi.build`) |
+| [`solvi.solutions.document`](solutions_document.md) | a decision over a document: one read per field, each fact found in the text, code computes the answer, checks, a calibrated threshold, a replayable record (`solvi.document`) |
 | [`solvi.solutions.agent`](solutions_agent.md) | the environment agent: `Agent` — System 1 on what the knowledge predicts, System 2 a search, hard checks, replay |
 | [`solvi.solutions.knowledge`](solutions_knowledge.md) | `Knowledge`: the store, agenda, action model and failure memory behind one object |
 | [`solvi.solutions.guard`](agents.md) | guarding an agent's tool calls: `Guard`, the "user asked" and "user confirmed" policies |
