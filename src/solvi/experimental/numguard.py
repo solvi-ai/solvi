@@ -1499,7 +1499,7 @@ def fill(text: str, source: str | list[Numeral], *, answer_marker: str | None = 
                     raise ProgramError(f"{where}: [{mm.group(1)}] is {n.surface!r}, not a full date or a whole number")
                 if n.kind == "date":
                     raise ProgramError(f"{where}: [{mm.group(1)}] is the date {n.surface!r}; use <date> for dates")
-                return f"({n.number})" if n.number < 0 else str(n.number)
+                return f"({n.number:f})" if n.number < 0 else f"{n.number:f}"
 
             def rslot(mm, kind=kind, where=where, k=k):
                 j = int(mm.group(1) or mm.group(2))
@@ -1521,7 +1521,8 @@ def fill(text: str, source: str | list[Numeral], *, answer_marker: str | None = 
                 if isinstance(v, dt.date) or isinstance(v, str):
                     raise ProgramError(f"{where}: @{j} is {show(v)!r}, not a number; use <date> for dates")
                 v = Decimal(v)
-                return f"({v})" if v < 0 else str(v)
+                # plain notation: str(Decimal) can write 1.2463E+6, which the expression grammar does not read
+                return f"({v:f})" if v < 0 else f"{v:f}"
 
             body = _IN_RE.sub(rin, expr)
             body = _SLOT_RE.sub(rslot, body)

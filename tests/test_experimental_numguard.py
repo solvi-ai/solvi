@@ -312,3 +312,10 @@ def test_guard_ids_check_and_extra_results():
 def test_outcome_to_dict():
     d = NumberGuard().run("Grew <calc>[1] - [3]</calc>.", SOURCE).to_dict()
     assert d["ok"] and d["calls"] == [{"k": 1, "kind": "calc", "expr": "[1] - [3]", "shown": "150", "error": ""}]
+
+
+def test_fill_earlier_result_in_exponent_form_is_read_back():
+    # 1 246 300 / 100 % is 1.2463E+6 as str(Decimal); the next call must still read it
+    f = fill("<calc>[1] / [2]%</calc> then <calc>@1 - [3]</calc>", "1,246.3 and 0.1% and 300")
+    assert not f.errors, f.errors
+    assert [c.value for c in f.calls] == [Decimal("1246300"), Decimal("1246000")]
