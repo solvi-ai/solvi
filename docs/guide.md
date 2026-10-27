@@ -3617,7 +3617,8 @@ guarantee is kept across processes with `system.save_guarantee(question, path)` 
 `system.load_guarantee(path)` — the promise, its thresholds and report, and the catalog fingerprint, answer type and
 guard fingerprint it was made for (another catalog or answer type is refused unless `strict=False`; a signal or grouping
 that was a function is passed again, `signal=` / `groups=`): stored decisions then replay against it without
-calibrating again. The facts the signal and the groups read become
+calibrating again. The file's fingerprints catch a file that does not fit or an inconsistent edit, not a forgery that
+recomputes them — keep it like code. The facts the signal and the groups read become
 required parts of the question (`requires`), so every flow computes them. Every answer of the question records its verdict as a hashed
 trace record (`guard:<question>`: the signal's value, the threshold, the promise); below the threshold the question
 abstains (safeguard low confidence) and says what it would have answered; a forced answer (a failed hard check) and an
@@ -3685,8 +3686,9 @@ not verify because a value it rests on did not come back from storage as it was 
 restores nor declared: no verdict on the data, see [serialization](#typed-input-state-and-serialization)), `not_kept`
 (a compact stored record does not keep what checking this step needs — see [compact records](#compact-records-and-rotation):
 no verdict on the data past it), `error` (`replay_all`: a stored record could not be loaded, or the replay raised) and
-`other_system` (`replay_all`: the record answers no question of the given System — another system's record; only its
-hashes are checked). When there are mismatches the result also has `"kinds"`, the count
+`other_system` (`replay_all`: the record answers no question of the given System — another system's record, or one
+whose questions were edited; not an integrity verdict: `replay_all` checks every record's own hash as `verify()` does,
+and a foreign full record's trace hashes; run `verify()` for the chain). When there are mismatches the result also has `"kinds"`, the count
 per kind, and `"summary"`, one line: `"data damaged: the hash chain or a record does not verify"`, `"data intact,
 catalog changed (parts missing)"`, `"data intact, catalog changed"`, `"data intact, model changed"`, `"data intact,
 steps do not recompute"`, `"not verified: a compact record does not keep this step's surroundings (no verdict on the

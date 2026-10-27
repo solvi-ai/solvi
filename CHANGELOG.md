@@ -595,19 +595,26 @@ labels, 10 % of the labels discordant) rolled back in 10 / 28 / 70 % of runs by 
 ### Fixed
 - **A quoted number is located as a number of its own** (`solvi.core.deciders.llm.locate`). An LLM's span or quote
   `"7"` was located at the 7 of "2017" (`"10"` in "109", `"1.0"` in "41.0"), and the grounding check then rightly
-  rejected it: the occurrence that begins or ends inside a longer number is now skipped for the next standalone one,
-  and when there is none the passage is not found. The grounding check is unchanged.
+  rejected it: an occurrence that begins or ends inside a longer number (as `cuts_number` reads it) is now skipped for
+  the next standalone one, overlapping occurrences included, and when there is none the passage is not found.
+  `cuts_number` also reads a separator at a quote's edge between two digits as inside the number ("7." of "7.5",
+  "1," of "1,300"), which the grounding check now refuses too — stricter, not looser.
 - **A number a rule computes: `Answer.estimate()`** (no bins: the rule's number as it is). A rule's `-> float` alone
   is still not an answer type; its error now names `Answer.estimate()` (and `Span[float]` for a quoted number), and the
   guide's answer-type table has the row. No new public name.
 - **`System.save_guarantee(question, path)` / `System.load_guarantee(path)`**: a question's guarantee as a file (the
   promise, thresholds per group, report, how its signal is read), refused for another catalog or answer type (unless
   `strict=False`) and when the rebuilt guard's fingerprint is not the saved one; stored decisions replay against it
-  without calibrating again (`solvi.core.guarantees.guarantee`).
+  without calibrating again (`solvi.core.guarantees.guarantee`). The fingerprints catch a file that does not fit or an
+  inconsistent edit, not a forgery that recomputes them: keep the file like code. `signal=` / `groups=` are only for a
+  signal or grouping that was a function (otherwise ValueError).
 - **One store, two systems** (`TraceStorage.replay_all`). Replaying a store that two Systems wrote against one of them
   reported every other record as a changed catalog, missing inputs and a changed guarantee; `replay_all([a, b])`
   replays each record against the system that asks its questions, and a record no given system asks is one mismatch of
-  kind `other_system` — its hashes are still checked (`integrity`), so an edited record is still caught.
+  kind `other_system`. That is not an integrity verdict (which questions a record answers is its own, editable content):
+  `replay_all` now checks every record's own hash as `verify()` does (an edited record: `integrity`, also one whose
+  questions were renamed to look foreign), a foreign full record's trace hashes too, and says so when it cannot — a
+  compact foreign record keeps no trace (`not_kept`), a trace that does not load with this system is an `error`.
 - **Docs: `not_gated` in the guarantee report** (calibration examples with no signal to gate: forced or never
   answered alone) **and a span decision reads exactly one given text fact** (several facts or a computed text
   escalate every time).

@@ -861,7 +861,9 @@ def load_guarantee(system, path, *, signal=None, groups=None, strict=True):
     """Attach a guarantee saved by save_guarantee (System.load_guarantee) → its report. The guard it rebuilds must have the
     saved fingerprint — the same promise, signal, answer and groups — so stored decisions replay against it as against
     the one calibrated; a signal or grouping that was a function is passed again (`signal=`, `groups=`; its code is
-    fingerprinted and must match). strict (default): refuse a file made for another catalog (the signal is computed by
+    fingerprinted and must match; for a saved fact or keyword, `signal=` / `groups=` raise). The fingerprints catch a file
+    that does not fit (another catalog, an edit that changes the promise inconsistently), not a deliberate forgery that
+    recomputes them: keep the file like code. strict (default): refuse a file made for another catalog (the signal is computed by
     the catalog's code) or for another answer type of the question; strict=False attaches it anyway (the guard's
     fingerprint is still checked)."""
     import json
@@ -884,6 +886,9 @@ def load_guarantee(system, path, *, signal=None, groups=None, strict=True):
     for given, saved, what in ((signal, rec.get("signal_function"), "signal"), (groups, rec.get("groups_function"), "groups")):
         if saved and given is None:
             raise ValueError(f"{path}: the guarantee's {what} was a function: pass it again ({what}=that_function)")
+        if given is not None and not saved:
+            raise ValueError(f"{path}: the guarantee's {what} is {rec.get(what)!r}, not a function: {what}= is only for a "
+                             f"{what} that was a function")
     sig = signal if rec.get("signal_function") else rec.get("signal")
     grp = groups if rec.get("groups_function") else rec.get("groups")
     pr = rec["promise"]

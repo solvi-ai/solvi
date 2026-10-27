@@ -284,12 +284,16 @@ def find_whole(text, t):
 
 def cuts_number(t, i, j):
     """Does t[i:j] begin or end inside a longer number written in t? A quote [26:27] of "30" is the "3" of "30", one of
-    "3.5" or "1,300" is part of that number. (Words are not held to this: a quote with offsets may end inside a word.)"""
+    "3.5" or "1,300" is part of that number, and so is "7." of "7.5" (a separator at its edge, between two digits).
+    (Words are not held to this: a quote with offsets may end inside a word.)"""
     if not 0 <= i < j <= len(t):
         return False
     left = t[i].isdigit() and i > 0 and (t[i - 1].isdigit() or (t[i - 1] in ".," and i > 1 and t[i - 2].isdigit()))
     right = t[j - 1].isdigit() and j < len(t) and (
         t[j].isdigit() or (t[j] in ".," and j + 1 < len(t) and t[j + 1].isdigit()))
+    # a separator at the edge between two digits: "7." of "7.5", ".5" of "7.5", "1," of "1,300"
+    left = left or (t[i] in ".," and 0 < i and i + 1 < len(t) and t[i - 1].isdigit() and t[i + 1].isdigit())
+    right = right or (t[j - 1] in ".," and j >= 2 and j < len(t) and t[j - 2].isdigit() and t[j].isdigit())
     return left or right
 
 
