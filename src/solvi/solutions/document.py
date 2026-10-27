@@ -45,7 +45,8 @@ The scheme it sets up (all of it existing low-level blocks, wired):
   parentheses or marker the quote left out abstains naming it ("$1,234" in prose and "(1,234)" in a table do not
   read as +1234), so does a quote that reads a sign the text does not write there ("- 1,234" from a list bullet) and
   a quote whose digits do not stand in the text at all. A currency or a scale the quote left out is not a refusal: it
-  is taken from the text into the field's unit ("$1.2" of "$1.2 billion" is in billion), and occurrences that
+  is taken from the text into the field's unit ("$1.2" of "$1.2 billion" is in billion; so is a percent: "12" of
+  "12%" is a percent, and of "-12%" it abstains for the sign), and occurrences that
   disagree ("$1,234" here, "€1,234" there) abstain as ambiguous. Not bound to the digits: a "- " bullet at a line's
   start, a dash right after a letter, a digit or "%" ("10-K", "2018-2019", "50%-60%"), a spaced dash after a word, a
   digit, "%" or a dash ("Revenue - 1,234", "1,234 – 1,300", "50% - 60%"), "(" that does not close right after the
@@ -110,9 +111,9 @@ STATE = "state"                     # the fact that carries the input without th
 MIN_CALIBRATION = 100               # below this, calibrate warns: the threshold rests on few examples
 UNIT_MODES = ("same", "lenient", "any")
 
-# every dash or minus sign a document writes (length-preserving, so offsets into the text stay as they are); "△" / "▲"
-# are the minus of Japanese and Chinese financial tables
-_DASHES = str.maketrans({**{c: "-" for c in "−–—―‑‐‒﹣－⁻˗△▲"},     # ... and full-width digits and marks
+# every dash or minus sign a document writes (length-preserving, so offsets into the text stay as they are); "△" / "▲",
+# the minus of Japanese and Chinese financial tables, stay themselves (never a separator) and read as a minus
+_DASHES = str.maketrans({**{c: "-" for c in "−–—―‑‐‒﹣－⁻˗"},     # ... and full-width digits and marks
                          **{chr(0xFF10 + i): str(i) for i in range(10)}, "（": "(", "）": ")", "，": ",", "．": ".",
                          "［": "[", "］": "]", "＄": "$", "％": "%"})
 _ISO = ("USD EUR GBP JPY CNY RMB RUB CHF CAD AUD NZD HKD SGD TWD INR BRL MXN ZAR SEK NOK DKK PLN CZK HUF KRW TRY ILS "
@@ -163,8 +164,9 @@ def _read_quote(vtype, text):
     from ..core.types import span_value
     if not isinstance(text, str):
         raise ValueError(f"not a quoted number: {text!r}")
-    t = unicodedata.normalize("NFKC", text.replace("&minus;", "-")).translate(_DASHES).strip()
-    if re.search(r"\b(?:CR|Cr|DR|Dr)\b|\[|\]", t):
+    t = unicodedata.normalize("NFKC", text.replace("&minus;", "-")).translate(_DASHES).replace("△", "-") \
+        .replace("▲", "-").strip()
+    if re.search(r"\b(?:CR|Cr|cr|DR|Dr|dr)\b|\[|\]", t):
         raise ValueError("a CR / DR marker or brackets: the sign depends on the account, the quote does not say")
     if re.search(r"[0-9][eE][+-]?[0-9]|_", t):
         raise ValueError("an exponent or an underscore is not how a document writes a number")
@@ -210,17 +212,19 @@ def _read_number(vtype, text):
 _R_SCALE = re.compile(_SP + r"?(?:thousands?|millions?|billions?|trillions?|mn|bn|tn|k|m|b)\b\.?", re.IGNORECASE)
 _R_PCT = re.compile(_SP + r"?(?:%|bps\b|basis points\b|percent\b|per" + _SP + r"?cent\b)", re.IGNORECASE)
 _R_ISO = re.compile(_SP + r"?(?:" + "|".join(_ISO) + r")\b")
-_R_MARK = re.compile(_HS + r"*(?:CR|Cr|DR|Dr)\b")
+_R_MARK = re.compile(_HS + r"*(?:CR|Cr|cr|DR|Dr|dr)\b")
 _R_CLOSE = re.compile(r"\s*\)")
 _R_CLOSE_SQ = re.compile(r"\s*\]")
 _L_CUR = re.compile(r"(?:" + _CUR_RX + r")" + _HS + r"*\Z")
-_L_DASH = re.compile(r"(?:-|&minus;)" + _HS + r"*\Z")
+_L_DASH = re.compile(r"(?:[-△▲]|&minus;)\s*\Z")
 _L_OPEN = re.compile(r"\(\s*\Z")
 _L_OPEN_SQ = re.compile(r"\[\s*\Z")
 # a parenthesised number after another number on its logical line (one new line, a tab or a comma between allowed;
 # a table's "|" or ";" is a separator): "SEK 1,234 m (1,100)", "12.3 percent (11.8)", "2.1x\n(2.5)"
 _AFTER_NUMBER = re.compile(r"[0-9][^\n|;()\[\]0-9]{0,10}(?:\n[^\S\n]*)?\Z")
-_NUM_CORE = re.compile(r"[0-9](?:[0-9,.]*[0-9])?")
+_NUM_CORE = re.compile(r"[0-9](?:[0-9,.]*[0-9])?(?:[ \u00a0\u2009\u202f][0-9]{3}(?![0-9]))*")
+_GROUP_LEFT = re.compile(r"[0-9][ \u00a0\u2009\u202f]\Z")
+_GROUP_RIGHT = re.compile(r"[ \u00a0\u2009\u202f][0-9]{3}(?![0-9])")
 _WINDOW = 64
 
 
@@ -256,7 +260,15 @@ def _token(s, a, b, quote=False):
         m = _L_DASH.search(left)
         if m and "sign" not in p:
             k = w0 + m.start()
+            if s[k] in "△▲":                          # never a separator, never a bullet
+                p["sign"], i = "-", k
+                continue
             spaced = s[k] == "-" and k + 1 < i
+            if spaced and "\n" in s[k:i]:             # "-" then the number on the next line: bound, as "( ... )"
+                if not (s[k - 1:k].isalnum() or s[k - 1:k] == "%"):
+                    p["sign"], i = "-", k
+                    continue
+                break
             prev = s[k - 1:k]
             bare_prev = s[max(0, k - _WINDOW):k].rstrip()[-1:]
             if not spaced:
@@ -308,18 +320,27 @@ def _ground(raw, doc):
     n = doc.translate(_DASHES)
     digits, spans, k = core.group(), [], n.find(core.group())
     while k >= 0:                                      # every place the quote's digits stand as a number of their own
-        if not cuts_number(n, k, k + len(digits)):
+        e = k + len(digits)                            # (not a group of "1 234" either)
+        if not cuts_number(n, k, e) and not (_GROUP_LEFT.search(n[max(0, k - 2):k]) and re.match(r"[0-9]{3}(?![0-9])",
+                                                                                                digits)) \
+                and not _GROUP_RIGHT.match(n, e):
             spans.append(k)
         k = n.find(digits, k + 1)
     signed_q = any(x in qp for x in _SIGNED)
     seen, unsigned, inherited = 0, None, {}
+    found = []
     for k in spans:
         tp, a, b, ambiguous = _token(n, k, k + len(digits))
-        written = n[a:b].rstrip(".")
         if any(x in qp and x not in tp for x in ("currency", "scale")):
             continue                                   # not an occurrence of the quote: it writes less there
-        if ("percent" in tp) != ("percent" in qp):
-            continue                                   # another quantity
+        found.append((tp, a, b, ambiguous))
+    same = [o for o in found if ("percent" in o[0]) == ("percent" in qp)]
+    if same:
+        found = same                                   # another quantity (a percent next to the amount) is left out
+    elif found and "percent" not in qp:
+        inherited["percent"] = True                    # "12" of "12%": the field is in percent
+    for tp, a, b, ambiguous in found:
+        written = n[a:b].rstrip(".")
         if signed_q and not any(x in tp for x in _SIGNED):
             unsigned = unsigned or written             # the digits without the quote's sign: another occurrence
             continue
@@ -342,7 +363,7 @@ def _ground(raw, doc):
     if signed_q and not seen and unsigned is not None:
         return (f"the quote {raw!r} reads a sign the text does not write there ({unsigned!r}: a list bullet or a "
                 "separator)"), {}
-    if not spans:
+    if not spans or not found:
         return f"the number of the quote {raw!r} does not stand in the text as a number of its own", {}
     return None, inherited
 
@@ -698,7 +719,8 @@ def document(schema, model, *, task=None, text="doc", compute=None, answer=None,
                 u = Unit()
             why, got = _ground(raw, kw[text])
             if why is None:
-                u = u._replace(scale=u.scale or got.get("scale"), currency=u.currency or got.get("currency"))
+                u = u._replace(scale=u.scale or got.get("scale"), currency=u.currency or got.get("currency"),
+                               percent=u.percent or bool(got.get("percent")))
             out[x] = [u.scale, u.currency, u.percent]
         return out
 

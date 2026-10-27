@@ -12,8 +12,9 @@
   the quote must be the whole number token at its place — at every occurrence of its digits the token is extended
   over a sign in any dash, minus or `&minus;`, a currency, closing parentheses or brackets, a CR / DR marker, a scale
   and a percent; a sign, parentheses or marker the quote left out (`1,234` of `-1,234` or `(1,234)`), a sign the
-  text does not write there (a `- ` list bullet) or digits that do not stand in the text abstain, while a currency or
-  scale the quote left out is taken from the text into the field's unit (`$1.2` of `$1.2 billion` is in billion;
+  text does not write there (a `- ` list bullet) or digits that do not stand in the text abstain (a group of `1 234`
+  does not stand alone), while a currency, scale or percent the quote left out is taken from the text into the
+  field's unit (`$1.2` of `$1.2 billion` is in billion, `12` of `-12%` is a percent and its sign is checked;
   occurrences that disagree abstain); a number in parentheses after another number on its line (`SEK 1,234 m
   (1,100)`, `12.3 percent (11.8)`) is ambiguous and abstains; each number's unit is `facts.units`, and a hard check
   `same_units` abstains when the amounts differ in scale (a field without one next to one with one included) or
@@ -28,8 +29,9 @@
   numbers, sets and tuples as lists). An LLM made with `logprobs="auto"` is read with one stated confidence per read
   (a copy, with a warning); `llm()`'s own default is unchanged. Built only from the low level; `DocumentSystem` holds
   a `System` (`.system`), it does not subclass it.
-- **A number with a space beside its separator does not read** (`solvi.core.types.span_value`): `"1 ,234"` was read
-  as 1 and `"(1 ,234)"` as −1; both are now a ValueError (one number or two?).
+- **A number with a space beside its separator does not read** (`solvi.core.textin.parse_number`, and so every
+  parser path and `solvi.core.types.span_value`): `"1 ,234"` was read as 1 and `"(1 ,234)"` as −1; both are now
+  refused as ambiguous (one number or two?).
 - **A saved guarantee names its models** (`System.save_guarantee` / `load_guarantee`): the file carries
   `System.fingerprint()["models"]` (each model-backed part's model, endpoint, reply settings and question as asked),
   and `load_guarantee` refuses a file calibrated with other models, and one that names none (strict=False attaches

@@ -200,10 +200,14 @@ def parse_number(s, spec=None):
     "three quarters of a million", "5 and a half thousand" — is refused, never read as the number next to it.
     Refused as ambiguous rather than guessed: a one-letter scale apart from the number ("5 m" — metres? "5m" and "$5 m"
     are read), a single ".ddd" group ("1.000"; spec {"decimal": "." | ","} decides), digits grouped by plain spaces
-    without a currency next to them ("3 100" may be two numbers; "1 500 000 руб" is read), a percentage ("5%"; spec
+    without a currency next to them ("3 100" may be two numbers; "1 500 000 руб" is read), a separator with a space
+    beside it ("1 ,234", "1. 5": one number or two?), a percentage ("5%"; spec
     {"percent": True}: the field is in percent, 5% → 5), and a two-digit year is the date parser's.
     spec {"integer": True}: the number must be whole."""
     spec = spec or {}
+    if re.search(r"\d\s+[.,]\s*\d|\d[.,]\s+\d", s):
+        raise ParseError(f"{s.strip()!r} is ambiguous: a separator with a space beside it (\"1 ,234\") — one number "
+                         "or two?")
     found = list(NUMBER_RE.finditer(s))
     if len(found) != 1:
         raise ParseError(f"{'no number' if not found else 'more than one number'} in {s!r}")
