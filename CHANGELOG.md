@@ -593,6 +593,34 @@ labels, 10 % of the labels discordant) rolled back in 10 / 28 / 70 % of runs by 
   waits for a second task outside physics.
 
 ### Fixed
+- **An invalid LLM reply no longer crashes a calibration** (`DecisionPart.act_guard` / `calibrate_for` /
+  `conformal`). A calibration decision escalated as invalid output (value None) raised `ValueError: None is not one of
+  [...]`; it now counts as escalated and not right, never answered alone, and the result says how many (`"unusable"`,
+  with a line in `"warnings"`). Covered by `tests/test_outside_user_fixes.py`.
+- **Mixed probability sources are found after a few calls** (`solvi.core.deciders.llm`). Under `logprobs="auto"` a
+  gateway that answers some requests with log-probabilities and some without was refused only after every calibration
+  call was paid for; the model now warns at the first reply from the other source, and a calibration over an LLM asks
+  its first 16 examples first and refuses a mix there.
+- **An answer that echoes `option: description` is read as the option** (`solvi.core.deciders.llm`). With options
+  given as `{option: description}` a model answered `"contradiction: the contract states the opposite"`, an invalid
+  output; it is read as that option when exactly one option is followed by `:`, ` - `, ` – ` or ` — ` and the rest is its
+  own description or names no other option (`extra["llm"]["answer_echo"]` keeps what was written).
+- **A stated 0.9 is 0.9** (`solvi.core.deciders.DecideModel`, LLM backend). The log and softmax turned a stated 0.9 into
+  0.8999999999999999 or 0.9000000000000001 depending on the other options, so a threshold calibrated at one escalated
+  the other; an LLM decision's probabilities are rounded to 12 decimals, in calibration and in every decision.
+- **`why` and the audit show a model's quote, not the whole input** (`System`). A model decision that quoted the text
+  leads its `why` with the quote and where it is (`quote 'shall not disclose' (contract[20:38])`) and shows an input text
+  over 200 characters by its length; without a quote the `why` is as before. A record stored with the earlier `why`
+  still replays.
+- **The docstrings say where `Facts` comes from** (`DecisionPart.decide`, `act_guard`, `Combination.decide`):
+  `from solvi.core.deciders import Facts`.
+- **The README's links work on PyPI.** Relative links (`docs/guide.md`, `examples/...`) are absolute GitHub links.
+- **Calibration progress** (`DecisionPart` over an LLM). A calibration is asked in chunks of 32 and logs its progress
+  to the logger `"solvi.calibration"` at INFO (`label: 48/303 calibration examples decided (95 s, about 505 s left)`);
+  nothing is printed by default.
+- **A stored record keeps the input once** (`solvi.core.store`). A full record held the given facts in the trace and
+  again in the response's `values` (a 12k-character contract twice); `values` now keeps a name the trace holds with
+  null, and loading takes the value from the trace, as it always did.
 - **`LoraLearner` trains at the part's own input length** (`solvi.experimental.stream`). The training payload
   carried the multi-question layout's `max_len` instead of the model's, so a part loaded with `max_len=768` was retrained
   at the default 512 and every training of a question longer than 512 tokens (77 intents with descriptions) failed.
