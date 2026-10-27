@@ -674,12 +674,24 @@ class AdapterLoop:
         lam = self._vs[v]["promise"].threshold
         return math.isfinite(lam) and u.certified_at(lam)
 
+    def _useful_at_answer(self, v):
+        """Additive, usefulness on: whether v's usefulness certificate holds at the composed answer threshold — the
+        point the layer answers at (None without a usefulness certificate). `_useful_ok` reads the joint point λ_J
+        (what the start gate checks); a layer whose λ_J is not useful still answers at a useful point when one is
+        certified by both."""
+        u = self._vs[v].get("useful")
+        if u is None:
+            return None
+        lam = self._threshold(v)
+        return math.isfinite(lam) and u.certified_at(lam)
+
     def _state(self) -> LoopState:
         vs = []
         for v, ver in sorted(self._vs.items()):
             thr = self._joint(v)                           # the certificate's own (= _threshold without usefulness)
             uk = ({} if ver.get("useful") is None else
-                  {"useful": self._useful_ok(v), "useful_thr": self._threshold(v)})
+                  {"useful": self._useful_ok(v), "useful_at_answer": self._useful_at_answer(v),
+                   "useful_thr": self._threshold(v)})
             vs.append(VersionInfo(v, ver["state"], n_train=ver["n_train"], samples=len(ver["samples"]),
                                   certified=math.isfinite(thr), threshold=thr, fingerprint=ver["fingerprint"], **uk,
                                   frozen_at=None if v == 0 else ver["frozen_at"], train_keys=ver["keys"],
@@ -1024,7 +1036,9 @@ class AdapterLoop:
             u = self._vs[v].get("useful")
             if u is not None:                              # usefulness on: "threshold" is the composed one
                 j = self._joint(v)
+                # ok: useful at the joint point λ_J (the start gate's check); ok_at_answer: at the composed point
                 layers[-1]["useful"] = {"joint_threshold": None if math.isinf(j) else j, "ok": self._useful_ok(v),
+                                        "ok_at_answer": self._useful_at_answer(v),
                                         "certified": u.state()["certified"], "v_index": u.v, "delta_v": u.delta_v,
                                         "error": self.useful_error}
         joint = alone = 0.0                                # Σ_j P̂(Z_j)·(wrong_j, answered_j per base sample)

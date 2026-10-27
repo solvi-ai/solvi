@@ -39,14 +39,20 @@
   δ_u / G) on its own δ budget `delta_use` (default the loop's δ). A candidate starts serving only where it holds;
   a layer answers at the loosest point certified by both. Two guarantees, separate budgets: per zone, P(a layer ever
   answers alone at a threshold whose risk on its zone is above α) ≤ δ, as before; and P(a layer ever answers alone at
-  a point whose error among its alone answers on its zone is β or more) ≤ δ_use — a layer trained on noise never
-  starts serving. β = 0.5 is a noise guard, not a quality promise. New: `StreamPromise(procedure="pointwise")` with
+  a point whose error among its alone answers on its zone is β or more) ≤ δ_use — a layer trained on noise starts
+  serving with probability at most δ_use (it stays out with probability ≥ 1 − δ_use). β = 0.5 is a noise guard, not a quality promise. New: `StreamPromise(procedure="pointwise")` with
   `certified_at`, `log_wealth_at`, `level_now`; promote-event fields `useful`, `useful_lw`, `useful_level`,
   `useful_v_index`, `useful_delta_v`, `useful_error`, `joint_thr`, `alone_k`, `wrong_k`; per-record `useful`;
-  `useful_*` events; `status()["delta_use_spent"]`; `VersionInfo.useful` / `useful_thr`; `LoopState.useful_error`.
+  `useful_*` events; `status()["delta_use_spent"]`; `VersionInfo.useful` (at the joint point λ_J, the start
+  gate's check) / `useful_at_answer` (at the composed answer point) / `useful_thr`, the same pair as `ok` /
+  `ok_at_answer` in a layer's `status()` `useful` block; `LoopState.useful_error`.
   `useful_error=None` writes the records of the additive loop without it, and replacement mode is unchanged; a
-  `StreamPromise` built without `procedure` keeps its records, dumps and fingerprint. Checked on synthetic streams
-  (noise layer, real layer, the null at β, the composed threshold); no stand has run it.
+  `StreamPromise` built without `procedure` keeps its records, dumps and fingerprint. Checked on synthetic streams,
+  400 seeds each: a noise layer was promoted in 0/400 runs (bar 28.2 at δ_use = 0.05); the usefulness null at β
+  (δ_use = 0.30) was falsely certified in 3/400, 0/397, 0/397 runs at indices 1–3 (bars from δ_u / G per index,
+  8.0 at index 1); the composed threshold with a joint prefix reaching a bad band: 0 false in 400; a real layer
+  starts later by p50 48 / p90 188 / p95 238 / max 454 zone samples and answers alone 1.14× as often as with the
+  check off in the last 2 000 decisions. No stand has run it.
 - **`DefaultPolicy(novel_only=...)`: the promotion's novel-only paired comparison can be switched off, for controls**
   (`solvi.experimental.stream`). Default `True`, unchanged: the comparison counts only post-freeze samples on keys the
   candidate never trained on. With `False` it counts every sample, the candidate's train keys too (the seen fields

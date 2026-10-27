@@ -827,7 +827,9 @@ stays `additive=False`, the replacement protocol above, with the same records an
   becomes useful is discarded `trial` decisions after its freeze, with `useful` among the failed checks. After the
   start, a layer answers at the **composed threshold**: the loosest point of its certified prefix that the usefulness
   certificate has also certified (both sets only grow, so it only loosens); "threshold" in `status()["zones"]` and
-  `versions()` is that one, the certificate's own is beside it. An alarm on a layer restarts both. β = 0.5 is a noise
+  `versions()` is that one, the certificate's own is beside it. Two usefulness flags: `VersionInfo.useful` (status
+  `useful.ok`) reads the joint point λ_J, what the start gate checks; `VersionInfo.useful_at_answer` (status
+  `useful.ok_at_answer`) reads the composed point the layer answers at. An alarm on a layer restarts both. β = 0.5 is a noise
   guard ("not worse than a coin among its own confident answers"), not a quality promise: the quality promise stays
   the joint α; a tighter β turns the gate into a quality floor tested on a few dozen alone answers, where it cannot
   separate a 5 % layer from a 30 % one. Pointwise rather than the fixed sequence: the strictest grid point of the
@@ -838,10 +840,23 @@ stays `additive=False`, the replacement protocol above, with the same records an
   loop without it, record for record.
 - *Two guarantees.* (1) Per zone, as below: with probability ≥ 1 − δ, no layer ever answers alone at a threshold whose
   risk on its zone is above α. (2) With probability ≥ 1 − δ_use, no layer ever answers alone at a point whose error
-  among its alone answers on its zone is β or more — in particular a layer trained on noise never starts serving.
+  among its alone answers on its zone is β or more — in particular a layer trained on noise starts serving with
+  probability at most δ_use (it stays out with probability ≥ 1 − δ_use).
   Both are anytime-valid (Ville's inequality per index and point, a union over them), on the same stream assumptions
   (i.i.d. between change points, labels drawn by a coin independent of the input; in trial every zone row is
   labelled). They are separate statements on separate budgets; together they hold with probability ≥ 1 − δ − δ_use.
+  The usefulness guarantee is anytime-valid between change points only: the usefulness certificate has no detector of
+  its own and is re-tested (restarted on a fresh index) only on the alarms of the layer's joint detector. A drift
+  where the selective error among a layer's alone answers rises to β or more while its joint risk stays ≤ α (a layer
+  that answers alone rarely can be wrong on most of those answers at a small joint risk) raises no alarm, and the
+  certificate's old points stay certified until some other alarm restarts it.
+  Checked on synthetic streams, 400 seeds each: a noise layer (joint-certifiable, wrong on 90 % of its alone answers)
+  was promoted in 0/400 runs (bar 28.2, δ_use = 0.05); the usefulness null exactly at β, with every grid point
+  reading the same alone rows, was falsely certified in 3/400, 0/397, 0/397 runs at indices 1–3 (bars from δ_u / G:
+  8.0, 3.6, 2.5 at δ_use = 0.30); the composed threshold when the joint prefix reaches a band with error ≥ β: 0 false
+  in 400; a real layer (10 % wrong) starts later than with the check off by p50 48 / p90 188 / p95 238 / max 454
+  zone samples, and in the last 2 000 decisions answers alone 1.14× as often (69 685 vs 61 053 answers over the 400
+  runs): a later start reads more trial rows at the full rate and tends to start looser.
 - *The guarantee is per zone.* Every layer's certificate is on its own zone, the decisions that reach it, at level α,
   read on coin samples of that zone; the zones are fixed by routing thresholds frozen at attach; a layer answers
   inside a deeper zone where its live λ_j allows (top-down). Each layer's certificate is valid on its own zone's

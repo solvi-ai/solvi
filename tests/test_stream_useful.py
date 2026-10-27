@@ -202,6 +202,9 @@ def test_answers_are_at_the_composed_threshold_and_records_carry_the_usefulness_
     assert set(last) == {1} and last[1] == real._vs[1]["useful"].state()
     z = real.status()["zones"]["layers"][1]
     assert z["useful"]["ok"] is True and z["threshold"] == real._threshold(1)
+    assert z["useful"]["ok_at_answer"] is True                  # the composed point is useful by construction
+    vi = next(r for r in real._state().versions if r.version == 1)
+    assert vi.useful is True and vi.useful_at_answer is True and vi.useful_thr == real._threshold(1)
     assert "delta_use_spent" in real.status() and "useful_error" not in json.dumps(real.status()["zones"]["layers"][0])
 
 
