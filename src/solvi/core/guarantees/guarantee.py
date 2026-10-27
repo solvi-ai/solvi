@@ -800,5 +800,109 @@ def _plain(d):
     return d
 
 
-__all__ = ["GuaranteeWarning", "Promise", "QuestionGuard", "apply_guards", "calibrate", "guard_question", "promise_text",
-           "replay_guard", "separation"]
+# ------------------------------------------------------------------------------------------------ as a file
+GUARANTEE_FORMAT = "solvi guarantee v1"
+
+
+def _keyed(d):
+    """{group path (a tuple): info} → [[path as a list, info]] (JSON has no tuple keys); other values as they are."""
+    return [[list(k), v] for k, v in d.items()] if isinstance(d, dict) else d
+
+
+def _unkeyed(d):
+    return {tuple(k): dict(v) for k, v in d} if isinstance(d, list) else d
+
+
+def _answer_data(q):
+    from ..schema import dump
+    return dump(q.answer, "json") if q.answer is not None else None
+
+
+def guarantee_record(system, question):
+    """The guarantee in force on a question as JSON-ready data: the Promise (method, level, delta, thresholds per group,
+    report), how the guard reads its signal, which answer it lets through and its groups, and what it was calibrated
+    for — the catalog's fingerprint, the question's answer type and the guard's own fingerprint (what every gated
+    decision records)."""
+    from ..calibfile import _norm
+    guard = system.guards.get(question)
+    if guard is None:
+        raise KeyError(f"no guarantee on {question!r}: calibrate one first (System.guarantee)")
+    p = guard.promise
+    if type(p) is not Promise:
+        raise ValueError(f"the guarantee on {question!r} is a {type(p).__name__}, not a calibrated Promise: only a "
+                         "Promise is saved")
+    rep = dict(p.report)
+    if isinstance(rep.get("groups"), dict):
+        rep["groups"] = _keyed(rep["groups"])
+    fn_signal, fn_groups = callable(guard.signal), callable(guard.groups)
+    from ... import __version__
+    return _norm({"format": GUARANTEE_FORMAT, "question": question, "answer_type": _answer_data(system.questions[question]),
+                  "catalog": system.fingerprint()["catalog"], "guard": guard.fingerprint(),
+                  "signal": None if fn_signal else guard.signal, "signal_function": fn_signal,
+                  "answer": guard.answer, "groups": None if fn_groups else guard.groups, "groups_function": fn_groups,
+                  "promise": {"method": p.method, "level": p.level, "delta": p.delta, "threshold": p.threshold,
+                              "nodes": _keyed(p.nodes), "by": p.by, "report": rep, "why": p.why,
+                              "min_group": p.min_group, "signal": p.signal, "procedure": p.procedure},
+                  "solvi": __version__})
+
+
+def save_guarantee(system, question, path):
+    """Write the guarantee in force on a question to a JSON file (System.save_guarantee) → path."""
+    import json
+    from ..calibfile import _enc
+    rec = guarantee_record(system, question)
+    with open(path, "w", encoding="utf-8") as fh:
+        json.dump(_enc(rec), fh, ensure_ascii=False, indent=1, allow_nan=False)
+        fh.write("\n")
+    return path
+
+
+def load_guarantee(system, path, *, signal=None, groups=None, strict=True):
+    """Attach a guarantee saved by save_guarantee (System.load_guarantee) → its report. The guard it rebuilds must have the
+    saved fingerprint — the same promise, signal, answer and groups — so stored decisions replay against it as against
+    the one calibrated; a signal or grouping that was a function is passed again (`signal=`, `groups=`; its code is
+    fingerprinted and must match). strict (default): refuse a file made for another catalog (the signal is computed by
+    the catalog's code) or for another answer type of the question; strict=False attaches it anyway (the guard's
+    fingerprint is still checked)."""
+    import json
+    from ..calibfile import _dec
+    with open(path, encoding="utf-8") as fh:
+        rec = _dec(json.load(fh))
+    if rec.get("format") != GUARANTEE_FORMAT:
+        raise ValueError(f"{path}: not a solvi guarantee file (format {rec.get('format')!r}, expected {GUARANTEE_FORMAT!r})")
+    q = rec["question"]
+    if q not in system.questions:
+        raise ValueError(f"{path}: a guarantee on {q!r}, which this system does not ask")
+    if strict:
+        if rec.get("answer_type") != json.loads(json.dumps(_answer_data(system.questions[q]), default=str)):
+            raise ValueError(f"{path}: made for another answer type of {q!r} ({rec.get('answer_type')})")
+        fp = system.fingerprint()["catalog"]
+        if rec.get("catalog") != fp:
+            raise ValueError(f"{path}: calibrated on catalog #{rec.get('catalog')}, this system's catalog is #{fp}: the "
+                             "parts that compute the answer or its signal changed — calibrate again (System.guarantee), "
+                             "or load with strict=False")
+    for given, saved, what in ((signal, rec.get("signal_function"), "signal"), (groups, rec.get("groups_function"), "groups")):
+        if saved and given is None:
+            raise ValueError(f"{path}: the guarantee's {what} was a function: pass it again ({what}=that_function)")
+    sig = signal if rec.get("signal_function") else rec.get("signal")
+    grp = groups if rec.get("groups_function") else rec.get("groups")
+    pr = rec["promise"]
+    rep = dict(pr["report"])
+    if isinstance(rep.get("groups"), list):
+        rep["groups"] = _unkeyed(rep["groups"])
+    promise = Promise(pr["method"], pr["level"], pr["delta"], pr["threshold"], _unkeyed(pr["nodes"]), pr["by"], rep,
+                      pr["why"], pr["min_group"], pr["signal"], pr.get("procedure", "bonferroni"))
+    if isinstance(grp, list):
+        grp = list(grp)
+    answer = rec.get("answer")
+    if answer is not None:
+        answer = system.questions[q].answer.normalize(answer)
+    guard = QuestionGuard(q, promise, sig, answer, grp)
+    if guard.fingerprint() != rec.get("guard"):
+        raise ValueError(f"{path}: the rebuilt guarantee is #{guard.fingerprint()}, the saved one #{rec.get('guard')}: "
+                         "its signal, answer or groups differ (a function passed again must be the same code)")
+    return guard_question(system, q, None, promise=promise, signal=sig, answer=answer, groups=grp)
+
+
+__all__ = ["GuaranteeWarning", "Promise", "QuestionGuard", "apply_guards", "calibrate", "guard_question", "guarantee_record",
+           "load_guarantee", "promise_text", "replay_guard", "save_guarantee", "separation"]

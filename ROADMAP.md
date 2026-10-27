@@ -101,6 +101,11 @@ for one pre-registered check, run once, before it enters the library.
 | **Outside-user test: README links on PyPI** | Every relative README link is an absolute GitHub link (a test keeps them pointing at files that exist) | done (1.4, on `dev`) |
 | **Outside-user test: calibration progress** | A calibration over an LLM logs its progress in chunks of 32 to the logger `solvi.calibration` at INFO, with the time left; silent by default | done (1.4, on `dev`) |
 | **Outside-user test: the input stored twice** | A full record keeps a value the trace holds once (in the trace); `values` keeps its name with null, and loading takes it from the trace as before; verify and replay unchanged | done (1.4, on `dev`) |
+| **Outside-user test 2: a quoted number inside a longer number** | `locate` skips an occurrence that begins or ends inside a number (the 7 of 2017) for the next standalone one; the grounding check unchanged | done (1.4, on `dev`) |
+| **Outside-user test 2: a computed number as an answer** | `Answer.estimate()` without bins, named by the `-> float` error and in the guide's table; no new public name | done (1.4, on `dev`) |
+| **Outside-user test 2: a System guarantee as a file** | `System.save_guarantee` / `load_guarantee` with catalog, answer-type and guard fingerprints checked | done (1.4, on `dev`) |
+| **Outside-user test 2: one store written by two systems** | `replay_all([a, b])` replays each record against its own system; a foreign record is one `other_system` mismatch, its hashes still checked | done (1.4, on `dev`) |
+| **Outside-user test 2: docs** | `not_gated` in the guarantee report; a span decision reads one given text fact. Open: refuse a span decision over several facts when it is made, before any call is paid | done (1.4, on `dev`) |
 
 ## Next (1.2): from use over the automated tests of a live web application
 

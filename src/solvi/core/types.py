@@ -644,7 +644,10 @@ def answer_type_of(t, ordinal=False):
         return Answer.yes_no()
     cv = closed_values(s)
     if cv is None:
-        raise TypeError(f"no answer type for {type_name(t)}: use bool, Literal[...], an Enum, or list[Literal[...]]")
+        hint = ("; a number a rule computes: Question(..., answer=Answer.estimate()) — an estimate without bins is the "
+                "rule's number as it is (confidence: the facts it rests on) — or Estimate[edges]; a number quoted from a "
+                "text: Span[float]") if s in (int, float) or type_name(t) in ("Decimal", "Fraction") else ""
+        raise TypeError(f"no answer type for {type_name(t)}: use bool, Literal[...], an Enum, or list[Literal[...]]{hint}")
     vals, multi = cv
     if multi:
         return Answer.multi(vals)

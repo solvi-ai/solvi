@@ -1272,9 +1272,35 @@ class TraceStorage(abc.ABC):
         A compact record (record="compact") is re-run from its recorded input and every step compared with its recorded
         hash (rederive), then replayed like a full one; one that cannot be — a model step not re-run (kind "not_kept":
         no verdict on the data past the chain), a step whose hash differs (kind "recompute": the old value is not kept)
-        — is listed with "record": "compact"."""
+        — is listed with "record": "compact".
+
+        One store, several systems: pass them all, `replay_all([system_a, system_b])` — each record is replayed against
+        the system that asks every question it answers (the one whose catalog fingerprint is the recorded one first). A
+        record that no given system asks any question of is another system's: it is listed with one mismatch of kind
+        "other_system" (and the summary says no verdict past its hashes) instead of the missing parts and inputs a
+        foreign catalog would report; what does not depend on the system — its hashes (kind "integrity") — is still
+        checked and reported. `question=` / `catalog_fp=` filters replay one system's records only."""
         from ..runtime import Mismatch, mismatch_summary
         bad = []
+        systems = list(system) if isinstance(system, (list, tuple)) else [system]
+        if not systems:
+            raise ValueError("replay_all needs a System (or a list of the Systems that wrote the store)")
+        cats = [(x, x.fingerprint()["catalog"]) for x in systems if hasattr(x, "questions")]
+
+        def own(data):
+            """→ (the system to replay this record with, whether it is one that asks its questions)."""
+            if len(cats) < len(systems):              # a bare Catalog: replayed as before
+                return systems[0], True
+            qs = set(data.get("answers") or {})
+            if not qs:                                # nothing to tell it by: replayed as before
+                return systems[0], True
+            fits = [(x, c) for x, c in cats if qs and qs <= set(x.questions)]
+            exact = [x for x, c in fits if c == data.get("catalog")]
+            if exact or fits:
+                return (exact or [fits[0][0]])[0], True
+            if any(qs & set(x.questions) for x, _ in cats):
+                return next(x for x, _ in cats if qs & set(x.questions)), True
+            return systems[0], False
 
         def failed(s, stage, e):
             ms = [Mismatch(0, stage, f"{type(e).__name__}: {e}", "error")]
@@ -1282,6 +1308,23 @@ class TraceStorage(abc.ABC):
                         **mismatch_summary(ms)})
 
         for s in (self.query(**filters) if filters else self.iter()):
+            system, mine = own(s.data)
+            if not mine:
+                ms = []
+                try:
+                    r = s.response(system) if not s.compact else None
+                    if r is not None:
+                        rep = r.trace.replay(system, r.flow, trust_models=True)
+                        ms = [m for m in rep["mismatches"] if m.kind == "integrity"]
+                except Exception:  # noqa: BLE001 — a foreign catalog may not load its values: no verdict past the hashes
+                    ms = []
+                qs = sorted(s.data.get("answers") or {})
+                ms.append(Mismatch(0, "system", f"the record answers {qs}, which no given system asks: another "
+                                   "system's record — replay it with that system (replay_all([...]) with every system "
+                                   "that writes this store)", "other_system"))
+                bad.append({"id": s.id, "seq": s.seq, "time": s.time, "mismatches": ms, "models": [], "catalog": None,
+                            **mismatch_summary(ms)})
+                continue
             if s.compact:
                 try:
                     r, ms = rederive(s.data, system, trust_models)
