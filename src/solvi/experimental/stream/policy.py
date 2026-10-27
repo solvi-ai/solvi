@@ -200,8 +200,9 @@ class VersionInfo:
     live). A list or set given is stored as a frozenset. discarded_at: the train labels the loop had when this
     version was discarded (None: not discarded) — the lane LearningLoop's refreeze floor reads it. Additive mode with
     the usefulness certificate on (`AdapterLoop(useful_error=)`): certified / threshold are the version's own
-    certificate's (λ_J), useful whether the usefulness certificate holds at λ_J, useful_thr the threshold it answers
-    at (composed; +inf: no point certified by both)."""
+    certificate's (λ_J), useful whether the usefulness certificate holds at λ_J (the joint point, what the start
+    gate's "useful" check reads), useful_at_answer whether it holds at the composed answer point useful_thr, the
+    threshold it answers at (composed; +inf: no point certified by both)."""
     version: int
     state: str
     n_train: int = 0
@@ -218,6 +219,8 @@ class VersionInfo:
     #                                                    the candidate since decision 21 (None: replacement mode)
     useful: bool | None = None                         # additive, usefulness on: its usefulness certificate holds at
     #                                                    `threshold` (its certificate's λ_J); None: no such certificate
+    useful_at_answer: bool | None = None               # additive, usefulness on: it holds at `useful_thr`, the
+    #                                                    composed point the version answers at; None: no certificate
     useful_thr: float | None = None                    # additive, usefulness on: the composed answer threshold (the
     #                                                    loosest point of the certified prefix that is also useful)
 
