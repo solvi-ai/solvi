@@ -414,7 +414,13 @@ def test_a_saved_guarantee_is_refused_for_another_model(tmp_path):
     with pytest.raises(ValueError, match="calibrated with other models than this system's — answer:label"):
         other.load_guarantee(path)
     assert other.load_guarantee(path, strict=False)["n"] == 120          # strict=False: attached anyway
-    del rec["models"]                                                      # a file saved before 1.4: not checked
-    old = tmp_path / "old.json"
-    old.write_text(json.dumps(rec))
-    assert _guarded().load_guarantee(old)["n"] == 120
+    for bad in (None, "absent"):                                           # one deleted key does not bypass it
+        if bad is None:
+            rec["models"] = None
+        else:
+            del rec["models"]
+        old = tmp_path / "old.json"
+        old.write_text(json.dumps(rec))
+        with pytest.raises(ValueError, match="names no models it was calibrated with"):
+            _guarded().load_guarantee(old)
+        assert _guarded().load_guarantee(old, strict=False)["n"] == 120

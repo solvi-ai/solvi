@@ -28,15 +28,24 @@ The scheme it sets up (all of it existing low-level blocks, wired):
 - grounding: a `Span[...]` field must be found in the text (normalized view; a number as a number of its own, not
   inside a longer one — solvi.core.catalog.locate, cuts_number); not found, the field escalates and the answer
   abstains with the reason. The kept value is the text's own substring.
-- numbers: a `Span[float]` (int, Decimal) is read from what was quoted, as the document writes it: one scale rule —
-  a scale is never multiplied, the number is kept in the document's own unit ("1,250 million", "$1.2bn", "1.2M",
-  "3k" → 1250, 1.2, 1.2, 3); currency signs and codes dropped; a percentage as its number ("12.5%" → 12.5); a sign in
-  any dash ("-", "−", "–", "—"), before or after a currency sign, or trailing ("1,234-"); parentheses as an accounting
-  negative ("(1,234)", "$(1,234) million", "EUR (1,234)" → −1234) — only around a number with a separator, decimals
-  or a currency ("(2019)", "(1)" do not read: a year, a footnote). Anything else — a range, two numbers, an exponent
-  ("1e3"), "1_000", NaN or infinity, an ambiguous "2.500" — does not read, and the answer abstains with the reason. A
-  number field also abstains when the text writes a sign the quote left out (a "-" or "(" right before it): the
-  quote "1,234" of "-1,234" or "(1,234)" is not read as +1234. A `Span[date]` and other types: solvi.core.types.span_value.
+- numbers: a `Span[float]` (int, Decimal) is read from what was quoted, as the document writes it, into a fact
+  `<field>_value` (the rule's `why` shows it next to the quote). One scale rule — a scale is never multiplied, the
+  number is kept in the document's own unit ("1,250 million", "$1.2bn", "1.2M", "3k" → 1250, 1.2, 1.2, 3); the
+  currency (a sign — "$", "US$", "R$", "HK$", "Rs", "€" ... — or a known ISO code: "EUR", "USD"; "EBT", "NET" are not
+  currencies) dropped; a percentage as its number ("12.5%" → 12.5); a sign in any dash, before or after the currency,
+  or trailing ("1,234-"); parentheses as an accounting negative ("(1,234)", "$(1,234) million", "EUR (1,234)",
+  "(12%)", "(12)%" → −1234, −12) — only around a number with a separator, decimals, a currency or a percent ("(2019)",
+  "(1)" do not read: a year, a footnote). Anything else — a range, two numbers, two scales or currencies, an
+  exponent ("1e3"), "1_000", NaN or infinity, an ambiguous "2.500" — does not read, and the answer abstains with the
+  reason. A number field also abstains when the text writes a sign the quote left out at any of its occurrences: a
+  "-" right before it (a currency between; not after a letter or digit, not a "- " bullet), "(" before it with ")"
+  closing right after it, or a "-" right after it — "$1,234" in prose and "(1,234)" in a table do not read as +1234.
+- units: what each number field writes besides the number is `facts.units[field]` — a Unit(scale, currency,
+  percent). With `units="same"` (the default) and two or more number fields, a hard check `units` makes the answer
+  abstain when their written scales or currencies differ ("$1.2bn" and "$950 million"; "$100" and "€100"); a field
+  that writes no scale or currency conflicts with nothing, and a percentage next to an absolute number is only
+  exposed (`units.percent`), not refused. `units="any"` turns the check off. A `Span[date]` and other types:
+  solvi.core.types.span_value.
 - code computes: `compute=(facts, state) → value` is the question's rule; `facts` is the schema filled with the read
   values, `state` the input without the text. The answer is a number (`Answer.estimate()`) unless `answer=` says
   otherwise (`solvi.Answer.choice(["pay", "hold"])`, `Answer.yes_no()`); its confidence is the weakest fact's.
@@ -44,7 +53,7 @@ The scheme it sets up (all of it existing low-level blocks, wired):
   with that field's value: a number (estimate), or a `Literal` / `Enum` / `bool` field's option; a `Span[str]` or
   `Span[date]` field needs compute= and answer=.
 - checks: `checks={name: (facts, state) → bool}` are hard checks on the answer: one that fails makes it abstain
-  ("failed check").
+  ("failed check"). The names `units`, `compute` and `<field>_value` are the recipe's own.
 - confidence: an LLM made with `logprobs="auto"` (llm()'s default) is rebuilt to ask for one stated confidence per
   read (`logprobs=False, ask="confidence"`), with a UserWarning that says so; a gateway that mixes logprob and stated
   replies cannot then split a calibration. A model made with `logprobs=True` or `False`, and any other decider, is
@@ -52,18 +61,22 @@ The scheme it sets up (all of it existing low-level blocks, wired):
 - calibration: `calibrate(examples, max_risk=)` is System.guarantee on the answer (conformal risk control; max_error=
   for learn-then-test; groups=, correct=, weak= pass through): below the threshold the answer abstains. Fewer than
   100 examples: a GuaranteeWarning (the threshold rests on few examples and can move); a signal that does not
-  separate right from wrong raises, as System.guarantee does. A number is judged right at the label's own precision:
-  the label (a number, or a string read like a quote: "1,500", "33.33") with d decimals matches an answer within half
-  a unit of its last digit (0.5·10^-d); pass correct=(result, label) → bool to judge otherwise.
+  separate right from wrong raises, as System.guarantee does. A number answer is judged by its label: a label
+  written as a string states its precision ("33.33" takes 33.3333, "1,500" takes 1500.4: within half a unit of its
+  last digit); a label given as a number is matched up to float noise (math.isclose: the int 1 does not take 1.4).
+  Pass correct=(result, label) → bool to judge otherwise.
 - record: `storage=` (a path: JSONLStorage, `record="full"` so every decision replays) keeps every ask hash-chained;
   `verify()` checks the chain, `replay_all()` re-checks every stored decision against this system.
   `save_calibration(path)` / `document(..., calibration=path)` keep the calibrated threshold across processes
-  (System.save_guarantee / load_guarantee: a file made for another catalog, another model or other prompts — the
-  task, a field's description — is refused).
+  (System.save_guarantee / load_guarantee: a file made for another catalog — another task=, a field's
+  description, compute or a check — or for other models is refused; the models are compared as every model of the
+  System fingerprints itself: an endpoint's name, settings and the question asked — a server that changes the
+  weights behind an unversioned model name is not told apart).
 
 The input of `ask` is a dict with the text under `text=` and anything else the rule and checks read; the system is
-given the text and the rest as one fact named "state", made plain JSON data first (numpy / pandas scalars as
-numbers, tuples and sets as lists; anything else that JSON cannot store is refused), so a stored decision replays.
+given the text and the rest as one fact named "state", made plain data first (numpy / pandas scalars as numbers,
+tuples and sets as lists, dates and Decimals as they are; a numpy array or anything else the record cannot store is
+refused), so a stored decision replays.
 DocumentSystem holds a solvi.System (`recipe.system`) and does not subclass it (System is final): the low-level calls
 (`recipe.system.ask`, `.guarantee`, `.report`) stay open."""
 from __future__ import annotations
@@ -79,21 +92,45 @@ from ..core.catalog import Answer, Catalog, Question
 QUESTION = "answer"
 STATE = "state"                     # the fact that carries the input without the text
 MIN_CALIBRATION = 100               # below this, calibrate warns: the threshold rests on few examples
+UNIT_MODES = ("same", "any")
 
-_DASHES = str.maketrans({"−": "-", "–": "-", "—": "-", "‑": "-", "‒": "-"})
-_CURRENCY = re.compile(r"[$€£¥₽]|\b[A-Z]{3}\b")
+# every dash a document writes for a minus (length-preserving, so offsets into the text stay as they are)
+_DASHES = str.maketrans({c: "-" for c in "−–—‑‐‒﹣－⁻"})
+_ISO = ("USD EUR GBP JPY CNY RMB RUB CHF CAD AUD NZD HKD SGD INR BRL MXN ZAR SEK NOK DKK PLN CZK HUF KRW TRY ILS AED "
+        "SAR").split()
+_CUR_SYMBOL = {"US$": "USD", "A$": "AUD", "AU$": "AUD", "C$": "CAD", "CA$": "CAD", "HK$": "HKD", "NZ$": "NZD",
+               "S$": "SGD", "R$": "BRL", "Rs.": "INR", "Rs": "INR", "₹": "INR", "$": "USD", "€": "EUR", "£": "GBP",
+               "¥": "JPY", "₽": "RUB", "RMB": "CNY"}
+_CUR_RX = (r"(?:" + "|".join(re.escape(k) for k in sorted(_CUR_SYMBOL, key=len, reverse=True) if not k[0].isalpha())
+           + r"|\b(?:Rs\.?|" + "|".join(_ISO) + r")\b|(?<![A-Za-z])(?:US|AU|A|CA|C|HK|NZ|S|R)\$)")
+_CURRENCY = re.compile(_CUR_RX)
 _PERCENT = re.compile(r"\s*(?:%|\bper\s?cent\b)", re.IGNORECASE)
-_SCALE_WORD = re.compile(r"\s*\b(?:thousands?|millions?|billions?|trillions?|mn|bn|tn)\b\.?", re.IGNORECASE)
-_SCALE_SUFFIX = re.compile(r"(?<=\d)\s?(?:bn|mn|tn|k|K|m|M|b|B)\b", re.IGNORECASE)
+_SCALES = {"thousand": "thousand", "thousands": "thousand", "k": "thousand", "million": "million",
+           "millions": "million", "mn": "million", "m": "million", "billion": "billion", "billions": "billion",
+           "bn": "billion", "b": "billion", "trillion": "trillion", "trillions": "trillion", "tn": "trillion"}
+_SCALE_WORD = re.compile(r"\s*\b(thousands?|millions?|billions?|trillions?|mn|bn|tn)\b\.?", re.IGNORECASE)
+_SCALE_SUFFIX = re.compile(r"(?<=\d)\s?(bn|mn|tn|k|m|b)\b", re.IGNORECASE)
 _CORE = re.compile(r"[0-9][0-9,. ]*|\.[0-9]+")
-_SIGN_BEFORE = re.compile(r"(?:[-−–—]|\()\s?(?:[$€£¥₽]|[A-Z]{3})?\s?$")
 
 
-def _read_number(vtype, text):
-    """A quoted number → vtype (see the module docs, "numbers"): the scale never multiplied, currency dropped, a
-    percentage as its number, a sign in any dash before or after the currency or trailing, parentheses as a negative
-    around a number with a separator, decimals or a currency; the digits and separators as
-    solvi.core.types.span_value reads them. ValueError when it is not one number."""
+class Unit(typing.NamedTuple):
+    """What a number field's quote writes besides the number: scale ("thousand", "million", "billion", "trillion" or
+    None — never multiplied in), currency (an ISO code or None), percent (True for "12%")."""
+    scale: str | None = None
+    currency: str | None = None
+    percent: bool = False
+
+
+def _currency_code(tok):
+    tok = tok.strip()
+    return _CUR_SYMBOL.get(tok, tok)
+
+
+def _read_quote(vtype, text):
+    """A quoted number → (the value as vtype, its Unit). See the module docs, "numbers": the scale never multiplied,
+    the currency dropped (an ISO code or a sign), a percentage as its number, a sign in any dash before or after the
+    currency or trailing, parentheses as a negative around a number with a separator, decimals, a currency or a
+    percent; the digits and separators as solvi.core.types.span_value reads them. ValueError when it is not one number."""
     import unicodedata
 
     from ..core.types import span_value
@@ -104,15 +141,22 @@ def _read_number(vtype, text):
         raise ValueError("an exponent or an underscore is not how a document writes a number")
     if re.search(r"%\s*[0-9]", t):
         raise ValueError("a percent sign before the number")
-    cur = bool(_CURRENCY.search(t))
-    for rx in (_CURRENCY, _SCALE_WORD, _SCALE_SUFFIX, _PERCENT):
-        t = rx.sub(" ", t)
+    curs = {_currency_code(m.group()) for m in _CURRENCY.finditer(t)}
+    if len(curs) > 1:
+        raise ValueError(f"two currencies ({', '.join(sorted(curs))})")
+    t = _CURRENCY.sub(" ", t)
+    scales = {_SCALES[m.group(1).lower()] for rx in (_SCALE_WORD, _SCALE_SUFFIX) for m in rx.finditer(t)}
+    if len(scales) > 1:
+        raise ValueError(f"two scales ({', '.join(sorted(scales))})")
+    t = _SCALE_SUFFIX.sub(" ", _SCALE_WORD.sub(" ", t))
+    pct = bool(_PERCENT.search(t))
+    t = _PERCENT.sub(" ", t)
     t = re.sub(r"\s+", " ", t).strip()
     t = re.sub(r"\(\s*", "(", re.sub(r"\s*\)", ")", t))
     neg = False
     if t.startswith("(") and t.endswith(")"):
         neg, t = True, t[1:-1].strip()
-        if not cur and not re.search(r"[.,]", t):
+        if not curs and not pct and not re.search(r"[.,]", t):
             raise ValueError("a bare number in parentheses (a year, a footnote?) is not read as a negative")
     elif t.startswith("-"):
         neg, t = True, t[1:].strip()
@@ -125,40 +169,80 @@ def _read_number(vtype, text):
     v = span_value(vtype, t)
     if isinstance(v, float) and not math.isfinite(v):
         raise ValueError("not a finite number")
-    return -v if neg else v
+    return (-v if neg else v), Unit(next(iter(scales), None), next(iter(curs), None), pct)
+
+
+def _read_number(vtype, text):
+    """A quoted number → its value (_read_quote without the unit)."""
+    return _read_quote(vtype, text)[0]
+
+
+_BEFORE_CUR = re.compile(r"(?:" + _CUR_RX + r")\s?$")
+_AFTER_CLOSE = re.compile(r"\s*(?:(?:thousands?|millions?|billions?|trillions?|mn|bn|tn|k|m|b)\b\.?)?\s*%?\s*\)",
+                          re.IGNORECASE)
+
+
+def _signed_at(n, a, b):
+    """Does the (dash-normalized) text n write a sign around its occurrence n[a:b]? A "-" right before it (a currency
+    between allowed, no space; not after a letter or a digit: "Revenue—1,234", "10-K", "2018-2019" are not signs; a
+    "- " bullet is not adjacent), "(" right before it with ")" closing right after it (a scale or "%" between
+    allowed: "(1,234 million)", not "(4,800 in 2018)"), or a "-" right after it not followed by a letter or digit."""
+    before = n[max(0, a - 12):a]
+    m = _BEFORE_CUR.search(before)
+    core = before[:m.start()] if m else before
+    if core.endswith("-") and not (len(core) > 1 and core[-2].isalnum()):
+        return n[a - (len(before) - len(core)) - 1:b]
+    if re.search(r"\(\s*$", core) and _AFTER_CLOSE.match(n, b):
+        return n[a - (len(before) - len(core)) - len(re.search(r"\(\s*$", core).group()):_AFTER_CLOSE.match(n, b).end()]
+    if n[b:b + 1] == "-" and not n[b + 1:b + 2].isalnum():
+        return n[a:b + 1]
+    return None
 
 
 def _sign_dropped(raw, doc):
-    """A number quote whose text writes a sign right before it ("-1,234", "(1,234)", "-$1,234") that the quote left
-    out → that context, else None (the quote is located as the grounding locates it)."""
+    """A number quote whose text writes a sign around one of its occurrences ("-1,234", "(1,234)", "-US$1,234",
+    "1,234-") that the quote left out → that context, else None. Every occurrence counts (one signed is enough): the
+    same digits as "$1,234" in prose and "(1,234)" in the table do not read as +1234."""
+    from ..core.catalog import cuts_number
     from ..core.deciders.llm import locate
-    if not isinstance(raw, str) or not isinstance(doc, str) or raw.lstrip()[:1] in ("-", "−", "–", "—", "(", "+"):
+    if not isinstance(raw, str) or not isinstance(doc, str):
         return None
-    got = locate(raw, doc)
-    if got is None:
-        return None
-    a, b = got
-    m = _SIGN_BEFORE.search(doc[max(0, a - 8):a])
-    if not m:
-        return None
-    if m.group().lstrip().startswith("(") and ")" not in doc[b:b + 24].split("\n")[0]:
-        return None
-    return doc[a - len(m.group()):b + (1 if doc[b:b + 1] == ")" else 0)]
+    q = raw.translate(_DASHES).strip()
+    if q[:1] in ("-", "(", "+") or q[-1:] in ("-", ")"):
+        return None                                    # the quote carries its sign: it is read as written
+    n = doc.translate(_DASHES)
+    spans = []
+    i = n.find(q)
+    while i >= 0 and q:
+        if not cuts_number(n, i, i + len(q)):
+            spans.append((i, i + len(q)))
+        i = n.find(q, i + 1)
+    if not spans:
+        got = locate(raw, doc)
+        spans = [got] if got else []
+    for a, b in spans:
+        around = _signed_at(n, a, b)
+        if around:
+            return around
+    return None
 
 
 def _plain(v, where="state"):
     """An input value → plain data the record stores and a replay reads back as the same: numpy / pandas scalars as
-    Python numbers, tuples as lists, sets as sorted lists; dates as they are. TypeError for anything else."""
+    Python numbers, tuples as lists, sets as sorted lists; dates and Decimals as they are. TypeError for anything else
+    (a numpy array included)."""
     import datetime
-    if v is None or isinstance(v, (bool, str)):
+    from decimal import Decimal
+    if v is None or isinstance(v, (bool, str, Decimal)):
         return v
     if isinstance(v, int):
         return int(v)
     if isinstance(v, float):
         return float(v)
-    item = getattr(v, "item", None)
-    if callable(item) and type(v).__module__.split(".")[0] in ("numpy", "pandas"):
-        return _plain(item(), where)
+    if type(v).__module__.split(".")[0] in ("numpy", "pandas"):
+        if getattr(v, "shape", ()) != () or not callable(getattr(v, "item", None)):
+            raise TypeError(f"{where}: a {type(v).__name__} is not stored as JSON — pass a list (.tolist())")
+        return _plain(v.item(), where)
     if isinstance(v, (datetime.date, datetime.datetime)):
         return v
     if isinstance(v, dict):
@@ -176,23 +260,24 @@ def _plain(v, where="state"):
         except TypeError:
             raise TypeError(f"{where}: a set whose values do not sort; pass a list") from None
         return [_plain(x, where) for x in items]
-    raise TypeError(f"{where}: a {type(v).__name__} is not stored as JSON — give numbers, strings, dates, and lists "
-                    "or dicts of them")
+    raise TypeError(f"{where}: a {type(v).__name__} is not stored as JSON — give numbers, strings, dates, Decimals, "
+                    "and lists or dicts of them")
 
 
 def _value_reader(fi):
-    """A field → a function: the raw value its part gave → the field's value. A span of a number: _read_number; a span
-    of another type (date, ...): span_value; a span of str and any other field (a choice): as it is. A value that is
-    not a string (solvi.Unknown for a Maybe[...] field) passes as it is."""
-    from decimal import Decimal
-
+    """A non-number field → a function: the raw value its part gave → the field's value. A span of a date (or another
+    type): span_value; a span of str and a choice: as it is. A value that is not a string (solvi.Unknown for a
+    Maybe[...] field) passes as it is."""
     from ..core.types import span_value
     t = fi.annotation
     if _span_source(fi) is None or t is str:
         return lambda raw: raw
-    if t in (int, float, Decimal):
-        return lambda raw: _read_number(t, raw) if isinstance(raw, str) else raw
     return lambda raw: span_value(t, raw) if isinstance(raw, str) else raw
+
+
+def _is_number(fi):
+    from decimal import Decimal
+    return _span_source(fi) is not None and fi.annotation in (int, float, Decimal)
 
 
 def _span_source(fi):
@@ -298,7 +383,8 @@ class DocumentSystem:
 
     def load_calibration(self, path, **kw):
         """Attach a calibration written by save_calibration (System.load_guarantee: refuses a file made for another
-        catalog) → its report."""
+        catalog — other prompts, compute or checks — or for other models; strict=False attaches it anyway) → its
+        report."""
         rep = self.system.load_guarantee(path, **kw)
         self.calibration = rep
         return rep
@@ -327,37 +413,41 @@ class DocumentSystem:
 
 
 def _same_number(r, y):
-    """The default judge of a number answer: right when it rounds to the label at the label's precision — a label with
-    d decimals (a number, or a string read as a quote: "1,500", "33.33", "(2.5)") matches within 0.5·10^-d."""
+    """The default judge of a number answer. A label written as a string ("33.33", "1,500", "(2.5)", read like a
+    quote) states its precision: d decimals match an answer within 0.5·10^-d ("33.33" takes 33.3333; "1,500" takes
+    1500.4). A label given as a number has no written precision: equal up to float noise (math.isclose, 1e-9) —
+    the int 1 does not take 1.4, the float 33.33 does not take 33.3333."""
     try:
-        if r.answer is None or isinstance(y, bool):
+        if r.answer is None or isinstance(y, bool) or isinstance(r.answer, bool):
             return False
         a = float(r.answer)
-        if isinstance(y, str):
-            g, written = float(_read_number(float, y)), y
-        else:
-            g = float(y)
-            written = repr(y) if isinstance(y, float) else str(y)
-        if not (math.isfinite(a) and math.isfinite(g)):
+        if not math.isfinite(a):
             return False
-        m = re.search(r"[.,](\d+)\D*$", written.strip())
-        d = len(m.group(1)) if m and not (isinstance(y, float) and written.endswith(".0")) else 0
-        if isinstance(y, str) and m and re.fullmatch(r"\d{3}", m.group(1)) and "," in written and "." not in written:
+        if not isinstance(y, str):
+            g = float(y)
+            return math.isfinite(g) and math.isclose(a, g, rel_tol=1e-9, abs_tol=1e-9)
+        g = float(_read_number(float, y))
+        core = re.sub(r"[^0-9.,]", "", y)
+        m = re.search(r"[.,](\d+)$", core)
+        d = len(m.group(1)) if m else 0
+        if m and len(m.group(1)) == 3 and "," in core and "." not in core:
             d = 0                                      # "1,500": a thousands separator, not three decimals
-        return abs(a - g) <= 0.5 * 10 ** -d + 1e-9 * abs(g)
+        return math.isfinite(g) and abs(a - g) <= 0.5 * 10 ** -d + 1e-9 * abs(g)
     except (TypeError, ValueError, OverflowError):
         return False
 
 
-def document(schema, model, *, task=None, text="doc", compute=None, answer=None, checks=None, storage=None,
-             calibration=None, record="full", workers=1):
+def document(schema, model, *, task=None, text="doc", compute=None, answer=None, checks=None, units="same",
+             storage=None, calibration=None, record="full", workers=1):
     """A decision over a document (see the module docs) → DocumentSystem.
 
     schema: a pydantic model class, one field per fact to read (`Span[float]`, `Span[date]`, `Span[str]`, a
     `Literal[...]` choice ...). model: a decider (`solvi.models.llm(url, name)`, `decider("solvi-base")`). task: text
     put before every field's description (what the document is). text: the name of the text fact in the input
     (default "doc"). compute: (facts, state) → the answer. answer: its answer type (default `Answer.estimate()`, a
-    number). checks: {name: (facts, state) → bool}, hard checks. storage: a path (JSONLStorage with `record=`) or a
+    number). checks: {name: (facts, state) → bool}, hard checks. units: "same" (default: the answer abstains when two
+    number fields write different scales or currencies — "$1.2bn" and "$950 million", "$100" and "€100"; a field that
+    writes none conflicts with nothing) or "any" (no such check; compute reads `facts.units`). storage: a path (JSONLStorage with `record=`) or a
     TraceStorage. calibration: a file written by save_calibration, attached at once. workers: parallel steps inside
     one ask (System(workers=))."""
     from ..core.store import JSONLStorage
@@ -369,18 +459,26 @@ def document(schema, model, *, task=None, text="doc", compute=None, answer=None,
     if not isinstance(text, str) or not text:
         raise TypeError("text= is the name of the text fact in the input (default \"doc\")")
     fields = list(schema.model_fields)
-    for bad in (text, STATE, QUESTION):
+    if units not in UNIT_MODES:
+        raise ValueError(f'units must be "same" or "any", not {units!r}')
+    for bad in (text, STATE, QUESTION, "units", "compute"):
         if bad in fields:
             raise ValueError(f"{schema.__name__}.{bad}: a field cannot be named {bad!r} (the "
-                             + ("text fact" if bad == text else "input fact" if bad == STATE else "question") + ")")
+                             + {text: "text fact", STATE: "input fact", QUESTION: "question", "units": "facts' units",
+                                "compute": "rule"}[bad] + ")")
+    made = {f"{x}_value" for x in fields}
+    if made & set(fields):
+        x = sorted(made & set(fields))[0]
+        raise ValueError(f"{schema.__name__}.{x}: a field cannot be named {x!r} — the recipe names the value it reads "
+                         f"from field {x[:-6]!r} so")
     if text == STATE:
         raise ValueError(f"text= cannot be {STATE!r}: that fact carries the rest of the input")
     checks = dict(checks or {})
     for name, f in checks.items():
-        if not isinstance(name, str) or not name.isidentifier() or name in fields or name in (text, STATE, QUESTION) \
-                or name in {f"{x}_sign" for x in fields} or name == "compute":
-            raise ValueError(f"check name {name!r}: a Python identifier other than a field, <field>_sign, compute, "
-                             f"{text!r}, {STATE!r} or {QUESTION!r}")
+        if not isinstance(name, str) or not name.isidentifier() or name in fields or name in made \
+                or name in (text, STATE, QUESTION, "compute", "units"):
+            raise ValueError(f"check name {name!r}: a Python identifier other than a field, <field>_value, compute, "
+                             f"units, {text!r}, {STATE!r} or {QUESTION!r}")
         if not callable(f):
             raise TypeError(f"check {name!r} is a function (facts, state) → bool, not {type(f).__name__}")
     if compute is not None and not callable(compute):
@@ -428,46 +526,96 @@ def document(schema, model, *, task=None, text="doc", compute=None, answer=None,
         cat.fn(model.decision(name, q, text, options=opts, type=t, **args))
         readers[name] = _value_reader(fi)
 
+    from decimal import Decimal as _Dec
+    numbers = [x for x, fi in schema.model_fields.items() if _is_number(fi)]
+    for name in numbers:                                   # a number field's value: read, its sign checked in the text
+        vt = schema.model_fields[name].annotation
+
+        def value(kw, name=name, vt=vt):
+            raw = kw[name]
+            if not isinstance(raw, str):
+                return raw
+            try:
+                v = _read_quote(vt, raw)[0]
+            except ValueError as e:
+                raise ValueError(f"{name}: {raw!r} does not read as {vt.__name__}: {e}") from None
+            around = _sign_dropped(raw, kw[text])
+            if around is not None:
+                raise ValueError(f"{name}: the text writes {around!r}, the quote {raw!r} left out its sign")
+            return v
+        cat.fn(_part(f"{name}_value", [name, text], value))
+
+    def finite(v):
+        import numbers as _numbers
+        if isinstance(v, (_numbers.Number, _Dec)) and not isinstance(v, bool):
+            try:
+                ok = math.isfinite(v)
+            except (TypeError, ValueError, OverflowError):
+                ok = True                              # a complex or a huge int: judged by the answer type
+            if not ok:
+                raise ValueError(f"the computed answer is {v!r}, not a finite number")
+        return v
+
+    def units_of(kw):
+        out = {}
+        for x in numbers:
+            try:
+                out[x] = _read_quote(schema.model_fields[x].annotation, kw[x])[1]
+            except ValueError:                         # unreadable: its value part says why
+                out[x] = Unit()
+        return out
+
+    from ..core.slow.refine import Fail
+
+    def same_units(us):
+        for what in ("scale", "currency"):
+            said = {x: getattr(u, what) for x, u in us.items() if getattr(u, what) is not None}
+            if len(set(said.values())) > 1:
+                raise ValueError(f"units differ: {', '.join(f'{x} in {v}' for x, v in said.items())} — the {what}s of "
+                                 'the facts do not match (document(..., units="any") turns the check off; compute '
+                                 "reads facts.units)")
+
     def facts_of(kw):
         vals = {}
         for name in fields:
+            if name in numbers:
+                vals[name] = kw[f"{name}_value"]
+                continue
             raw = kw[name]
             try:
                 vals[name] = readers[name](raw)
             except ValueError as e:
                 raise ValueError(f"{name}: {raw!r} does not read as {_type_name(schema.model_fields[name])}: {e}") from None
-        return schema.model_construct(**vals)
+        f = schema.model_construct(**vals)
+        object.__setattr__(f, "units", units_of(kw))
+        return f
 
-    from decimal import Decimal as _Dec
-
-    from ..core.slow.refine import Fail
-    signed = []
-    for name, fi in schema.model_fields.items():           # a number whose sign the quote left out abstains
-        if _span_source(fi) is not None and fi.annotation in (int, float, _Dec):
-            def sign_kept(kw, name=name):
-                around = _sign_dropped(kw[name], kw[text])
-                return True if around is None else Fail(f"{name}: the text writes {around!r}, the quote "
-                                                        f"{kw[name]!r} left out its sign")
-            cat.check(_part(f"{name}_sign", [name, text], sign_kept), hard=True)
-            signed.append(f"{name}_sign")
-
-    def finite(v):
-        if isinstance(v, (float, _Dec)) and not isinstance(v, bool) and not math.isfinite(v):
-            raise ValueError(f"the computed answer is {v!r}, not a finite number")
-        return v
-
-    inputs = fields + [STATE]
+    inputs = [f"{x}_value" for x in numbers] + fields + [STATE]   # the rule's why: each value, then its quote
     for name, f in checks.items():
         cat.check(_part(name, inputs, lambda kw, f=f: f(facts_of(kw), kw[STATE]), wrapped=f), hard=True)
+    required = []
+    if units == "same" and len(numbers) > 1:              # two number fields: their written units must agree
+
+        def same(kw):
+            try:
+                same_units(units_of(kw))
+            except ValueError as e:
+                return Fail(str(e))
+            return True
+        cat.check(_part("units", list(numbers), same), hard=True)
+        required.append("units")
     if compute is None:
         only = fields[0]
-        rule = _part("compute", [only], lambda kw: finite(readers[only](kw[only])))
+        if only in numbers:
+            rule = _part("compute", [f"{only}_value", only], lambda kw: finite(kw[f"{only}_value"]))
+        else:
+            rule = _part("compute", [only], lambda kw: readers[only](kw[only]))
     else:
         rule = _part("compute", inputs, lambda kw: finite(compute(facts_of(kw), kw[STATE])), wrapped=compute)
     cat.rule(QUESTION)(rule)
     if answer is None:
         answer = Answer.estimate()
-    q = Question(QUESTION, task or f"{schema.__name__} → the computed answer", answer, requires=signed + list(checks))
+    q = Question(QUESTION, task or f"{schema.__name__} → the computed answer", answer, requires=required + list(checks))
     if isinstance(storage, str) or hasattr(storage, "__fspath__"):
         storage = JSONLStorage(storage, record=record)
     s = System(cat, [q], storage=storage, workers=workers)

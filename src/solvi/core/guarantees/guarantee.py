@@ -867,8 +867,10 @@ def load_guarantee(system, path, *, signal=None, groups=None, strict=True):
     that does not fit (another catalog, an edit that changes the promise inconsistently), not a deliberate forgery that
     recomputes them: keep the file like code. strict (default): refuse a file made for another catalog (the signal is computed by
     the catalog's code), for other models (another model, endpoint or reply settings, or a decision asked with other
-    words — what the models' fingerprints cover; a file saved before 1.4 carries none and is not checked for it) or for
-    another answer type of the question; strict=False attaches it anyway (the guard's fingerprint is still checked)."""
+    words — what the models' fingerprints cover; a model that names no version is compared by its name and settings,
+    so a server that changes the weights behind the name is not told apart; a file without the models' fingerprints
+    is refused) or for another answer type of the question; strict=False attaches it anyway (the guard's fingerprint is
+    still checked)."""
     import json
     from ..calibfile import _dec
     with open(path, encoding="utf-8") as fh:
@@ -886,13 +888,15 @@ def load_guarantee(system, path, *, signal=None, groups=None, strict=True):
             raise ValueError(f"{path}: calibrated on catalog #{rec.get('catalog')}, this system's catalog is #{fp}: the "
                              "parts that compute the answer or its signal changed — calibrate again (System.guarantee), "
                              "or load with strict=False")
-        if "models" in rec:
-            now = json.loads(json.dumps(system.fingerprint()["models"], default=str))
-            if rec["models"] != now:
-                diff = sorted(k for k in set(rec["models"]) | set(now) if rec["models"].get(k) != now.get(k))
-                raise ValueError(f"{path}: calibrated with other models than this system's — {', '.join(diff)} "
-                                 "differ (the model, its endpoint or reply settings, or the question asked): calibrate "
-                                 "again (System.guarantee), or load with strict=False")
+        if not isinstance(rec.get("models"), dict):
+            raise ValueError(f"{path}: the file names no models it was calibrated with (\"models\") — calibrate "
+                             "again and save (System.save_guarantee), or load with strict=False")
+        now = json.loads(json.dumps(system.fingerprint()["models"], default=str))
+        if rec["models"] != now:
+            diff = sorted(k for k in set(rec["models"]) | set(now) if rec["models"].get(k) != now.get(k))
+            raise ValueError(f"{path}: calibrated with other models than this system's — {', '.join(diff)} "
+                             "differ (the model, its endpoint or reply settings, or the question asked): calibrate "
+                             "again (System.guarantee), or load with strict=False")
     for given, saved, what in ((signal, rec.get("signal_function"), "signal"), (groups, rec.get("groups_function"), "groups")):
         if saved and given is None:
             raise ValueError(f"{path}: the guarantee's {what} was a function: pass it again ({what}=that_function)")
