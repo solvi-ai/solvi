@@ -129,7 +129,7 @@ def test_a_sign_the_quote_left_out_abstains():
                 "Revenue was -$1,234 and cost was 5.", "Revenue was −1,234 and cost was 5."):
         res = ops_system(Server(reply)).ask({"doc": doc, "op": "diff"})
         assert res["answer"].status == "abstain", doc
-        assert "left out its sign" in res["answer"].why, doc
+        assert "left out its" in res["answer"].why, doc
     ok = ops_system(Server(reply)).ask({"doc": "Revenue was 1,234 and cost was 5.", "op": "diff"})["answer"]
     assert ok.status == "ok" and ok.answer == 1229.0
 
@@ -331,7 +331,8 @@ def test_the_default_number_judge_reads_the_label_at_its_precision():
 
     from solvi.solutions.document import _same_number
     assert _same_number(R(answer=33.3333), "33.33") and not _same_number(R(answer=33.3333), 33.33)
-    assert not _same_number(R(answer=33.35), "33.33") and _same_number(R(answer=33.4), "33")
+    assert not _same_number(R(answer=33.35), "33.33") and not _same_number(R(answer=33.4), "33")   # < 100: exact
+    assert _same_number(R(answer=133.4), "133") and _same_number(R(answer=33.0), "33")
     assert _same_number(R(answer=1500.4), "1,500") and not _same_number(R(answer=1500.2), 1500)
     assert not _same_number(R(answer=1501.0), "1,500") and not _same_number(R(answer=1.4), 1)   # int 1: exact
     assert not _same_number(R(answer=0.4), 1e-05) and not _same_number(R(answer=0.49), 0)
@@ -412,7 +413,8 @@ def two(qa, qb, **kw):
 
 @pytest.mark.parametrize("doc,qa,qb,why", [
     ("Revenue $1.2bn, cost $950 million.", "$1.2bn", "$950 million", "a in billion, b in million"),
-    ("Revenue $100, cost €100.", "$100", "€100", "a in USD, b in EUR"),
+    ("Revenue $100, cost €100.", "$100", "€100", "a in $, b in EUR"),
+    ("Revenue 3k, cost 3,000.", "3k", "3,000", "a in thousand, b in no scale"),
     ("Revenue US$100, cost EUR 100.", "US$100", "EUR 100", "a in USD, b in EUR"),
 ])
 def test_two_numbers_in_different_units_abstain(doc, qa, qb, why):
@@ -428,12 +430,17 @@ def test_units_are_exposed_and_a_bare_number_conflicts_with_nothing():
     def compute(f, s):
         seen.update(f.units)
         return f.a - f.b
-    r = two("12%", "$1,200 million", compute=compute).ask({"doc": "Margin 12%, revenue $1,200 million."})["answer"]
+    r = two("12%", "$1,200", compute=compute).ask({"doc": "Margin 12%, revenue $1,200."})["answer"]
     assert r.status == "ok"                               # percent next to an absolute number: exposed, not refused
-    assert seen["a"].percent and seen["a"].currency is None and seen["b"].scale == "million"
-    assert seen["b"].currency == "USD" and not seen["b"].percent
-    assert two("3k", "950").ask({"doc": "Revenue 3k, cost 950."})["answer"].status == "ok"
-    with pytest.raises(ValueError, match='units must be "same" or "any"'):
+    assert seen["a"].percent and seen["a"].currency is None and seen["b"].scale is None
+    assert seen["b"].currency == "$" and not seen["b"].percent
+    assert two("3k", "950").ask({"doc": "Revenue 3k, cost 950."})["answer"].status == "abstain"       # "same"
+    assert two("3k", "950", units="lenient").ask({"doc": "Revenue 3k, cost 950."})["answer"].status == "ok"
+    assert two("$1.2bn", "$950m", units="lenient").ask({"doc": "Revenue $1.2bn, cost $950m."})["answer"].status \
+        == "abstain"                                       # lenient: two explicit scales still differ
+    assert two("$100", "C$100").ask({"doc": "Revenue $100, cost C$100."})["answer"].status == "ok"    # "$": any dollar
+    assert two("US$100", "C$100").ask({"doc": "Revenue US$100, cost C$100."})["answer"].status == "abstain"
+    with pytest.raises(ValueError, match='units must be "same", "lenient" or "any"'):
         two("1", "2", units="all")
 
 
@@ -441,11 +448,61 @@ def test_units_are_exposed_and_a_bare_number_conflicts_with_nothing():
     "Revenue -US$1,234; cost 100.", "Revenue (  1,234); cost 100.", "Revenue 1,234-; cost 100.",
     "Revenue \u20111,234; cost 100.", "Revenue \uff0d1,234; cost 100.", "Revenue \ufe631,234; cost 100.",
     "Revenue -Rs 1,234; cost 100.", "Revenue -R$1,234; cost 100.", "Revenue (1,234 million); cost 100.",
-    "We had a loss of $1,234 this year. | Net revenue | (1,234) |. Cost 100.",     # any occurrence signed
+    "We had a loss of 1,234 this year. | Net revenue | (1,234) |. Cost 100.",      # any occurrence signed
+    "| Net | - 1,234 |\n| Cost | 100 |", "Net income: \u2212 1,234. Cost 100.", "Net income: \u2212\u20091,234. Cost 100.",
+    "Net income \u20151,234. Cost 100.", "Net income \u02d71,234. Cost 100.", "Net \u25b31,234. Cost 100.",
+    "Net EUR-1,234. Cost 100.", "Net profit -Rs. 1,234. Cost 100.", "Net profit (Rs. 1,234). Cost 100.",
+    "| Net | 1,234 | (1,234) |\n| Cost | 100 | 90 |",
 ])
 def test_a_sign_at_any_occurrence_or_in_any_dash_abstains(doc):
-    r = two("1,234", "100").ask({"doc": doc})["answer"]
-    assert r.status == "abstain" and "left out its sign" in r.why, (doc, r.why)
+    r = two("1,234", "100", units="any").ask({"doc": doc})["answer"]
+    assert r.status == "abstain" and "left out its" in r.why, (doc, r.why)
+    assert "sign" in r.why or "parentheses" in r.why, r.why
+
+
+@pytest.mark.parametrize("doc,qa,part", [
+    ("Revenue $1.2 billion, cost $950 million.", "$1.2", "scale"), ("Net −$1.2 bn. Cost 100.", "1.2", "sign"),
+    ("Net −$1.2 bn. Cost 100.", "1.2", "currency"), ("Net −$1.2 bn. Cost 100.", "1.2", "scale"),
+    ("| Net | $ (1,234) |\n| Cost | 100 |", "1,234", "parentheses"),
+    ("Net (1,234 million). Cost 100.", "1,234 million", "parentheses"),
+    ("Revenue $1,234 in prose. | Net | -$ 1,234 |. Cost 100.", "$1,234", "sign"),   # spaces differ: still it
+])
+def test_the_quote_must_be_the_whole_number_token(doc, qa, part):
+    r = two(qa, "100", units="any").ask({"doc": doc})["answer"]
+    assert r.status == "abstain" and "left out its" in r.why and part in r.why, (doc, r.why)
+
+
+@pytest.mark.parametrize("doc,qa", [
+    ("- 1,234 revenue\n- 100 cost", "- 1,234"),             # a list bullet is not a minus
+    ("Revenue - 1,234\nCost - 100", "- 1,234"),              # a separator is not a minus
+])
+def test_a_quote_reading_a_sign_the_text_does_not_write_abstains(doc, qa):
+    r = two(qa, "100", units="any").ask({"doc": doc})["answer"]
+    assert r.status == "abstain" and "the text does not write there" in r.why, r.why
+
+
+@pytest.mark.parametrize("doc,qa", [
+    ("Net sales SEK 1,234 m (1,100). Cost 100.", "1,100"), ("Net sales SEK 1,234 m (1,100). Cost 100.", "(1,100)"),
+    ("EBIT margin 12.3% (11.8). Cost 100.", "(11.8)"),
+])
+def test_a_number_in_parentheses_right_after_another_is_ambiguous(doc, qa):
+    r = two(qa, "100", units="any").ask({"doc": doc})["answer"]
+    assert r.status == "abstain" and "right after another number" in r.why, r.why
+
+
+@pytest.mark.parametrize("doc,qa,qb", [
+    ("Revenue Rs. 1,234, cost Rs. 100.", "Rs. 1,234", "Rs. 100"), ("Revenue Rs.500, cost Rs.100.", "Rs.500", "Rs.100"),
+    ("Revenue 12. Cost 5. Change in cost −12%.", "12", "5"),         # the −12% is another quantity
+    ("Revenue 1,234. Cost 100. Margin −100 bps.", "1,234", "100"),
+    ("| Net | $ (1,234) |\n| Cost | $ 100 |", "$ (1,234)", "$ 100"),
+    ("Net −$1.2 bn. Cost $0.1 bn.", "−$1.2 bn", "$0.1 bn"),
+    ("Total revenue 1,234 (Note 5). Cost 100.", "1,234", "100"), ("Revenue 1,234(1). Cost 100.", "1,234", "100"),
+    ("Revenue guidance 1,234–1,300. Cost 100.", "1,300", "100"), ("Revenue guidance 1,234 – 1,300. Cost 100.", "1,300", "100"),
+    ("Revenue: -- 1,234; Cost 100", "1,234", "100"), ("Revenue £1,234m (2018: £1,100m). Cost £100m.", "£1,100m", "£100m"),
+])
+def test_whole_tokens_and_unbound_marks_pass(doc, qa, qb):
+    r = two(qa, qb, units="any").ask({"doc": doc})["answer"]
+    assert r.status == "ok", (doc, r.why)
 
 
 @pytest.mark.parametrize("doc,qa", [
@@ -461,7 +518,8 @@ def test_dashes_and_parentheses_that_are_not_signs_pass(doc, qa):
 
 @pytest.mark.parametrize("raw,v", [("EBT (2019)", None), ("NET (5)", None), ("(12%)", -12.0), ("(12)%", -12.0),
                                    ("(3.5)%", -3.5), ("-R$1,234", -1234.0), ("HK$1,234", 1234.0), ("Rs 1,234", 1234.0),
-                                   ("$1.2bn 3 million", None), ("$1 €2", None)])
+                                   ("$1.2bn 3 million", None), ("$1 €2", None), ("$1.2bn million", None),
+                                   ("€1.2 USD", None), ("Rs. 1,234", 1234.0), ("Rs.500", 500.0), ("$1.2 USD", 1.2)])
 def test_currency_codes_and_percent_parentheses(raw, v):
     from solvi.solutions.document import _read_quote
     if v is None:
