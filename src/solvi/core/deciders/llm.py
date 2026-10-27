@@ -248,9 +248,9 @@ def locate(passage, text, ignore_case=True):
     (’ ‘ “ ” as ' "), dashes (– — ‑ − as -), runs of whitespace (a new line written as a space) and, when nothing matches
     with the case kept, letter case ("wre54g" for "WRE54G"; ignore_case=False: not); nothing else. The offsets are into
     the text as given, so text[start:end] is the text's own spelling, never the passage's. None when it is not there.
-    An occurrence that begins or ends inside a longer number is skipped (solvi.core.catalog.cuts_number): "7" is found
-    as a number of its own, never as the 7 of "2017", and "10" not in "109" — when every occurrence is inside a number,
-    None (the grounding check would refuse such a quote anyway)."""
+    An occurrence that begins or ends inside a longer number, as solvi.core.catalog.cuts_number reads it, is skipped:
+    "7" is found as a number of its own, not as the 7 of "2017", "10" not in "109", "7." not in "7.5" — when every
+    occurrence does, None (the grounding check refuses such a quote with the same rule)."""
     from ..catalog import cuts_number
     if not passage:
         return None
@@ -274,11 +274,16 @@ def locate(passage, text, ignore_case=True):
     words = p.split()
     if not words:
         return None
+    def matches_at(rx):                              # every match, overlapping ones too (finditer skips them)
+        m = rx.search(t)
+        while m:
+            yield m.start(), m.end()
+            m = rx.search(t, m.start() + 1)
+
     rx = re.compile(r"\s+".join(re.escape(w) for w in words))
-    got = first((m.start(), m.end()) for m in rx.finditer(t))
+    got = first(matches_at(rx))
     if got is None and ignore_case:
-        rx = re.compile(rx.pattern, re.IGNORECASE)
-        got = first((m.start(), m.end()) for m in rx.finditer(t))
+        got = first(matches_at(re.compile(rx.pattern, re.IGNORECASE)))
     return got
 
 
@@ -334,8 +339,9 @@ def echoed_option(ans, labs, it):
     "contradiction: the contract states the opposite", the option's line from the prompt's list echoed back — else None.
     Accepted only when exactly one option is followed by a separator (":", " - ", " – ", " — ") at the start and
     something follows it, and what follows:
-    - for an option with a description: is that description (or its start, or it and more words), and is not, nor
-      starts like, another option's description ("yes: it does not" with no = "it does not" stays invalid);
+    - for an option with a description: is that description (or its start, or it and more words that name no other
+      option and hold no other option's description), and is not, nor starts like, another option's description
+      ("yes: it does not" with no = "it does not", "yes: it applies, no it does not" stay invalid);
     - for options without descriptions: names no other option ("neutral: or maybe entailment" stays invalid).
     A bare "neutral:" stays invalid: nothing after the separator is a cut or malformed reply, not an echo."""
     hits = []
@@ -355,14 +361,18 @@ def echoed_option(ans, labs, it):
 
     def like(d):
         return bool(d) and (d.startswith(said) or said.startswith(d))
+
+    def names_another(t):                            # another option by name, or another option's description
+        return any(re.search(r"(?<!\w)" + re.escape(x.lower()) + r"(?!\w)", t) for x in labs if x != o) or \
+            any(d in t for k, d in descs.items() if k != o)
     if any(like(d) for k, d in descs.items() if k != o):
         return None
     if descs.get(o):
-        return o if like(descs[o]) else None
-    for other in labs:
-        if other != o and re.search(r"(?<!\w)" + re.escape(other.lower()) + r"(?!\w)", rest.lower()):
+        if not like(descs[o]):
             return None
-    return o
+        tail = said[len(descs[o]):] if said.startswith(descs[o]) else ""
+        return None if names_another(tail) else o   # "<its description>, or rather entailment" stays invalid
+    return None if names_another(said) else o
 
 
 def logprob_probs(content, logprobs, answer, labs, echo=False):

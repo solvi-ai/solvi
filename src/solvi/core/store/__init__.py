@@ -1276,12 +1276,40 @@ class TraceStorage(abc.ABC):
 
         One store, several systems: pass them all, `replay_all([system_a, system_b])` — each record is replayed against
         the system that asks every question it answers (the one whose catalog fingerprint is the recorded one first). A
-        record that no given system asks any question of is another system's: it is listed with one mismatch of kind
-        "other_system" (and the summary says no verdict past its hashes) instead of the missing parts and inputs a
-        foreign catalog would report; what does not depend on the system — its hashes (kind "integrity") — is still
-        checked and reported. `question=` / `catalog_fp=` filters replay one system's records only."""
+        record that no given system asks any question of is listed with a mismatch of kind "other_system" instead of
+        the missing parts and inputs a foreign catalog would report — not an integrity verdict: which questions a record
+        answers is its own (editable) content. What does not depend on the system is still checked: a full record's
+        trace hashes (kind "integrity"); a compact one keeps no trace ("not_kept"), and a trace that cannot be loaded
+        with this system is an "error" mismatch, never passed over. Every record's own hash is checked as verify()
+        checks it (an edited record: kind "integrity"). `question=` / `catalog_fp=` filters replay one system's
+        records only."""
         from ..runtime import Mismatch, mismatch_summary
         bad = []
+        systems = list(system) if isinstance(system, (list, tuple)) else [system]
+        if not systems:
+            raise ValueError("replay_all needs a System (or a list of the Systems that wrote the store)")
+        cats = [(x, x.fingerprint()["catalog"]) for x in systems if hasattr(x, "questions")]
+
+        def own(data):
+            """→ (the system to replay this record with, whether it is one that asks its questions)."""
+            if len(cats) < len(systems):              # a bare Catalog: replayed as before
+                return systems[0], True
+            qs = set(data.get("answers") or {})
+            if not qs:                                # nothing to tell it by: replayed as before
+                return systems[0], True
+            fits = [(x, c) for x, c in cats if qs and qs <= set(x.questions)]
+            exact = [x for x, c in fits if c == data.get("catalog")]
+            if exact or fits:
+                return (exact or [fits[0][0]])[0], True
+            if any(qs & set(x.questions) for x, _ in cats):
+                return next(x for x, _ in cats if qs & set(x.questions)), True
+            return systems[0], False
+
+        def failed(s, stage, e):
+            ms = [Mismatch(0, stage, f"{type(e).__name__}: {e}", "error")]
+            return {"id": s.id, "seq": s.seq, "time": s.time, "mismatches": ms, "models": [], "catalog": None,
+                    **mismatch_summary(ms)}
+
         systems = list(system) if isinstance(system, (list, tuple)) else [system]
         if not systems:
             raise ValueError("replay_all needs a System (or a list of the Systems that wrote the store)")
@@ -1307,56 +1335,70 @@ class TraceStorage(abc.ABC):
             bad.append({"id": s.id, "seq": s.seq, "time": s.time, "mismatches": ms, "models": [], "catalog": None,
                         **mismatch_summary(ms)})
 
-        for s in (self.query(**filters) if filters else self.iter()):
+        def foreign(s, system):
+            """Another system's record: only what does not depend on the system — its trace's hashes, when it keeps a
+            trace and the trace loads — is checked; a check that cannot run is said, never passed over."""
+            ms = []
+            if s.compact:
+                ms.append(Mismatch(0, "trace", "a compact record keeps no trace: its steps are checked only by the "
+                                   "system that wrote it", "not_kept"))
+            else:
+                try:
+                    r = s.response(system)
+                    rep = r.trace.replay(system, r.flow, trust_models=True)
+                    ms += [m for m in rep["mismatches"] if m.kind == "integrity"]
+                except Exception as e:  # noqa: BLE001 — a foreign catalog may not load its values
+                    ms.append(Mismatch(0, "trace", f"its trace could not be checked with this system: "
+                                       f"{type(e).__name__}: {str(e)[:120]}", "error"))
+            qs = sorted(s.data.get("answers") or {})
+            ms.append(Mismatch(0, "system", f"the record answers {qs}, which no given system asks: another system's "
+                               "record (or one whose questions were edited: verify() tells) — replay it with that system "
+                               "(replay_all([...]) with every system that writes this store)", "other_system"))
+            return {"id": s.id, "seq": s.seq, "time": s.time, "mismatches": ms, "models": [], "catalog": None,
+                    **({"record": "compact"} if s.compact else {}), **mismatch_summary(ms)}
+
+        def check(s):
             system, mine = own(s.data)
             if not mine:
-                ms = []
-                try:
-                    r = s.response(system) if not s.compact else None
-                    if r is not None:
-                        rep = r.trace.replay(system, r.flow, trust_models=True)
-                        ms = [m for m in rep["mismatches"] if m.kind == "integrity"]
-                except Exception:  # noqa: BLE001 — a foreign catalog may not load its values: no verdict past the hashes
-                    ms = []
-                qs = sorted(s.data.get("answers") or {})
-                ms.append(Mismatch(0, "system", f"the record answers {qs}, which no given system asks: another "
-                                   "system's record — replay it with that system (replay_all([...]) with every system "
-                                   "that writes this store)", "other_system"))
-                bad.append({"id": s.id, "seq": s.seq, "time": s.time, "mismatches": ms, "models": [], "catalog": None,
-                            **mismatch_summary(ms)})
-                continue
+                return foreign(s, system)
             if s.compact:
                 try:
                     r, ms = rederive(s.data, system, trust_models)
                 except Exception as e:  # noqa: BLE001
-                    failed(s, "rederive", e)
-                    bad[-1]["record"] = "compact"
-                    continue
+                    return {**failed(s, "rederive", e), "record": "compact"}
                 if r is None:
-                    bad.append({"id": s.id, "seq": s.seq, "time": s.time, "mismatches": ms, "models": [],
-                                "catalog": None, "record": "compact", **mismatch_summary(ms)})
-                    continue
+                    return {"id": s.id, "seq": s.seq, "time": s.time, "mismatches": ms, "models": [],
+                            "catalog": None, "record": "compact", **mismatch_summary(ms)}
             else:
                 try:
                     r = s.response(system)
                 except Exception as e:  # noqa: BLE001
-                    failed(s, "load", e)
-                    continue
+                    return failed(s, "load", e)
             if int(s.data.get("v") or 1) < 2:         # stored with sorted dict keys: a reason that shows a dict shows it
                 r.trace.legacy_order = True           # in another order than it was written (not an edit; see LEGACY_ORDER)
             try:                                      # a compact decision's steps (and models) were just re-run by
                 rep = r.trace.replay(system, r.flow, trust_models=trust_models or s.compact)   # rederive: not again
             except Exception as e:  # noqa: BLE001
-                failed(s, "replay", e)
-                continue
-            if not rep["ok"]:
-                b = {"id": s.id, "seq": s.seq, "time": s.time, "mismatches": rep["mismatches"], "models": rep["models"],
-                     "catalog": rep["catalog"], "kinds": rep["kinds"], "summary": rep["summary"]}
-                rerun = {step for step, _, verdict in rep["models"] if verdict == "recomputed"}
-                if int(s.data.get("v") or 1) < 2 and any(m.kind == "recompute" and m[0] in rerun for m in rep["mismatches"]):
-                    b["note"] = LEGACY_ORDER          # a model step of an old record did not recompute: maybe only this
-                if s.compact:
-                    b["record"] = "compact"
+                return failed(s, "replay", e)
+            if rep["ok"]:
+                return None
+            b = {"id": s.id, "seq": s.seq, "time": s.time, "mismatches": rep["mismatches"], "models": rep["models"],
+                 "catalog": rep["catalog"], "kinds": rep["kinds"], "summary": rep["summary"]}
+            rerun = {step for step, _, verdict in rep["models"] if verdict == "recomputed"}
+            if int(s.data.get("v") or 1) < 2 and any(m.kind == "recompute" and m[0] in rerun for m in rep["mismatches"]):
+                b["note"] = LEGACY_ORDER              # a model step of an old record did not recompute: maybe only this
+            if s.compact:
+                b["record"] = "compact"
+            return b
+
+        for s in (self.query(**filters) if filters else self.iter()):
+            b = check(s)
+            if s.data.get("hash") != record_hash(s.data):   # the record itself edited after it was stored (as verify)
+                hm = Mismatch(0, "record", "record edited after it was stored (its hash does not match)", "integrity")
+                b = b or {"id": s.id, "seq": s.seq, "time": s.time, "mismatches": [], "models": [], "catalog": None}
+                b["mismatches"] = [hm] + list(b["mismatches"])
+                b.update(mismatch_summary(b["mismatches"], b.get("catalog")))
+            if b is not None:
                 bad.append(b)
         return bad
 

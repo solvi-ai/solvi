@@ -113,6 +113,10 @@ def test_one_source_calibrates_in_chunks_with_the_same_numbers():
     ("neutral: or maybe entailment", None),
     ("contradiction or neutral", None),                             # no separator
     ("Contradiction: the contract states the opposite", None),      # not the option as written
+    ("contradiction: the contract states the opposite of the hypothesis, or rather entailment", None),   # a tail that
+    ("contradiction: the contract states the opposite of the hypothesis. Actually neutral.", None),      # names another
+    ("contradiction: the contract states the opposite of the hypothesis; entailment: the contract states or clearly "
+     "implies it", None),
 ])
 def test_an_answer_echoing_option_and_description(said, value):
     srv = Server(lambda i, b: reply(said, {"entailment": 0.05, "contradiction": 0.9, "neutral": 0.05}
@@ -129,6 +133,8 @@ def test_an_answer_echoing_option_and_description(said, value):
     ("yes: it does not", None),                                     # no's description
     ("yes - it does not apply", None),                              # starts like no's description
     ("no: it does not apply", "no"),
+    ("yes: it applies, no it does not", None),
+    ("yes: it applies. it does not", None),                         # holds no's description
 ])
 def test_an_echo_with_another_options_description_is_not_read(said, value):
     srv = Server(lambda i, b: reply(said, {"yes": 0.9, "no": 0.1} if said.startswith("yes") else {"yes": 0.1, "no": 0.9}))
@@ -252,6 +258,9 @@ def test_the_readme_links_resolve_outside_the_repository():
     ("1.0", "Ratio 41.0 in total, 1.0 per share.", "1.0"),
     ("6", "Revenue 13,064 and 6 segments.", "6"),
     ("7", "In 2017 and 1997.", None),                         # only inside numbers: not found
+    ("7.", "Up 7.5 percent, then 7. And more", "7."),          # not the 7. of 7.5
+    ("1,", "Total 1,300; items 1, 2", "1,"),
+    ("12 3", "codes 112 3 and 12 3", "12 3"),                  # overlapping matches of the words pattern
     ("charged", "he was charged twice", "charged"),           # words as before
 ])
 def test_locating_a_quoted_number_never_lands_inside_a_longer_number(passage, text, want):
@@ -322,6 +331,8 @@ def test_a_system_guarantee_saves_and_loads(tmp_path):
         _guarded().load_guarantee(bad)
     with pytest.raises(KeyError):
         _guarded().save_guarantee("label", tmp_path / "x.json")
+    with pytest.raises(ValueError, match="only for a signal that was a function"):
+        _guarded().load_guarantee(path, signal=lambda r, v: 1.0)
 
 
 def test_one_store_two_systems_replays_each_record_against_its_own(tmp_path):
@@ -353,3 +364,35 @@ def test_one_store_two_systems_replays_each_record_against_its_own(tmp_path):
     assert hit and "integrity" in hit[0]["kinds"]
     hit = [x for x in st.replay_all([a, b]) if x["seq"] == rec["seq"]]
     assert hit and "integrity" in hit[0]["kinds"]
+
+
+def test_grounding_refuses_a_quote_ending_in_a_separator_inside_a_number():
+    from solvi.core.catalog import Quote, check_evidence, cuts_number
+    t = "Up 7.5 percent."
+    assert cuts_number(t, 3, 5) and cuts_number(t, 4, 6) and not cuts_number(t, 3, 6)
+    assert check_evidence([Quote("7.", 3, 5, "doc")], {"doc": t})
+
+
+def test_a_foreign_record_is_never_given_a_benign_verdict_it_was_not_checked_for(tmp_path):
+    from solvi import Question
+    store = tmp_path / "d.jsonl"
+    a = _guarded(tmp_path)
+    cat = Catalog()
+
+    @cat.rule("double")
+    def double(n: int) -> bool:
+        return n % 2 == 0
+    b = System(cat, [Question("double", "Even?")], storage=JSONLStorage(store, record="compact"))
+    a.ask({"hypothesis": "H", "contract": DOC})
+    b.ask({"n": 2})
+    st = JSONLStorage(store)
+    [x] = st.replay_all(a)                                      # b's compact record: no trace to check, and it says so
+    assert x["kinds"] == {"not_kept": 1, "other_system": 1} and "no verdict" in x["summary"]
+    assert "hashes verify" not in x["summary"]
+    lines = store.read_text().splitlines()
+    rec = json.loads(lines[0])                                  # a's own record, its question renamed to look foreign
+    rec["answers"] = {"other": rec["answers"]["label"]}
+    lines[0] = json.dumps(rec)
+    store.write_text("\n".join(lines) + "\n")
+    hit = [x for x in JSONLStorage(store).replay_all([a, b]) if x["seq"] == rec["seq"]]
+    assert hit and "integrity" in hit[0]["kinds"] and hit[0]["summary"].startswith("data damaged")
