@@ -402,7 +402,8 @@ class AdapterLoop:
                  detector=None, monitor="auto", probation=300, source="human", secret=None, seed=0, sampling=None,
                  promise_options=None, storage=None, versions_dir=None, system=None, feature="text", key=None,
                  served=None, clock=None, wait=False, part=None, mode="stream", warn_refused=200,
-                 trace_candidate=False, additive=False, max_layers=3, _detector_alone=False, _batch=None):
+                 trace_candidate=False, additive=False, max_layers=3, useful_error="auto", delta_use=None,
+                 _detector_alone=False, _batch=None):
         global _warned
         if mode not in MODES:
             raise ValueError(f"mode is 'stream' (decisions through step, a promise per version) or 'label' (labels "
@@ -415,6 +416,25 @@ class AdapterLoop:
         if additive and initial is None:
             raise ValueError("additive coverage needs an initial model (version 0): a layer is attached below a "
                              "certified layer, and version 0 without a model is never certified")
+        if isinstance(useful_error, str):
+            if useful_error != "auto":
+                raise ValueError(f"useful_error is a rate in (0, 1), None (off) or 'auto', not {useful_error!r}")
+            useful_error = 0.5 if additive else None
+        if useful_error is not None:
+            if not additive:
+                raise ValueError("useful_error= is an additive layer's usefulness certificate: replacement mode "
+                                 "(additive=False) has none — leave it out or give None")
+            if isinstance(useful_error, bool) or not 0.0 < float(useful_error) < 1.0:
+                raise ValueError("useful_error is the selective error a layer must be certified below, in (0, 1), "
+                                 "or None (off)")
+            useful_error = float(useful_error)
+        if delta_use is not None:
+            if useful_error is None:
+                raise ValueError("delta_use= is the usefulness certificate's δ budget: give it only with "
+                                 "useful_error= on (additive mode)")
+            if isinstance(delta_use, bool) or not 0.0 < float(delta_use) < 1.0:
+                raise ValueError("delta_use is a probability in (0, 1), or None (the loop's delta)")
+            delta_use = float(delta_use)
         # The joint kind is allowed: its guarantee is per zone, and the stream-wide joint risk is bounded by
         # α·(1 + Σ_{j≥1} P(Z_j)) (documented, reported in status()["zones"]) — nothing to refuse here.
         if mode == "label" and (detector is not None or (monitor is not None and monitor != "auto")):
@@ -435,8 +455,10 @@ class AdapterLoop:
                         probation=probation, source=source, seed=seed, sampling=sampling,
                         promise_options=promise_options, feature=feature, key=key, served=served, wait=wait,
                         mode=mode, warn_refused=warn_refused, trace_candidate=bool(trace_candidate),
-                        additive=additive, max_layers=int(max_layers))
+                        additive=additive, max_layers=int(max_layers),
+                        useful_error=useful_error, delta_use=delta_use)
         self.additive, self.max_layers = additive, int(max_layers)
+        self.useful_error, self.delta_use = useful_error, delta_use
         self._layers = [0]                                 # additive: the chain L0, L1, … (versions; L0 = served)
         self._chain_rev = 0                                # additive: +1 at every change of the chain or of a Λ (a
         #                                                    Dispatcher's _pre routed on the chain it read: `_post`)
@@ -502,6 +524,15 @@ class AdapterLoop:
             warnings.warn("AdapterLoop: the calibration coin is a public hash of the question, seed and decision "
                           "number; give secret= to key it", PredictableDrawWarning, stacklevel=2)
         self.budget = DeltaBudget(delta)                   # δ over every version (the training budget: policy.budget)
+        # additive: the usefulness certificates' own δ budget (Basel over every layer's usefulness index, lazy charge
+        # as the joint one); the loop's δ is untouched by it
+        self.useful_budget = (None if useful_error is None else
+                              DeltaBudget(delta if delta_use is None else delta_use))
+        self._ukw = None if useful_error is None else {
+            "max_error": useful_error, "procedure": "pointwise",
+            **{k: v for k, v in (promise_options or {}).items()
+               if k in ("grid", "grid_from", "grid_size", "bets", "fractions", "weights", "c")}}
+        self._uev_seen: dict = {}                          # additive: version → usefulness events already written
         self.rate = Rate(**(sampling or {}))
         self.storage, self.system = storage, system
         self._base = (initial if initial is not None and callable(getattr(initial, "install", None))
@@ -563,7 +594,7 @@ class AdapterLoop:
     def _row(v, state, model, promise, frozen_at, seen, n_train, keys, fp):
         return {"version": v, "state": state, "model": model, "promise": promise, "frozen_at": frozen_at,
                 "seen": seen, "n_train": n_train, "keys": keys, "fingerprint": fp, "samples": [], "fed": [],
-                "discarded_at": None, "served_cls": None, "cmp": None}
+                "discarded_at": None, "served_cls": None, "cmp": None, "useful": None}
 
     def _comparison(self, p):
         """The served version's comparison certificate for a candidate whose promise is p: a `StreamPromise` with the
@@ -596,18 +627,61 @@ class AdapterLoop:
         return self._step_t if self._step_t is not None else float(self._clock())
 
     def _threshold(self, v):
+        """Version v's answer threshold: its promise's; an additive layer or candidate with a usefulness certificate
+        answers at the composed threshold (`_composed`)."""
         if self.mode == "label":                           # label mode: the version's own fixed-set threshold
             t = self._vs[v].get("fixed")
             return math.inf if t is None else float(t)
-        p = self._vs[v]["promise"]
-        return math.inf if p is None else p.threshold
+        ver = self._vs[v]
+        p = ver["promise"]
+        if p is None:
+            return math.inf
+        return p.threshold if ver.get("useful") is None else self._composed(v)
+
+    def _joint(self, v):
+        """Version v's own certificate's threshold (the joint / max_error= promise), without the usefulness
+        composition — what the start gate and the trial counts read. Equal to `_threshold` without a usefulness
+        certificate."""
+        ver = self._vs[v]
+        if self.mode == "label" or ver.get("useful") is None or ver["promise"] is None:
+            return self._threshold(v)
+        return ver["promise"].threshold
+
+    def _composed(self, v):
+        """The composed answer threshold of version v (additive, usefulness on): the loosest point of its promise's
+        certified prefix (strict → loose: the threshold in force and every stricter point) that its usefulness
+        certificate has certified too; +inf when none. Both sets only grow, so it only loosens (until a restart)."""
+        ver = self._vs[v]
+        p, u = ver["promise"], ver["useful"]
+        if math.isinf(p.threshold):
+            return math.inf
+        if u.grid != p.grid:                               # both read the same scores: cannot happen
+            raise RuntimeError(f"version {v}: the usefulness certificate's grid is not its promise's")
+        best = math.inf
+        for lam, cj, cu in zip(p.grid, p._cert, u._cert):
+            if not cj:
+                break
+            if cu:
+                best = lam
+        return best
+
+    def _useful_ok(self, v):
+        """Additive, usefulness on: whether v's usefulness certificate holds at its promise's threshold in force λ_J
+        (None without a usefulness certificate)."""
+        u = self._vs[v].get("useful")
+        if u is None:
+            return None
+        lam = self._vs[v]["promise"].threshold
+        return math.isfinite(lam) and u.certified_at(lam)
 
     def _state(self) -> LoopState:
         vs = []
         for v, ver in sorted(self._vs.items()):
-            thr = self._threshold(v)
+            thr = self._joint(v)                           # the certificate's own (= _threshold without usefulness)
+            uk = ({} if ver.get("useful") is None else
+                  {"useful": self._useful_ok(v), "useful_thr": self._threshold(v)})
             vs.append(VersionInfo(v, ver["state"], n_train=ver["n_train"], samples=len(ver["samples"]),
-                                  certified=math.isfinite(thr), threshold=thr, fingerprint=ver["fingerprint"],
+                                  certified=math.isfinite(thr), threshold=thr, fingerprint=ver["fingerprint"], **uk,
                                   frozen_at=None if v == 0 else ver["frozen_at"], train_keys=ver["keys"],
                                   discarded_at=ver["discarded_at"],
                                   **({} if not self.additive else
@@ -628,7 +702,8 @@ class AdapterLoop:
                          **({} if not self.additive else
                             {"layers": tuple(self._layers), "deepest": self._layers[-1],
                              "deepest_certified": math.isfinite(self._threshold(self._layers[-1])),
-                             "zone_share": self._zone_share()}))
+                             "zone_share": self._zone_share(),
+                             **({} if self.useful_error is None else {"useful_error": self.useful_error})}))
 
     def _maturity(self) -> dict | None:
         """`LoopState.maturity`: the maturity gate's inputs on the deepest layer (additive) or the served version
@@ -675,7 +750,7 @@ class AdapterLoop:
         (`_thr_served`, conservative: an uncertified comparison would put ℓ_s at 0 and the margin would pass on the
         candidate alone); Paired.thr_s records which one was used. Deterministic from the recorded samples: replay gives
         the same numbers."""
-        thr_k, thr_own = self._threshold(c), self._threshold(self.served)
+        thr_k, thr_own = self._joint(c), self._threshold(self.served)   # additive: at λ_J, the start gate's point
         thr_s, rule = self._thr_served(c)
         novel_only = bool(getattr(self.policy, "novel_only", True))   # a policy pickled before the switch: on
         n_nov = a_nov = w_nov = a_srv = w_srv = n_seen = a_seen = w_seen = a_own = w_own = 0
@@ -946,6 +1021,12 @@ class AdapterLoop:
                            "learning": "base" if self._base_regime(v) else "owned", "probation": self._prob(v),
                            "zone_share": share[v], "owned_share": own, **z,
                            "risk": {"joint": joint, "selective": sel}})
+            u = self._vs[v].get("useful")
+            if u is not None:                              # usefulness on: "threshold" is the composed one
+                j = self._joint(v)
+                layers[-1]["useful"] = {"joint_threshold": None if math.isinf(j) else j, "ok": self._useful_ok(v),
+                                        "certified": u.state()["certified"], "v_index": u.v, "delta_v": u.delta_v,
+                                        "error": self.useful_error}
         joint = alone = 0.0                                # Σ_j P̂(Z_j)·(wrong_j, answered_j per base sample)
         ok = True
         for row in layers:
@@ -1055,11 +1136,15 @@ class AdapterLoop:
         the step's detectors read too: a promise that re-certifies on this decision changes its regime from the next
         one)."""
         for v, _, score in route["path"]:
-            p = self._vs[v]["promise"]
+            p, u = self._vs[v]["promise"], self._vs[v].get("useful")
             if p is not None:
                 p.observe(score)
+            if u is not None:                              # the usefulness certificate reads what the promise reads
+                u.observe(score)
         if route["zone"]:
             self._vs[c]["promise"].observe(score_k)
+            if self._vs[c].get("useful") is not None:
+                self._vs[c]["useful"].observe(score_k)
         o, would_o, score_o = route["path"][-1]
         d = self._layers[-1]
         for v, would, score in route["path"]:
@@ -1077,12 +1162,16 @@ class AdapterLoop:
             if not n > ver["frozen_at"]:                   # cannot happen: a version is frozen at the end of a step
                 raise RuntimeError(f"decision {n} would calibrate version {v} frozen at {ver['frozen_at']}")
             ver["promise"].learn(score, would, label, floor=floor)
+            if ver.get("useful") is not None:
+                ver["useful"].learn(score, would, label, floor=floor)
             ver["fed"].append(n)
         if route["zone"]:
             ver = self._vs[c]
             if not n > ver["frozen_at"]:
                 raise RuntimeError(f"decision {n} would calibrate version {c} frozen at {ver['frozen_at']}")
             ver["promise"].learn(score_k, would_k, label)
+            if ver.get("useful") is not None:
+                ver["useful"].learn(score_k, would_k, label)
             ver["fed"].append(n)
             ver["samples"].append((score_k, score_o, label is None or would_k != label,
                                    label is None or would_o != label, key in ver["keys"]))
@@ -1689,9 +1778,19 @@ class AdapterLoop:
             rec["candidate_score"] = None if trial is None else _num(trial[1])
         if route is not None:
             rec.update(self._route_record(route))
+        if self.useful_error is not None:                  # additive, usefulness on: each certificate's state
+            rec["useful"] = [[v, self._vs[v]["useful"].state()] for v in self._useful_versions()]
         if error is not None:
             rec["error"] = error
         return rec
+
+    def _useful_versions(self) -> list:
+        """The layers (chain order) and the candidate that carry a usefulness certificate."""
+        out = [v for v in self._layers if self._vs[v].get("useful") is not None]
+        c = self.candidate
+        if c is not None and c not in out and self._vs[c].get("useful") is not None:
+            out.append(c)
+        return out
 
     # --- errors
     def _at(self, where):
@@ -1864,7 +1963,9 @@ class AdapterLoop:
         if c is not None:
             paired = None if self.mode == "label" else self._paired(c)    # label mode: the pre-freeze gates decided
             st = self._state()
-            certified = math.isfinite(self._threshold(c))     # as the promote() control: never an uncertified one
+            certified = math.isfinite(self._joint(c)) and math.isfinite(self._threshold(c))   # as the promote()
+            #                                                    control: never an uncertified one (additive with a
+            #                                                    usefulness certificate: both certificates)
             if not self.paused:
                 self._at("policy.promote")
             if not self.paused and certified and self.policy.promote(st, paired):
@@ -1909,15 +2010,29 @@ class AdapterLoop:
 
     def _zone_fields(self, c, paired):
         """An additive promote event's view of the trial: the candidate's own numbers on its zone samples (no
-        comparison with the layer above: a layer only adds coverage)."""
-        return {"l_k": paired.share_k, "samples": len(self._vs[c]["samples"]), "n_novel": paired.n_novel,
-                "wrong_novel": paired.wrong_novel, "n_seen": paired.n_seen}
+        comparison with the layer above: a layer only adds coverage). With a usefulness certificate also: useful (the
+        start gate's check at λ_J), useful_lw / useful_level (its log-wealth there and the level log(G/δ_u)),
+        useful_v_index / useful_delta_v, useful_error (β), joint_thr (λ_J), alone_k / wrong_k (the trial's alone
+        answers at λ_J and the wrong ones among them: what the usefulness certificate read there)."""
+        out = {"l_k": paired.share_k, "samples": len(self._vs[c]["samples"]), "n_novel": paired.n_novel,
+               "wrong_novel": paired.wrong_novel, "n_seen": paired.n_seen}
+        u = self._vs[c].get("useful")
+        if u is not None:
+            lam = self._joint(c)
+            alone = [wk for sk, _, wk, _, _ in self._vs[c]["samples"] if _alone(sk, lam)]
+            out.update(useful=self._useful_ok(c), useful_lw=None if math.isinf(lam) else u.log_wealth_at(lam),
+                       useful_level=u.level_now, useful_v_index=u.v, useful_delta_v=u.delta_v,
+                       useful_error=self.useful_error, joint_thr=None if math.isinf(lam) else lam,
+                       alone_k=len(alone), wrong_k=sum(bool(w) for w in alone))
+        return out
 
     def _restart(self, v, n, why="alarm") -> list:
         """Version v's promise from scratch (the next (v, δ_v) at its first sample, threshold +inf, wealth 1) and, for a
         candidate, its paired samples dropped. → its "recertify" and a "restart" event."""
         ver = self._vs[v]
         ver["promise"].restart(why)                        # lazy δ charge: its next index at its first post-restart bet
+        if ver.get("useful") is not None:                  # the usefulness certificate is about the old regime too:
+            ver["useful"].restart(why)                     # its next index (own budget) at its first post-restart bet
         if ver.get("cmp") is not None:                     # the comparison restarts with the candidate, at its new δ_v
             ver["cmp"].restart(why)
         ver["samples"], ver["stale"] = [], False
@@ -2295,6 +2410,8 @@ class AdapterLoop:
         row["served_as"], row["served_cls"] = srv, None if srv is None else type(srv)
         row["cmp"] = (None if p is None or self.additive or self._vs[self.served]["model"] is None  # additive: no
                       else self._comparison(p))                    # comparison (a layer only adds coverage)
+        if p is not None and self.additive and self.useful_error is not None:   # its usefulness certificate:
+            row["useful"] = StreamPromise(**self._ukw, budget=self.useful_budget)   # selective at β, pointwise
         self._vs[k] = row
         self.candidate = k
         return self._event("freeze", k, n, frozen_at=n, seen=self.live.seen(), n_train=n_train,
@@ -2309,6 +2426,11 @@ class AdapterLoop:
             new = p.events[self._ev_seen.get(v, 0):]
             self._ev_seen[v] = len(p.events)
             out += [{**e, "version": v, "decision": self.n} for e in new]
+            u = ver.get("useful")
+            if u is not None:                              # its usefulness certificate's: "useful_" + the event
+                new = u.events[self._uev_seen.get(v, 0):]
+                self._uev_seen[v] = len(u.events)
+                out += [{**e, "event": "useful_" + e["event"], "version": v, "decision": self.n} for e in new]
         return out
 
     # --- controls
@@ -2445,8 +2567,11 @@ class AdapterLoop:
             raise ValueError("the loop is paused: resume() before a promotion")
         if c is None or (v is not None and v != c):
             raise ValueError(f"version {v} is not the candidate in trial (candidate: {c})")
-        if not math.isfinite(self._threshold(c)):
+        if not math.isfinite(self._joint(c)):
             raise ValueError(f"version {c} is not certified: a promotion never skips the certificate")
+        if not math.isfinite(self._threshold(c)):
+            raise ValueError(f"version {c} has no point certified by both its certificate and its usefulness "
+                             "certificate: a promotion never skips a certificate")
         paired = None if self.mode == "label" else self._paired(c)
         if not force:
             self._at("policy.promote")
@@ -2701,6 +2826,11 @@ class AdapterLoop:
                         "samples": len(ver["samples"]), "discarded_at": ver["discarded_at"],
                         "fingerprint": ver["fingerprint"],
                         "paired": dataclasses.asdict(self._paired(v)) if v == self.candidate else None})
+            u = ver.get("useful")
+            if u is not None:                              # additive, usefulness on: "threshold" is the composed one
+                j = self._joint(v)
+                out[-1].update(joint_threshold=None if math.isinf(j) else j, useful=self._useful_ok(v),
+                               useful_v_index=u.v, useful_delta_v=u.delta_v)
         return out
 
     def status(self) -> dict:
@@ -2738,6 +2868,7 @@ class AdapterLoop:
                               "fixed-set (act_guard on calib labels); no anytime certificate"),
                 "watch": None if self._watch is None else _watch_copy(self._watch),
                 "delta_spent": self.budget.spent,
+                **({} if self.useful_budget is None else {"delta_use_spent": self.useful_budget.spent}),
                 "versions_kept": sum(1 for ver in list(self._vs.values()) if ver["state"] in KEPT),
                 **({} if not self.additive else {"zones": self._zones()})}
 

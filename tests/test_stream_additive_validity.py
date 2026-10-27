@@ -26,7 +26,25 @@ promises:
     a shrinking zone would serve) is printed: it grows with L0's loosening — not a bar;
 (h) sanity: a run in which L0 cannot loosen after the attach (its loose grid points are at or above α) gives the same
     routing, answers, coin and events as the 82e0ad5 loop on the same stream (a pinned digest of those fields, two
-    seeds; the new record fields aside).
+    seeds; the new record fields aside) — with `useful_error=None`; with the usefulness certificate on (the default)
+    the same digest once its own "useful_*" events are left out (a good layer: the certificate never binds).
+
+The usefulness certificate (decision 25: selective at β = 0.5, pointwise, its own budget δ_use):
+(i) a noise layer — wrong w.p. 0.9 at every score, 2 % of its zone above every grid point, so the joint certificate
+    passes it (risk ≈ 0.018 ≤ α) — starts serving in at most δ_use of runs (binomial bar; two attaches per run, both
+    indices on the δ_use budget); the δ_use audit (v) is read from the same runs' records: usefulness indices
+    chronological and unique per run, Σ δ_u ≤ δ_use;
+(ii) a real layer (error 0.1 at every score, score uniform) still starts in every run, and its promote decision differs
+    from a `useful_error=None` run's by ≤ 50 zone samples at the 95th percentile, and its alone answers over the last
+    2 000 decisions are ≥ 95 % of that run's (no coverage lost; a later start has read more trial rows at the full
+    rate, so it tends to start at a looser threshold and answer more);
+    the loop's own δ indices are the same in both runs whenever the promote decision is;
+(iii) the null at the edge: a layer whose error among its alone answers is exactly β at every grid point (6 % of its
+    zone alone: joint risk 0.03 ≤ α) is usefulness-certified in at most δ_u of runs per index (δ_use = 0.3 for power);
+(iv) composition: after a layer starts, its joint prefix loosens into a band where its selective error is ≥ β (the
+    joint risk there stays ≤ α); its answer threshold stays at usefulness-certified points: runs with any alone answer
+    at a point of true selective error ≥ β ≤ bar(δ_use), the realised error among its alone answers ≤ β, its zone's
+    joint risk ≤ α, and the composition binds (the joint threshold reaches the bad band) in most runs.
 
 The default suite runs two seeds per scenario (the machinery and the bounds, no statistical power);
 `-m slow` runs the spec's 400 seeds per scenario in SOLVI_VALIDITY_WORKERS processes (default 4; minutes, not
@@ -425,10 +443,11 @@ def _check_shrink(runs):
 SANITY = {0: "fabeb5c1", 1: "bea7d4b3"}
 
 
-def _sanity_fields(seed, n=4000):
+def _sanity_fields(seed, n=4000, useful_error=None):
     loop = AdapterLoop(_Hand([_cand("good", 0.01)]), question="q", policy=_policy(mature_patience="auto"), secret=KEY,
                        initial=L0, additive=True, monitor=None, _detector_alone=True, wait=True, clock=lambda: 0.0,
-                       max_risk=0.05, delta=0.05, max_layers=2, promise_options={"grid": GRID})
+                       max_risk=0.05, delta=0.05, max_layers=2, promise_options={"grid": GRID},
+                       useful_error=useful_error)
     for x in _xs(seed, n):
         loop.step(x, lambda x=x: x[0])
     rows = []
@@ -438,7 +457,7 @@ def _sanity_fields(seed, n=4000):
             rows.append([r[f] for f in ("n", "served", "candidate", "owner", "layer", "path", "trial_zone", "alone",
                                         "by", "sampled", "missing", "rho", "probation", "score", "threshold",
                                         "shadow")] + [p["answer"], p["path_would"]])
-        else:
+        elif not d["event"].startswith("useful_"):
             rows.append([d["event"], d["version"], d["decision"]])
     import hashlib
     import json
@@ -499,3 +518,200 @@ def test_with_no_upstream_loosening_the_routing_and_answers_are_the_82e0ad5_ones
         assert len(loop._layers) == 2 and loop._route[0] == 0.5               # layered, Λ_0 = λ_0 = 0.5 for good
         assert all(r["answered_by"] in (None, r["owner"]) for r in recs)      # nobody above the owner answered
         assert got == want, (seed, got)
+
+
+def test_with_the_usefulness_certificate_a_good_layer_routes_and_answers_as_without_it():
+    for seed, want in SANITY.items():
+        got, loop = _sanity_fields(seed, useful_error=0.5)
+        assert len(loop._layers) == 2 and loop._vs[1]["useful"] is not None
+        assert got == want, (seed, got)
+
+
+# ───────────────────────────── (i)–(iv): the usefulness certificate (decision 25)
+def _noise(name, err, share):
+    """A layer wrong w.p. err at every score; a `share` of its zone scores 0.97 (above every grid point), the rest
+    below every grid point (never alone): its selective error is err at every point, its joint risk err·share."""
+    return _M(name, lambda x: (_flip(x[0]) if x[4] < err else x[0], 0.97 if x[2] < share else 0.04 * x[2]))
+
+
+def _useful_audit(loop):
+    """(v) from the records: the usefulness indices (chronological, unique) and their δ_u."""
+    seen, order = {}, []
+    for k, d in loop.log:
+        if k != "loop":
+            continue
+        for v, st in d["stream"]["useful"]:
+            i = st["v_index"]
+            if i is not None and i not in seen:
+                seen[i] = (v, st["delta_v"])
+                order.append(i)
+    assert order == list(range(1, len(order) + 1)), order
+    assert len({v for v, _ in seen.values()}) == len(seen)        # one index per certificate (no restart here)
+    total = sum(dv for _, dv in seen.values())
+    assert total <= loop.useful_budget.delta + 1e-12 and total == pytest.approx(loop.useful_budget.spent)
+    return seen
+
+
+def _run_noise(seed, n=8000):
+    loop = _loop([_noise("noise", 0.9, 0.02)], policy=_policy(stale=3000, trial=3000), max_risk=0.05, delta=0.05,
+                 max_layers=2, promise_options={"grid": GRID})
+    for x in _xs(seed, n):
+        loop.step(x, lambda x=x: x[0])
+    joint = sum(1 for v, ver in loop._vs.items()                   # candidates the joint certificate passed
+                if v and any(e["event"] == "certified" for e in ver["promise"].events))
+    idx = _useful_audit(loop)
+    promoted = any(d.get("event") == "promote" for k, d in loop.log if k == "stream")
+    return {"promoted": promoted, "attaches": sum(1 for v in loop._vs if v), "joint_certified": joint,
+            "indices": len(idx), "spent": loop.useful_budget.spent}
+
+
+def _check_noise(runs):
+    n = len(runs)
+    assert all(r["attaches"] >= 2 for r in runs)                  # two attaches per run
+    assert sum(r["joint_certified"] >= 1 for r in runs) >= 0.9 * n  # the joint certificate passes the noise layer
+    promoted = sum(r["promoted"] for r in runs)
+    assert promoted <= _binom_upper(0.05, n), (promoted, n)
+    return {"runs": n, "promoted": promoted, "bar": round(_binom_upper(0.05, n), 1),
+            "joint_certified_runs": sum(r["joint_certified"] >= 1 for r in runs),
+            "max_spent": round(max(r["spent"] for r in runs), 4)}
+
+
+def _run_real_pair(seed, n=5000):
+    out = {}
+    for ue in (0.5, None):
+        loop = _loop([_cand("real", 0.10)], policy=_policy(), max_risk=0.05, delta=0.05, max_layers=2,
+                     promise_options={"grid": GRID}, useful_error=ue)
+        at, answered = None, 0
+        for x in _xs(seed, n):
+            o = loop.step(x, lambda x=x: x[0])
+            if at is None and len(loop._layers) == 2:
+                pe = next(d for k, d in loop.log if k == "stream" and d.get("event") == "promote")
+                at = (pe["decision"], pe["samples"])
+                continue
+            if loop.n > n - 2000 and o.get("answered_by") == 1:   # coverage once both have loosened
+                answered += 1
+        out[ue] = {"at": at, "answered": answered, "budget_v": loop.budget.v}
+    return out
+
+
+def _check_real_pair(runs):
+    n = len(runs)
+    assert all(r[0.5]["at"] is not None and r[None]["at"] is not None for r in runs)   # promoted in every run
+    diff = sorted(abs(r[0.5]["at"][1] - r[None]["at"][1]) for r in runs)
+    p95 = diff[min(n - 1, int(math.ceil(0.95 * n)) - 1)]
+    assert p95 <= 50, diff[-5:]
+    on, off = sum(r[0.5]["answered"] for r in runs), sum(r[None]["answered"] for r in runs)
+    assert on >= 0.95 * off, (on, off)                     # no coverage lost (a later start reads more trial
+    #                                                        rows at the full rate, so it tends to start looser)
+    same = [r for r in runs if r[0.5]["at"] == r[None]["at"]]
+    assert all(r[0.5]["budget_v"] == r[None]["budget_v"] for r in same)   # the loop's δ untouched
+    return {"runs": n, "delay_p95": p95, "delay_max": diff[-1], "same_decision": len(same),
+            "answered_on": on, "answered_off": off}
+
+
+DELTA_EDGE = 0.30
+
+
+def _run_edge(seed, n=8000):
+    loop = _loop([_noise("edge", 0.5, 0.06)], policy=_policy(stale=3000, trial=3000), max_risk=0.05, delta=0.05,
+                 max_layers=2, promise_options={"grid": GRID}, delta_use=DELTA_EDGE)
+    for x in _xs(seed, n):
+        loop.step(x, lambda x=x: x[0])
+    rows = []
+    for v, ver in loop._vs.items():
+        u = ver.get("useful")
+        if u is None or u.v is None:
+            continue
+        false = any(e["event"] in ("certified", "loosened") for e in u.events)
+        rows.append((u.v, u.delta_v, false))
+    return rows
+
+
+def _check_edge(runs):
+    by = {}
+    for rows in runs:
+        for i, d, f in rows:
+            k = by.setdefault(i, [d, 0, 0])
+            k[1] += 1
+            k[2] += f
+    assert by
+    for i, (d, m, false) in by.items():
+        assert false <= _binom_upper(d, m), (i, d, m, false)
+    return {"runs": len(runs), "per_index": {i: {"delta_u": round(d, 4), "runs": m, "false": f}
+                                             for i, (d, m, f) in sorted(by.items())}}
+
+
+def _bandy(x):
+    """(iv): 4 % of the zone at [0.5, 1) always right, 6 % at [0.05, 0.5) always wrong, the rest below every grid
+    point (right, never alone)."""
+    w = x[2]
+    if w < 0.04:
+        return x[0], 0.5 + 0.5 * w / 0.04
+    if w < 0.10:
+        return _flip(x[0]), 0.05 + 0.45 * (w - 0.04) / 0.06
+    return x[0], 0.04 * w
+
+
+def _band_error(lam):                                      # true selective error of _bandy at threshold lam
+    if lam >= 0.5:
+        return 0.0
+    b = 0.06 * min(1.0, (0.5 - lam) / 0.45)
+    return b / (0.04 + b)
+
+
+def _run_compose(seed, n=9000):
+    loop = _loop([_M("band", _bandy)], policy=_policy(stale=6000, trial=6000), max_risk=0.10, delta=0.05,
+                 max_layers=2, promise_options={"grid": GRID})
+    on, zone, alone, wrong, false = None, 0, 0, 0, False
+    for x in _xs(seed, n):
+        o = loop.step(x, lambda x=x: x[0])
+        if on is None:
+            if loop.candidate == 1 and math.isfinite(loop._threshold(1)):
+                loop.promote(1, force=True, by="test", why="(iv): composition after the start")
+            if len(loop._layers) == 2:
+                on = loop.n
+            continue
+        if o["layer"] >= 1:
+            zone += 1
+        if o.get("answered_by") == 1:
+            r = next(d for k, d in reversed(loop.log) if k == "loop")["stream"]
+            alone += 1
+            wrong += o["answer"] != x[0]
+            false |= _band_error(r["answer_thr"]) >= 0.5
+    j = loop._joint(1) if 1 in loop._vs else math.inf
+    return {"on": on, "zone": zone, "alone": alone, "wrong": wrong, "false": false,
+            "binds": on is not None and _band_error(j) >= 0.5, "composed": loop._threshold(1) if on else None}
+
+
+def _check_compose(runs):
+    n = len(runs)
+    on = [r for r in runs if r["on"] is not None]
+    assert len(on) >= 0.9 * n
+    binds = sum(r["binds"] for r in on)
+    assert binds >= 0.5 * len(on), binds                  # the joint prefix reached the bad band in most runs
+    false = sum(r["false"] for r in on)
+    assert false <= _binom_upper(0.05, n), (false, n)
+    alone, wrong, zone = (sum(r[k] for r in on) for k in ("alone", "wrong", "zone"))
+    assert alone and wrong / alone <= 0.5 and wrong / zone <= 0.10, (alone, wrong, zone)
+    return {"runs": n, "layered": len(on), "binds": binds, "false": false, "selective": round(wrong / alone, 4),
+            "zone_joint": round(wrong / zone, 4), "bar": round(_binom_upper(0.05, n), 1)}
+
+
+@pytest.mark.parametrize("seeds", SEEDS)
+def test_i_a_noise_layer_starts_serving_in_at_most_delta_use_of_runs_and_v_the_delta_use_audit(seeds):
+    print("\n(i)+(v)", _check_noise(_map(_run_noise, seeds)))
+
+
+@pytest.mark.parametrize("seeds", SEEDS)
+def test_ii_a_real_layer_still_starts_with_a_small_shift(seeds):
+    print("\n(ii)", _check_real_pair(_map(_run_real_pair, seeds)))
+
+
+@pytest.mark.parametrize("seeds", SEEDS)
+def test_iii_the_usefulness_null_at_the_edge_is_certified_at_most_delta_u(seeds):
+    print("\n(iii)", _check_edge(_map(_run_edge, seeds)))
+
+
+@pytest.mark.parametrize("seeds", SEEDS)
+def test_iv_the_answer_threshold_stays_at_useful_points_when_the_joint_prefix_reaches_a_bad_band(seeds):
+    print("\n(iv)", _check_compose(_map(_run_compose, seeds)))

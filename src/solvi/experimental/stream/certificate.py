@@ -29,6 +29,15 @@ was last set (`peak_at()`: that count for the first uncertified point — the on
 "certified" / "loosened" events' `n` it tells a policy whether the certificate is still loosening
 (`DefaultPolicy.mature_patience`). Kept in `dump()` (key "peaks"), not in `state()`.
 
+Procedure. "fixed" (the default): the fixed-sequence rule above, each point at level 1/δ_v. "pointwise": each grid
+point is its own test at level G/δ_v (G the grid's size; Bonferroni: every point's statement holds together with
+probability ≥ 1 − δ_v), a point is certified as soon as its own wealth reaches it, whatever the stricter points did,
+and the threshold in force is the loosest certified point (no prefix rule); `certified_at(λ)` says whether one grid
+point is. The set of certified points only grows, so the threshold still only loosens. Pointwise pays log G nats per
+point and never starves on a strict point that almost no sample reaches — the reason the selective kind uses it as an
+additive layer's usefulness certificate (`AdapterLoop(useful_error=)`). A "fixed" promise's records, dumps and
+fingerprint are those of a promise built without the keyword.
+
 A missing label (`learn(..., label=None)`: an expired ticket, a failed oracle) counts as a loss at every point where
 the sample would have been answered alone: its factor is ≤ 1, so it can only lower the wealth, whatever the reason the
 label is missing.
@@ -52,6 +61,7 @@ from ._eprocess import FRACTIONS, WEIGHTS, DeltaBudget, MirrorBound, Mixture
 
 KINDS = ("joint", "selective")
 BETS = ("mixture", "agrapa")
+PROCEDURES = ("fixed", "pointwise")
 
 
 def fixed_grid(lo: float = 0.0, hi: float = 1.0) -> list:
@@ -88,7 +98,8 @@ class StreamPromise:
     min_group = None
 
     def __init__(self, max_risk=None, max_error=None, delta=None, *, kind=None, grid="auto", grid_from=200,
-                 grid_size=32, bets="mixture", fractions=FRACTIONS, weights=WEIGHTS, c=0.75, budget=None):
+                 grid_size=32, bets="mixture", fractions=FRACTIONS, weights=WEIGHTS, c=0.75, budget=None,
+                 procedure="fixed"):
         if (max_risk is None) == (max_error is None):
             raise ValueError("give the promise as max_risk= (joint: P(answered alone and wrong)) or max_error= "
                              "(selective: the error among the answers given alone)")
@@ -101,6 +112,9 @@ class StreamPromise:
             raise ValueError("the promised rate is strictly between 0 and 1")
         if bets not in BETS:
             raise ValueError(f"bets is one of {BETS}, not {bets!r}")
+        if procedure not in PROCEDURES:
+            raise ValueError(f"procedure is one of {PROCEDURES}, not {procedure!r}")
+        self.procedure = procedure
         if budget is None:
             budget = DeltaBudget(0.05 if delta is None else delta)
         elif delta is not None and abs(float(delta) - budget.delta) > 1e-15:
@@ -163,6 +177,33 @@ class StreamPromise:
                 return self._peak[i][1]
         return None
 
+    def _level(self) -> float:
+        """The log-wealth a point needs: log(1/δ_v) (fixed sequence) or log(G/δ_v) (pointwise, G the grid's size)."""
+        g = len(self.grid) if self.procedure == "pointwise" else 1
+        return math.log(g / self.delta_v) - 1e-12
+
+    def certified_at(self, lam) -> bool:
+        """Whether the grid point lam is certified (False for a value that is not a grid point, or before the grid)."""
+        if self._cert is None:
+            return False
+        lam = float(lam)
+        return any(c and x == lam for x, c in zip(self.grid, self._cert))
+
+    def log_wealth_at(self, lam):
+        """The log-wealth of grid point lam's e-process now (None: not a grid point, or no grid yet)."""
+        if self._proc is None:
+            return None
+        lam = float(lam)
+        for x, p in zip(self.grid, self._proc):
+            if x == lam:
+                return p.log_wealth
+        return None
+
+    @property
+    def level_now(self):
+        """The log-wealth a point needs under the current index (None before the first bet: no δ_v yet)."""
+        return None if self.delta_v is None or self.grid is None else self._level()
+
     def _set_grid(self, pts):
         self.grid = list(pts)
         self._proc = [self._new_bet() for _ in self.grid]
@@ -181,9 +222,13 @@ class StreamPromise:
         what = ("P(answered alone and wrong) ≤ " if self.kind == "joint" else
                 "the error among the answers given alone ≤ ") + f"{self.level:g}"
         # no state in the text (not δ_v of the current restart): a replay re-derives the recorded verdicts with it
-        return (f"with probability ≥ 1 − δ_v (version index v, δ_v = 6δ/(π²v²), δ = {self.delta:g}), at every point in "
+        text = (f"with probability ≥ 1 − δ_v (version index v, δ_v = 6δ/(π²v²), δ = {self.delta:g}), at every point in "
                 f"time, {what} for the threshold in force, on a stream i.i.d. between change points (the conditional "
                 f"risk given the past is constant), sampled by a coin independent of the input")
+        if self.procedure == "pointwise":
+            text += ("; pointwise: each grid point tested at δ_v / G (G grid points, Bonferroni), so the statement "
+                     "holds at every certified point together")
+        return text
 
     @property
     def report(self) -> dict:
@@ -227,7 +272,7 @@ class StreamPromise:
         s = _score(signal)
         wrong = True if label is None else answer != label
         self.missing += label is None
-        level = math.log(1.0 / self.delta_v) - 1e-12
+        level = self._level()
         newly = False
         for i, lam in enumerate(self.grid):
             if self._cert[i]:
@@ -251,6 +296,8 @@ class StreamPromise:
             thr = math.inf
             for i, lam in enumerate(self.grid):            # fixed sequence: strict → loose, stop at the first not certified
                 if not self._cert[i]:
+                    if self.procedure == "pointwise":
+                        continue                           # pointwise: the loosest certified point, no prefix rule
                     break
                 thr = lam
             if thr < self.threshold:
@@ -278,12 +325,15 @@ class StreamPromise:
     # --- what is recorded
     def state(self) -> dict:
         ev = None if self._proc is None else [[round(x, 9) for x in p.vector()] for p in self._proc]
-        return {"v_index": self.v, "delta_v": self.delta_v,
-                "threshold": None if math.isinf(self.threshold) else self.threshold,
-                "n": self.n, "seen": self.seen, "missing": self.missing, "dropped": self.dropped,
-                "certified": 0 if self._cert is None else sum(self._cert),
-                "evidence_fp": _sha([ev, self._cert])[:16],
-                "grid_fp": None if self.grid is None else _sha(self.grid)[:16]}
+        out = {"v_index": self.v, "delta_v": self.delta_v,
+               "threshold": None if math.isinf(self.threshold) else self.threshold,
+               "n": self.n, "seen": self.seen, "missing": self.missing, "dropped": self.dropped,
+               "certified": 0 if self._cert is None else sum(self._cert),
+               "evidence_fp": _sha([ev, self._cert])[:16],
+               "grid_fp": None if self.grid is None else _sha(self.grid)[:16]}
+        if self.procedure != "fixed":                      # a fixed-sequence promise's state is as before
+            out["procedure"] = self.procedure
+        return out
 
     def dump(self) -> dict:
         """Everything a restore needs (JSON data): the configuration's fingerprint, (v, δ_v), the grid (or the scores
@@ -300,7 +350,8 @@ class StreamPromise:
                 "cert": None if self._cert is None else list(self._cert),
                 "procs": None if self._proc is None else [p.dump() for p in self._proc],
                 "events": [dict(e) for e in self.events], "evidence_fp": self.state()["evidence_fp"],
-                "peaks": None if self._peak is None else [list(x) for x in self._peak]}
+                "peaks": None if self._peak is None else [list(x) for x in self._peak],
+                **({} if self.procedure == "fixed" else {"procedure": self.procedure})}
 
     def restore(self, d) -> "StreamPromise":
         """The state of `dump()` on this promise (built with the same configuration; its budget is left as it is) →
@@ -308,6 +359,9 @@ class StreamPromise:
         (ValueError)."""
         if d.get("format") not in ("solvi stream promise v1", "solvi stream promise v2"):
             raise ValueError(f"not a StreamPromise dump ({d.get('format')!r})")
+        if d.get("procedure", "fixed") != self.procedure:
+            raise ValueError(f"the dump is of a {d.get('procedure', 'fixed')!r} StreamPromise, this one is "
+                             f"{self.procedure!r}")
         if d.get("config") != self.fingerprint():
             raise ValueError("the dump is of a StreamPromise with another configuration")
         if d["v"] is None:
@@ -344,13 +398,17 @@ class StreamPromise:
     def record(self) -> dict:
         out = {"method": self.method, "kind": self.kind, "promise": self.promise, "n": self.n,
                "delta": self.delta, "delta_v": self.delta_v, "v_index": self.v, "bets": self.bets}
+        if self.procedure != "fixed":
+            out["procedure"] = self.procedure
         out["risk" if self.kind == "joint" else "error"] = self.level
         return out
 
     def fingerprint(self) -> str:
         from ...core.provenance import digest
+        extra = () if self.procedure == "fixed" else (self.procedure,)    # fixed: the fingerprint as before
         return digest("StreamPromise", self.kind, self.level, self.delta, self.budget.schedule, self.grid_spec,
-                      self.grid_from, self.grid_size, self.bets, list(self.fractions), list(self.weights), self.c)
+                      self.grid_from, self.grid_size, self.bets, list(self.fractions), list(self.weights), self.c,
+                      *extra)
 
     def __repr__(self):
         thr = "inf" if math.isinf(self.threshold) else f"{self.threshold:.4g}"
@@ -378,4 +436,4 @@ class _Mirror:
         return self.promise.v or 0
 
 
-__all__ = ["BETS", "KINDS", "StreamPromise", "fixed_grid"]
+__all__ = ["BETS", "KINDS", "PROCEDURES", "StreamPromise", "fixed_grid"]
