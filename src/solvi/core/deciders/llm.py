@@ -304,7 +304,40 @@ def _stated(reply, labs, answer, shape):
     return None
 
 
-def logprob_probs(content, logprobs, answer, labs):
+_ECHO_SEP = re.compile(r"\s*(?::|\s[-\u2013\u2014]|[-\u2013\u2014]\s)\s*")
+_ECHO_TRIM = " .,;:!?\u2026\"'"
+
+
+def _norm_words(x):
+    return " ".join(str(x).lower().split()).strip(_ECHO_TRIM)
+
+
+def echoed_option(ans, labs, it):
+    """The option an answer names when the model wrote the option followed by a separator and more words — "contradiction:
+    the contract states the opposite", the option's line from the prompt's list echoed back — else None. Accepted only
+    when exactly one option is followed by a separator (":", " - ", " – ", " — ") at the start, and the words after it
+    are that option's own description (or its start) or name no other option: "neutral: or maybe entailment" is
+    ambiguous and stays invalid."""
+    hits = []
+    for o in labs:
+        if ans.startswith(o):
+            m = _ECHO_SEP.match(ans, len(o))
+            if m and m.end() > len(o):
+                hits.append((o, ans[m.end():]))
+    if len(hits) != 1:
+        return None
+    o, rest = hits[0]
+    descs = dict(zip([str(x) for x in it.options], getattr(it, "descriptions", None) or ()))
+    own, said = _norm_words(descs.get(o) or ""), _norm_words(rest)
+    if own and said and (own.startswith(said) or said.startswith(own)):
+        return o
+    for other in labs:
+        if other != o and re.search(r"(?<!\w)" + re.escape(other.lower()) + r"(?!\w)", rest.lower()):
+            return None
+    return o
+
+
+def logprob_probs(content, logprobs, answer, labs, echo=False):
     """{label: p} from the answer's token log-probabilities, or None when they cannot be aligned. The chosen label gets the
     probability of its whole token sequence; another label shares the probability of each alternative at the answer's
     first token that it begins with (split evenly among the labels that begin with it). The rest of the mass (tokens that
@@ -324,8 +357,8 @@ def logprob_probs(content, logprobs, answer, labs):
     enc = {o: json.dumps(o, ensure_ascii=False)[1:-1] for o in labs}
     a0 = m.end()
     a1 = a0 + len(enc[answer])
-    if content[a0:a1] != enc[answer] or content[a1:a1 + 1] != '"':
-        return None
+    if content[a0:a1] != enc[answer] or (content[a1:a1 + 1] != '"' and not echo):
+        return None                                    # echo: the option, then a separator and its description
     pos, first, lp = 0, None, 0.0
     for i, (t, piece) in enumerate(zip(toks, pieces)):
         s, e = pos, pos + len(piece)
@@ -429,11 +462,16 @@ def read_reply(it, content, logprobs=None, ask="probabilities"):
         if NOT_STATED in ans and len(ans) > 1 and NOT_STATED not in it.options:
             raise InvalidOutput(f"{NOT_STATED!r} together with options")
     else:
+        echo = None
+        if isinstance(ans, str) and ans not in labs:
+            echo, ans = ans, echoed_option(ans, labs, it)
         if not isinstance(ans, str) or ans not in labs:
-            raise InvalidOutput(f"the answer {ans!r} is not one of the options {labs}")
+            raise InvalidOutput(f"the answer {ans if echo is None else echo!r} is not one of the options {labs}")
+        if echo is not None:
+            info["answer_echo"] = echo[:200]          # what the model wrote: an option followed by its description
     p = None
     if shape == "choice" and logprobs is not None:
-        p = logprob_probs(content, logprobs, ans, labs)
+        p = logprob_probs(content, logprobs, ans, labs, echo=echo is not None)
         if p is not None:
             info["probabilities"] = "logprobs"
     if p is None:
@@ -538,6 +576,7 @@ class LLMScorer(RemoteClient):
         r = (self.extra_body or {}).get("reasoning")
         self._reasoning_hidden = isinstance(r, dict) and bool(r.get("exclude"))   # asked, but not to be returned
         self._warned_unthought = False
+        self._sources, self._warned_mix = set(), False   # logprobs="auto": the probability sources seen so far
         # default: 512 for a reply alone, 2,048 when the thinking counts against the limit too
         self.max_tokens = int(max_tokens) if max_tokens is not None else (MAX_TOKENS_REASONING if self.reasoning else 512)
         self.workers = max(1, int(workers))
@@ -683,7 +722,26 @@ class LLMScorer(RemoteClient):
                 info["rejected"] = e.answer
             return {**blank, "escalate": f"invalid LLM output — {e}", "info": {"llm": info}}
         out["info"] = {"llm": {**info, **out.get("info", {})}}
+        self._note_source(out["info"]["llm"].get("probabilities"))
         return out
+
+    def _note_source(self, src):
+        """logprobs="auto": warn once, at the first reply whose probabilities come from the other source than an earlier
+        reply's (a gateway that routes to several providers) — a calibration over both is refused, so the warning comes
+        before the remaining calls are paid for."""
+        if self.logprobs != "auto" or src is None:
+            return
+        kind = "logprobs" if src == "logprobs" else "stated"
+        with self._lock:
+            self._sources.add(kind)
+            if len(self._sources) < 2 or self._warned_mix:
+                return
+            self._warned_mix = True
+        import warnings
+        warnings.warn(f"{self.model_id}: some replies carry log-probabilities and some do not (the server or gateway "
+                      "routes to several providers), so their probabilities come from two sources — a calibration over "
+                      "both is refused. Make the model with logprobs=False (or True, for a server that always returns "
+                      "them), or pin the provider (extra_body={'provider': {...}})", UserWarning, stacklevel=2)
 
     def _warn_unthought(self, fmt):
         with self._lock:

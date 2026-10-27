@@ -114,17 +114,42 @@ def experimental_of(system):
 
 
 
-def _rule_why(rule, r, vals, by):
+WHY_TEXT_MAX = 200     # with a model's quote, an input text longer than this is shown by its length in `why`
+
+
+def _model_quote(r, rule, vals):
+    """The supporting quote a model gave for its decision (an LLM decider's extra["llm"]["quote"]) → its words in `why`:
+    the quote and where it is — `contract[20:38]` when it occurs exactly once in exactly one input text, else its
+    offsets in the text the model read — or None."""
+    info = (r.extra or {}).get("llm") if isinstance(r.extra, dict) else None
+    q = info.get("quote") if isinstance(info, dict) else None
+    if not (isinstance(q, (list, tuple)) and len(q) == 3 and isinstance(q[0], str) and q[0]):
+        return None
+    text, s, e = q
+    at = [(x, vals[x].find(text)) for x in rule.inputs
+          if isinstance(vals.get(x), str) and vals[x].count(text) == 1]
+    where = f"{at[0][0]}[{at[0][1]}:{at[0][1] + len(text)}]" if len(at) == 1 else f"[{s}:{e}] of the text the model read"
+    return f"quote {text!r} ({where})"
+
+
+def _rule_why(rule, r, vals, by, legacy=False):
     """A rule's `why`: its inputs with their values — each with the reason its fact function gave (solvi.core.because /
-    missing) — led by the rule's own reason when it gave one."""
+    missing) — led by the rule's own reason when it gave one. A model decision that quoted the text (an LLM decider)
+    leads with the quote and its offsets instead, and an input text longer than WHY_TEXT_MAX is shown by its length
+    (`contract = <text, 12,345 chars>`), not whole. legacy=True: the form before 1.4 (every input whole), which a
+    replay accepts for a record stored then."""
     from .catalog import because_text
-    parts = []
+    quote = None if legacy else _model_quote(r, rule, vals)
+    parts = [quote] if quote else []
     for x in rule.inputs:
         said = because_text(by[x].extra) if x in by else None
-        if said and said.startswith("missing (") and vals.get(x) is None:
+        v = vals.get(x)
+        if said and said.startswith("missing (") and v is None:
             parts.append(f"{x} = {said}")
+        elif quote and isinstance(v, str) and len(v) > WHY_TEXT_MAX:
+            parts.append(f"{x} = <text, {len(v):,} chars>" + (f" ({said})" if said else ""))
         else:
-            parts.append(f"{x} = {srepr(vals.get(x))}" + (f" ({said})" if said else ""))
+            parts.append(f"{x} = {srepr(v)}" + (f" ({said})" if said else ""))
     own = because_text(r.extra)
     if own:
         b = r.extra["because"] if "because" in r.extra else None
@@ -133,6 +158,15 @@ def _rule_why(rule, r, vals, by):
                 if b is not None else own)
         parts.insert(0, lead)
     return "; ".join(parts)
+
+
+def _why_before(res, why, old):
+    """A result whose `why` names a model's quote (1.4) keeps the form an earlier version stored (every input whole)
+    as `_why_before`, not serialized: a replay of a record stored then accepts that `why` — the same reason, from the
+    same trace, written as it was written."""
+    if old != why and isinstance(res.why, str) and why in res.why:
+        res._why_before = res.why.replace(why, old)
+    return res
 
 
 class System:
@@ -832,6 +866,23 @@ class System:
                 lines.append(f"  {i18n.label(k, lang):{w}s} {st[key]}")
         return "\n".join(lines)
 
+    @staticmethod
+    def _rule_result(q, r, rule, pc, conf, why, trace):
+        """The answer a computed rule gives (its value, or the abstention when it returned None / a value outside the
+        options), with its `why`."""
+        src = rule.func.__name__ if rule.func is not None else rule.name
+        if r.value is None:                       # the rule itself declined to answer (e.g. a split vote): a deliberate abstention
+            return Result(None, 0.0, f"the rule abstained (returned None); {why}", "abstain", provenance=r.origin,
+                          source=src, guard="rule_abstained")
+        if q.answer.primitive or q.require_evidence or (r.extra is not None and "evidence" in r.extra):
+            return _resolved(q, r, pc, why, src, trace.init, getattr(rule, "quotes", "normalized"))
+        try:
+            return Result(q.answer.normalize(r.value), conf, why, probs=dict(r.probs or {}), provenance=r.origin,
+                          source=src)
+        except ValueError:
+            return Result(None, 0.0, f"rule returned {srepr(r.value)}, not one of the answer options; {why}", "abstain",
+                          provenance=r.origin, source=src, guard="outside_options")
+
     def _answer(self, q, flow, trace, vals, by, hard, pcache=None):
         facts = flow.per_question.get(q.name, [])
         # hard checks: a false hard check in the question's flow decides the answer (the model cannot override it).
@@ -901,18 +952,8 @@ class System:
             pc = path_confidence(self.catalog, trace, rule.inputs, pcache)
             conf = min(pc, r.confidence)
             why = _rule_why(rule, r, vals, by)
-            src = rule.func.__name__ if rule.func is not None else rule.name
-            if r.value is None:                       # the rule itself declined to answer (e.g. a split vote): a deliberate abstention
-                return Result(None, 0.0, f"the rule abstained (returned None); {why}", "abstain", provenance=r.origin,
-                              source=src, guard="rule_abstained")
-            if q.answer.primitive or q.require_evidence or (r.extra is not None and "evidence" in r.extra):
-                return _resolved(q, r, pc, why, src, trace.init, getattr(rule, "quotes", "normalized"))
-            try:
-                return Result(q.answer.normalize(r.value), conf, why, probs=dict(r.probs or {}), provenance=r.origin,
-                              source=src)
-            except ValueError:
-                return Result(None, 0.0, f"rule returned {srepr(r.value)}, not one of the answer options; {why}", "abstain",
-                              provenance=r.origin, source=src, guard="outside_options")
+            old = _rule_why(rule, r, vals, by, legacy=True)
+            return _why_before(self._rule_result(q, r, rule, pc, conf, why, trace), why, old)
         head = self.heads.get(q.name)
         if head is None:
             return Result(None, 0.0, "no rule and the answer head is not fitted (fit)", "abstain")

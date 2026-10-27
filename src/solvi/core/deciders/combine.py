@@ -522,7 +522,8 @@ class Combination:
 
     @_deprecate.removed_kwargs(x="text")
     def decide(self, text):
-        """An input (a text, a state, or Facts by name) → Decision; a list of inputs → a list."""
+        """An input (a text, a state, or facts by name: `from solvi.core.deciders import Facts`,
+        Facts(contract=..., hypothesis=...)) → Decision; a list of inputs → a list."""
         one = isinstance(text, Facts) or _single(text)
         out = [self._decide(_src(v)) for v in ([text] if one else list(text))]
         return out[0] if one else out

@@ -779,6 +779,14 @@ class DecideModel:
             if sp.evidence and ptr is not None and d.value is not Unknown:
                 ev = (self.caps.get("pointer") or {}).get("evidence") or {}
                 d.evidence = pointer_evidence(ptr, ev.get("threshold", 0.15), min(sp.evidence, ev.get("max_spans", 3)))
+        if self.backend == "llm":
+            # an LLM's probabilities are numbers it wrote (or token probabilities) passed through log and softmax: a
+            # stated 0.9 comes back as 0.8999999999999999 or 0.9000000000000001 depending on the other options, and a
+            # threshold calibrated on one of them escalates the other. Rounded to 12 decimals, every stated 0.9 is 0.9 —
+            # in calibration and in every decision alike, so a threshold means the same on both sides
+            d.probs = {k: (round(v, 12) if isinstance(v, float) else v) for k, v in d.probs.items()}
+            if isinstance(d.confidence, float):
+                d.confidence = round(d.confidence, 12)
         info, why = getattr(z, "info", None), getattr(z, "escalate", None)
         if info:
             d.extra.update(info)
