@@ -1293,7 +1293,17 @@ which: "logprobs", "stated" or "confidence"). A gateway can mix the two in one s
 log-probabilities, some do not), and they are two scales: `act_guard` / `calibrate_for` / `conformal` refuse
 calibration examples that mix them (ValueError naming the counts — make the model with `logprobs=False`, or pin the
 provider), and a part calibrated on one source records it in its guarantee (`"probabilities"`) and escalates a later
-decision whose probabilities came from the other. Yes/no, scores, multi-label questions, spans (`kind="span"`: the passage must be in the text), "not stated"
+decision whose probabilities came from the other. The mix is caught early: under `logprobs="auto"` the model warns
+(UserWarning) at the first reply from the other source, and a calibration asks an LLM its first 16 examples before the
+rest, refusing a mix there — after 16 calls, not after all of them. A calibration over an LLM is asked in chunks of 32 and
+logs its progress (`logging.basicConfig(level=logging.INFO)`, or the logger `"solvi.calibration"` at INFO: "label:
+48/303 calibration examples decided (95 s, about 505 s left)"); nothing is printed by default. A decision with no usable
+output (an invalid reply, no answer from the server) counts there as escalated and not right — never answered alone —
+and the result says how many (`"unusable"`, with a line in `"warnings"`). An answer that echoes the option's line from
+the prompt — `"contradiction: the contract states the opposite"` for options given as `{option: description}` — is read
+as that option when exactly one option is followed by a separator (`:`, ` - `, ` – `, ` — `) and the rest is its own
+description or names no other option (`extra["llm"]["answer_echo"]` keeps what was written); anything else stays an
+invalid output. Yes/no, scores, multi-label questions, spans (`kind="span"`: the passage must be in the text), "not stated"
 (`Maybe[...]`) and `evidence=True` work; rankings and numbers are asked as a choice over the options / bins. Where the
 reply has one number (a span, `ask="confidence"`), the prompt says what it means for "not stated" — the model's
 probability that the text does not say it — and solvi reads it as p(not stated): a "not stated" at 0.2 is an unsure one.

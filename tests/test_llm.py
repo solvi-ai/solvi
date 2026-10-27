@@ -729,8 +729,9 @@ def test_a_calibration_refuses_log_probabilities_mixed_with_written_numbers_and_
     numbers the model wrote (0.85-0.95); one threshold over both answered alone by which provider replied."""
     mixed = [("I was charged twice on my card", "billing"), ("my parcel is late", "shipping")] * 20
     part = model(SomeLogprobs(), workers=1).decision("team", "Which team?", "email", TEAMS)
-    with pytest.raises(ValueError, match="two sources: 20 from log-probabilities, 20 from the numbers the model wrote"):
-        part.act_guard(mixed, max_risk=0.10)
+    with pytest.raises(ValueError, match=r"first 16 calibration examples \(of 40\) come from two sources: 8 from "
+                                         "log-probabilities, 8 from the numbers the model wrote"):
+        part.act_guard(mixed, max_risk=0.10)                   # refused after 16 calls, not after all 40
     with pytest.raises(ValueError, match="two sources"):
         part.calibrate_for(mixed, max_error=0.10)
     other = model(SomeLogprobs(), workers=1).decision("team", "Which team?", "email", TEAMS)

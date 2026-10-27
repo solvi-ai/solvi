@@ -334,6 +334,13 @@ def entry(resp, meta=None, record="full"):
         from ..schema import pack_skipped
         if isinstance(d.get("flow"), dict):
             d = {**d, "flow": pack_skipped(d["flow"])}  # the parts the flow did not plan: grouped by reason
+        if isinstance(d.get("values"), dict):
+            # a value the trace holds (a given fact, a step's value) is stored once, in the trace: "values" keeps its name
+            # with null — loading a response takes every value the trace holds from the trace in any case (schema.load),
+            # so a long input is not stored twice. A value only "values" holds is kept.
+            from ..runtime import MISSING
+            held = set(tr.init) | {r.name for r in tr.records if r.value is not MISSING}
+            d = {**d, "values": {k: (None if k in held else v) for k, v in d["values"].items()}}
         e["response"] = d
     return e
 
