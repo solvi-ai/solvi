@@ -71,7 +71,13 @@ own counters in `self` and must pickle (the loop's checkpoint saves it).
   on every decision, so the bound is a stand-in for a fixed-sample test, not an anytime guarantee; the rate of false
   promotions it allows is what the shuffled-label control of a stand reads.
   probe=False drops the probe (promotion and discard). Label
-  mode (no paired samples): the pre-freeze gates decided, promote.
+  mode (no paired samples): the pre-freeze gates decided, promote. The novel-risk bar is a joint ratio (wrong alone
+  over every novel sample, alone or not): it never asks whether the alone answers are right. Additive mode (decision
+  D1): five checks — certified, novel, novel_risk, probe and, with the loop's usefulness certificate on (default),
+  useful: the candidate's selective certificate at β (`AdapterLoop(useful_error=0.5)`) holds at its certified
+  threshold, so a layer that is wrong on most of the few answers it gives alone (a layer trained on noise, whose
+  scores collapse) never starts serving; no min_share and no margin. A certified candidate that is not useful by
+  `trial` decisions after its freeze is discarded with "useful" among the failed checks.
 - discard — (probe on) the probe shows the gap beyond noise (Wilson lower bound of the novel error − Wilson upper bound of the
   seen error > gap, at `wilson` confidence; a point-estimate gap at n = 30 does not discard); not certified
   `stale` (3000) decisions after its freeze; certified and not promotable `trial` (3000) decisions after its freeze
@@ -192,7 +198,10 @@ class VersionInfo:
     keys it trained on, a set snapshotted at the freeze (not a digest: novel / seen is membership, `key in
     train_keys`, for every post-freeze sample; the learner's key list grows after the freeze and must not be read
     live). A list or set given is stored as a frozenset. discarded_at: the train labels the loop had when this
-    version was discarded (None: not discarded) — the lane LearningLoop's refreeze floor reads it."""
+    version was discarded (None: not discarded) — the lane LearningLoop's refreeze floor reads it. Additive mode with
+    the usefulness certificate on (`AdapterLoop(useful_error=)`): certified / threshold are the version's own
+    certificate's (λ_J), useful whether the usefulness certificate holds at λ_J, useful_thr the threshold it answers
+    at (composed; +inf: no point certified by both)."""
     version: int
     state: str
     n_train: int = 0
@@ -207,6 +216,10 @@ class VersionInfo:
     routing_thr: float | None = None                   # additive mode: its frozen routing threshold Λ (None: none)
     learning: bool | None = None                       # additive mode: its promise learns — True for every layer and
     #                                                    the candidate since decision 21 (None: replacement mode)
+    useful: bool | None = None                         # additive, usefulness on: its usefulness certificate holds at
+    #                                                    `threshold` (its certificate's λ_J); None: no such certificate
+    useful_thr: float | None = None                    # additive, usefulness on: the composed answer threshold (the
+    #                                                    loosest point of the certified prefix that is also useful)
 
     def __post_init__(self):
         if not isinstance(self.train_keys, frozenset):
@@ -258,6 +271,7 @@ class LoopState:
     deepest_certified: bool | None = None              # additive mode: the deepest layer's promise is certified
     zone_share: dict | None = None                     # additive mode: layer version → P̂(Z_v), its zone's share
     maturity: dict | None = None                       # the maturity gate's inputs (`DefaultPolicy.maturity_gate`)
+    useful_error: float | None = None                  # additive mode: β of the usefulness certificate (None: off)
 
     def __post_init__(self):
         if self.mode not in ("stream", "label"):
@@ -701,7 +715,11 @@ class DefaultPolicy(LoopPolicy):
         "ok" (novel_risk / probe only when on). The probe
         passes only with ≥ probe_min alone answers on novel samples (an unmeasured novel side does not promote).
         Additive mode (st.layers set): the additive gate (decision D1) — certified, novel, novel_risk, probe; no
-        min_share and no margin (nothing to compare with: a layer serves only the zone the layer above escalates)."""
+        min_share and no margin (nothing to compare with: a layer serves only the zone the layer above escalates);
+        with the loop's usefulness certificate on (st.useful_error set) a fifth check, "useful": the candidate's
+        usefulness certificate (selective error among its alone answers ≤ β, anytime-valid on its own δ budget) holds
+        at its certificate's threshold in force λ_J — a layer whose alone answers are not shown to be right more
+        often than β allows never starts serving."""
         c = st.candidate_info
         out = {"certified": {"ok": bool(c is not None and c.certified)},
                "novel": {"ok": paired.n_novel >= self.min_novel, "n_novel": paired.n_novel, "min": self.min_novel}}
@@ -719,6 +737,15 @@ class DefaultPolicy(LoopPolicy):
                                  f"Wilson {self.wilson:.0%} upper bound {ub:.4f} (≤ α {st.alpha:g} needed)"}
         if self.probe:
             out["probe"] = self._probe_promote(paired)
+        beta = getattr(st, "useful_error", None)
+        if st.layers is not None and beta is not None:
+            ok = bool(c is not None and c.useful)
+            thr = None if c is None or c.useful_thr is None or math.isinf(c.useful_thr) else c.useful_thr
+            out["useful"] = {"ok": ok, "beta": beta, "thr": thr,
+                             "why": (f"the usefulness certificate (error among the alone answers ≤ {beta:g}) holds at "
+                                     "the certified threshold" if ok else
+                                     f"the usefulness certificate (error among the alone answers ≤ {beta:g}) does not "
+                                     "hold at the certified threshold yet")}
         return out
 
     def _probe(self, paired):

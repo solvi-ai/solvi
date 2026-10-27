@@ -87,8 +87,12 @@ FORMAT = "solvi adapter loop checkpoint v1"
 # refuses it with this string in its message; a replacement loop's checkpoint stays v1, byte for byte as before.
 # v3 (decision 21): every layer keeps learning and answers at its live threshold; a v2 checkpoint (frozen layers) is
 # refused by name — its records carry the owner-only answering, and a loop resumed from it would not replay across.
-FORMAT_ADDITIVE = ("solvi adapter loop checkpoint v3 (additive coverage: load it with a solvi whose AdapterLoop takes "
-                   "additive=True)")
+# v4 (decision 25): every layer and candidate carries its usefulness certificate (its own δ budget); a v3 checkpoint
+# (no usefulness certificate) is refused by name — its layers started without the usefulness gate.
+FORMAT_ADDITIVE = ("solvi adapter loop checkpoint v4 (additive coverage with usefulness certificates: load it with a "
+                   "solvi whose AdapterLoop takes additive=True and useful_error=)")
+_FORMAT_ADDITIVE_V3 = ("solvi adapter loop checkpoint v3 (additive coverage: load it with a solvi whose AdapterLoop "
+                       "takes additive=True)")
 _FORMAT_ADDITIVE_V2 = ("solvi adapter loop checkpoint v2 (additive coverage: load it with a solvi whose AdapterLoop "
                        "takes additive=True)")
 _FORMATS = (FORMAT, FORMAT_ADDITIVE)
@@ -216,7 +220,9 @@ def _state(loop) -> dict:
                    "promise": None if p is None else p.dump(),
                    "cmp": None if ver.get("cmp") is None else ver["cmp"].dump(),
                    "fixed": (None if ver.get("fixed") is None or not math.isfinite(ver["fixed"])
-                             else float(ver["fixed"]))})
+                             else float(ver["fixed"])),
+                   **({} if not loop.additive else
+                      {"useful": None if ver.get("useful") is None else ver["useful"].dump()})})
     rows_keys = {r.key for r in loop._rows}
     return {"n": loop.n, "served": loop.served, "candidate": loop.candidate, "left": loop.left,
             "paused": loop.paused, "closed": loop.closed, "error": loop.error, "attempt": loop._attempt,
@@ -243,7 +249,9 @@ def _additive_state(loop) -> dict:
             "detectors": {str(v): None if d is None else d.dump() for v, d in sorted(loop._dets.items())},
             "left_of": {str(v): int(k) for v, k in sorted(loop._left_of.items())},
             "refused_why": loop._refused_why,
-            "zones": {str(v): dict(z) for v, z in sorted(loop._zstat.items())}}
+            "zones": {str(v): dict(z) for v, z in sorted(loop._zstat.items())},
+            "useful_budget_v": None if loop.useful_budget is None else loop.useful_budget.v,
+            "useful_ev_seen": {str(v): k for v, k in sorted(loop._uev_seen.items())}}
 
 
 def _save_versions(loop, out: Path) -> dict:
@@ -321,7 +329,7 @@ def save_loop(loop, dir, *, cancel=False) -> dict:
                 "config": {k: kw[k] for k in ("max_risk", "max_error", "delta", "probation", "source", "seed",
                                               "sampling", "promise_options", "feature", "wait", "mode",
                                               "warn_refused", "trace_candidate")
-                           + (("additive", "max_layers") if loop.additive else ())},
+                           + (("additive", "max_layers", "useful_error", "delta_use") if loop.additive else ())},
                 "detector_alone": loop._detector_alone, "batch": loop._batch,
                 "detector": None if loop.detector is None else loop.detector.config(),
                 "system": loop.system is not None, "version0": v0["0"], "keyed": loop._secret is not None,
@@ -392,10 +400,14 @@ def _verified(folder: Path, secret) -> tuple:
     m = json.loads(mbytes)
     fmt = m.get("format")
     if fmt not in _FORMATS:
+        if fmt == _FORMAT_ADDITIVE_V3:
+            raise ValueError(f"{folder}: an additive loop checkpoint of format v3 (no usefulness certificates): this "
+                             "solvi's additive loop carries a usefulness certificate per layer (format v4), and a v3 "
+                             "run cannot be continued or replayed by it — load it with the solvi that wrote it")
         if fmt == _FORMAT_ADDITIVE_V2:
             raise ValueError(f"{folder}: an additive loop checkpoint of format v2 (frozen layers, the owner answers "
                              "alone): this solvi's additive loop answers top-down with every layer learning (format "
-                             "v3), and a v2 run cannot be continued or replayed by it — load it with the solvi that "
+                             "v4), and a v2 run cannot be continued or replayed by it — load it with the solvi that "
                              "wrote it")
         if isinstance(fmt, str) and fmt.startswith("solvi adapter loop checkpoint"):
             raise ValueError(f"{folder}: an adapter loop checkpoint of a format this solvi does not read ({fmt!r}): "
@@ -460,7 +472,7 @@ def load_loop(cls, dir, learner, *, system=None, storage=None, versions_dir=None
     served, clock: as the constructor's; secret: the loop's secret (required when it had one); groups: the
     grouping function of version 0's thresholds per group, when it was calibrated with one; additive: what the caller
     expects (None: whatever the checkpoint is) — a replacement checkpoint (v1) loaded with additive=True, or an additive
-    one (v3) with additive=False, is refused: a loop never changes its protocol at a load (a replacement loop's chain
+    one (v4) with additive=False, is refused: a loop never changes its protocol at a load (a replacement loop's chain
     cannot be rebuilt into layers; start an additive loop from its served version as version 0 instead)."""
     if isinstance(secret, str):
         secret = secret.encode()
@@ -475,7 +487,7 @@ def load_loop(cls, dir, learner, *, system=None, storage=None, versions_dir=None
     saved_additive = m["format"] == FORMAT_ADDITIVE
     if additive is not None and bool(additive) != saved_additive:
         raise ValueError(
-            "this checkpoint is of an additive loop (format v3): it loads as one, not with additive=False"
+            "this checkpoint is of an additive loop (format v4): it loads as one, not with additive=False"
             if saved_additive else
             "this checkpoint is of a replacement loop (format v1): it loads as one, not with additive=True — a loop "
             "never changes its protocol at a load; start an additive loop with its served version as initial=")
@@ -596,6 +608,11 @@ def _restore_additive(loop, st):
     loop._left_of = {int(v): int(k) for v, k in a["left_of"].items()}
     loop._refused_why = a["refused_why"]
     loop._zstat = {int(v): {k: int(x) for k, x in z.items()} for v, z in a["zones"].items()}
+    if (a.get("useful_budget_v") is None) != (loop.useful_budget is None):
+        raise ValueError("the checkpoint's usefulness budget and the loop's useful_error disagree")
+    if loop.useful_budget is not None:
+        loop.useful_budget.v = int(a["useful_budget_v"])
+    loop._uev_seen = {int(v): int(k) for v, k in (a.get("useful_ev_seen") or {}).items()}
     if loop._layers[0] != 0 or set(loop._zstat) != set(loop._layers) or not set(loop._route) <= set(loop._layers):
         raise ValueError(f"the additive chain state is inconsistent: layers {loop._layers}, routing thresholds of "
                          f"{sorted(loop._route)}, zone counts of {sorted(loop._zstat)}")
@@ -651,6 +668,17 @@ def _restore(loop, m, st, data, vdir, groups):
             cmp.restore(r["cmp"])
             cmp.budget = _Mirror(promise)                 # the candidate's index: it spends nothing from the loop's
             row["cmp"] = cmp
+        if r.get("useful") is not None:                   # additive: its usefulness certificate (own budget)
+            if loop.useful_budget is None:
+                raise ValueError(f"version {v} has a usefulness certificate and the loop has useful_error=None")
+            useful = StreamPromise(**loop._ukw, budget=DeltaBudget(loop.useful_budget.delta,
+                                                                   loop.useful_budget.schedule))
+            useful.restore(r["useful"])
+            useful.budget = loop.useful_budget
+            row["useful"] = useful
+        elif loop.additive and loop.useful_budget is not None and promise is not None and v != 0 \
+                and r["state"] in ("candidate", "layer"):
+            raise ValueError(f"version {v} has no usefulness certificate and the loop has useful_error on")
         if r["stale"] is not None:
             row["stale"] = r["stale"]
         if v != 0:

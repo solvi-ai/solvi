@@ -24,12 +24,29 @@
   the layer answered alone anywhere in its zone) is new. Records carry `owner`, `layer`, `zone`, `path`, `trial_zone`,
   `answered_by`,
   `answer_layer`, `answer_thr`, `base`, `rho_base` and `path_would`; `replay()` recomputes the routing and the answer
-  and `rescore=True` rescores every layer; the checkpoint of an additive loop is format v3 (a replacement loop's stays
-  v1; an older library refuses v3 by name, and v2 — frozen layers, a pre-release form — is refused by name).
+  and `rescore=True` rescores every layer; the checkpoint of an additive loop is format v4 (a replacement loop's stays
+  v1; an older library refuses v4 by name, and v3 — no usefulness certificate — and v2 — frozen layers — both
+  pre-release forms, are refused by name).
   `additive=False` writes the same
   records and events as with `additive` omitted; both differ from 1.3 by the lazy δ charge (see Changed: `v_index` /
   `delta_v` are `None` until a promise's first sample, "recertify" carries `None`). Checked on synthetic streams with known per-zone risk; no stand has run it, and no
   gain is claimed.
+- **Additive coverage: a usefulness certificate per layer, and a fifth start check `useful`**
+  (`AdapterLoop(useful_error=0.5, delta_use=None)`, additive mode only, on by default there; `None` turns it off).
+  The joint certificate alone admits a layer that answers alone on a few per cent of its zone and is wrong on almost
+  all of those answers (a layer trained on noise labels does this). Each candidate and layer now also carries a
+  selective certificate at β = `useful_error` on the same samples, tested pointwise over its grid (each point at
+  δ_u / G) on its own δ budget `delta_use` (default the loop's δ). A candidate starts serving only where it holds;
+  a layer answers at the loosest point certified by both. Two guarantees, separate budgets: per zone, P(a layer ever
+  answers alone at a threshold whose risk on its zone is above α) ≤ δ, as before; and P(a layer ever answers alone at
+  a point whose error among its alone answers on its zone is β or more) ≤ δ_use — a layer trained on noise never
+  starts serving. β = 0.5 is a noise guard, not a quality promise. New: `StreamPromise(procedure="pointwise")` with
+  `certified_at`, `log_wealth_at`, `level_now`; promote-event fields `useful`, `useful_lw`, `useful_level`,
+  `useful_v_index`, `useful_delta_v`, `useful_error`, `joint_thr`, `alone_k`, `wrong_k`; per-record `useful`;
+  `useful_*` events; `status()["delta_use_spent"]`; `VersionInfo.useful` / `useful_thr`; `LoopState.useful_error`.
+  `useful_error=None` writes the records of the additive loop without it, and replacement mode is unchanged; a
+  `StreamPromise` built without `procedure` keeps its records, dumps and fingerprint. Checked on synthetic streams
+  (noise layer, real layer, the null at β, the composed threshold); no stand has run it.
 - **`DefaultPolicy(novel_only=...)`: the promotion's novel-only paired comparison can be switched off, for controls**
   (`solvi.experimental.stream`). Default `True`, unchanged: the comparison counts only post-freeze samples on keys the
   candidate never trained on. With `False` it counts every sample, the candidate's train keys too (the seen fields

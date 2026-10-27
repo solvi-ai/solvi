@@ -1,6 +1,6 @@
 """solvi.experimental.stream, additive coverage, stage B3 (persistence): the records carry every reached layer's score
 and answer (path, path_would), replay recomputes the routing from them (1–3 layers, detach, per-layer restart), the
-candidate's trace on its zone only, the checkpoint of an additive loop (format v3, the chain, per-layer detectors and
+candidate's trace on its zone only, the checkpoint of an additive loop (format v4, the chain, per-layer detectors and
 probation, the trial) continues exactly as the loop it was saved from, old / mismatched checkpoints, status() zones.
 Spec tests 5, 6, 9 (audit part), 10 (status fields)."""
 import json
@@ -402,14 +402,18 @@ def test_a_replacement_checkpoint_stays_v1_and_loads_and_protocol_mismatches_are
     _run(al, _xs(0, 800))
     al.save(tmp_path / "a")
     folder, m = _manifest(tmp_path / "a")
-    assert m["format"] == ck.FORMAT_ADDITIVE != ck.FORMAT and "additive" in m["format"] and " v3 " in m["format"]
+    assert m["format"] == ck.FORMAT_ADDITIVE != ck.FORMAT and "additive" in m["format"] and " v4 " in m["format"]
     assert m["config"]["additive"] is True and m["config"]["max_layers"] == 2
     with pytest.raises(ValueError, match="additive loop.*additive=False"):
         AdapterLoop.load(tmp_path / "a", _Hand([GOOD]), secret=KEY, clock=_clock, additive=False)
     assert AdapterLoop.load(tmp_path / "a", _Hand([GOOD]), secret=KEY, clock=_clock, additive=True).additive
-    m2 = dict(m, config={**m["config"], "additive": False})                   # a v3 manifest claiming replacement
+    assert m["config"]["useful_error"] == 0.5 and m["config"]["delta_use"] is None
+    m2 = dict(m, config={**m["config"], "additive": False})                   # a v4 manifest claiming replacement
     _resign(folder, m2)
     with pytest.raises(ValueError, match="disagree"):
+        AdapterLoop.load(tmp_path / "a", _Hand([GOOD]), secret=KEY, clock=_clock)
+    _resign(folder, dict(m, format=ck._FORMAT_ADDITIVE_V3))                  # before the usefulness certificate
+    with pytest.raises(ValueError, match="format v3.*usefulness"):
         AdapterLoop.load(tmp_path / "a", _Hand([GOOD]), secret=KEY, clock=_clock)
     _resign(folder, dict(m, format=ck._FORMAT_ADDITIVE_V2))                  # before decision 21: refused by name
     with pytest.raises(ValueError, match="format v2"):

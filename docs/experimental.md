@@ -808,12 +808,40 @@ stays `additive=False`, the replacement protocol above, with the same records an
   probation, learns only on the decisions it owns (all labelled), and, if it is not the deepest, bets only at grid
   points at or above its Λ: its own decisions are a biased sample of its zone below Λ. The points below wait until it
   is certified and out of probation again.
-- *Layering.* `DefaultPolicy`'s additive gate is four checks: certified, novel samples (≥ `min_novel`), the novel-risk
-  Wilson bound ≤ α, and the probe; the share and margin comparison of replacement mode does not apply. A candidate
+- *Layering.* `DefaultPolicy`'s additive gate is five checks: certified, novel samples (≥ `min_novel`), the novel-risk
+  Wilson bound ≤ α, the probe, and `useful` (below); the share and margin comparison of replacement mode does not
+  apply. A candidate
   that passes becomes the deepest layer from the next decision ("promote" with `additive=True`); its promise goes on
   learning at the coin rate. `max_layers` caps the chain, base included (default 3); at the cap, and while the
   deepest layer is not certified, no training starts ("train_refused") and `train_now` is refused at the cap. Each
   layer costs one more scoring on the decisions that reach it and, with LoRA, one more staged adapter.
+- *The usefulness certificate.* `AdapterLoop(..., useful_error=0.5, delta_use=None)` (additive mode only; the
+  default there is 0.5, `None` turns it off). The joint certificate bounds P(answered alone and wrong) as a share of
+  the zone, so a layer that answers alone on 1–3 % of its zone and is wrong on almost all of those answers passes
+  it — a layer trained on noise labels does exactly that (its scores collapse, a few points at the strict end of the
+  grid answer). Every candidate and layer therefore carries a second certificate on the same samples and grid: the
+  selective kind at level β = `useful_error` ("the error among the answers given alone ≤ β"), tested **pointwise**
+  (each grid point on its own at δ_u / G, G the grid size), on its own δ budget `delta_use` (default: the loop's δ;
+  Basel over its own indices, lazy charge as above; the loop's δ is not touched). The start gate's fifth check
+  `useful` asks that this certificate holds at the candidate's certified threshold; a certified candidate that never
+  becomes useful is discarded `trial` decisions after its freeze, with `useful` among the failed checks. After the
+  start, a layer answers at the **composed threshold**: the loosest point of its certified prefix that the usefulness
+  certificate has also certified (both sets only grow, so it only loosens); "threshold" in `status()["zones"]` and
+  `versions()` is that one, the certificate's own is beside it. An alarm on a layer restarts both. β = 0.5 is a noise
+  guard ("not worse than a coin among its own confident answers"), not a quality promise: the quality promise stays
+  the joint α; a tighter β turns the gate into a quality floor tested on a few dozen alone answers, where it cannot
+  separate a 5 % layer from a 30 % one. Pointwise rather than the fixed sequence: the strictest grid point of the
+  auto grid sees an alone answer about once in 200 rows, and a selective fixed sequence starves there.
+  The promote event carries `useful`, `useful_lw`, `useful_level` (log(G/δ_u)), `useful_v_index`, `useful_delta_v`,
+  `useful_error`, `joint_thr`, `alone_k`, `wrong_k`; every record carries `useful` ([version, state] per certificate),
+  the stream carries `useful_*` events, and `status()` `delta_use_spent`. `useful_error=None` gives the records of the
+  loop without it, record for record.
+- *Two guarantees.* (1) Per zone, as below: with probability ≥ 1 − δ, no layer ever answers alone at a threshold whose
+  risk on its zone is above α. (2) With probability ≥ 1 − δ_use, no layer ever answers alone at a point whose error
+  among its alone answers on its zone is β or more — in particular a layer trained on noise never starts serving.
+  Both are anytime-valid (Ville's inequality per index and point, a union over them), on the same stream assumptions
+  (i.i.d. between change points, labels drawn by a coin independent of the input; in trial every zone row is
+  labelled). They are separate statements on separate budgets; together they hold with probability ≥ 1 − δ − δ_use.
 - *The guarantee is per zone.* Every layer's certificate is on its own zone, the decisions that reach it, at level α,
   read on coin samples of that zone; the zones are fixed by routing thresholds frozen at attach; a layer answers
   inside a deeper zone where its live λ_j allows (top-down). Each layer's certificate is valid on its own zone's
@@ -852,8 +880,9 @@ stays `additive=False`, the replacement protocol above, with the same records an
   escalated; `alone` is "some layer answered") and `base` / `rho_base` (the base coin); the loop payload carries
   `path_would` (each reached layer's answer). With `trace_candidate=True` the candidate's score and answer are recorded
   on its zone only. `replay()` recomputes the routing from the recorded path; `rescore=True` rescores every layer from
-  its file in `versions_dir`. `save()` writes checkpoint format v3 with the chain (layers, routing thresholds, one
-  detector per layer); a v2 checkpoint (written before every layer kept learning) is refused by name, a replacement
+  its file in `versions_dir`. `save()` writes checkpoint format v4 with the chain (layers, routing thresholds, one
+  detector per layer, the usefulness certificates and their budget); a v3 checkpoint (before the usefulness
+  certificate) and a v2 one (before every layer kept learning) are refused by name, a replacement
   loop's checkpoint stays v1, and `load(additive=)` refuses a protocol mismatch. Attached to a Dispatcher, a decision
   answered by a layer below L0 (or, escalated, owned by one) is decided with that layer's version installed for the
   call: the decision holds the loop's and the part's locks for its whole System 1 call (the loop's
