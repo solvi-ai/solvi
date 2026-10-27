@@ -620,5 +620,49 @@ def test_a_separator_with_a_space_beside_it_does_not_read():
     for t in ("1 ,234", "(1 ,234)", "1 .5"):
         with pytest.raises(ValueError, match="separator with a space"):
             span_value(float, t)
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="separator with a space"):
             _read_number(float, t)
+    from solvi.core.textin import ParseError, parse_number
+    with pytest.raises(ParseError, match="separator with a space"):
+        parse_number("1 ,234")
+
+
+@pytest.mark.parametrize("doc,qa", [
+    ("Revenue change | -12% |\nRevenue | 1,000 |", "12"), ("Revenue change | (12%) |\nRevenue | 1,000 |", "12"),
+    ("Margin change -80 bps.\nRevenue 1,000.", "80"),
+])
+def test_a_signed_percent_the_quote_left_out_abstains(doc, qa):
+    r = two(qa, "1,000", compute=lambda f, s: f.b * (1 + f.a / 100)).ask({"doc": doc})["answer"]
+    assert r.status == "abstain" and "left out its" in r.why, r.why
+
+
+def test_a_percent_the_quote_left_out_is_its_unit():
+    seen = {}
+
+    def compute(f, s):
+        seen.update(f.units)
+        return f.b * (1 + f.a / 100)
+    r = two("12", "$1,000 million", compute=compute).ask({"doc": "Growth | 12% |\nRevenue | $1,000 million |"})["answer"]
+    assert r.status == "ok" and r.answer == pytest.approx(1120.0) and seen["a"].percent
+
+
+@pytest.mark.parametrize("doc,q,part", [
+    ("Net -\n1,234. Cost 100.", "1,234", "sign"), ("Net △ 1,234. Cost 100.", "1,234", "sign"),
+    ("Net income ▲ 1,234.", "1,234", "sign"), ("| Net | -1\u00a0234 |", "1\u00a0234", "sign"),
+    ("Net 1,234 cr. Cost 100.", "1,234", "CR / DR"), ("Net 1,234 dr.", "1,234", "CR / DR"),
+])
+def test_more_signs_bound_to_the_number(doc, q, part):
+    from solvi.solutions.document import _left_out
+    why = _left_out(q, doc) or ""
+    assert "left out its" in why and part in why, (doc, why)
+
+
+def test_a_group_of_a_spaced_number_does_not_stand_alone():
+    from solvi.solutions.document import _left_out
+    assert "does not stand in the text" in _left_out("234", "Убыток -1 234 тыс. руб.")
+    assert "does not stand in the text" in _left_out("1", "Net -1\u2009234.")
+
+
+def test_one_quote_in_different_scales_is_ambiguous():
+    from solvi.solutions.document import _left_out
+    assert "different scales" in _left_out("1.2", "Revenue 1.2 billion; elsewhere 1.2 million.")
