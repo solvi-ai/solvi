@@ -3614,8 +3614,11 @@ calibration examples with no signal to gate: a forced answer (signal +inf) or on
 signal, NaN or −inf — an abstention before the guarantee, such as a rule input a model escalated); they count in `"n"`,
 `"answered"` and `"risk"` as what they are (an abstention is never answered alone), but not in `"separation"`. The
 guarantee is kept across processes with `system.save_guarantee(question, path)` and
-`system.load_guarantee(path)` — the promise, its thresholds and report, and the catalog fingerprint, answer type and
-guard fingerprint it was made for (another catalog or answer type is refused unless `strict=False`; a signal or grouping
+`system.load_guarantee(path)` — the promise, its thresholds and report, and the catalog fingerprint, the models'
+fingerprints (`system.fingerprint()["models"]`: each model, its endpoint, settings and the question it is asked), the
+answer type and guard fingerprint it was made for (another catalog, other models, a file that names no models or another
+answer type is refused unless `strict=False`; a model that names no version is compared by name and settings, so a
+server that changes the weights behind the name is not told apart; a signal or grouping
 that was a function is passed again, `signal=` / `groups=`): stored decisions then replay against it without
 calibrating again. The file's fingerprints catch a file that does not fit or an inconsistent edit, not a forgery that
 recomputes them — keep it like code. The facts the signal and the groups read become

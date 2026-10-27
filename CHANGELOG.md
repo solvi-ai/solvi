@@ -9,12 +9,18 @@
   them — one scale rule, never multiplied (`1,250 million`, `$1.2bn` → 1250, 1.2, in the document's unit), a sign in
   any dash or trailing, parentheses as a negative around a number with a separator, decimals, a currency or a percent
   (`$(1,234) million` → −1234; `(2019)` does not read), anything ambiguous or not finite abstains; a number whose sign
-  the text writes at any occurrence but the quote left out (`-1,234` quoted as `1,234`) abstains; each number's
-  written scale, currency and percent are `facts.units`, and two number fields in different scales or currencies
-  abstain (hard check `units`; `units="any"` turns it off) — `compute=(facts, state)` as the
+  the quote must be the whole number token at its place — at every occurrence of its digits the token is extended
+  over a sign in any dash or minus, a currency, closing parentheses, a scale and a percent, and a part the quote left
+  out (`$1.2` of `$1.2 billion`, `1,234` of `-1,234` or `(1,234)`) or a sign the text does not write there (a `- `
+  list bullet) abstains; a number in parentheses right after another number (`SEK 1,234 m (1,100)`) is ambiguous and
+  abstains; each number's written scale, currency and percent are `facts.units`, and a hard check `units` abstains
+  when number fields differ in scale (a field without one next to one with one included) or currency (a bare `$`
+  matches any dollar) — `units="lenient"` lets a field without a scale match any, `units="any"` turns it off —
+  `compute=(facts, state)` as the
   question's rule (a number by default, `answer=` otherwise; confidence the weakest read; a result that is not finite
   abstains), `checks=` as hard checks, `calibrate(examples, max_risk=)` over `System.guarantee` (a warning below 100
-  examples; a number judged at a string label's written precision, a numeric label up to float noise), `save_calibration` / `document(..., calibration=)`,
+  examples; a number judged at a string label's written precision — a whole number below 100 exactly — and a
+  numeric label up to float noise), `save_calibration` / `document(..., calibration=)`,
   `storage=` with `verify()` / `replay_all()`; the rest of the input stored as plain JSON data (numpy scalars as
   numbers, sets and tuples as lists). An LLM made with `logprobs="auto"` is read with one stated confidence per read
   (a copy, with a warning); `llm()`'s own default is unchanged. Built only from the low level; `DocumentSystem` holds

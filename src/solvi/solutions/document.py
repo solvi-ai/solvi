@@ -37,14 +37,23 @@ The scheme it sets up (all of it existing low-level blocks, wired):
   "(12%)", "(12)%" → −1234, −12) — only around a number with a separator, decimals, a currency or a percent ("(2019)",
   "(1)" do not read: a year, a footnote). Anything else — a range, two numbers, two scales or currencies, an
   exponent ("1e3"), "1_000", NaN or infinity, an ambiguous "2.500" — does not read, and the answer abstains with the
-  reason. A number field also abstains when the text writes a sign the quote left out at any of its occurrences: a
-  "-" right before it (a currency between; not after a letter or digit, not a "- " bullet), "(" before it with ")"
-  closing right after it, or a "-" right after it — "$1,234" in prose and "(1,234)" in a table do not read as +1234.
+  reason. One rule keeps the quote honest: it must be the whole number token at its place in the text. At every
+  occurrence of the quote the token is extended over what is bound to the digits — a sign in any dash or minus
+  (with or without one space), a currency, "(" with ")" closing right after, a scale word or suffix, a percent; if
+  the token carries a part the quote left out, the answer abstains naming it ("the text writes '$1.2 billion', the
+  quote '$1.2' left out its scale"; "$1,234" in prose and "(1,234)" in a table do not read as +1234), and a quote
+  that reads a sign the text does not write there ("- 1,234" from a list bullet) abstains too. Not bound to the
+  digits: a "- " bullet at a line's start, a dash right after a letter or digit ("10-K", "2018-2019"), a spaced dash
+  after a word, a digit or a dash ("Revenue - 1,234", "1,234 – 1,300"), "(" that does not close right after the
+  number ("1,234 (Note 5)"). A number in parentheses right after another number on its line ("SEK 1,234 m (1,100)",
+  "12.3% (11.8)") is a comparative or a negative — the text does not say, and the answer abstains. An occurrence with
+  a percent where the quote has none is another quantity and does not count.
 - units: what each number field writes besides the number is `facts.units[field]` — a Unit(scale, currency,
-  percent). With `units="same"` (the default) and two or more number fields, a hard check `units` makes the answer
-  abstain when their written scales or currencies differ ("$1.2bn" and "$950 million"; "$100" and "€100"); a field
-  that writes no scale or currency conflicts with nothing, and a percentage next to an absolute number is only
-  exposed (`units.percent`), not refused. `units="any"` turns the check off. A `Span[date]` and other types:
+  percent). With two or more number fields a hard check `units` compares them: `units="same"` (the default) abstains
+  when their scales differ — "$1.2bn" and "$950 million", and a field without a scale next to one with a scale ("3k"
+  and "3,000") — or their currencies differ ("$100" and "€100"; a field without a currency, and a bare "$" next to
+  "C$" or "US$", conflict with nothing); `units="lenient"` lets a field without a scale match any; `units="any"`
+  turns the check off. A percentage next to an absolute number is only exposed (`units.percent`), not refused. A `Span[date]` and other types:
   solvi.core.types.span_value.
 - code computes: `compute=(facts, state) → value` is the question's rule; `facts` is the schema filled with the read
   values, `state` the input without the text. The answer is a number (`Answer.estimate()`) unless `answer=` says
@@ -63,7 +72,8 @@ The scheme it sets up (all of it existing low-level blocks, wired):
   100 examples: a GuaranteeWarning (the threshold rests on few examples and can move); a signal that does not
   separate right from wrong raises, as System.guarantee does. A number answer is judged by its label: a label
   written as a string states its precision ("33.33" takes 33.3333, "1,500" takes 1500.4: within half a unit of its
-  last digit); a label given as a number is matched up to float noise (math.isclose: the int 1 does not take 1.4).
+  last digit; a whole number below 100, "33", is exact); a label given as a number is matched up to float noise
+  (math.isclose: the int 1 does not take 1.4).
   Pass correct=(result, label) → bool to judge otherwise.
 - record: `storage=` (a path: JSONLStorage, `record="full"` so every decision replays) keeps every ask hash-chained;
   `verify()` checks the chain, `replay_all()` re-checks every stored decision against this system.
@@ -92,17 +102,19 @@ from ..core.catalog import Answer, Catalog, Question
 QUESTION = "answer"
 STATE = "state"                     # the fact that carries the input without the text
 MIN_CALIBRATION = 100               # below this, calibrate warns: the threshold rests on few examples
-UNIT_MODES = ("same", "any")
+UNIT_MODES = ("same", "lenient", "any")
 
-# every dash a document writes for a minus (length-preserving, so offsets into the text stay as they are)
-_DASHES = str.maketrans({c: "-" for c in "−–—‑‐‒﹣－⁻"})
-_ISO = ("USD EUR GBP JPY CNY RMB RUB CHF CAD AUD NZD HKD SGD INR BRL MXN ZAR SEK NOK DKK PLN CZK HUF KRW TRY ILS AED "
-        "SAR").split()
-_CUR_SYMBOL = {"US$": "USD", "A$": "AUD", "AU$": "AUD", "C$": "CAD", "CA$": "CAD", "HK$": "HKD", "NZ$": "NZD",
-               "S$": "SGD", "R$": "BRL", "Rs.": "INR", "Rs": "INR", "₹": "INR", "$": "USD", "€": "EUR", "£": "GBP",
-               "¥": "JPY", "₽": "RUB", "RMB": "CNY"}
-_CUR_RX = (r"(?:" + "|".join(re.escape(k) for k in sorted(_CUR_SYMBOL, key=len, reverse=True) if not k[0].isalpha())
-           + r"|\b(?:Rs\.?|" + "|".join(_ISO) + r")\b|(?<![A-Za-z])(?:US|AU|A|CA|C|HK|NZ|S|R)\$)")
+# every dash or minus sign a document writes (length-preserving, so offsets into the text stay as they are); "△" / "▲"
+# are the minus of Japanese and Chinese financial tables
+_DASHES = str.maketrans({c: "-" for c in "−–—―‑‐‒﹣－⁻˗△▲"})
+_ISO = ("USD EUR GBP JPY CNY RMB RUB CHF CAD AUD NZD HKD SGD TWD INR BRL MXN ZAR SEK NOK DKK PLN CZK HUF KRW TRY ILS "
+        "AED SAR").split()
+_CUR_SYMBOL = {"U.S.$": "USD", "US$": "USD", "A$": "AUD", "AU$": "AUD", "C$": "CAD", "CA$": "CAD", "HK$": "HKD",
+               "NZ$": "NZD", "S$": "SGD", "NT$": "TWD", "R$": "BRL", "Rs.": "INR", "Rs": "INR", "₹": "INR",
+               "$": "$", "€": "EUR", "£": "GBP", "¥": "JPY", "₽": "RUB", "RMB": "CNY"}
+_DOLLARS = {"USD", "AUD", "CAD", "HKD", "NZD", "SGD", "TWD", "BRL", "MXN"}     # what a bare "$" may stand for
+_CUR_RX = (r"(?:(?<![A-Za-z])(?:U\.S\.|US|AU|A|CA|C|HK|NZ|S|NT|R)\$|[$€£¥₽₹]|\bRs\b\.?|\b(?:"
+           + "|".join(_ISO) + r")\b)")
 _CURRENCY = re.compile(_CUR_RX)
 _PERCENT = re.compile(r"\s*(?:%|\bper\s?cent\b)", re.IGNORECASE)
 _SCALES = {"thousand": "thousand", "thousands": "thousand", "k": "thousand", "million": "million",
@@ -111,6 +123,7 @@ _SCALES = {"thousand": "thousand", "thousands": "thousand", "k": "thousand", "mi
 _SCALE_WORD = re.compile(r"\s*\b(thousands?|millions?|billions?|trillions?|mn|bn|tn)\b\.?", re.IGNORECASE)
 _SCALE_SUFFIX = re.compile(r"(?<=\d)\s?(bn|mn|tn|k|m|b)\b", re.IGNORECASE)
 _CORE = re.compile(r"[0-9][0-9,. ]*|\.[0-9]+")
+_SP = "[    ]"                      # one space of a line (not a tab, not a new line)
 
 
 class Unit(typing.NamedTuple):
@@ -122,8 +135,13 @@ class Unit(typing.NamedTuple):
 
 
 def _currency_code(tok):
-    tok = tok.strip()
+    tok = re.sub(r"\s+", "", tok)
     return _CUR_SYMBOL.get(tok, tok)
+
+
+def _same_currency(x, y):
+    """Do two written currencies agree? A bare "$" is any dollar ("US$", "C$", "USD" ...)."""
+    return x == y or (x == "$" and y in _DOLLARS) or (y == "$" and x in _DOLLARS)
 
 
 def _read_quote(vtype, text):
@@ -142,8 +160,9 @@ def _read_quote(vtype, text):
     if re.search(r"%\s*[0-9]", t):
         raise ValueError("a percent sign before the number")
     curs = {_currency_code(m.group()) for m in _CURRENCY.finditer(t)}
-    if len(curs) > 1:
+    if len(curs) > 1 and not (len(curs) == 2 and _same_currency(*sorted(curs))):
         raise ValueError(f"two currencies ({', '.join(sorted(curs))})")
+    curs = {max(curs, key=len)} if curs else curs
     t = _CURRENCY.sub(" ", t)
     scales = {_SCALES[m.group(1).lower()] for rx in (_SCALE_WORD, _SCALE_SUFFIX) for m in rx.finditer(t)}
     if len(scales) > 1:
@@ -177,53 +196,116 @@ def _read_number(vtype, text):
     return _read_quote(vtype, text)[0]
 
 
-_BEFORE_CUR = re.compile(r"(?:" + _CUR_RX + r")\s?$")
-_AFTER_CLOSE = re.compile(r"\s*(?:(?:thousands?|millions?|billions?|trillions?|mn|bn|tn|k|m|b)\b\.?)?\s*%?\s*\)",
-                          re.IGNORECASE)
+_R_SCALE = re.compile(_SP + r"?(?:thousands?|millions?|billions?|trillions?|mn|bn|tn|k|m|b)\b\.?", re.IGNORECASE)
+_R_PCT = re.compile(_SP + r"?(?:%|bps\b|basis points\b|percent\b|per" + _SP + r"?cent\b)", re.IGNORECASE)
+_R_ISO = re.compile(_SP + r"?(?:" + "|".join(_ISO) + r")\b")
+_R_CLOSE = re.compile(_SP + r"*\)")
+_L_CUR = re.compile(r"(?:" + _CUR_RX + r")" + _SP + r"?$")
+_L_DASH = re.compile(r"-" + _SP + r"?$")
+_L_OPEN = re.compile(r"\(" + _SP + r"*$")
+_AFTER_NUMBER = re.compile(r"[0-9](?:" + _SP + r"?(?:thousands?|millions?|billions?|mn|bn|k|m|b)\b\.?)?" + _SP
+                           + r"?%?" + _SP + r"+$", re.IGNORECASE)
+_NUM_CORE = re.compile(r"[0-9](?:[0-9,.]*[0-9])?")
 
 
-def _signed_at(n, a, b):
-    """Does the (dash-normalized) text n write a sign around its occurrence n[a:b]? A "-" right before it (a currency
-    between allowed, no space; not after a letter or a digit: "Revenue—1,234", "10-K", "2018-2019" are not signs; a
-    "- " bullet is not adjacent), "(" right before it with ")" closing right after it (a scale or "%" between
-    allowed: "(1,234 million)", not "(4,800 in 2018)"), or a "-" right after it not followed by a letter or digit."""
-    before = n[max(0, a - 12):a]
-    m = _BEFORE_CUR.search(before)
-    core = before[:m.start()] if m else before
-    if core.endswith("-") and not (len(core) > 1 and core[-2].isalnum()):
-        return n[a - (len(before) - len(core)) - 1:b]
-    if re.search(r"\(\s*$", core) and _AFTER_CLOSE.match(n, b):
-        return n[a - (len(before) - len(core)) - len(re.search(r"\(\s*$", core).group()):_AFTER_CLOSE.match(n, b).end()]
-    if n[b:b + 1] == "-" and not n[b + 1:b + 2].isalnum():
-        return n[a:b + 1]
-    return None
+def _token(s, a, b, quote=False):
+    """The number token around the digits s[a:b]: what is bound to them — a sign (any dash, with or without one
+    space), a currency, "(" with ")" closing right after, a scale word or suffix, a percent or bps, a trailing "-" —
+    → ({kind: text} for kinds "sign", "paren", "currency", "scale", "percent"; start; end; ambiguous). Not bound: a
+    "- " list bullet at a line's start, a dash right after a letter or digit ("10-K", "2018-2019"; a currency code
+    before it is bound: "EUR-1,234"), a spaced dash after a word, a digit or another dash (a separator), "(" that does
+    not close right after the number. quote=True: s is a quote alone (its start is not a line's start). ambiguous: a
+    parenthesised number right after another number on its line ("1,234 m (1,100)", "12.3% (11.8)") — a comparative
+    or a sign, the text does not say."""
+    p, j, i = {}, b, a
+    for kind, rx in (("scale", _R_SCALE), ("percent", _R_PCT), ("currency", _R_ISO)):
+        m = rx.match(s, j)
+        if m:
+            p[kind], j = m.group().strip(), m.end()
+    close = _R_CLOSE.match(s, j)
+    while True:
+        left = s[:i]
+        m = _L_CUR.search(left)
+        if m and "currency" not in p:
+            p["currency"], i = m.group().strip(), m.start()
+            continue
+        m = _L_DASH.search(left)
+        if m and "sign" not in p:
+            k, spaced = m.start(), m.group() != "-"
+            before = s[:k]
+            bare = before.rstrip("    \t")
+            if not spaced:
+                if before[-1:].isalnum() and not _L_CUR.search(before):
+                    break                              # "10-K", "2018-2019"
+            elif not quote and (bare == "" or bare.endswith("\n")):
+                break                                  # a "- " list bullet
+            elif bare[-1:].isalnum() or bare.endswith("-"):
+                break                                  # "Revenue - 1,234", "1,234 – 1,300", "-- 1,234": a separator
+            p["sign"], i = "-", k
+            continue
+        m = _L_OPEN.search(left)
+        if m and "paren" not in p and close:
+            p["paren"], i, j = "()", m.start(), close.end()
+            continue
+        break
+    if "sign" not in p and "paren" not in p and s[j:j + 1] == "-" and not s[j + 1:j + 2].isalnum():
+        p["sign"], j = "-", j + 1
+    ambiguous = "paren" in p and not quote and bool(_AFTER_NUMBER.search(s[:i]))
+    return p, i, j, ambiguous
 
 
-def _sign_dropped(raw, doc):
-    """A number quote whose text writes a sign around one of its occurrences ("-1,234", "(1,234)", "-US$1,234",
-    "1,234-") that the quote left out → that context, else None. Every occurrence counts (one signed is enough): the
-    same digits as "$1,234" in prose and "(1,234)" in the table do not read as +1234."""
+_KIND_WORDS = {"sign": "sign", "paren": "parentheses (a negative)", "currency": "currency", "scale": "scale",
+               "percent": "percent"}
+
+
+def _left_out(raw, doc):
+    """The grounded quote must be the whole number token at its place in the text: at every occurrence of the quote,
+    the token around it (_token) may carry nothing the quote does not — a sign, parentheses, a currency, a scale — and
+    the quote nothing the text does not write there (a "- " bullet read as a minus). → the reason, or None. An
+    occurrence of the quote is a place its digits stand as a number of their own with at least the currency and the
+    scale the quote writes (whatever the spaces between: "$1,234" occurs in "-$ 1,234"); one with a percent or bps
+    where the quote has none (or the other way) is another quantity and is skipped."""
     from ..core.catalog import cuts_number
-    from ..core.deciders.llm import locate
     if not isinstance(raw, str) or not isinstance(doc, str):
         return None
     q = raw.translate(_DASHES).strip()
-    if q[:1] in ("-", "(", "+") or q[-1:] in ("-", ")"):
-        return None                                    # the quote carries its sign: it is read as written
+    core = _NUM_CORE.search(q)
+    if core is None:
+        return None
+    qp, _, _, _ = _token(q, core.start(), core.end(), quote=True)
     n = doc.translate(_DASHES)
-    spans = []
-    i = n.find(q)
-    while i >= 0 and q:
-        if not cuts_number(n, i, i + len(q)):
-            spans.append((i, i + len(q)))
-        i = n.find(q, i + 1)
-    if not spans:
-        got = locate(raw, doc)
-        spans = [got] if got else []
-    for a, b in spans:
-        around = _signed_at(n, a, b)
-        if around:
-            return around
+    digits, spans, k = core.group(), [], n.find(core.group())
+    while k >= 0:                                      # every place the quote's digits stand as a number of their own
+        if not cuts_number(n, k, k + len(digits)):
+            spans.append(k)
+        k = n.find(digits, k + 1)
+    signed_q = "sign" in qp or "paren" in qp
+    skipped, checked, unsigned = None, 0, None
+    for k in spans:
+        tp, a, b, ambiguous = _token(n, k, k + len(digits))
+        written = n[a:b]
+        if any(x in qp and x not in tp for x in ("currency", "scale")):
+            continue                                   # not an occurrence of the quote: it writes less there
+        if signed_q and not ("sign" in tp or "paren" in tp):
+            unsigned = unsigned or written             # the digits without the quote's sign: another occurrence
+            continue
+        if ("percent" in tp) != ("percent" in qp):
+            skipped = skipped or written
+            continue
+        checked += 1
+        if ambiguous:
+            return (f"the text writes {written!r} right after another number ({n[max(0, a - 16):b].strip()!r}): a "
+                    "comparative or a negative, the text does not say")
+        lost = [x for x in _KIND_WORDS if x in tp and x not in qp and not (x == "paren" and "sign" in qp)
+                and not (x == "sign" and "paren" in qp)]
+        if lost:
+            return (f"the text writes {written.rstrip('.')!r}, the quote {raw!r} left out its "
+                    + " and ".join(_KIND_WORDS[x] for x in lost))
+    if signed_q and not checked and unsigned is not None and skipped is None:
+        return (f"the quote {raw!r} reads a sign the text does not write there ({unsigned!r}: a list bullet or a "
+                "separator)")
+    if skipped is not None and not checked:
+        return f"the text writes {skipped!r}, the quote {raw!r} left out its percent"
     return None
 
 
@@ -415,8 +497,9 @@ class DocumentSystem:
 def _same_number(r, y):
     """The default judge of a number answer. A label written as a string ("33.33", "1,500", "(2.5)", read like a
     quote) states its precision: d decimals match an answer within 0.5·10^-d ("33.33" takes 33.3333; "1,500" takes
-    1500.4). A label given as a number has no written precision: equal up to float noise (math.isclose, 1e-9) —
-    the int 1 does not take 1.4, the float 33.33 does not take 33.3333."""
+    1500.4) — except a whole number below 100 ("33", "7"), which is a count or a small amount: exact. A label given as
+    a number has no written precision: equal up to float noise (math.isclose, 1e-9) — the int 1 does not take 1.4,
+    the float 33.33 does not take 33.3333."""
     try:
         if r.answer is None or isinstance(y, bool) or isinstance(r.answer, bool):
             return False
@@ -432,6 +515,8 @@ def _same_number(r, y):
         d = len(m.group(1)) if m else 0
         if m and len(m.group(1)) == 3 and "," in core and "." not in core:
             d = 0                                      # "1,500": a thousands separator, not three decimals
+        if d == 0 and abs(g) < 100:
+            return math.isclose(a, g, rel_tol=1e-9, abs_tol=1e-9)
         return math.isfinite(g) and abs(a - g) <= 0.5 * 10 ** -d + 1e-9 * abs(g)
     except (TypeError, ValueError, OverflowError):
         return False
@@ -445,9 +530,11 @@ def document(schema, model, *, task=None, text="doc", compute=None, answer=None,
     `Literal[...]` choice ...). model: a decider (`solvi.models.llm(url, name)`, `decider("solvi-base")`). task: text
     put before every field's description (what the document is). text: the name of the text fact in the input
     (default "doc"). compute: (facts, state) → the answer. answer: its answer type (default `Answer.estimate()`, a
-    number). checks: {name: (facts, state) → bool}, hard checks. units: "same" (default: the answer abstains when two
-    number fields write different scales or currencies — "$1.2bn" and "$950 million", "$100" and "€100"; a field that
-    writes none conflicts with nothing) or "any" (no such check; compute reads `facts.units`). storage: a path (JSONLStorage with `record=`) or a
+    number). checks: {name: (facts, state) → bool}, hard checks. units: "same" (default: the answer abstains when the
+    number fields write different scales — "$1.2bn" and "$950 million", and "3k" next to "3,000": a field without a
+    scale next to one with a scale — or different currencies: "$100" and "€100"; a field without a currency, or a bare
+    "$" next to "C$", conflicts with nothing), "lenient" (a field without a scale matches any) or "any" (no check;
+    compute reads `facts.units`). storage: a path (JSONLStorage with `record=`) or a
     TraceStorage. calibration: a file written by save_calibration, attached at once. workers: parallel steps inside
     one ask (System(workers=))."""
     from ..core.store import JSONLStorage
@@ -460,7 +547,7 @@ def document(schema, model, *, task=None, text="doc", compute=None, answer=None,
         raise TypeError("text= is the name of the text fact in the input (default \"doc\")")
     fields = list(schema.model_fields)
     if units not in UNIT_MODES:
-        raise ValueError(f'units must be "same" or "any", not {units!r}')
+        raise ValueError(f'units must be "same", "lenient" or "any", not {units!r}')
     for bad in (text, STATE, QUESTION, "units", "compute"):
         if bad in fields:
             raise ValueError(f"{schema.__name__}.{bad}: a field cannot be named {bad!r} (the "
@@ -539,9 +626,9 @@ def document(schema, model, *, task=None, text="doc", compute=None, answer=None,
                 v = _read_quote(vt, raw)[0]
             except ValueError as e:
                 raise ValueError(f"{name}: {raw!r} does not read as {vt.__name__}: {e}") from None
-            around = _sign_dropped(raw, kw[text])
-            if around is not None:
-                raise ValueError(f"{name}: the text writes {around!r}, the quote {raw!r} left out its sign")
+            why = _left_out(raw, kw[text])
+            if why is not None:
+                raise ValueError(f"{name}: {why}")
             return v
         cat.fn(_part(f"{name}_value", [name, text], value))
 
@@ -568,12 +655,17 @@ def document(schema, model, *, task=None, text="doc", compute=None, answer=None,
     from ..core.slow.refine import Fail
 
     def same_units(us):
-        for what in ("scale", "currency"):
-            said = {x: getattr(u, what) for x, u in us.items() if getattr(u, what) is not None}
-            if len(set(said.values())) > 1:
-                raise ValueError(f"units differ: {', '.join(f'{x} in {v}' for x, v in said.items())} — the {what}s of "
-                                 'the facts do not match (document(..., units="any") turns the check off; compute '
-                                 "reads facts.units)")
+        scales = {x: u.scale for x, u in us.items()}
+        said = {x: v for x, v in scales.items() if v is not None}
+        if len(set(said.values())) > 1 or (units == "same" and said and len(said) < len(scales)):
+            shown = ", ".join(f"{x} in {v or 'no scale'}" for x, v in scales.items())
+            raise ValueError(f"units differ: {shown} — the scales of the facts do not match (units=\"lenient\": a "
+                             "fact without a scale matches any; units=\"any\": no check; compute reads facts.units)")
+        curs = {x: u.currency for x, u in us.items() if u.currency is not None}
+        vals = list(curs.values())
+        if any(not _same_currency(v, w) for v in vals for w in vals):
+            raise ValueError(f"units differ: {', '.join(f'{x} in {v}' for x, v in curs.items())} — the currencies "
+                             'of the facts do not match (units="any": no check; compute reads facts.units)')
 
     def facts_of(kw):
         vals = {}
@@ -594,7 +686,7 @@ def document(schema, model, *, task=None, text="doc", compute=None, answer=None,
     for name, f in checks.items():
         cat.check(_part(name, inputs, lambda kw, f=f: f(facts_of(kw), kw[STATE]), wrapped=f), hard=True)
     required = []
-    if units == "same" and len(numbers) > 1:              # two number fields: their written units must agree
+    if units in ("same", "lenient") and len(numbers) > 1:              # two number fields: their written units must agree
 
         def same(kw):
             try:
