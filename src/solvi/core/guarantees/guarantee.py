@@ -821,8 +821,9 @@ def _answer_data(q):
 def guarantee_record(system, question):
     """The guarantee in force on a question as JSON-ready data: the Promise (method, level, delta, thresholds per group,
     report), how the guard reads its signal, which answer it lets through and its groups, and what it was calibrated
-    for — the catalog's fingerprint, the question's answer type and the guard's own fingerprint (what every gated
-    decision records)."""
+    for — the catalog's fingerprint, the models' fingerprints (System.fingerprint()["models"]: each model-backed
+    part's model and its question as asked, the prompt), the question's answer type and the guard's own fingerprint
+    (what every gated decision records)."""
     from ..calibfile import _norm
     guard = system.guards.get(question)
     if guard is None:
@@ -837,7 +838,8 @@ def guarantee_record(system, question):
     fn_signal, fn_groups = callable(guard.signal), callable(guard.groups)
     from ... import __version__
     return _norm({"format": GUARANTEE_FORMAT, "question": question, "answer_type": _answer_data(system.questions[question]),
-                  "catalog": system.fingerprint()["catalog"], "guard": guard.fingerprint(),
+                  "catalog": system.fingerprint()["catalog"], "models": system.fingerprint()["models"],
+                  "guard": guard.fingerprint(),
                   "signal": None if fn_signal else guard.signal, "signal_function": fn_signal,
                   "answer": guard.answer, "groups": None if fn_groups else guard.groups, "groups_function": fn_groups,
                   "promise": {"method": p.method, "level": p.level, "delta": p.delta, "threshold": p.threshold,
@@ -864,8 +866,9 @@ def load_guarantee(system, path, *, signal=None, groups=None, strict=True):
     fingerprinted and must match; for a saved fact or keyword, `signal=` / `groups=` raise). The fingerprints catch a file
     that does not fit (another catalog, an edit that changes the promise inconsistently), not a deliberate forgery that
     recomputes them: keep the file like code. strict (default): refuse a file made for another catalog (the signal is computed by
-    the catalog's code) or for another answer type of the question; strict=False attaches it anyway (the guard's
-    fingerprint is still checked)."""
+    the catalog's code), for other models (another model, endpoint or reply settings, or a decision asked with other
+    words — what the models' fingerprints cover; a file saved before 1.4 carries none and is not checked for it) or for
+    another answer type of the question; strict=False attaches it anyway (the guard's fingerprint is still checked)."""
     import json
     from ..calibfile import _dec
     with open(path, encoding="utf-8") as fh:
@@ -883,6 +886,13 @@ def load_guarantee(system, path, *, signal=None, groups=None, strict=True):
             raise ValueError(f"{path}: calibrated on catalog #{rec.get('catalog')}, this system's catalog is #{fp}: the "
                              "parts that compute the answer or its signal changed — calibrate again (System.guarantee), "
                              "or load with strict=False")
+        if "models" in rec:
+            now = json.loads(json.dumps(system.fingerprint()["models"], default=str))
+            if rec["models"] != now:
+                diff = sorted(k for k in set(rec["models"]) | set(now) if rec["models"].get(k) != now.get(k))
+                raise ValueError(f"{path}: calibrated with other models than this system's — {', '.join(diff)} "
+                                 "differ (the model, its endpoint or reply settings, or the question asked): calibrate "
+                                 "again (System.guarantee), or load with strict=False")
     for given, saved, what in ((signal, rec.get("signal_function"), "signal"), (groups, rec.get("groups_function"), "groups")):
         if saved and given is None:
             raise ValueError(f"{path}: the guarantee's {what} was a function: pass it again ({what}=that_function)")
