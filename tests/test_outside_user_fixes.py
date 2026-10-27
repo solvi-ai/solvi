@@ -396,3 +396,25 @@ def test_a_foreign_record_is_never_given_a_benign_verdict_it_was_not_checked_for
     store.write_text("\n".join(lines) + "\n")
     hit = [x for x in JSONLStorage(store).replay_all([a, b]) if x["seq"] == rec["seq"]]
     assert hit and "integrity" in hit[0]["kinds"] and hit[0]["summary"].startswith("data damaged")
+
+
+def test_a_saved_guarantee_is_refused_for_another_model(tmp_path):
+    s = _guarded()
+    ex = [({"hypothesis": f"H{i}", "contract": DOC}, "entailment" if i % 9 else "neutral") for i in range(120)]
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        s.guarantee("label", ex, max_risk=0.15, weak="warn")
+    path = s.save_guarantee("label", tmp_path / "g.json")
+    rec = json.loads(pathlib.Path(path).read_text())
+    assert rec["models"] == s.fingerprint()["models"] and rec["models"]
+    cat = Catalog()
+    part = llm("http://fake/v1", "another-model", opener=Server(lambda i, b: reply()), workers=1).decision(
+        "label", "Does the contract entail the hypothesis?", ["hypothesis", "contract"], OPTS)
+    other = System(cat, [part.question(cat)])
+    with pytest.raises(ValueError, match="calibrated with other models than this system's — answer:label"):
+        other.load_guarantee(path)
+    assert other.load_guarantee(path, strict=False)["n"] == 120          # strict=False: attached anyway
+    del rec["models"]                                                      # a file saved before 1.4: not checked
+    old = tmp_path / "old.json"
+    old.write_text(json.dumps(rec))
+    assert _guarded().load_guarantee(old)["n"] == 120

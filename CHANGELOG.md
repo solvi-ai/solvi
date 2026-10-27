@@ -6,12 +6,21 @@
 - **`solvi.document`: a decision over a document** (`solvi.solutions.document`; the 24th top-level name). One
   model read per field of a pydantic schema (`Span[float]`, `Span[date]`, `Span[str]`, a `Literal` choice), each span
   found in the text as the text writes it (a number as a number of its own), quoted numbers read as documents write
-  them (`$1,250`, `1,250 million` → 1250 in the document's unit, `(1,234)` → −1234, `12.5%` → 12.5), `compute=(facts,
-  state)` as the question's rule (a number by default, `answer=` otherwise; confidence the weakest read), `checks=`
-  as hard checks, `calibrate(examples, max_risk=)` over `System.guarantee` (a warning below 100 examples),
-  `save_calibration` / `document(..., calibration=)`, `storage=` with `verify()` / `replay_all()`. An LLM made with
-  `logprobs="auto"` is asked for one stated confidence per read; `llm()`'s own default is unchanged. Built only from
-  the low level; `DocumentSystem` holds a `System` (`.system`), it does not subclass it.
+  them — one scale rule, never multiplied (`1,250 million`, `$1.2bn` → 1250, 1.2, in the document's unit), a sign in
+  any dash or trailing, parentheses as a negative around a number with a separator, decimals or a currency
+  (`$(1,234) million` → −1234; `(2019)` does not read), anything ambiguous or not finite abstains; a number whose sign
+  the text writes but the quote left out (`-1,234` quoted as `1,234`) abstains — `compute=(facts, state)` as the
+  question's rule (a number by default, `answer=` otherwise; confidence the weakest read; a result that is not finite
+  abstains), `checks=` as hard checks, `calibrate(examples, max_risk=)` over `System.guarantee` (a warning below 100
+  examples; a number judged at the label's precision), `save_calibration` / `document(..., calibration=)`,
+  `storage=` with `verify()` / `replay_all()`; the rest of the input stored as plain JSON data (numpy scalars as
+  numbers, sets and tuples as lists). An LLM made with `logprobs="auto"` is read with one stated confidence per read
+  (a copy, with a warning); `llm()`'s own default is unchanged. Built only from the low level; `DocumentSystem` holds
+  a `System` (`.system`), it does not subclass it.
+- **A saved guarantee names its models** (`System.save_guarantee` / `load_guarantee`): the file carries
+  `System.fingerprint()["models"]` (each model-backed part's model, endpoint, reply settings and question as asked),
+  and `load_guarantee` refuses a file calibrated with other models (strict=False attaches it anyway; a file saved
+  without them is not checked for it).
 - **Exact values through a side channel (experimental)** (`solvi.experimental.numguard`). The model writes `[k]`
   for the k-th numeral of the input (`annotate` numbers them for the prompt), `<calc>` / `<date>` calls that code
   computes exactly (`Decimal` with 50 digits, calendar arithmetic: days, weeks, months to the month's end, years,
