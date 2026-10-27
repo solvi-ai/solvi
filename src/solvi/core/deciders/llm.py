@@ -247,22 +247,39 @@ def locate(passage, text, ignore_case=True):
     """A passage → (start, end) of its first occurrence in the text. Literal up to typographic quotes and apostrophes
     (’ ‘ “ ” as ' "), dashes (– — ‑ − as -), runs of whitespace (a new line written as a space) and, when nothing matches
     with the case kept, letter case ("wre54g" for "WRE54G"; ignore_case=False: not); nothing else. The offsets are into
-    the text as given, so text[start:end] is the text's own spelling, never the passage's. None when it is not there."""
+    the text as given, so text[start:end] is the text's own spelling, never the passage's. None when it is not there.
+    An occurrence that begins or ends inside a longer number is skipped (solvi.core.catalog.cuts_number): "7" is found
+    as a number of its own, never as the 7 of "2017", and "10" not in "109" — when every occurrence is inside a number,
+    None (the grounding check would refuse such a quote anyway)."""
+    from ..catalog import cuts_number
     if not passage:
         return None
-    i = text.find(passage)
-    if i >= 0:
-        return i, i + len(passage)
+
+    def first(spans):
+        return next(((a, b) for a, b in spans if not cuts_number(text, a, b)), None)
+
+    def finds(t, p):
+        i = t.find(p)
+        while i >= 0:
+            yield i, i + len(p)
+            i = t.find(p, i + 1)
+
+    got = first(finds(text, passage))
+    if got:
+        return got
     p, t = passage.translate(_TYPO), text.translate(_TYPO)
-    i = t.find(p)
-    if i >= 0:
-        return i, i + len(p)
+    got = first(finds(t, p))
+    if got:
+        return got
     words = p.split()
     if not words:
         return None
-    rx = r"\s+".join(re.escape(w) for w in words)
-    m = re.search(rx, t) or (re.search(rx, t, re.IGNORECASE) if ignore_case else None)
-    return (m.start(), m.end()) if m else None
+    rx = re.compile(r"\s+".join(re.escape(w) for w in words))
+    got = first((m.start(), m.end()) for m in rx.finditer(t))
+    if got is None and ignore_case:
+        rx = re.compile(rx.pattern, re.IGNORECASE)
+        got = first((m.start(), m.end()) for m in rx.finditer(t))
+    return got
 
 
 def _prob(v, what):

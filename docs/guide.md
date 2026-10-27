@@ -564,6 +564,7 @@ layer before it is an answer:
 | `Span[T]` | `span` | the quoted text read as `T` (pydantic, then the date / number parsers); `result.span` the Quote | p(this span); a rule: 1 | literally in the text ("grounding"), parses as `T` ("type rejected") |
 | `Rank[Literal[...], k]` | `rank` | a tuple: the top k options, best first; `result.scores` | Plackett–Luce p(this top k in this order); a rule: 1 | only the options, distinct, at least k ("outside the options") |
 | `Estimate[edges]` | `estimate` | a number: the middle of the median bin; `result.interval` | p(value in the interval) = the mass of its bins; a plain number: 1 | a distribution over the declared bins ("outside the options") |
+| `Answer.estimate()` (no bins) | `estimate` | a plain number a rule computes (`f(a, b)`), as it is; `result.interval` = `[x, x]` | the confidence of the facts it rests on | rules only (a model needs bins); a rule's `-> float` alone is not an answer type — pass `answer=Answer.estimate()` |
 
 Every kind's confidence is **the probability that the answer, as returned, is right** — for a rule answer at most the
 confidence of the facts it rests on (quotes, decisions), as always — and the response's overall confidence is their product
@@ -1305,7 +1306,9 @@ as that option when exactly one option is followed by a separator (`:`, ` - `, `
 description (or its start) that is not, nor starts like, another option's — `"yes: it does not"` with `no` described as
 "it does not" stays invalid; for options without descriptions the rest must name no other option; a bare `"neutral:"`
 stays invalid (`extra["llm"]["answer_echo"]` keeps what was written). Anything else stays an invalid output. These
-calibration changes are `DecisionPart`'s; a combination (`Vote`, `Cascade`, `Route`) calibrates as before. Yes/no, scores, multi-label questions, spans (`kind="span"`: the passage must be in the text), "not stated"
+calibration changes are `DecisionPart`'s; a combination (`Vote`, `Cascade`, `Route`) calibrates as before. Yes/no, scores, multi-label questions, spans (`kind="span"`: the passage must be in the text, and the decision reads exactly one **given** text fact — a
+span decision over several facts, `["header", "doc"]`, or over a computed text escalates every time, since its offsets
+must point into a text the trace holds as given: join the texts before `ask` and pass the result as one given fact), "not stated"
 (`Maybe[...]`) and `evidence=True` work; rankings and numbers are asked as a choice over the options / bins. Where the
 reply has one number (a span, `ask="confidence"`), the prompt says what it means for "not stated" — the model's
 probability that the text does not say it — and solvi reads it as p(not stated): a "not stated" at 0.2 is an unsure one.
@@ -3606,7 +3609,15 @@ What is checked before a threshold is set, so that a promise is never made on a 
 
 The report gives both shares on the calibration examples — `"risk"` (answered alone and wrong, of all) and `"error"`
 (among the answered) — with `"answered"`, the threshold's `"support"`, `"separation"` (`auroc`, `p`), `"base_error"`
-and, for conformal risk control, `"must_escalate_at_least"`. The facts the signal and the groups read become
+and, for conformal risk control, `"must_escalate_at_least"`. `"not_gated"` (present when it is not zero) counts the
+calibration examples with no signal to gate: a forced answer (signal +inf) or one that is never answered alone (no
+signal, NaN or −inf — an abstention before the guarantee, such as a rule input a model escalated); they count in `"n"`,
+`"answered"` and `"risk"` as what they are (an abstention is never answered alone), but not in `"separation"`. The
+guarantee is kept across processes with `system.save_guarantee(question, path)` and
+`system.load_guarantee(path)` — the promise, its thresholds and report, and the catalog fingerprint, answer type and
+guard fingerprint it was made for (another catalog or answer type is refused unless `strict=False`; a signal or grouping
+that was a function is passed again, `signal=` / `groups=`): stored decisions then replay against it without
+calibrating again. The facts the signal and the groups read become
 required parts of the question (`requires`), so every flow computes them. Every answer of the question records its verdict as a hashed
 trace record (`guard:<question>`: the signal's value, the threshold, the promise); below the threshold the question
 abstains (safeguard low confidence) and says what it would have answered; a forced answer (a failed hard check) and an
@@ -3673,7 +3684,9 @@ reads an input the trace does not hold), `flow` (a planned step is not recorded)
 not verify because a value it rests on did not come back from storage as it was — its type is neither one the dump
 restores nor declared: no verdict on the data, see [serialization](#typed-input-state-and-serialization)), `not_kept`
 (a compact stored record does not keep what checking this step needs — see [compact records](#compact-records-and-rotation):
-no verdict on the data past it) and `error` (`replay_all`: a stored record could not be loaded, or the replay raised). When there are mismatches the result also has `"kinds"`, the count
+no verdict on the data past it), `error` (`replay_all`: a stored record could not be loaded, or the replay raised) and
+`other_system` (`replay_all`: the record answers no question of the given System — another system's record; only its
+hashes are checked). When there are mismatches the result also has `"kinds"`, the count
 per kind, and `"summary"`, one line: `"data damaged: the hash chain or a record does not verify"`, `"data intact,
 catalog changed (parts missing)"`, `"data intact, catalog changed"`, `"data intact, model changed"`, `"data intact,
 steps do not recompute"`, `"not verified: a compact record does not keep this step's surroundings (no verdict on the
@@ -3712,6 +3725,7 @@ store.query(question="refund", answer="no", since="2026-09-01")
 store.query(safeguard="grounding")              # every decision where a model's quote was rejected
 store.query(model="solvi-base")                # ... this model ran in a step (id, type or fingerprint), used or rejected
 store.replay_all(system)                        # [] when every stored trace replays against the current catalog
+store.replay_all([arith, spans])                # one store written by two systems: each record against its own
 store.verify()                                  # the chain across stored records
 ```
 

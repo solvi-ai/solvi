@@ -1341,6 +1341,22 @@ class System:
         from .guarantees.guarantee import guard_question
         return guard_question(self, question, examples, **kw)
 
+    def save_guarantee(self, question, path):
+        """Write the guarantee in force on a question (System.guarantee) to a JSON file — the promise, its thresholds (per
+        group too) and report, how its signal is read, and what it was calibrated for (the catalog's fingerprint, the
+        question's answer type, the guard's fingerprint) → path. A new process attaches it with load_guarantee instead of
+        calibrating again, and its stored decisions replay against it (solvi.core.guarantees.guarantee.save_guarantee)."""
+        from .guarantees.guarantee import save_guarantee
+        return save_guarantee(self, question, path)
+
+    def load_guarantee(self, path, *, signal=None, groups=None, strict=True):
+        """Attach a guarantee written by save_guarantee → its report. Refuses (ValueError) a file made for another
+        catalog or answer type (strict=False: attaches it anyway) and one whose rebuilt guard is not the saved one; a
+        signal or grouping that was a function is passed again (`signal=`, `groups=`). Logged in `guard_history` like
+        System.guarantee (solvi.core.guarantees.guarantee.load_guarantee)."""
+        from .guarantees.guarantee import load_guarantee
+        return load_guarantee(self, path, signal=signal, groups=groups, strict=strict)
+
     learning = gone_in_1_0("learning()", "solvi.experimental.changes: a labelled update is a candidate change — "
                            "Pipeline(stages, journal, targets=[LearningTarget(system, ...)]).propose(Change(source, "
                            "artifact=\"update\")); the learning loop itself was removed in 1.1", "System")

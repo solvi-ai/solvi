@@ -243,3 +243,113 @@ def test_the_readme_links_resolve_outside_the_repository():
     base = "https://github.com/solvi-ai/solvi/blob/main/"
     missing = [x for x in links if x.startswith(base) and not (ROOT / x[len(base):].split("#")[0]).exists()]
     assert not missing, missing
+
+
+# second outside-user test (numbers out of financial tables) ------------------------------------------------------------
+@pytest.mark.parametrize("passage, text, want", [
+    ("7", "In 2017 sales rose by 7 percent.", "7"),           # not the 7 of 2017
+    ("10", "There were 109 stores, 10 of them new.", "10"),
+    ("1.0", "Ratio 41.0 in total, 1.0 per share.", "1.0"),
+    ("6", "Revenue 13,064 and 6 segments.", "6"),
+    ("7", "In 2017 and 1997.", None),                         # only inside numbers: not found
+    ("charged", "he was charged twice", "charged"),           # words as before
+])
+def test_locating_a_quoted_number_never_lands_inside_a_longer_number(passage, text, want):
+    from solvi.core.deciders.llm import locate
+    got = locate(passage, text)
+    assert (None if got is None else text[got[0]:got[1]]) == want
+    if got is not None:
+        from solvi.core.catalog import cuts_number
+        assert not cuts_number(text, *got)
+
+
+def test_an_llm_span_number_is_read_from_its_own_occurrence():
+    doc = "Fiscal 2017 results. The margin rose by 7 points."
+    srv = Server(lambda i, b: json.dumps({"answer": "7", "confidence": 0.9, "quote": ""}))
+    m = llm("http://fake/v1", "fake-model", opener=srv, workers=1)
+    from solvi import Span
+    cat = Catalog()
+    part = m.decision("margin", "By how many points did the margin rise?", "doc", type=Span[float])
+    res = System(cat, [part.question(cat)]).ask({"doc": doc})
+    assert res["margin"].answer == 7.0 and res["margin"].status == "ok"
+    assert res["margin"].span.start == doc.index(" 7 ") + 1
+
+
+def test_a_computed_number_names_its_answer_type():
+    from solvi import Answer, Question
+    cat = Catalog()
+
+    @cat.rule("total")
+    def total(x: float) -> float:
+        return x + 1
+    with pytest.raises(TypeError, match=r"Answer\.estimate\(\)"):
+        System(cat, [Question("total", "Total?")])
+    r = System(cat, [Question("total", "Total?", Answer.estimate())]).ask({"x": 2.0})["total"]
+    assert r.answer == 3.0 and r.extra["interval"] == [3.0, 3.0]
+
+
+def _guarded(tmp_path=None):
+    part = part_of(Server(lambda i, b: reply(probs=P90[i % 3])))
+    cat = Catalog()
+    s = System(cat, [part.question(cat)], storage=None if tmp_path is None else JSONLStorage(tmp_path / "d.jsonl"))
+    return s
+
+
+def test_a_system_guarantee_saves_and_loads(tmp_path):
+    s = _guarded(tmp_path)
+    ex = [({"hypothesis": f"H{i}", "contract": DOC}, "entailment" if i % 9 else "neutral") for i in range(120)]
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        rep = s.guarantee("label", ex, max_risk=0.15, weak="warn")
+    res = s.ask({"hypothesis": "H new", "contract": DOC})
+    path = s.save_guarantee("label", tmp_path / "label.guarantee.json")
+    fresh = _guarded()
+    got = fresh.load_guarantee(path)
+    assert got["threshold"] == rep["threshold"] and got["n"] == 120
+    assert fresh.guards["label"].fingerprint() == s.guards["label"].fingerprint()
+    assert JSONLStorage(tmp_path / "d.jsonl").replay_all(fresh) == []        # replays without calibrating again
+    assert res.stored_id
+    rec = json.loads(pathlib.Path(path).read_text())
+    rec["catalog"] = "0" * 16
+    bad = tmp_path / "bad.json"
+    bad.write_text(json.dumps(rec))
+    with pytest.raises(ValueError, match="calibrated on catalog"):
+        _guarded().load_guarantee(bad)
+    rec = json.loads(pathlib.Path(path).read_text())
+    rec["promise"]["threshold"] = 0.0                                       # a forged threshold: not the saved guard
+    bad.write_text(json.dumps(rec))
+    with pytest.raises(ValueError, match="rebuilt guarantee"):
+        _guarded().load_guarantee(bad)
+    with pytest.raises(KeyError):
+        _guarded().save_guarantee("label", tmp_path / "x.json")
+
+
+def test_one_store_two_systems_replays_each_record_against_its_own(tmp_path):
+    from solvi import Question
+    store = tmp_path / "d.jsonl"
+    a = _guarded(tmp_path)
+    cat = Catalog()
+
+    @cat.rule("double")
+    def double(n: int) -> bool:
+        return n % 2 == 0
+    b = System(cat, [Question("double", "Even?")], storage=JSONLStorage(store))
+    for i in range(3):
+        a.ask({"hypothesis": f"H{i}", "contract": DOC})
+        b.ask({"n": i})
+    st = JSONLStorage(store)
+    assert st.replay_all([a, b]) == []
+    alone = st.replay_all(a)                                            # b's records: one clear line each
+    assert len(alone) == 3 and all(x["kinds"] == {"other_system": 1} for x in alone)
+    assert all("another system's record" in x["summary"] for x in alone)
+    assert st.replay_all(a, question="label") == []
+    lines = store.read_text().splitlines()                              # a tampered record of b is still caught
+    rec = json.loads(lines[1])
+    rec["response"]["trace"]["init"]["n"] = 7
+    lines[1] = json.dumps(rec)
+    store.write_text("\n".join(lines) + "\n")
+    st = JSONLStorage(store)
+    hit = [x for x in st.replay_all(a) if x["seq"] == rec["seq"]]
+    assert hit and "integrity" in hit[0]["kinds"]
+    hit = [x for x in st.replay_all([a, b]) if x["seq"] == rec["seq"]]
+    assert hit and "integrity" in hit[0]["kinds"]
