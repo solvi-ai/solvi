@@ -10,12 +10,15 @@
   any dash or trailing, parentheses as a negative around a number with a separator, decimals, a currency or a percent
   (`$(1,234) million` → −1234; `(2019)` does not read), anything ambiguous or not finite abstains; a number whose sign
   the quote must be the whole number token at its place — at every occurrence of its digits the token is extended
-  over a sign in any dash or minus, a currency, closing parentheses, a scale and a percent, and a part the quote left
-  out (`$1.2` of `$1.2 billion`, `1,234` of `-1,234` or `(1,234)`) or a sign the text does not write there (a `- `
-  list bullet) abstains; a number in parentheses right after another number (`SEK 1,234 m (1,100)`) is ambiguous and
-  abstains; each number's written scale, currency and percent are `facts.units`, and a hard check `units` abstains
-  when number fields differ in scale (a field without one next to one with one included) or currency (a bare `$`
-  matches any dollar) — `units="lenient"` lets a field without a scale match any, `units="any"` turns it off —
+  over a sign in any dash, minus or `&minus;`, a currency, closing parentheses or brackets, a CR / DR marker, a scale
+  and a percent; a sign, parentheses or marker the quote left out (`1,234` of `-1,234` or `(1,234)`), a sign the
+  text does not write there (a `- ` list bullet) or digits that do not stand in the text abstain, while a currency or
+  scale the quote left out is taken from the text into the field's unit (`$1.2` of `$1.2 billion` is in billion;
+  occurrences that disagree abstain); a number in parentheses after another number on its line (`SEK 1,234 m
+  (1,100)`, `12.3 percent (11.8)`) is ambiguous and abstains; each number's unit is `facts.units`, and a hard check
+  `same_units` abstains when the amounts differ in scale (a field without one next to one with one included) or
+  currency (`$` next to `C$` included; percentages are not compared) — `units="lenient"` lets a field without a scale
+  match any and `$` any dollar, `units="any"` turns it off —
   `compute=(facts, state)` as the
   question's rule (a number by default, `answer=` otherwise; confidence the weakest read; a result that is not finite
   abstains), `checks=` as hard checks, `calibrate(examples, max_risk=)` over `System.guarantee` (a warning below 100
@@ -25,6 +28,8 @@
   numbers, sets and tuples as lists). An LLM made with `logprobs="auto"` is read with one stated confidence per read
   (a copy, with a warning); `llm()`'s own default is unchanged. Built only from the low level; `DocumentSystem` holds
   a `System` (`.system`), it does not subclass it.
+- **A number with a space beside its separator does not read** (`solvi.core.types.span_value`): `"1 ,234"` was read
+  as 1 and `"(1 ,234)"` as −1; both are now a ValueError (one number or two?).
 - **A saved guarantee names its models** (`System.save_guarantee` / `load_guarantee`): the file carries
   `System.fingerprint()["models"]` (each model-backed part's model, endpoint, reply settings and question as asked),
   and `load_guarantee` refuses a file calibrated with other models, and one that names none (strict=False attaches

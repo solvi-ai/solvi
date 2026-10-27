@@ -37,24 +37,30 @@ The scheme it sets up (all of it existing low-level blocks, wired):
   "(12%)", "(12)%" → −1234, −12) — only around a number with a separator, decimals, a currency or a percent ("(2019)",
   "(1)" do not read: a year, a footnote). Anything else — a range, two numbers, two scales or currencies, an
   exponent ("1e3"), "1_000", NaN or infinity, an ambiguous "2.500" — does not read, and the answer abstains with the
-  reason. One rule keeps the quote honest: it must be the whole number token at its place in the text. At every
-  occurrence of the quote the token is extended over what is bound to the digits — a sign in any dash or minus
-  (with or without one space), a currency, "(" with ")" closing right after, a scale word or suffix, a percent; if
-  the token carries a part the quote left out, the answer abstains naming it ("the text writes '$1.2 billion', the
-  quote '$1.2' left out its scale"; "$1,234" in prose and "(1,234)" in a table do not read as +1234), and a quote
-  that reads a sign the text does not write there ("- 1,234" from a list bullet) abstains too. Not bound to the
-  digits: a "- " bullet at a line's start, a dash right after a letter or digit ("10-K", "2018-2019"), a spaced dash
-  after a word, a digit or a dash ("Revenue - 1,234", "1,234 – 1,300"), "(" that does not close right after the
-  number ("1,234 (Note 5)"). A number in parentheses right after another number on its line ("SEK 1,234 m (1,100)",
-  "12.3% (11.8)") is a comparative or a negative — the text does not say, and the answer abstains. An occurrence with
-  a percent where the quote has none is another quantity and does not count.
-- units: what each number field writes besides the number is `facts.units[field]` — a Unit(scale, currency,
-  percent). With two or more number fields a hard check `units` compares them: `units="same"` (the default) abstains
-  when their scales differ — "$1.2bn" and "$950 million", and a field without a scale next to one with a scale ("3k"
-  and "3,000") — or their currencies differ ("$100" and "€100"; a field without a currency, and a bare "$" next to
-  "C$" or "US$", conflict with nothing); `units="lenient"` lets a field without a scale match any; `units="any"`
-  turns the check off. A percentage next to an absolute number is only exposed (`units.percent`), not refused. A `Span[date]` and other types:
-  solvi.core.types.span_value.
+  reason (a CR / DR marker or brackets do not read either: the sign depends on the account). One rule keeps the
+  quote honest: at every occurrence of its digits in the text (with at least the quote's currency and scale, any
+  spaces between; full-width digits and marks read as their ASCII) the number token is extended over what is bound
+  to the digits — a sign in any dash, minus or "&minus;" (any horizontal space after it), a currency, "(" with ")"
+  closing right after (any white space inside), "[" "]", a CR / DR marker, a scale word or suffix, a percent. A sign,
+  parentheses or marker the quote left out abstains naming it ("$1,234" in prose and "(1,234)" in a table do not
+  read as +1234), so does a quote that reads a sign the text does not write there ("- 1,234" from a list bullet) and
+  a quote whose digits do not stand in the text at all. A currency or a scale the quote left out is not a refusal: it
+  is taken from the text into the field's unit ("$1.2" of "$1.2 billion" is in billion), and occurrences that
+  disagree ("$1,234" here, "€1,234" there) abstain as ambiguous. Not bound to the digits: a "- " bullet at a line's
+  start, a dash right after a letter, a digit or "%" ("10-K", "2018-2019", "50%-60%"), a spaced dash after a word, a
+  digit, "%" or a dash ("Revenue - 1,234", "1,234 – 1,300", "50% - 60%"), "(" that does not close right after the
+  number ("1,234 (Note 5)"). A number in parentheses after another number on its line — up to ten characters of a
+  unit between, one new line, a tab or a comma allowed; a table's "|" is a separator — is a comparative or a
+  negative, the text does not say ("SEK 1,234 m (1,100)", "12.3 percent (11.8)", "2.1x (2.5)"), and the answer
+  abstains. An occurrence with a percent where the quote has none does not count. Each look reads a bounded window,
+  so a long text costs no more per occurrence.
+- units: each number field's unit — what its quote writes, completed from the text — is `facts.units[field]`, a
+  Unit(scale, currency, percent) (also the fact "units" in the record). With two or more number fields a hard check
+  `same_units` compares the amounts (a percentage is not an amount and is not compared): `units="same"` (the
+  default) abstains when their scales differ — "$1.2bn" and "$950 million", and a field without a scale next to one
+  with a scale ("3k" and "3,000") — or their currencies differ ("$100" and "€100", and a bare "$" next to an
+  explicit "C$"; a field without a currency conflicts with nothing); `units="lenient"` lets a field without a scale
+  match any and a bare "$" any dollar; `units="any"` turns the check off.
 - code computes: `compute=(facts, state) → value` is the question's rule; `facts` is the schema filled with the read
   values, `state` the input without the text. The answer is a number (`Answer.estimate()`) unless `answer=` says
   otherwise (`solvi.Answer.choice(["pay", "hold"])`, `Answer.yes_no()`); its confidence is the weakest fact's.
@@ -62,7 +68,7 @@ The scheme it sets up (all of it existing low-level blocks, wired):
   with that field's value: a number (estimate), or a `Literal` / `Enum` / `bool` field's option; a `Span[str]` or
   `Span[date]` field needs compute= and answer=.
 - checks: `checks={name: (facts, state) → bool}` are hard checks on the answer: one that fails makes it abstain
-  ("failed check"). The names `units`, `compute` and `<field>_value` are the recipe's own.
+  ("failed check"). The names `units`, `same_units`, `compute` and `<field>_value` are the recipe's own.
 - confidence: an LLM made with `logprobs="auto"` (llm()'s default) is rebuilt to ask for one stated confidence per
   read (`logprobs=False, ask="confidence"`), with a UserWarning that says so; a gateway that mixes logprob and stated
   replies cannot then split a calibration. A model made with `logprobs=True` or `False`, and any other decider, is
@@ -106,14 +112,16 @@ UNIT_MODES = ("same", "lenient", "any")
 
 # every dash or minus sign a document writes (length-preserving, so offsets into the text stay as they are); "△" / "▲"
 # are the minus of Japanese and Chinese financial tables
-_DASHES = str.maketrans({c: "-" for c in "−–—―‑‐‒﹣－⁻˗△▲"})
+_DASHES = str.maketrans({**{c: "-" for c in "−–—―‑‐‒﹣－⁻˗△▲"},     # ... and full-width digits and marks
+                         **{chr(0xFF10 + i): str(i) for i in range(10)}, "（": "(", "）": ")", "，": ",", "．": ".",
+                         "［": "[", "］": "]", "＄": "$", "％": "%"})
 _ISO = ("USD EUR GBP JPY CNY RMB RUB CHF CAD AUD NZD HKD SGD TWD INR BRL MXN ZAR SEK NOK DKK PLN CZK HUF KRW TRY ILS "
         "AED SAR").split()
 _CUR_SYMBOL = {"U.S.$": "USD", "US$": "USD", "A$": "AUD", "AU$": "AUD", "C$": "CAD", "CA$": "CAD", "HK$": "HKD",
                "NZ$": "NZD", "S$": "SGD", "NT$": "TWD", "R$": "BRL", "Rs.": "INR", "Rs": "INR", "₹": "INR",
                "$": "$", "€": "EUR", "£": "GBP", "¥": "JPY", "₽": "RUB", "RMB": "CNY"}
 _DOLLARS = {"USD", "AUD", "CAD", "HKD", "NZD", "SGD", "TWD", "BRL", "MXN"}     # what a bare "$" may stand for
-_CUR_RX = (r"(?:(?<![A-Za-z])(?:U\.S\.|US|AU|A|CA|C|HK|NZ|S|NT|R)\$|[$€£¥₽₹]|\bRs\b\.?|\b(?:"
+_CUR_RX = (r"(?:(?<![A-Za-z])(?:U\.S\.|US ?|AU|A|CA|C|HK|NZ|S|NT|R)\$|[$€£¥₽₹]|\bRs\b\.?|\b(?:"
            + "|".join(_ISO) + r")\b)")
 _CURRENCY = re.compile(_CUR_RX)
 _PERCENT = re.compile(r"\s*(?:%|\bper\s?cent\b)", re.IGNORECASE)
@@ -124,6 +132,7 @@ _SCALE_WORD = re.compile(r"\s*\b(thousands?|millions?|billions?|trillions?|mn|bn
 _SCALE_SUFFIX = re.compile(r"(?<=\d)\s?(bn|mn|tn|k|m|b)\b", re.IGNORECASE)
 _CORE = re.compile(r"[0-9][0-9,. ]*|\.[0-9]+")
 _SP = "[    ]"                      # one space of a line (not a tab, not a new line)
+_HS = r"[^\S\n]"                                   # any horizontal white space (tab, U+2007, U+3000 ...)
 
 
 class Unit(typing.NamedTuple):
@@ -154,7 +163,9 @@ def _read_quote(vtype, text):
     from ..core.types import span_value
     if not isinstance(text, str):
         raise ValueError(f"not a quoted number: {text!r}")
-    t = unicodedata.normalize("NFKC", text).translate(_DASHES).strip()
+    t = unicodedata.normalize("NFKC", text.replace("&minus;", "-")).translate(_DASHES).strip()
+    if re.search(r"\b(?:CR|Cr|DR|Dr)\b|\[|\]", t):
+        raise ValueError("a CR / DR marker or brackets: the sign depends on the account, the quote does not say")
     if re.search(r"[0-9][eE][+-]?[0-9]|_", t):
         raise ValueError("an exponent or an underscore is not how a document writes a number")
     if re.search(r"%\s*[0-9]", t):
@@ -199,79 +210,100 @@ def _read_number(vtype, text):
 _R_SCALE = re.compile(_SP + r"?(?:thousands?|millions?|billions?|trillions?|mn|bn|tn|k|m|b)\b\.?", re.IGNORECASE)
 _R_PCT = re.compile(_SP + r"?(?:%|bps\b|basis points\b|percent\b|per" + _SP + r"?cent\b)", re.IGNORECASE)
 _R_ISO = re.compile(_SP + r"?(?:" + "|".join(_ISO) + r")\b")
-_R_CLOSE = re.compile(_SP + r"*\)")
-_L_CUR = re.compile(r"(?:" + _CUR_RX + r")" + _SP + r"?$")
-_L_DASH = re.compile(r"-" + _SP + r"?$")
-_L_OPEN = re.compile(r"\(" + _SP + r"*$")
-_AFTER_NUMBER = re.compile(r"[0-9](?:" + _SP + r"?(?:thousands?|millions?|billions?|mn|bn|k|m|b)\b\.?)?" + _SP
-                           + r"?%?" + _SP + r"+$", re.IGNORECASE)
+_R_MARK = re.compile(_HS + r"*(?:CR|Cr|DR|Dr)\b")
+_R_CLOSE = re.compile(r"\s*\)")
+_R_CLOSE_SQ = re.compile(r"\s*\]")
+_L_CUR = re.compile(r"(?:" + _CUR_RX + r")" + _HS + r"*\Z")
+_L_DASH = re.compile(r"(?:-|&minus;)" + _HS + r"*\Z")
+_L_OPEN = re.compile(r"\(\s*\Z")
+_L_OPEN_SQ = re.compile(r"\[\s*\Z")
+# a parenthesised number after another number on its logical line (one new line, a tab or a comma between allowed;
+# a table's "|" or ";" is a separator): "SEK 1,234 m (1,100)", "12.3 percent (11.8)", "2.1x\n(2.5)"
+_AFTER_NUMBER = re.compile(r"[0-9][^\n|;()\[\]0-9]{0,10}(?:\n[^\S\n]*)?\Z")
 _NUM_CORE = re.compile(r"[0-9](?:[0-9,.]*[0-9])?")
+_WINDOW = 64
+
+
+def _line_start(s, k):
+    """Is s[k] the first non-blank character of its line?"""
+    ls = s.rfind("\n", 0, k) + 1
+    return s[ls:k].strip() == ""
 
 
 def _token(s, a, b, quote=False):
-    """The number token around the digits s[a:b]: what is bound to them — a sign (any dash, with or without one
-    space), a currency, "(" with ")" closing right after, a scale word or suffix, a percent or bps, a trailing "-" —
-    → ({kind: text} for kinds "sign", "paren", "currency", "scale", "percent"; start; end; ambiguous). Not bound: a
-    "- " list bullet at a line's start, a dash right after a letter or digit ("10-K", "2018-2019"; a currency code
-    before it is bound: "EUR-1,234"), a spaced dash after a word, a digit or another dash (a separator), "(" that does
-    not close right after the number. quote=True: s is a quote alone (its start is not a line's start). ambiguous: a
-    parenthesised number right after another number on its line ("1,234 m (1,100)", "12.3% (11.8)") — a comparative
-    or a sign, the text does not say."""
+    """The number token around the digits s[a:b]: what is bound to them — a sign (any dash or "&minus;", with any
+    horizontal space after it), a currency, "(" with ")" closing right after (any white space inside), "[" with "]",
+    a scale word or suffix, a percent or bps, a CR / DR marker, a trailing "-" — → ({kind: text} for kinds "sign",
+    "paren", "mark", "currency", "scale", "percent"; start; end; ambiguous). Not bound: a "- " list bullet at a
+    line's start, a dash right after a letter, a digit or "%" ("10-K", "2018-2019", "50%-60%"; a currency code before
+    it is bound: "EUR-1,234"), a spaced dash after a word, a digit, "%" or a dash (a separator), "(" that does not close
+    right after the number. quote=True: s is a quote alone (its start is not a line's start). ambiguous: a
+    parenthesised number right after another number on its line ("1,234 m (1,100)") — a comparative or a negative.
+    Every look to the left reads a window of 64 characters, so the cost does not grow with the text."""
     p, j, i = {}, b, a
-    for kind, rx in (("scale", _R_SCALE), ("percent", _R_PCT), ("currency", _R_ISO)):
+    for kind, rx in (("scale", _R_SCALE), ("percent", _R_PCT), ("currency", _R_ISO), ("mark", _R_MARK)):
         m = rx.match(s, j)
-        if m:
+        if m and kind not in p:
             p[kind], j = m.group().strip(), m.end()
-    close = _R_CLOSE.match(s, j)
+    close, close_sq = _R_CLOSE.match(s, j), _R_CLOSE_SQ.match(s, j)
     while True:
-        left = s[:i]
+        w0 = max(0, i - _WINDOW)
+        left = s[w0:i]
         m = _L_CUR.search(left)
         if m and "currency" not in p:
-            p["currency"], i = m.group().strip(), m.start()
+            p["currency"], i = m.group().strip(), w0 + m.start()
             continue
         m = _L_DASH.search(left)
         if m and "sign" not in p:
-            k, spaced = m.start(), m.group() != "-"
-            before = s[:k]
-            bare = before.rstrip("    \t")
+            k = w0 + m.start()
+            spaced = s[k] == "-" and k + 1 < i
+            prev = s[k - 1:k]
+            bare_prev = s[max(0, k - _WINDOW):k].rstrip()[-1:]
             if not spaced:
-                if before[-1:].isalnum() and not _L_CUR.search(before):
-                    break                              # "10-K", "2018-2019"
-            elif not quote and (bare == "" or bare.endswith("\n")):
+                if (prev.isalnum() or prev == "%") and not _L_CUR.search(s[max(0, k - _WINDOW):k]):
+                    break                              # "10-K", "2018-2019", "50%-60%"
+            elif not quote and _line_start(s, k):
                 break                                  # a "- " list bullet
-            elif bare[-1:].isalnum() or bare.endswith("-"):
-                break                                  # "Revenue - 1,234", "1,234 – 1,300", "-- 1,234": a separator
+            elif bare_prev.isalnum() or bare_prev in ("-", "%"):
+                break                                  # "Revenue - 1,234", "1,234 – 1,300", "50% - 60%": a separator
             p["sign"], i = "-", k
             continue
         m = _L_OPEN.search(left)
         if m and "paren" not in p and close:
-            p["paren"], i, j = "()", m.start(), close.end()
+            p["paren"], i, j = "()", w0 + m.start(), close.end()
+            continue
+        m = _L_OPEN_SQ.search(left)
+        if m and "mark" not in p and close_sq:
+            p["mark"], i, j = "[]", w0 + m.start(), close_sq.end()
             continue
         break
     if "sign" not in p and "paren" not in p and s[j:j + 1] == "-" and not s[j + 1:j + 2].isalnum():
         p["sign"], j = "-", j + 1
-    ambiguous = "paren" in p and not quote and bool(_AFTER_NUMBER.search(s[:i]))
+    ambiguous = "paren" in p and not quote and bool(_AFTER_NUMBER.search(s[max(0, i - _WINDOW):i].replace("\t", " ")
+                                                                         .replace(",", " ")))
     return p, i, j, ambiguous
 
 
-_KIND_WORDS = {"sign": "sign", "paren": "parentheses (a negative)", "currency": "currency", "scale": "scale",
-               "percent": "percent"}
+_KIND_WORDS = {"sign": "sign", "paren": "parentheses (a negative)", "mark": "CR / DR marker or brackets",
+               "currency": "currency", "scale": "scale", "percent": "percent"}
+_SIGNED = ("sign", "paren", "mark")
 
 
-def _left_out(raw, doc):
-    """The grounded quote must be the whole number token at its place in the text: at every occurrence of the quote,
-    the token around it (_token) may carry nothing the quote does not — a sign, parentheses, a currency, a scale — and
-    the quote nothing the text does not write there (a "- " bullet read as a minus). → the reason, or None. An
-    occurrence of the quote is a place its digits stand as a number of their own with at least the currency and the
-    scale the quote writes (whatever the spaces between: "$1,234" occurs in "-$ 1,234"); one with a percent or bps
-    where the quote has none (or the other way) is another quantity and is skipped."""
+def _ground(raw, doc):
+    """The grounded quote against its number tokens in the text (_token) → (reason to abstain or None, {"scale",
+    "currency"} the text writes and the quote does not). At every occurrence of the quote — a place its digits stand
+    as a number of their own with at least the quote's currency and scale, whatever the spaces ("$1,234" occurs in
+    "-$ 1,234"), with or without a percent as the quote — the token may carry no sign, parentheses or CR / DR marker
+    the quote left out, and the quote no sign the text does not write there (a "- " bullet read as a minus); a
+    currency or a scale the quote left out is taken from the text (several occurrences that disagree: ambiguous). A
+    quote whose digits do not stand in the text at all abstains too."""
     from ..core.catalog import cuts_number
     if not isinstance(raw, str) or not isinstance(doc, str):
-        return None
-    q = raw.translate(_DASHES).strip()
+        return None, {}
+    q = raw.replace("&minus;", "-").translate(_DASHES).strip()
     core = _NUM_CORE.search(q)
     if core is None:
-        return None
+        return None, {}
     qp, _, _, _ = _token(q, core.start(), core.end(), quote=True)
     n = doc.translate(_DASHES)
     digits, spans, k = core.group(), [], n.find(core.group())
@@ -279,34 +311,45 @@ def _left_out(raw, doc):
         if not cuts_number(n, k, k + len(digits)):
             spans.append(k)
         k = n.find(digits, k + 1)
-    signed_q = "sign" in qp or "paren" in qp
-    skipped, checked, unsigned = None, 0, None
+    signed_q = any(x in qp for x in _SIGNED)
+    seen, unsigned, inherited = 0, None, {}
     for k in spans:
         tp, a, b, ambiguous = _token(n, k, k + len(digits))
-        written = n[a:b]
+        written = n[a:b].rstrip(".")
         if any(x in qp and x not in tp for x in ("currency", "scale")):
             continue                                   # not an occurrence of the quote: it writes less there
-        if signed_q and not ("sign" in tp or "paren" in tp):
+        if ("percent" in tp) != ("percent" in qp):
+            continue                                   # another quantity
+        if signed_q and not any(x in tp for x in _SIGNED):
             unsigned = unsigned or written             # the digits without the quote's sign: another occurrence
             continue
-        if ("percent" in tp) != ("percent" in qp):
-            skipped = skipped or written
-            continue
-        checked += 1
+        seen += 1
         if ambiguous:
             return (f"the text writes {written!r} right after another number ({n[max(0, a - 16):b].strip()!r}): a "
-                    "comparative or a negative, the text does not say")
-        lost = [x for x in _KIND_WORDS if x in tp and x not in qp and not (x == "paren" and "sign" in qp)
-                and not (x == "sign" and "paren" in qp)]
-        if lost:
-            return (f"the text writes {written.rstrip('.')!r}, the quote {raw!r} left out its "
-                    + " and ".join(_KIND_WORDS[x] for x in lost))
-    if signed_q and not checked and unsigned is not None and skipped is None:
+                    "comparative or a negative, the text does not say"), {}
+        lost = [x for x in _SIGNED if x in tp and x not in qp]   # a "-" quote of "(1,234)" keeps its sign
+        if lost and (not signed_q or "mark" in lost):
+            return (f"the text writes {written!r}, the quote {raw!r} left out its "
+                    + " and ".join(_KIND_WORDS[x] for x in lost)), {}
+        for x in ("currency", "scale"):
+            if x in tp and x not in qp:
+                v = _currency_code(tp[x]) if x == "currency" else _SCALES.get(tp[x].lower().rstrip("."), tp[x])
+                if inherited.get(x, v) != v:
+                    return (f"the quote {raw!r} stands in the text with different "
+                            f"{'currencies' if x == 'currency' else 'scales'} ({inherited[x]}, {v}): which "
+                            "one it means, the text does not say"), {}
+                inherited[x] = v
+    if signed_q and not seen and unsigned is not None:
         return (f"the quote {raw!r} reads a sign the text does not write there ({unsigned!r}: a list bullet or a "
-                "separator)")
-    if skipped is not None and not checked:
-        return f"the text writes {skipped!r}, the quote {raw!r} left out its percent"
-    return None
+                "separator)"), {}
+    if not spans:
+        return f"the number of the quote {raw!r} does not stand in the text as a number of its own", {}
+    return None, inherited
+
+
+def _left_out(raw, doc):
+    """_ground's reason alone (None: the quote reads as the text writes it)."""
+    return _ground(raw, doc)[0]
 
 
 def _plain(v, where="state"):
@@ -531,10 +574,10 @@ def document(schema, model, *, task=None, text="doc", compute=None, answer=None,
     put before every field's description (what the document is). text: the name of the text fact in the input
     (default "doc"). compute: (facts, state) → the answer. answer: its answer type (default `Answer.estimate()`, a
     number). checks: {name: (facts, state) → bool}, hard checks. units: "same" (default: the answer abstains when the
-    number fields write different scales — "$1.2bn" and "$950 million", and "3k" next to "3,000": a field without a
-    scale next to one with a scale — or different currencies: "$100" and "€100"; a field without a currency, or a bare
-    "$" next to "C$", conflicts with nothing), "lenient" (a field without a scale matches any) or "any" (no check;
-    compute reads `facts.units`). storage: a path (JSONLStorage with `record=`) or a
+    amounts write different scales — "$1.2bn" and "$950 million", and "3k" next to "3,000": a field without a scale
+    next to one with a scale — or different currencies: "$100" and "€100", "$" and "C$"; a field without a currency
+    conflicts with nothing; percentages are not compared), "lenient" (a field without a scale matches any, a bare "$"
+    any dollar) or "any" (no check; compute reads `facts.units`). storage: a path (JSONLStorage with `record=`) or a
     TraceStorage. calibration: a file written by save_calibration, attached at once. workers: parallel steps inside
     one ask (System(workers=))."""
     from ..core.store import JSONLStorage
@@ -548,11 +591,11 @@ def document(schema, model, *, task=None, text="doc", compute=None, answer=None,
     fields = list(schema.model_fields)
     if units not in UNIT_MODES:
         raise ValueError(f'units must be "same", "lenient" or "any", not {units!r}')
-    for bad in (text, STATE, QUESTION, "units", "compute"):
+    for bad in (text, STATE, QUESTION, "units", "same_units", "compute"):
         if bad in fields:
             raise ValueError(f"{schema.__name__}.{bad}: a field cannot be named {bad!r} (the "
                              + {text: "text fact", STATE: "input fact", QUESTION: "question", "units": "facts' units",
-                                "compute": "rule"}[bad] + ")")
+                                "same_units": "units check", "compute": "rule"}[bad] + ")")
     made = {f"{x}_value" for x in fields}
     if made & set(fields):
         x = sorted(made & set(fields))[0]
@@ -563,9 +606,9 @@ def document(schema, model, *, task=None, text="doc", compute=None, answer=None,
     checks = dict(checks or {})
     for name, f in checks.items():
         if not isinstance(name, str) or not name.isidentifier() or name in fields or name in made \
-                or name in (text, STATE, QUESTION, "compute", "units"):
+                or name in (text, STATE, QUESTION, "compute", "units", "same_units"):
             raise ValueError(f"check name {name!r}: a Python identifier other than a field, <field>_value, compute, "
-                             f"units, {text!r}, {STATE!r} or {QUESTION!r}")
+                             f"units, same_units, {text!r}, {STATE!r} or {QUESTION!r}")
         if not callable(f):
             raise TypeError(f"check {name!r} is a function (facts, state) → bool, not {type(f).__name__}")
     if compute is not None and not callable(compute):
@@ -643,18 +686,29 @@ def document(schema, model, *, task=None, text="doc", compute=None, answer=None,
                 raise ValueError(f"the computed answer is {v!r}, not a finite number")
         return v
 
-    def units_of(kw):
+    def units_fact(kw):
+        """{field: [scale, currency, percent]}: what each number's quote writes, and the currency or scale its text
+        token writes where the quote left them out."""
         out = {}
         for x in numbers:
+            raw = kw[x]
             try:
-                out[x] = _read_quote(schema.model_fields[x].annotation, kw[x])[1]
-            except ValueError:                         # unreadable: its value part says why
-                out[x] = Unit()
+                u = _read_quote(schema.model_fields[x].annotation, raw)[1]
+            except (ValueError, TypeError):            # unreadable: its value part says why
+                u = Unit()
+            why, got = _ground(raw, kw[text])
+            if why is None:
+                u = u._replace(scale=u.scale or got.get("scale"), currency=u.currency or got.get("currency"))
+            out[x] = [u.scale, u.currency, u.percent]
         return out
+
+    def units_of(kw):
+        return {x: Unit(*v) for x, v in kw["units"].items()} if numbers else {}
 
     from ..core.slow.refine import Fail
 
     def same_units(us):
+        us = {x: u for x, u in us.items() if not u.percent}   # a percentage is no amount: neither scale nor currency
         scales = {x: u.scale for x, u in us.items()}
         said = {x: v for x, v in scales.items() if v is not None}
         if len(set(said.values())) > 1 or (units == "same" and said and len(said) < len(scales)):
@@ -663,9 +717,11 @@ def document(schema, model, *, task=None, text="doc", compute=None, answer=None,
                              "fact without a scale matches any; units=\"any\": no check; compute reads facts.units)")
         curs = {x: u.currency for x, u in us.items() if u.currency is not None}
         vals = list(curs.values())
-        if any(not _same_currency(v, w) for v in vals for w in vals):
+        agree = _same_currency if units == "lenient" else (lambda v, w: v == w)
+        if any(not agree(v, w) for v in vals for w in vals):
             raise ValueError(f"units differ: {', '.join(f'{x} in {v}' for x, v in curs.items())} — the currencies "
-                             'of the facts do not match (units="any": no check; compute reads facts.units)')
+                             'of the facts do not match (units="lenient": a bare "$" matches any dollar; units="any": '
+                             "no check; compute reads facts.units)")
 
     def facts_of(kw):
         vals = {}
@@ -682,7 +738,9 @@ def document(schema, model, *, task=None, text="doc", compute=None, answer=None,
         object.__setattr__(f, "units", units_of(kw))
         return f
 
-    inputs = [f"{x}_value" for x in numbers] + fields + [STATE]   # the rule's why: each value, then its quote
+    if numbers:
+        cat.fn(_part("units", list(numbers) + [text], units_fact))
+    inputs = [f"{x}_value" for x in numbers] + fields + (["units"] if numbers else []) + [STATE]   # why: value, quote
     for name, f in checks.items():
         cat.check(_part(name, inputs, lambda kw, f=f: f(facts_of(kw), kw[STATE]), wrapped=f), hard=True)
     required = []
@@ -694,8 +752,8 @@ def document(schema, model, *, task=None, text="doc", compute=None, answer=None,
             except ValueError as e:
                 return Fail(str(e))
             return True
-        cat.check(_part("units", list(numbers), same), hard=True)
-        required.append("units")
+        cat.check(_part("same_units", ["units"], same), hard=True)
+        required.append("same_units")
     if compute is None:
         only = fields[0]
         if only in numbers:

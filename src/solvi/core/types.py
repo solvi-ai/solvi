@@ -16,6 +16,7 @@ pydantic is imported on the first typed part (or BaseModel input, or serializati
 from __future__ import annotations
 
 import inspect
+import re
 import sys
 import types
 import typing
@@ -161,6 +162,8 @@ def span_value(vtype, text, strict=False):
     reading only."""
     t = text.strip()
     ta = adapter(vtype)
+    if vtype in _NUMBER_TYPES() and re.search(r"\d\s+[.,]\s*\d|\d[.,]\s+\d", t):
+        raise ValueError(f"{t!r}: a separator with a space beside it (\"1 ,234\") — one number or two?")
     if not strict and vtype in _NUMBER_TYPES():       # a number: what the guarded parser calls ambiguous ("2.500": two
         from .textin import ParseError, parse_number  # and a half, or two thousand five hundred?) is not read by the
         try:                                          # type's own reading either
