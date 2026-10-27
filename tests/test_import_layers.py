@@ -310,9 +310,9 @@ def test_experimental_modules_warn_on_import_and_say_their_status():
 
 # --- (rule 5) the public surfaces are pinned: a name added to or dropped from one is a decision, made here
 SURFACES = {
-    "solvi": ["build", "Agent", "Guard", "Knowledge", "Budget", "Catalog", "Question", "Answer", "System", "Response",
+    "solvi": ["build", "document", "Agent", "Guard", "Knowledge", "Budget", "Catalog", "Question", "Answer", "System", "Response",
               "Quote", "Claim", "Decision", "Fail", "Unknown", "Span", "Maybe", "Rank", "Estimate", "Scale", "Bins",
-              "SolviDeprecationWarning", "ExperimentalWarning"],          # LAYOUT §1: 23 names
+              "SolviDeprecationWarning", "ExperimentalWarning"],          # LAYOUT §1: 24 names
     "solvi.core": ["ExperimentalWarning", "NOT_STATED", "accept", "accepts", "Answer", "AnswerType", "bin_labels",
                    "Catalog", "check_evidence", "Claim", "cuts_number", "Decision", "evidence_rows", "find_quote",
                    "find_whole", "ground", "has_evidence", "locate", "NOT_STATED_KEY", "NotStated", "Part", "plain_json",
@@ -331,6 +331,7 @@ SURFACES = {
     "solvi.models": ["cached", "cached_path", "decider", "DecideModel", "kind_of", "llm", "load", "ModelError",
                      "PUBLISHED", "pull", "resolve", "systemone"],
     "solvi.solutions.decisions": ["DecisionSystem", "build"],
+    "solvi.solutions.document": ["DocumentSystem", "document"],
     "solvi.solutions.agent": ["Agent", "CHECKS", "QUESTION", "s1_pick", "search_order", "state_key"],
     "solvi.solutions.knowledge": ["Knowledge", "action_key", "split_action"],
     "solvi.solutions.guard": ["action_model_allows", "agenda_allows", "accepted_proposals", "accepts", "INTENTS", "register_intent", "approval_verifier", "sign_approval", "sign_message", "signed_messages", "model_from_json_schema", "arguments_from_user",
@@ -356,7 +357,8 @@ def test_the_public_surfaces_are_the_pinned_ones():
     import solvi
     assert solvi.build.__module__ == "solvi.solutions.decisions" and solvi.Guard.__module__ == "solvi.solutions.guard"
     assert solvi.Agent.__module__ == "solvi.solutions.agent" and solvi.Knowledge.__module__ == "solvi.solutions.knowledge"
-    assert len(solvi.__all__) == 23
+    assert solvi.document.__module__ == "solvi.solutions.document"
+    assert len(solvi.__all__) == 24
 
 
 # --- (rule 6) the 1.0 shims resolve: every 0.9 module path and every name solvi no longer exports reach the same object,
