@@ -85,17 +85,31 @@ def test_mixed_probability_sources_are_refused_after_the_first_calls_not_after_a
 
 
 def test_one_source_calibrates_in_chunks_with_the_same_numbers():
-    srv = Server(lambda i, b: reply(probs=P90[i % 3]))
-    info = part_of(srv).act_guard(examples(70), max_risk=0.10)
-    assert srv.calls == 70 and info["n"] == 70 and "unusable" not in info
+    def answer(i, b):                                  # right or wrong by the example, sure or unsure by the example
+        k = int(re.search(r"H(\d+):", b["messages"][1]["content"]).group(1))
+        ans = "entailment" if k % 7 else "neutral"
+        p = 0.6 + 0.39 * ((k * 37) % 70) / 70 if k % 7 else 0.5 + 0.2 * (k % 3) / 3   # the wrong ones mostly unsure
+        rest = {o: (1 - p) / 2 for o in OPTS if o != ans}
+        return reply(ans, {ans: p, **rest})
+    chunked, whole = part_of(Server(answer)), part_of(Server(answer))
+    whole.model.deterministic = True                   # read as a local model is: every example in one batch
+    a = chunked.act_guard(examples(70), max_risk=0.05)
+    b = whole.act_guard(examples(70), max_risk=0.05)
+    assert a == b and a["n"] == 70 and 0 < a["answered"] < 1 and "unusable" not in a
+    assert chunked.calibrate_for(examples(70), max_error=0.1) == whole.calibrate_for(examples(70), max_error=0.1)
 
 
 # 3 --------------------------------------------------------------------------------------------------------------------
 @pytest.mark.parametrize("said, value", [
     ("contradiction: the contract states the opposite of the hypothesis", "contradiction"),   # its own description
     ("contradiction: the contract states the opposite…", "contradiction"),                    # cut short
-    ("neutral — not addressed anywhere", "neutral"),                                          # names no other option
-    ("neutral: neither entailment nor contradiction", None),       # names other options: ambiguous
+    ("contradiction — the contract states the opposite of the hypothesis here", "contradiction"),   # and more words
+    ("neutral — not addressed anywhere", None),                     # a description, but not its own
+    ("entailment: the contract does not address it", None),         # another option's description
+    ("entailment: the contract", None),                             # starts like every description
+    ("neutral:", None),                                             # nothing after the separator
+    ("neutral: ", None),
+    ("neutral: neither entailment nor contradiction", None),       # names other options
     ("neutral: or maybe entailment", None),
     ("contradiction or neutral", None),                             # no separator
     ("Contradiction: the contract states the opposite", None),      # not the option as written
@@ -108,6 +122,27 @@ def test_an_answer_echoing_option_and_description(said, value):
         assert d.value is None and "invalid LLM output" in d.escalate and said[:20] in d.escalate
     else:
         assert d.value == value and d.escalate is None and d.extra["llm"]["answer_echo"] == said
+
+
+@pytest.mark.parametrize("said, value", [
+    ("yes: it applies", "yes"),
+    ("yes: it does not", None),                                     # no's description
+    ("yes - it does not apply", None),                              # starts like no's description
+    ("no: it does not apply", "no"),
+])
+def test_an_echo_with_another_options_description_is_not_read(said, value):
+    srv = Server(lambda i, b: reply(said, {"yes": 0.9, "no": 0.1} if said.startswith("yes") else {"yes": 0.1, "no": 0.9}))
+    m = llm("http://fake/v1", "fake-model", opener=srv, workers=1)
+    d = m.decision("q", "Does it apply?", "contract", {"yes": "it applies", "no": "it does not"}).decide(DOC)
+    assert d.value == value
+
+
+@pytest.mark.parametrize("said, value", [("neutral - not addressed", "neutral"), ("neutral: or maybe entailment", None),
+                                         ("neutral:", None)])
+def test_an_echo_over_options_without_descriptions(said, value):
+    srv = Server(lambda i, b: reply(said, {"entailment": 0.05, "contradiction": 0.05, "neutral": 0.9}))
+    d = part_of(srv, options=list(OPTS)).decide(Facts(hypothesis="H", contract=DOC))
+    assert d.value == value
 
 
 def test_two_options_sharing_a_prefix_are_not_guessed():

@@ -603,11 +603,16 @@ labels, 10 % of the labels discordant) rolled back in 10 / 28 / 70 % of runs by 
   its first 16 examples first and refuses a mix there.
 - **An answer that echoes `option: description` is read as the option** (`solvi.core.deciders.llm`). With options
   given as `{option: description}` a model answered `"contradiction: the contract states the opposite"`, an invalid
-  output; it is read as that option when exactly one option is followed by `:`, ` - `, ` – ` or ` — ` and the rest is its
-  own description or names no other option (`extra["llm"]["answer_echo"]` keeps what was written).
+  output; it is read as that option when exactly one option is followed by `:`, ` - `, ` – ` or ` — ` and by its own
+  description (or its start) that is not, nor starts like, another option's description (`"yes: it does not"` with `no`
+  described as "it does not" stays invalid); without descriptions the rest must name no other option, and a bare
+  `"neutral:"` stays invalid (`extra["llm"]["answer_echo"]` keeps what was written).
 - **A stated 0.9 is 0.9** (`solvi.core.deciders.DecideModel`, LLM backend). The log and softmax turned a stated 0.9 into
   0.8999999999999999 or 0.9000000000000001 depending on the other options, so a threshold calibrated at one escalated
   the other; an LLM decision's probabilities are rounded to 12 decimals, in calibration and in every decision.
+  Upgrading: a calibration of an LLM part saved before this change keeps its threshold (e.g. 0.9000000000000001),
+  which the rounded confidences now meet less often — such a part escalates more, never less, than when it was
+  calibrated; recalibrate LLM parts to get the intended threshold back.
 - **`why` and the audit show a model's quote, not the whole input** (`System`). A model decision that quoted the text
   leads its `why` with the quote and where it is (`quote 'shall not disclose' (contract[20:38])`) and shows an input text
   over 200 characters by its length; without a quote the `why` is as before. A record stored with the earlier `why`
@@ -617,7 +622,9 @@ labels, 10 % of the labels discordant) rolled back in 10 / 28 / 70 % of runs by 
 - **The README's links work on PyPI.** Relative links (`docs/guide.md`, `examples/...`) are absolute GitHub links.
 - **Calibration progress** (`DecisionPart` over an LLM). A calibration is asked in chunks of 32 and logs its progress
   to the logger `"solvi.calibration"` at INFO (`label: 48/303 calibration examples decided (95 s, about 505 s left)`);
-  nothing is printed by default.
+  nothing is printed by default. The unusable count, the early mixed-source refusal and the progress log are
+  `DecisionPart`'s calibration; a combination (`Vote`, `Cascade`, `Route`) calibrates as before (an invalid reply did
+  not crash it; mixed sources are still refused after all its calls).
 - **A stored record keeps the input once** (`solvi.core.store`). A full record held the given facts in the trace and
   again in the response's `values` (a 12k-character contract twice); `values` now keeps a name the trace holds with
   null, and loading takes the value from the trace, as it always did.

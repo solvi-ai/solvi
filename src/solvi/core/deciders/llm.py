@@ -313,11 +313,14 @@ def _norm_words(x):
 
 
 def echoed_option(ans, labs, it):
-    """The option an answer names when the model wrote the option followed by a separator and more words — "contradiction:
-    the contract states the opposite", the option's line from the prompt's list echoed back — else None. Accepted only
-    when exactly one option is followed by a separator (":", " - ", " – ", " — ") at the start, and the words after it
-    are that option's own description (or its start) or name no other option: "neutral: or maybe entailment" is
-    ambiguous and stays invalid."""
+    """The option an answer names when the model wrote the option followed by a separator and its description —
+    "contradiction: the contract states the opposite", the option's line from the prompt's list echoed back — else None.
+    Accepted only when exactly one option is followed by a separator (":", " - ", " – ", " — ") at the start and
+    something follows it, and what follows:
+    - for an option with a description: is that description (or its start, or it and more words), and is not, nor
+      starts like, another option's description ("yes: it does not" with no = "it does not" stays invalid);
+    - for options without descriptions: names no other option ("neutral: or maybe entailment" stays invalid).
+    A bare "neutral:" stays invalid: nothing after the separator is a cut or malformed reply, not an echo."""
     hits = []
     for o in labs:
         if ans.startswith(o):
@@ -327,10 +330,18 @@ def echoed_option(ans, labs, it):
     if len(hits) != 1:
         return None
     o, rest = hits[0]
-    descs = dict(zip([str(x) for x in it.options], getattr(it, "descriptions", None) or ()))
-    own, said = _norm_words(descs.get(o) or ""), _norm_words(rest)
-    if own and said and (own.startswith(said) or said.startswith(own)):
-        return o
+    said = _norm_words(rest)
+    if not said:
+        return None
+    descs = {k: _norm_words(v) for k, v in zip([str(x) for x in it.options], getattr(it, "descriptions", None) or ())
+             if v}
+
+    def like(d):
+        return bool(d) and (d.startswith(said) or said.startswith(d))
+    if any(like(d) for k, d in descs.items() if k != o):
+        return None
+    if descs.get(o):
+        return o if like(descs[o]) else None
     for other in labs:
         if other != o and re.search(r"(?<!\w)" + re.escape(other.lower()) + r"(?!\w)", rest.lower()):
             return None
