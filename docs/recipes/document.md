@@ -91,5 +91,22 @@ or currencies disagree; `"lenient"` lets a bare `$` match any dollar and a field
 decider interface; a `logprobs="auto"` model is read with one stated confidence per read (a copy, with a
 warning).
 
+## Reasoning models: `max_tokens`
+
+A reasoning model (one that thinks before the JSON) spends its token budget on the thinking: at the default
+(512; 2,048 when reasoning is requested) a model like `openai/gpt-oss-120b` often runs out mid-reply — the read
+then escalates loudly with the reason "the reply was cut off (max_tokens)" and the field abstains. Nothing is
+silent, but coverage collapses. Measured on that model (the recipe reading two spans per case): `max_tokens=8192`
+fixes part of it, `16384` fixes more — at ≈ 6× the latency per read. Set it on the model, not the recipe:
+
+```python
+model = llm(URL, "openai/gpt-oss-120b", max_tokens=16384,
+            extra_body={"reasoning": {"effort": "low"}})
+```
+
+If reads come back as abstentions with that reason in `why`, raise `max_tokens` before tuning anything else —
+and check the latency/coverage tradeoff on your own calibration sample first: coverage bought at 6× latency may
+not be worth it.
+
 The runnable example: [examples/27_document_decision.py](https://github.com/solvi-ai/solvi/blob/main/examples/27_document_decision.py)
 — a fake chat-completions endpoint, no network; the test suite runs it.
