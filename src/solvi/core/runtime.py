@@ -603,8 +603,10 @@ def _answers_differ(trace, system, flow):
     for q, a in now.items():
         was = stored[q]
         diff = _result_differs(was, a, why=not getattr(trace, "legacy_order", False))
-        if diff == ["why"] and getattr(a, "_why_before", None) == was.why:
-            continue                                  # stored before 1.4: the model's quote not yet leading the why
+        wb = getattr(a, "_why_before", None)
+        ok_why = was.why == wb or (isinstance(wb, (list, tuple)) and was.why in wb)
+        if diff == ["why"] and ok_why:
+            continue                                  # stored by an earlier form (pre-1.4 / 1.4): same reason, older wording
         if not diff or _before_no_data(was, a, diff):
             continue
         if diff[0] in ("answer", "status"):

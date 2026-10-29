@@ -99,6 +99,8 @@ DocumentSystem holds a solvi.System (`recipe.system`) and does not subclass it (
 from __future__ import annotations
 
 import inspect
+import sys
+import time
 import math
 import re
 import typing
@@ -494,11 +496,14 @@ class DocumentSystem:
         `res.stored_id` when storage= was given. Keyword options go to System.ask."""
         return self.system.ask(self.given(state), [QUESTION], **kw)
 
-    def calibrate(self, examples, *, max_risk=None, max_error=None, correct=None, **kw):
+    def calibrate(self, examples, *, max_risk=None, max_error=None, correct=None, workers=None, progress=None, **kw):
         """A calibrated threshold on the answer from labelled examples [(input, correct answer)] (System.guarantee:
         max_risk= or max_error=, and groups=, weak=, delta=, method= ...) → the calibration report (also kept as
         `self.calibration`). Fewer than 100 examples: a GuaranteeWarning. A number is judged right at the label's own
-        precision (see the module docs) unless correct=(result, label) → bool is given."""
+        precision (see the module docs) unless correct=(result, label) → bool is given. workers > 1: the examples run
+        in a thread pool (results in input order; one broken example counts as escalated). progress: (done, total)
+        after every example; when workers > 1 and progress is None and there are 50 or more examples, a heartbeat
+        prints to stderr every 10 s."""
         from ..core.guarantees.guarantee import GuaranteeWarning
         examples = [(self.given(st), y) for st, y in examples]
         n = len(examples)
@@ -510,9 +515,20 @@ class DocumentSystem:
         default = correct is None and self.system.questions[QUESTION].answer.kind == "estimate"
         if default:
             correct = _same_number
+        if progress is None and workers is not None and workers > 1 and n >= 50:
+            cell = {"t": time.time()}
+
+            def progress(done, total, _cell=cell):          # the heartbeat: a counter + a time check
+                now = time.time()
+                if done == total or now - _cell["t"] >= 10:
+                    print(f"\r[calibrate] {done}/{total} ({now - _cell['t']:.0f} s since the last beat)",
+                          end="\n" if done == total else "", file=sys.stderr, flush=True)
+                    _cell["t"] = now
+        if workers is not None and (not isinstance(workers, int) or isinstance(workers, bool) or workers < 1):
+            raise ValueError(f"workers must be a positive int, not {workers!r}")
         try:
             rep = self.system.guarantee(QUESTION, examples, max_risk=max_risk, max_error=max_error, correct=correct,
-                                        **kw)
+                                        workers=workers, progress=progress, warn_small=False, **kw)
         except ValueError as e:
             if default:
                 raise ValueError(f"{e} — the answers were judged by the default number match (at the label's "
