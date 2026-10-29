@@ -150,7 +150,7 @@ def _label_policy(**kw):
 
 def _attach(disp, learner=None, **kw):
     base = dict(question="team", max_risk=0.05, secret=KEY, initial=disp.system.holder.ver, policy=_policy(),
-                wait=True, clock=lambda: 1000.0)
+                wait=True, clock=lambda: 1000.0, additive=False)
     base.update(kw)
     return AdapterLoop.attach(disp, Learner() if learner is None else learner, **base)
 
@@ -438,7 +438,7 @@ def test_a_refused_attach_leaves_nothing_attached():
     s1 = _s1()
     loop = AdapterLoop(Learner(), question="team", max_risk=0.05, secret=KEY, initial=s1.holder.ver,
                        policy=DefaultPolicy(Budget(min_interval_s=0.0, per_day=10 ** 6)), wait=True,
-                       clock=lambda: 1000.0)
+                       clock=lambda: 1000.0, additive=False)
     disp = Dispatcher(s1, AskPath(_s2()), secret=KEY)
     with pytest.raises(ValueError, match="refuses the slow path's labels"):
         loop.attach_to(disp)
@@ -459,7 +459,7 @@ def test_teach_in_stream_mode_without_storage_warns_that_the_correction_is_lost(
 def test_a_combination_over_an_attached_part_is_refused_until_detach():
     s, (part, other), _ = _llm_system(2)
     disp = Dispatcher(s, AskPath(_s2()), secret=KEY)
-    loop = AdapterLoop.attach(disp, Learner(), question="team", max_risk=0.05, secret=KEY, policy=_policy())
+    loop = AdapterLoop.attach(disp, Learner(), question="team", max_risk=0.05, secret=KEY, policy=_policy(), additive=False)
     assert loop.part is part
     with pytest.raises(ValueError, match="served by an adapter loop"):
         Cascade([part, other])
@@ -475,7 +475,7 @@ def test_a_combination_over_an_attached_part_is_refused_until_detach():
 def test_a_system_alone_learns_from_teach_and_outcome_and_promotes_on_its_pre_freeze_gates(tmp_path):
     s1 = _s1(storage=JSONLStorage(tmp_path / "s.jsonl"))
     loop = AdapterLoop.attach(s1, Learner(), question="team", max_risk=0.05, secret=KEY, initial=s1.holder.ver,
-                              policy=_label_policy(), wait=True, clock=lambda: 1000.0)
+                              policy=_label_policy(), wait=True, clock=lambda: 1000.0, additive=False)
     assert loop.mode == "label" and s1.adapter_loop is loop
     st = loop.status()
     assert st["guarantee"] == "fixed-set (act_guard on calib labels); no anytime certificate" and st["mode"] == "label"
@@ -496,7 +496,7 @@ def test_a_system_alone_learns_from_teach_and_outcome_and_promotes_on_its_pre_fr
     assert loop.n == 701
     assert len(s1.storage.corrections()) == 701       # every label is stored too
     with pytest.raises(ValueError, match="label mode"):
-        AdapterLoop(Learner(), question="team", mode="stream", secret=KEY, max_risk=0.05).label({"email": "x"}, "billing")
+        AdapterLoop(Learner(), question="team", mode="stream", secret=KEY, max_risk=0.05, additive=False).label({"email": "x"}, "billing")
     assert loop.replay()["ok"]
     loop.detach()
     assert s1.holder.ver.fingerprint() == "ver-v0-0.5" and s1.adapter_loop is None
@@ -519,7 +519,7 @@ class Worse(Learner):
 def test_label_mode_never_serves_a_training_its_gates_refuse_and_refuses_the_gates_off():
     s1 = _s1()
     loop = AdapterLoop.attach(s1, Worse(), question="team", max_risk=0.05, secret=KEY, initial=s1.holder.ver,
-                              policy=_label_policy(), wait=True, clock=lambda: 1000.0)
+                              policy=_label_policy(), wait=True, clock=lambda: 1000.0, additive=False)
     for x in _emails(700):
         s1.teach("team", x, _gold(x["email"]))
     ev = [e for k, e in loop.log if k == "stream"]
@@ -530,7 +530,7 @@ def test_label_mode_never_serves_a_training_its_gates_refuse_and_refuses_the_gat
     assert loop.replay()["ok"]
     for pol in (_policy(), _label_policy(pre_freeze=False)):       # label mode with the gates off: refused
         with pytest.raises(ValueError, match="pre_freeze=False measures nothing"):
-            AdapterLoop.attach(_s1(), Learner(), question="team", max_risk=0.05, secret=KEY, policy=pol)
+            AdapterLoop.attach(_s1(), Learner(), question="team", max_risk=0.05, secret=KEY, policy=pol, additive=False)
 
 
 class Uncalibrated(Ver):
@@ -556,7 +556,7 @@ def test_label_mode_automatic_promotion_needs_the_certificate_as_the_promote_con
     pol = PassAll(Budget(min_interval_s=0.0, per_day=10 ** 6), **{**dict(first=100, growth=1.0, calib=0.15,
                                                                          holdout=0.15, min_holdout=20, probe=False)})
     loop = AdapterLoop.attach(s1, L(), question="team", max_risk=0.05, secret=KEY, initial=s1.holder.ver, policy=pol,
-                              wait=True, clock=lambda: 1000.0)
+                              wait=True, clock=lambda: 1000.0, additive=False)
     for x in _emails(700):
         s1.teach("team", x, _gold(x["email"]))
     ev = [e["event"] for k, e in loop.log if k == "stream"]
@@ -587,7 +587,7 @@ def test_label_mode_watch_rolls_back_a_promoted_version_that_is_worse_than_the_o
     pol = LetThrough(Budget(min_interval_s=0.0, per_day=10 ** 6), first=100, growth=1.0, calib=0.15, holdout=0.15,
                      min_holdout=20, probe=False)
     loop = AdapterLoop.attach(s1, Seq(), question="team", max_risk=0.05, secret=KEY, initial=s1.holder.ver,
-                              policy=pol, wait=True, clock=lambda: 1000.0, storage=JSONLStorage(tmp_path / "l.jsonl"))
+                              policy=pol, wait=True, clock=lambda: 1000.0, storage=JSONLStorage(tmp_path / "l.jsonl"), additive=False)
     xs = _emails(3000)
     i = 0
     while loop.served != 1 and i < 1000:
@@ -617,7 +617,7 @@ def test_label_mode_checkpoint_continues_as_the_unbroken_run(tmp_path):
     xs = _emails(1200)
     sa = _s1()
     la = AdapterLoop.attach(sa, Learner(), question="team", max_risk=0.05, secret=KEY, initial=sa.holder.ver,
-                            policy=_label_policy(), wait=True, clock=lambda: 1000.0)
+                            policy=_label_policy(), wait=True, clock=lambda: 1000.0, additive=False)
     for x in xs[:700]:
         sa.teach("team", x, _gold(x["email"]))
     assert la.served == 1 and la.versions()[1]["certified"], la.versions()
@@ -644,7 +644,7 @@ def test_label_mode_checkpoint_saves_and_restores_the_watch_e_process(tmp_path):
     xs = _emails(1000)
     sa = _s1()
     la = AdapterLoop.attach(sa, Learner(), question="team", max_risk=0.05, secret=KEY, initial=sa.holder.ver,
-                            policy=_label_policy(), wait=True, clock=lambda: 1000.0)
+                            policy=_label_policy(), wait=True, clock=lambda: 1000.0, additive=False)
     for x in xs[:700]:
         sa.teach("team", x, _gold(x["email"]))
     w = la.status()["watch"]
@@ -701,7 +701,7 @@ class OnlyHuman(LoopPolicy):
 def test_a_custom_policy_and_learner_attach():
     s1 = _s1()
     loop = AdapterLoop.attach(s1, Learner(), policy=OnlyHuman(), initial=s1.holder.ver, secret=KEY, max_risk=0.05,
-                              wait=True, clock=lambda: 1000.0)
+                              wait=True, clock=lambda: 1000.0, additive=False)
     for x in _emails(400):
         s1.teach("team", x, _gold(x["email"]))
     assert loop.served == 1 and s1.holder.ver.name == "v1"
@@ -728,11 +728,11 @@ def _llm_system(n=1, cascade=False):
 def test_a_combination_or_a_member_of_one_is_refused():
     s, parts, _ = _llm_system(2, cascade=True)
     with pytest.raises(ValueError, match="combination"):
-        AdapterLoop.attach(s, Learner(), question="team", secret=KEY, max_risk=0.05)
+        AdapterLoop.attach(s, Learner(), question="team", secret=KEY, max_risk=0.05, additive=False)
     s1, ps, _ = _llm_system(2)
     keep = Cascade(ps)                                # the System's own part, also a member of a cascade elsewhere
     with pytest.raises(ValueError, match="member of a combination"):
-        AdapterLoop.attach(s1, Learner(), question="team", secret=KEY, max_risk=0.05)
+        AdapterLoop.attach(s1, Learner(), question="team", secret=KEY, max_risk=0.05, additive=False)
     del keep
 
 
@@ -752,9 +752,9 @@ def test_other_refusals():
     with pytest.raises(ValueError, match="use ask"):
         disp.start(_emails(1)[0])
     with pytest.raises(ValueError, match="label-mode loop"):
-        AdapterLoop(Learner(), question="team", secret=KEY, max_risk=0.05).attach_to(_s1())
+        AdapterLoop(Learner(), question="team", secret=KEY, max_risk=0.05, additive=False).attach_to(_s1())
     with pytest.raises(ValueError, match="model-backed decision part"):
-        AdapterLoop.attach(_s1(), question="team", dir="unused")
+        AdapterLoop.attach(_s1(), question="team", dir="unused", additive=False)
 
 
 # ───────────────────────────── the lock order under threads
@@ -768,7 +768,7 @@ def test_no_deadlock_between_decisions_controls_a_background_training_and_the_pa
     try:
         disp = Dispatcher(s1, AskPath(_s2()), secret=KEY)
         loop = AdapterLoop.attach(disp, Learner(), question="team", max_risk=0.05, secret=KEY,
-                                  initial=s1.holder.ver, policy=_policy(first=60), wait=False)
+                                  initial=s1.holder.ver, policy=_policy(first=60), wait=False, additive=False)
         assert loop.part is part
         errs, stop = [], threading.Event()
 

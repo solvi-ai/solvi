@@ -535,7 +535,8 @@ def _load_verified(cls, folder, m, data, vdir, learner, *, system, storage, vers
         if got != m["store"]["items"]:
             raise ValueError(f"the store holds {got} records of this loop, the checkpoint {m['store']['items']}: "
                              "records written after the save are not in its state")
-    cfg = m["config"]
+    cfg = dict(m["config"])
+    cfg.setdefault("additive", m["format"] == FORMAT_ADDITIVE)   # a v1 replacement checkpoint predates the flag
     vrows = {r["version"]: r for r in st["versions"]}
     # version 0
     v0 = m["version0"]

@@ -3,7 +3,8 @@
 
     from solvi.experimental.stream import AdapterLoop, DefaultPolicy, HashedTextTrainer
 
-    loop = AdapterLoop(HashedTextTrainer(), question="intent", policy=DefaultPolicy(), max_risk=0.05, secret=key)
+    loop = AdapterLoop(HashedTextTrainer(), question="intent", policy=DefaultPolicy(), max_risk=0.05, secret=key,
+                       additive=False)     # the default is additive coverage, which needs an initial= model; see below
     out = loop.step(text, oracle)          # oracle: () → the label (None: missing), called only when one is needed
     loop.pause() / loop.resume()           # no training, freezing or promotion while paused; labels and promises go on
     loop.train_now(wait=False)             # → TrainJob: ignores want_train, not the budget; returns at once
@@ -364,7 +365,9 @@ class AdapterLoop:
     protocol never reads them (no behaviour change), it costs one candidate scoring per decision; the keys are absent
     with no candidate or with the option off (default).
 
-    additive (experimental, default False — the replacement protocol above, unchanged): a candidate serves the escalation
+    additive (default True: additive coverage; `additive=False` runs the replacement protocol above, unchanged — it
+    lost on the stand: worse than no loop by 11–16 points on 3 of 4 intent datasets, while additive coverage gained
+    on 4 of 4): a candidate serves the escalation
     zone *below* the served chain instead of replacing it. The loop serves a chain of layers [L0, L1, …] (L0 = the
     served version); layer j has its live threshold λ_j (its promise's) and, when it is not the deepest, a frozen
     routing threshold Λ_j, frozen when the layer below it was attached; a decision walks j = 0, 1, … to the first layer
@@ -402,7 +405,7 @@ class AdapterLoop:
                  detector=None, monitor="auto", probation=300, source="human", secret=None, seed=0, sampling=None,
                  promise_options=None, storage=None, versions_dir=None, system=None, feature="text", key=None,
                  served=None, clock=None, wait=False, part=None, mode="stream", warn_refused=200,
-                 trace_candidate=False, additive=False, max_layers=3, useful_error="auto", delta_use=None,
+                 trace_candidate=False, additive=True, max_layers=3, useful_error="auto", delta_use=None,
                  _detector_alone=False, _batch=None):
         global _warned
         if mode not in MODES:

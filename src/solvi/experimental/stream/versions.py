@@ -4,11 +4,15 @@
     from solvi.experimental.stream import HashedTextLearner, LearningLoop
 
     loop = LearningLoop(HashedTextLearner(), question="intent", max_risk=0.05, delta=0.05, secret=key,
-                        storage=store)
+                        storage=store, initial=model)
     out = loop.step(text, oracle)          # oracle: () → the label (None: missing), called only when one is needed
     out["answer"], out["by"]               # "local" (the served version alone), "oracle", or "person" (no label)
     loop.versions()                        # [{"version", "state", "certified", "threshold", ...}]
     loop.replay()                          # every decision and event rebuilt from the records and compared
+
+Additive coverage is the default: it needs stream mode and an `initial` model (version 0, above), as in the example;
+`additive=False` is the replacement protocol, which lost on the stand (worse than no loop by 11–16 points on 3 of 4
+intent datasets; additive coverage gained on 4 of 4).
 
 Versions. Version 0 is "no model" by default: it answers nothing alone, has no certificate and spends no δ (it never
 certifies). With `initial=` (opt-in) version 0 is an existing frozen model — the fitted System 1, e.g.
@@ -127,7 +131,7 @@ class LearningLoop(AdapterLoop):
     def __init__(self, learner, *, question, max_risk=None, max_error=None, delta=0.05, freeze_min=300, growth=2.0,
                  stale=3000, trial=None, min_share=0.05, margin=0.01, refreeze=1.5, initial=None, detector=None,
                  probation=300, s2_labels=False, source="human", secret=None, seed=0, sampling=None,
-                 promise_options=None, storage=None, versions_dir=None, system=None, feature="text", additive=False,
+                 promise_options=None, storage=None, versions_dir=None, system=None, feature="text", additive=True,
                  max_layers=3):
         policy = lane_policy(freeze_min=freeze_min, growth=growth, stale=stale, trial=trial, min_share=min_share,
                              margin=margin, refreeze=refreeze, s2_labels=s2_labels)

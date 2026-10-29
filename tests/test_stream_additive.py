@@ -94,10 +94,19 @@ def test_additive_is_refused_in_label_mode_without_an_initial_model_and_below_tw
                         max_layers=bad)
 
 
-def test_additive_false_writes_the_same_records_and_events_as_the_default():
+def test_additive_is_the_default_and_a_loop_without_initial_must_say_so():
+    loop = AdapterLoop(_Hand([GOOD]), question="q", max_risk=0.05, secret=KEY, initial=L0, monitor=None,
+                       _detector_alone=True, wait=True)
+    assert loop.additive is True
+    with pytest.raises(ValueError, match="initial"):
+        AdapterLoop(_Hand([GOOD]), question="q", max_risk=0.05, secret=KEY, monitor=None, _detector_alone=True,
+                    wait=True)
+
+
+def test_additive_false_writes_the_same_records_and_events_as_explicit_false():
     xs = _xs(3, 2500)
     runs = []
-    for kw in ({}, {"additive": False}, {"additive": False, "max_layers": 5}):
+    for kw in ({"additive": False}, {"additive": False, "max_layers": 5}):
         loop = AdapterLoop(_Hand([GOOD, GOOD]), question="q", policy=_policy(), max_risk=0.05, secret=KEY,
                            initial=L0, monitor=None, _detector_alone=True, wait=True, clock=lambda: 0.0, **kw)
         _run(loop, xs)

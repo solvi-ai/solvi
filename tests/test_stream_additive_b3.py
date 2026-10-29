@@ -387,7 +387,7 @@ def _resign(folder, m):
 
 def test_a_replacement_checkpoint_stays_v1_and_loads_and_protocol_mismatches_are_refused(tmp_path):
     rl = AdapterLoop(_Hand([GOOD]), question="q", policy=_policy(), max_risk=0.05, secret=KEY, initial=L0,
-                     monitor=None, _detector_alone=True, wait=True, clock=_clock)
+                     monitor=None, _detector_alone=True, wait=True, clock=_clock, additive=False)
     _run(rl, _xs(0, 800))
     rl.save(tmp_path / "r")
     folder, m = _manifest(tmp_path / "r")
@@ -463,5 +463,5 @@ def test_status_reports_each_zone_and_its_counts_match_the_records(three):
     assert c["joint_bound"] == pytest.approx(0.05 * (1 + z["zone_share"][1] + z["zone_share"][2]))
     assert loop._state().zone_share == z["zone_share"]
     rl = AdapterLoop(_Hand([GOOD]), question="q", policy=_policy(), max_risk=0.05, secret=KEY, initial=L0,
-                     monitor=None, _detector_alone=True, wait=True, clock=_clock)
+                     monitor=None, _detector_alone=True, wait=True, clock=_clock, additive=False)
     assert "zones" not in rl.status() and rl._state().zone_share is None

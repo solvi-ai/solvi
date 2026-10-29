@@ -258,7 +258,7 @@ def test_a_subprocess_training_writes_a_file_the_loop_installs(helper, tmp_path)
     sink, system = [], types.SimpleNamespace(heads={}, fp=None)
     learner = _ProcTrainer(list("ab"), _sub(helper), tmp_path)
     loop = AdapterLoop(learner, question="q", wait=True, max_risk=0.05, secret=KEY, policy=_plain(first=100), system=system,
-                       served=lambda f: _Slot(f, sink))
+                       served=lambda f: _Slot(f, sink), additive=False)
     for x, y in _data(1, 1500):
         loop.step(x, lambda y=y: y)
         if loop.served != 0:
@@ -287,7 +287,7 @@ class _Crash(HashedTextTrainer):
 
 def test_a_runner_crash_stops_the_loop_with_status_error_and_the_replay_stays_exact(helper, tmp_path):
     loop = AdapterLoop(_Crash(_sub(helper), tmp_path, "lt_runner_helper:die"), question="q", wait=True, max_risk=0.05, secret=KEY,
-                       policy=_plain(first=50))
+                       policy=_plain(first=50), additive=False)
     with pytest.raises(RunnerError):
         for x, y in _data(2, 400):
             loop.step(x, lambda y=y: y)
@@ -302,7 +302,7 @@ def test_a_runner_crash_stops_the_loop_with_status_error_and_the_replay_stays_ex
     assert r["ok"], r["mismatches"][:5]
     # the same through a control
     loop2 = AdapterLoop(_Crash(_sub(helper), tmp_path, "lt_runner_helper:killed"), question="q", wait=True, max_risk=0.05,
-                        secret=KEY, policy=_plain(first=10 ** 6))
+                        secret=KEY, policy=_plain(first=10 ** 6), additive=False)
     for x, y in _data(3, 60):
         loop2.step(x, lambda y=y: y)
     with pytest.raises(RunnerError):
@@ -316,7 +316,7 @@ def test_a_training_refused_by_its_estimate_is_recorded_and_replays(helper, tmp_
     clock = [1000.0]
     loop = AdapterLoop(_Crash(_sub(helper), tmp_path, "lt_runner_helper:echo"), question="q", wait=True, max_risk=0.05, secret=KEY,
                        policy=DefaultPolicy(_budget(max_train_s=10.0, min_interval_s=600.0), calib=0.0, holdout=0.0,
-                                            pre_freeze=False, probe=False, first=50), clock=lambda: clock[0])
+                                            pre_freeze=False, probe=False, first=50), clock=lambda: clock[0], additive=False)
     for x, y in _data(4, 120):
         loop.step(x, lambda y=y: y)
     tr = _events(loop, "train")

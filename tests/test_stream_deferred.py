@@ -94,7 +94,7 @@ def _step(loop, x):
 def test_decisions_go_on_while_a_slow_training_runs_and_the_apply_is_recorded_where_it_happened():
     gate = threading.Event()
     learner = _Learner([_Model("m", 0.9)], gate=gate)
-    loop = AdapterLoop(learner, question="q", max_risk=0.05, secret=KEY, policy=_plain(first=20))
+    loop = AdapterLoop(learner, question="q", max_risk=0.05, secret=KEY, policy=_plain(first=20), additive=False)
     data = iter(_fake(1, 5000))
     while not learner.jobs:
         _step(loop, next(data))
@@ -128,7 +128,7 @@ def test_decisions_go_on_while_a_slow_training_runs_and_the_apply_is_recorded_wh
 def test_train_now_returns_at_once_and_wait_true_blocks():
     gate = threading.Event()
     loop = AdapterLoop(_Learner([_Model("m", 0.9), _Model("m2", 0.9)], gate=gate), question="q", max_risk=0.05,
-                       secret=KEY, policy=_plain(first=10 ** 6))
+                       secret=KEY, policy=_plain(first=10 ** 6), additive=False)
     data = iter(_fake(2, 20000))
     for _ in range(50):
         _step(loop, next(data))
@@ -150,7 +150,7 @@ def test_train_now_returns_at_once_and_wait_true_blocks():
 
 
 def test_a_paused_loop_keeps_a_ready_result_until_resume():
-    loop = AdapterLoop(_Learner([_Model("m", 0.9)]), question="q", max_risk=0.05, secret=KEY, policy=_plain(first=20))
+    loop = AdapterLoop(_Learner([_Model("m", 0.9)]), question="q", max_risk=0.05, secret=KEY, policy=_plain(first=20), additive=False)
     data = iter(_fake(3, 2000))
     while not loop.status()["job"]:
         _step(loop, next(data))
@@ -174,7 +174,7 @@ def test_replay_is_exact_across_apply_failure_refusal_discard_and_eviction():
                 _Model("s99", 0.995)] + [_Model(f"w{i}", 0.3) for i in range(60)]
     models = [o for o in outcomes if isinstance(o, _Model)]
     loop = AdapterLoop(_Learner(outcomes, delay=lambda: r0.random() * 0.02), question="q", max_risk=0.05, secret=KEY,
-                       policy=_plain(keep=2, growth=1.0, trial=300, first=200))
+                       policy=_plain(keep=2, growth=1.0, trial=300, first=200), additive=False)
     keep = loop.policy.budget.max_versions_kept
     data = iter(_fake(8, 30000))
     for _ in range(14000):
@@ -199,7 +199,7 @@ def test_replay_is_exact_across_apply_failure_refusal_discard_and_eviction():
 
 def test_a_runner_error_in_the_background_stops_the_loop_where_it_is_applied_and_replays():
     loop = AdapterLoop(_Learner([RunnerError("the training process 1: no log line for 300 s")]), question="q",
-                       max_risk=0.05, secret=KEY, policy=_plain(first=20))
+                       max_risk=0.05, secret=KEY, policy=_plain(first=20), additive=False)
     data = iter(_fake(4, 2000))
     while not loop.status()["job"]:
         _step(loop, next(data))
@@ -219,7 +219,7 @@ def test_a_runner_error_in_the_background_stops_the_loop_where_it_is_applied_and
 # ───────────────────────────── close cancels the training in flight
 def test_close_cancels_a_running_training_in_a_thread():
     learner = _Learner([_Model("m", 0.9)], gate=threading.Event())
-    loop = AdapterLoop(learner, question="q", max_risk=0.05, secret=KEY, policy=_plain(first=20))
+    loop = AdapterLoop(learner, question="q", max_risk=0.05, secret=KEY, policy=_plain(first=20), additive=False)
     data = iter(_fake(5, 2000))
     while not learner.jobs:
         _step(loop, next(data))
@@ -252,7 +252,7 @@ def test_close_kills_a_running_training_subprocess(helper, tmp_path):  # noqa: F
     loop = AdapterLoop(_ProcSlow(_sub(helper), tmp_path), question="q", max_risk=0.05, secret=KEY,
                        policy=DefaultPolicy(Budget(min_interval_s=0.0, per_day=10 ** 6, cpu_threads=1, device="cpu",
                                                    max_train_s=120.0), calib=0.0, holdout=0.0, pre_freeze=False,
-                                            probe=False, first=20))
+                                            probe=False, first=20), additive=False)
     data = [(f"text {c} {i}", c) for i, c in enumerate("ab" * 200)]
     i = 0
     while not loop.status()["job"]:
@@ -297,7 +297,7 @@ def test_a_decision_under_the_part_lock_and_a_loop_step_do_not_deadlock():
     learner = _Learner([_Shadow(part, f"m{i}", 0.9) for i in range(30)])
     learner.part = part
     loop = AdapterLoop(learner, question="q", max_risk=0.05, secret=KEY, initial=_Shadow(part, "v0", 0.6),
-                       policy=_plain(first=20, growth=1.0, trial=100))
+                       policy=_plain(first=20, growth=1.0, trial=100), additive=False)
     assert loop._part_lock is version_lock(part)
     errors = []
 
@@ -365,7 +365,7 @@ def test_a_rollback_during_a_training_makes_its_result_stale_discarded_and_relea
     v1 = _Counted("m1", 0.9)
     learner = _Gated([v1, m2], gates=[g1, g2])
     loop = AdapterLoop(learner, question="q", max_risk=0.05, secret=KEY, initial=_Model("v0", 0.6),
-                       policy=_plain(first=20, growth=1.0, trial=300, holdout=0.5))
+                       policy=_plain(first=20, growth=1.0, trial=300, holdout=0.5), additive=False)
     data = iter(_fake(1, 60000))
     while loop.served != 1:
         _step(loop, next(data))
@@ -399,7 +399,7 @@ def test_the_report_stops_when_the_training_is_cancelled():
     gate = threading.Event()
     slow = _Counted("slow", 0.9, delay=0.01)
     loop = AdapterLoop(_Gated([slow], gates=[gate]), question="q", max_risk=0.05, secret=KEY,
-                       initial=_Model("v0", 0.6), policy=_plain(first=10 ** 6, holdout=0.9))
+                       initial=_Model("v0", 0.6), policy=_plain(first=10 ** 6, holdout=0.9), additive=False)
     for x in _fake(2, 1500):
         _step(loop, x)
     assert loop.status()["labels"]["holdout"] > 300
@@ -420,7 +420,7 @@ def test_the_rollback_target_is_never_evicted():
     (then the loop rolls forward again), and version 0 is "served" or "retired" throughout."""
     outcomes = [_Model(f"s{i}", min(0.6 + 0.05 * i, 0.995)) for i in range(40)]
     loop = AdapterLoop(_Learner(outcomes), question="q", max_risk=0.05, secret=KEY, wait=True,
-                       policy=_plain(keep=2, growth=1.0, trial=300, first=200))
+                       policy=_plain(keep=2, growth=1.0, trial=300, first=200), additive=False)
     data = iter(_fake(8, 60000))
     checked = 0
     seen_evicts = 0
@@ -450,7 +450,7 @@ def test_a_candidate_refused_at_the_freeze_is_released_at_once():
     """S3: with the pre-freeze gates on, a candidate that fails them is released when it is discarded at birth."""
     bad = _Model("bad", 0.1)
     loop = AdapterLoop(_Learner([bad]), question="q", max_risk=0.05, secret=KEY, initial=_Model("v0", 0.9),
-                       policy=_plain(first=10 ** 6, pre_freeze=True, holdout=0.3, calib=0.2))
+                       policy=_plain(first=10 ** 6, pre_freeze=True, holdout=0.3, calib=0.2), additive=False)
     for x in _fake(3, 3000):
         _step(loop, x)
     job = loop.train_now()
@@ -476,7 +476,7 @@ def test_an_error_stop_names_the_cancelled_training():
                 raise RuntimeError("the label store is gone")
             self._seen += 1
     learner = _Failing([_Model("m", 0.9)], gate=threading.Event())
-    loop = AdapterLoop(learner, question="q", max_risk=0.05, secret=KEY, policy=_plain(first=20))
+    loop = AdapterLoop(learner, question="q", max_risk=0.05, secret=KEY, policy=_plain(first=20), additive=False)
     data = iter(_fake(3, 5000))
     while not learner.jobs:
         _step(loop, next(data))
@@ -503,7 +503,7 @@ def test_train_now_without_wait_on_an_online_learner_records_the_wait_asked():
 
         def snapshot(self):
             return _Model(f"snap{self._seen}", 0.9)
-    loop = AdapterLoop(_Online(), question="q", max_risk=0.05, secret=KEY, policy=_plain(first=10 ** 6))
+    loop = AdapterLoop(_Online(), question="q", max_risk=0.05, secret=KEY, policy=_plain(first=10 ** 6), additive=False)
     for x in _fake(2, 30):
         _step(loop, x)
     job = loop.train_now(wait=False)
@@ -515,7 +515,7 @@ def test_train_now_without_wait_on_an_online_learner_records_the_wait_asked():
 
 def test_a_keyboard_interrupt_in_the_training_thread_is_a_failed_training():
     loop = AdapterLoop(_Learner([KeyboardInterrupt()]), question="q", max_risk=0.05, secret=KEY,
-                       policy=_plain(first=10 ** 6))
+                       policy=_plain(first=10 ** 6), additive=False)
     data = iter(_fake(5, 200))
     for _ in range(30):
         _step(loop, next(data))

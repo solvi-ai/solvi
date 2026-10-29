@@ -128,10 +128,10 @@ def test_useful_error_defaults_and_refusals():
     assert _loop([REAL], useful_error=None).useful_budget is None
     assert _loop([REAL], delta_use=0.1).useful_budget.delta == 0.1
     rl = AdapterLoop(_Hand([REAL]), question="q", policy=_policy(), max_risk=0.05, secret=KEY, initial=L0,
-                     monitor=None, _detector_alone=True, wait=True, clock=_clock)
+                     monitor=None, _detector_alone=True, wait=True, clock=_clock, additive=False)
     assert rl.useful_error is None and rl.useful_budget is None
     with pytest.raises(ValueError, match="replacement mode"):
-        AdapterLoop(_Hand([REAL]), question="q", max_risk=0.05, secret=KEY, initial=L0, useful_error=0.5)
+        AdapterLoop(_Hand([REAL]), question="q", max_risk=0.05, secret=KEY, initial=L0, useful_error=0.5, additive=False)
     with pytest.raises(ValueError, match="delta_use"):
         _loop([REAL], useful_error=None, delta_use=0.1)
     for bad in (0.0, 1.0, True, "half"):

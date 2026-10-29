@@ -78,7 +78,8 @@ class _Other(_Det):
 
 def _loop(learner=None, **kw):
     base = dict(question="q", max_risk=0.05, secret=KEY, initial=_Model("v0", 0.5), wait=True, clock=lambda: 1000.0,
-                detector=RiskDetector(0.05, arl=50.0), policy=_plain(keep=3, growth=1.0, trial=300, first=200))
+                detector=RiskDetector(0.05, arl=50.0), policy=_plain(keep=3, growth=1.0, trial=300, first=200),
+                additive=False)
     base.update(kw)
     return AdapterLoop(_Det() if learner is None else learner, **base)
 
