@@ -11,6 +11,21 @@ from .runtime import MISSING, NO_DATA
 
 
 @dataclass
+class Fact:
+    """One quoted fact of a response (`res.facts`): the value with the quote that supports it — `fact.quote` is the
+    quoted text itself, literally at `doc[start:end]` of the source named `source`; the step's confidence and
+    provenance ("quoted", or another kind a producer stated). From the trace, never parsed back from text."""
+    name: str
+    value: object
+    start: int
+    end: int
+    source: str
+    quote: str | None
+    confidence: float = 1.0
+    origin: str = "quoted"
+
+
+@dataclass
 class CheckResult:
     """One check of a decision (`res.checks`): its name, the questions whose flow ran it, its status — "passed",
     "failed", "skipped" (not run: a failed hard check settled every question that needed it, or — no data — a hard check
@@ -241,6 +256,22 @@ class Response(Serial):
         self._system = None
         return self
 
+    @property
+    def facts(self):
+        """The quoted facts of this response as data: every trace step that quoted its value out of a source text —
+        name, value, the offsets (source[start:end]), the quoted text itself, confidence, provenance. Built from the
+        trace (never parsed from text); empty when nothing was quoted. The whole computed state as data: res.values."""
+        out = []
+        for r in self.trace.records:
+            if r.kind in ("rule", "head") or not r.quote:
+                continue
+            s, e, src = r.quote
+            t = self.values.get(src)
+            out.append(Fact(name=r.name, value=r.value, start=s, end=e, source=src,
+                            quote=t[s:e] if isinstance(t, str) else None,
+                            confidence=r.confidence, origin=r.origin))
+        return out
+
     def report(self, format="md", question=None, system=None, replay="trusted"):
         """A human-readable report of this decision for an auditor or a customer: each answer, what it rests on, the quotes
         highlighted in the source text with their offsets, the safeguards that fired, the guarantee line, the models'
@@ -251,4 +282,4 @@ class Response(Serial):
         return render(decision(self, question, system, replay), format)
 
 
-__all__ = ["CheckResult", "checks_of", "Response"]
+__all__ = ["CheckResult", "Fact", "checks_of", "Response"]
