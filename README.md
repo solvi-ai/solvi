@@ -7,11 +7,11 @@ character offsets in the source) and a hash-chained trace that can be re-execute
 pinpoint the step that was altered. When something cannot be computed or checked, solvi abstains or hands the case to
 a person instead of guessing; a failed hard check always overrides any model's confidence.
 
-solvi 1.0 has two levels. **Ready systems** you configure: `solvi.build` (decisions from labelled examples, with a
-promise on the errors), `solvi.Agent` (acting in an environment), `solvi.Guard` (an agent's tool calls) and
-`solvi.Knowledge` (what they know, and from whom). **Building blocks** in `solvi.core`, which the ready systems are
-made of, each replaceable by a part of your own. What works but has no measured gain yet is kept apart in
-`solvi.experimental`.
+solvi 1.0 has two levels. **Ready systems** you configure: `solvi.document` (a decision over a document, the recipe),
+`solvi.build` (decisions from labelled examples, with a promise on the errors), `solvi.Agent` (acting in an
+environment), `solvi.Guard` (an agent's tool calls) and `solvi.Knowledge` (what they know, and from whom).
+**Building blocks** in `solvi.core`, which the ready systems are made of, each replaceable by a part of your own.
+What works but has no measured gain yet is kept apart in `solvi.experimental`.
 
 Where solvi is going — systems that learn from experience and change themselves only through checks they cannot switch
 off — is described, with what is measured and what is research, in [the mission](https://github.com/solvi-ai/solvi/blob/main/docs/mission.md#where-it-is-going).
@@ -33,6 +33,38 @@ pip install "solvi[smt]"       # + z3-solver: narrows / widens of a rule change 
 Requires Python 3.11+ (tested on 3.11–3.14). Coming from 0.9: see [below](#coming-from-09).
 
 ## Start
+
+### Documents: `solvi.document`
+
+A decision over a document: one model read per field of a pydantic schema, each fact found in the text as the text
+writes it, the answer computed by your code, a calibrated threshold on top. Nothing is guessed: a read that cannot be
+grounded, a number that reads two ways, a sign the text does not write — the field abstains with the reason.
+
+```python
+import solvi
+from solvi import Span
+from solvi.models import llm
+from pydantic import BaseModel, Field
+
+class Invoice(BaseModel):
+    total: Span[float] = Field(description="The total amount due, exactly as written.")
+
+recipe = solvi.document(Invoice, llm(URL, "openai/gpt-oss-120b"),
+                        task="An invoice: the total.", compute=lambda f, s: f.total,
+                        storage="invoices.jsonl")
+res = recipe.ask({"doc": invoice_text})
+print(res["answer"].answer, res["answer"].confidence)
+for f in res.facts:                      # value, offsets and the quoted text itself
+    print(f.name, f.value, f"{f.source}[{f.start}:{f.end}]:", f.quote)
+recipe.calibrate([({"doc": d}, gold) for d, gold in labelled], max_risk=0.05, workers=8)
+```
+
+Numbers read as documents write them (`1,250 million` is 1250 in millions, `(1,250)` is −1250), the unit the text
+states is kept, not multiplied in; `calibrate` sets the abstention threshold (parallel examples with `workers=`, a
+heartbeat, a warning below 100 examples); every answer carries `res.facts`, a checkable `why` (a long input text is
+named by its length and hash, never carried) and a hash-chained record
+([docs/recipes/document.md](https://github.com/solvi-ai/solvi/blob/main/docs/recipes/document.md),
+[examples/27_document_decision.py](https://github.com/solvi-ai/solvi/blob/main/examples/27_document_decision.py)).
 
 ### Decisions: `solvi.build`
 
@@ -171,7 +203,7 @@ Every answer is a value and a confidence, and the types also declare answer prim
   [solvi-ai/extract-receipts](https://huggingface.co/solvi-ai/extract-receipts). Each model card states what the model was
   measured on, how well it does, and its limits; all models are listed at [huggingface.co/solvi-ai](https://huggingface.co/solvi-ai).
 
-## Building blocks (`solvi.core`)
+## Build your own (`solvi.core`)
 
 The ready systems are assembled from these; you can use them directly, and put a part of your own at every extension
 point (a store, a slow path, a strategist, a head, a decider, an action model, ...).
@@ -333,7 +365,7 @@ system = System(cat, questions, strategist=CostStrategist(producers="equivalent"
 
 See [docs/strategist.md](https://github.com/solvi-ai/solvi/blob/main/docs/strategist.md) and [examples/17_cost_strategist.py](https://github.com/solvi-ai/solvi/blob/main/examples/17_cost_strategist.py).
 
-## Extract from documents
+### Extract from documents
 
 With `solvi[model]`, fields are found by a fine-tuned ModernBERT extractor. The extracted value is always a span of the
 document, so every answer built on it can be cited.
@@ -363,7 +395,7 @@ CORD and loads with `LongSpanExtractor.load("solvi-ai/extract-receipts")` (its c
 [examples/07_receipts_model.py](https://github.com/solvi-ai/solvi/blob/main/examples/07_receipts_model.py) uses it). See
 [docs/guide.md](https://github.com/solvi-ai/solvi/blob/main/docs/guide.md#extracting-fields-from-documents).
 
-## Experimental (`solvi.experimental`)
+### Experimental (`solvi.experimental`)
 
 Pieces that work and are tested but have not yet shown a measured gain. Importing one warns (`ExperimentalWarning`),
 a decision that used one records it, and each one graduates or is removed by 1.2; `solvi.experimental.STATUS` and
