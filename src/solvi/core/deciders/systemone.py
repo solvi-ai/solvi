@@ -437,7 +437,7 @@ def systemone(base_url, model, api_key=None, *, timeout=30.0, opener=None, extra
     (https://github.com/scienthoon/jev-ood-calibration, their numbers) refit the choice temperature to 3.29 with a 1e-6
     floor and to 1.30 with 0.005. "auto" and a float change the numbers, so they enter the fingerprint: switching one
     on is a new model — calibrate again (a guarantee calibrated under the old fingerprint is refused, not reused, and
-    stored records keep their own). A decision records the floor used in extra["systemone"]["prob_floor"] when it is
+    stored records keep their own). A decision records the floor used in `extra["systemone"]["prob_floor"]` when it is
     not 1e-6. The logits are not renormalised after clipping: they go through a softmax.
 
     max_options: the most options the service takes in one choice question (Jev 255, Solar Decide 26, by their docs;
