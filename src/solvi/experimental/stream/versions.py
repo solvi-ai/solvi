@@ -4,11 +4,15 @@
     from solvi.experimental.stream import HashedTextLearner, LearningLoop
 
     loop = LearningLoop(HashedTextLearner(), question="intent", max_risk=0.05, delta=0.05, secret=key,
-                        storage=store)
+                        storage=store, initial=model)
     out = loop.step(text, oracle)          # oracle: () → the label (None: missing), called only when one is needed
     out["answer"], out["by"]               # "local" (the served version alone), "oracle", or "person" (no label)
     loop.versions()                        # [{"version", "state", "certified", "threshold", ...}]
     loop.replay()                          # every decision and event rebuilt from the records and compared
+
+Additive coverage is the default: it needs stream mode and an `initial` model (version 0, above), as in the example;
+`additive=False` is the replacement protocol, which lost on the stand (worse than no loop by 11–16 points on 3 of 4
+intent datasets; additive coverage gained on 4 of 4).
 
 Versions. Version 0 is "no model" by default: it answers nothing alone, has no certificate and spends no δ (it never
 certifies). With `initial=` (opt-in) version 0 is an existing frozen model — the fitted System 1, e.g.
@@ -17,8 +21,8 @@ budget), fed from decision 1 (its freeze is before the stream); its fingerprint 
 live learner starts empty either way. The live learner (`stream.learner.Learner`) takes every accepted oracle label and
 is never served. When no candidate exists and the live learner has taken ≥ max(freeze_min, growth × the served version's
 labels at its freeze, the refreeze floor) labels (300, 2: constants from the adapted design), a snapshot is frozen as the candidate, with
-its own `StreamPromise` drawing the next (v, δ_v) from the loop's one `DeltaBudget` (Σ δ_v ≤ δ over every version ever
-frozen). Each decision is scored by the served version and, in shadow, by the candidate, before its label is read.
+its own `StreamPromise` drawing the next (v, δ_v) from the loop's one `DeltaBudget` at its first sample (lazy charge;
+Σ δ_v ≤ δ over every version ever frozen). Each decision is scored by the served version and, in shadow, by the candidate, before its label is read.
 
 Calibration. A version's promise reads only samples drawn after its freeze: the samples of decision n go to the
 served version's promise and the candidate's — each frozen before n — and only then does the label reach the live
@@ -31,7 +35,11 @@ breaks the promise: the stage-2 control).
 
 Promotion. Once the candidate is certified, on the candidate's own samples (all after its freeze and after the last
 alarm): ℓ_k = the share with the candidate's score ≥ its threshold, ℓ_s = the share with the served version's score
-≥ the served threshold now — a paired comparison on the same samples. Promote when ℓ_k ≥ `min_share` (0.05) AND
+≥ the threshold of its comparison certificate — a paired comparison on the same samples, both versions certified the
+same way: the comparison certificate is a `StreamPromise` for the served version on exactly the candidate's decisions
+and samples, same grid rule, the candidate's δ_v (1.4.0; before, the served version's own threshold, from an older
+certificate loosened at a larger δ_v, so a fresh candidate lost on the certificate's age). It only ranks and spends no
+δ: nothing is answered at its threshold. Promote when ℓ_k ≥ `min_share` (0.05) AND
 ℓ_k ≥ ℓ_s + `margin` (0.01: one point) — the author's rule (2026-10-23): under the joint promise a model of noise
 certifies at a strict threshold that almost nothing passes, and with margin 0 over a version that answers nothing it
 was promoted; the floor keeps such a version out (the shuffled-label control: shuffled labels never promote, both kinds). Discard a candidate not certified `stale` decisions
@@ -44,7 +52,8 @@ The detector (opt-in, `detector=RiskDetector(alpha=<the promised rate>)`, stage 
 whose served version had a threshold in force, outside probation, feeds it the deployed loss as the Dispatcher's
 driver does (joint: answered alone and wrong; selective: wrong, fed only when answered alone; a missing label is
 wrong). On an alarm: a "stream" event "alarm" (R, the detector's n, why), the detector is reset, the served
-version's promise restarts (the next (v, δ_v) from the loop's budget, threshold +inf), and so does the candidate's,
+version's promise restarts (the next (v, δ_v) from the loop's budget at its first post-alarm sample, threshold
++inf), and so does the candidate's,
 certified or not, its paired samples dropped: the alarm is evidence that the conditional loss moved, so a certificate
 earned before it is about another regime (seen in the stage-4 smoke: a candidate certified before a shift was promoted
 at the alarm, ℓ_s being 0, and served the moved world at a true risk above α). Each restart is a "restart" event (why
@@ -122,14 +131,15 @@ class LearningLoop(AdapterLoop):
     def __init__(self, learner, *, question, max_risk=None, max_error=None, delta=0.05, freeze_min=300, growth=2.0,
                  stale=3000, trial=None, min_share=0.05, margin=0.01, refreeze=1.5, initial=None, detector=None,
                  probation=300, s2_labels=False, source="human", secret=None, seed=0, sampling=None,
-                 promise_options=None, storage=None, versions_dir=None, system=None, feature="text"):
+                 promise_options=None, storage=None, versions_dir=None, system=None, feature="text", additive=True,
+                 max_layers=3):
         policy = lane_policy(freeze_min=freeze_min, growth=growth, stale=stale, trial=trial, min_share=min_share,
                              margin=margin, refreeze=refreeze, s2_labels=s2_labels)
         super().__init__(learner, question=question, policy=policy, max_risk=max_risk, max_error=max_error,
                          delta=delta, initial=initial, detector=detector, monitor=None, probation=probation,
                          source=source, secret=secret, seed=seed, sampling=sampling, promise_options=promise_options,
                          storage=storage, versions_dir=versions_dir, system=system, feature=feature,
-                         _detector_alone=True, _batch=False)
+                         additive=additive, max_layers=max_layers, _detector_alone=True, _batch=False)
 
     freeze_min = property(lambda self: self.policy.first)
     growth = property(lambda self: self.policy.growth)

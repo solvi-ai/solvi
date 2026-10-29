@@ -14,7 +14,8 @@ with documented limits (see [experimental](../experimental.md#stream)).
 ## `solvi.experimental.stream.certificate`
 
 `StreamPromise` and `DeltaBudget`: the certificate itself — one e-process per grid point, fixed-sequence from strict to
-loose, the threshold only loosens; δ spent over restarts.
+loose, the threshold only loosens; δ spent over restarts. A promise takes its (v, δ_v) from the budget at its first sample (lazy charge):
+`v` / `delta_v` are `None` before it, `restart()` returns `(None, None)`, and a promise that never bet spends nothing.
 
 ::: solvi.experimental.stream.certificate
 
@@ -135,6 +136,18 @@ slow path's "s2" unless `s2_labels=True`). A loop that stops or fails leaves the
 (`learning: {"stopped": ...}` or `"error"`). `teach` in stream mode only stores the correction; without storage a
 UserWarning says it is lost. Unmeasured.
 
+Additive coverage (experimental): `AdapterLoop(..., additive=True, max_layers=3)` — a certified candidate serves the
+zone the served chain escalates instead of replacing it. Routing over the chain of layers by frozen routing thresholds
+Λ_j (fixed zones, one owner per decision); the first layer on the path, from L0 down, at or above its live λ_j
+answers alone (an upstream layer inside a deeper zone where that layer escalates; nobody in a trial zone), else the
+oracle; every layer keeps learning on coin samples of its zone; attach below a certified deepest layer, trial on
+every zone decision, `DefaultPolicy`'s additive gate, `max_layers` cap
+("train_refused"), one `RiskDetector` per layer, `rollback(j)` detaches layer j and the deeper ones. The guarantee is
+per zone; with `max_risk=` the stream-wide joint risk is bounded by α·(1 + Σ_{j≥1} P(Z_j)) (`status()["zones"]`).
+Records: `owner`, `layer`, `zone`, `path`, `trial_zone`, `answered_by`, `answer_layer`, `answer_thr`, `base`,
+`rho_base`, `path_would`; checkpoint format v3. Semantics:
+[experimental](../experimental.md#stream), "Additive coverage".
+
 ::: solvi.experimental.stream.loop
 
 ## `solvi.experimental.stream.checkpoint`
@@ -156,7 +169,8 @@ verified bytes (a private copy), never from the folder again after the check. Th
 the saved train labels again. A training in flight refuses the save unless `cancel=True`. A loaded loop continues with
 the same decisions and records as the loop it was saved from and `replay()` rebuilds every decision before and after
 the load. A save holds the part's version lock and the loop's lock for all its writes, so the part's decisions wait
-for it; one loop saves into a directory. Unmeasured.
+for it; one loop saves into a directory. Unmeasured. An additive loop saves format v3 (its chain: layers, routing
+thresholds, a detector per layer; a v2 one is refused by name); a replacement loop's checkpoint stays v1; `load(..., additive=)` refuses a protocol mismatch.
 
 ::: solvi.experimental.stream.checkpoint
 

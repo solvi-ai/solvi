@@ -55,7 +55,8 @@ own counters in `self` and must pickle (the loop's checkpoint saves it).
   pre_freeze=False freezes every training (the lane LearningLoop's protocol: the stream certificate alone decides);
   refused in label mode, where the gates are the only measurement before a version is served.
 - promote — the candidate certified, ≥ min_novel (100) post-freeze samples on keys it never trained on, on those
-  share_k ≥ min_share (0.05) and share_k ≥ share_s + margin (0.01), and the memorisation probe passes (error alone on
+  share_k ≥ min_share (0.05) and share_k ≥ share_s + margin (0.01) (share_s: the served version certified the same
+  way on the same samples, `Paired`), and the memorisation probe passes (error alone on
   novel − on seen ≤ gap, 0.10). The candidate must have ≥ probe_min (30) alone answers on novel samples: a thin
   novel side is the memoriser's signature (it answers the items it trained on and abstains on the rest), so an
   unmeasured probe does not promote. The errors are compared once the seen side has ≥ probe_min alone answers too
@@ -70,7 +71,13 @@ own counters in `self` and must pickle (the loop's checkpoint saves it).
   on every decision, so the bound is a stand-in for a fixed-sample test, not an anytime guarantee; the rate of false
   promotions it allows is what the shuffled-label control of a stand reads.
   probe=False drops the probe (promotion and discard). Label
-  mode (no paired samples): the pre-freeze gates decided, promote.
+  mode (no paired samples): the pre-freeze gates decided, promote. The novel-risk bar is a joint ratio (wrong alone
+  over every novel sample, alone or not): it never asks whether the alone answers are right. Additive mode (decision
+  D1): five checks — certified, novel, novel_risk, probe and, with the loop's usefulness certificate on (default),
+  useful: the candidate's selective certificate at β (`AdapterLoop(useful_error=0.5)`) holds at its certified
+  threshold, so a layer that is wrong on most of the few answers it gives alone (a layer trained on noise, whose
+  scores collapse) never starts serving; no min_share and no margin. A certified candidate that is not useful by
+  `trial` decisions after its freeze is discarded with "useful" among the failed checks.
 - discard — (probe on) the probe shows the gap beyond noise (Wilson lower bound of the novel error − Wilson upper bound of the
   seen error > gap, at `wilson` confidence; a point-estimate gap at n = 30 does not discard); not certified
   `stale` (3000) decisions after its freeze; certified and not promotable `trial` (3000) decisions after its freeze
@@ -82,6 +89,18 @@ own counters in `self` and must pickle (the loop's checkpoint saves it).
   zero-risk candidate at 12 decisions per sample (≈ 1 700), 3 000 lets a 1 %-risk point of the first candidate
   certify at any of these rates (≤ 2 840) and the 2nd–4th up to 10 decisions per sample. The clock runs from the
   freeze: an alarm's restart drops the paired samples but does not restart it.
+- maturity gate (`mature_patience`, "auto": 150 in additive mode, off in replacement mode; an int: on in both; None:
+  off) — no training while the gated certificate (the deepest layer in additive mode, the served version otherwise) is
+  still loosening: a "certified" / "loosened" event within its last `mature_patience` coin samples, or its first
+  uncertified grid point's log-wealth set a new running maximum within them (it is still climbing). Freezing a
+  threshold that would still loosen gives up coverage the version would have earned (in additive mode the attach
+  freezes the deepest layer's routing threshold Λ; its answer threshold keeps loosening, so what an early attach
+  changes is who answers, not the coverage — kept as pre-registered). Overrides: an alarm on that version since the
+  latest freeze (drift response unchanged: alarm → restart → train), or ≥ `backlog_max` (None: 2 × `first`, 600) accepted labels since the
+  latest freeze (the labels are paid for). The label floors and the budget still apply after it. The gate's inputs
+  and the reason it opened (`maturity_gate(st)["trigger"]`: "mature" / "alarm" / "backlog") are in why_not_train and
+  in the loop's "train_start" / "train" events ("gate"). On by default in additive mode only: in replacement mode it
+  changes when trainings start, and replacement records stay as before unless asked (DESIGN_DELTA_CADENCE §3).
 - alarm — "recertify"; a second alarm on the current serving of the served version (alarms at n ≥ served_since)
   within `probation` (300) decisions → "rollback:<v>", v the highest retired version below the served one with no
   alarm on record (the versions rolled back from were alarmed); no such version → "recertify".
@@ -108,7 +127,7 @@ from ...core.sources import TRUSTED_SOURCES
 from . import gates
 
 SLOW_SOURCES = ("s2", "verified")
-STATES = ("served", "candidate", "retired", "discarded", "evicted")
+STATES = ("served", "candidate", "retired", "discarded", "evicted", "layer", "detached")   # layer, detached: additive
 
 
 # ───────────────────────────────────────────────────────────── the budget
@@ -179,7 +198,11 @@ class VersionInfo:
     keys it trained on, a set snapshotted at the freeze (not a digest: novel / seen is membership, `key in
     train_keys`, for every post-freeze sample; the learner's key list grows after the freeze and must not be read
     live). A list or set given is stored as a frozenset. discarded_at: the train labels the loop had when this
-    version was discarded (None: not discarded) — the lane LearningLoop's refreeze floor reads it."""
+    version was discarded (None: not discarded) — the lane LearningLoop's refreeze floor reads it. Additive mode with
+    the usefulness certificate on (`AdapterLoop(useful_error=)`): certified / threshold are the version's own
+    certificate's (λ_J), useful whether the usefulness certificate holds at λ_J (the joint point, what the start
+    gate's "useful" check reads), useful_at_answer whether it holds at the composed answer point useful_thr, the
+    threshold it answers at (composed; +inf: no point certified by both)."""
     version: int
     state: str
     n_train: int = 0
@@ -190,6 +213,16 @@ class VersionInfo:
     frozen_at: int | None = None
     train_keys: frozenset = frozenset()
     discarded_at: int | None = None
+    layer: int | None = None                           # additive mode: index in the chain (None: not a layer)
+    routing_thr: float | None = None                   # additive mode: its frozen routing threshold Λ (None: none)
+    learning: bool | None = None                       # additive mode: its promise learns — True for every layer and
+    #                                                    the candidate since decision 21 (None: replacement mode)
+    useful: bool | None = None                         # additive, usefulness on: its usefulness certificate holds at
+    #                                                    `threshold` (its certificate's λ_J); None: no such certificate
+    useful_at_answer: bool | None = None               # additive, usefulness on: it holds at `useful_thr`, the
+    #                                                    composed point the version answers at; None: no certificate
+    useful_thr: float | None = None                    # additive, usefulness on: the composed answer threshold (the
+    #                                                    loosest point of the certified prefix that is also useful)
 
     def __post_init__(self):
         if not isinstance(self.train_keys, frozenset):
@@ -208,7 +241,12 @@ class LoopState:
     in flight ({"id", "started", "eta"}) or None; now: the wall clock; paused; mode: "stream" (a Dispatcher, the stream
     promise) or "label" (a System alone: the pre-freeze gates only); promises, detector: their state dumps, for a
     policy that reads them; keys: the distinct content keys with a label, by split (a relabelled key counts once, as
-    the pre-freeze report's latest label per key; None: a state built without them, `labels` stands in).
+    the pre-freeze report's latest label per key; None: a state built without them, `labels` stands in). maturity:
+    the inputs of `DefaultPolicy.maturity_gate` — version (the deepest layer in additive mode, else the served
+    version), samples (its promise's samples read), changed_at (the samples at its latest "certified" / "loosened"
+    event since its latest restart; None: none), peak_at (`StreamPromise.peak_at`), last_freeze (the decision of the
+    latest training's freeze or birth discard, 0: none), labels_since_freeze (accepted labels after it), alarm (an
+    alarm on that version after it); None in label mode or when that version has no promise.
 
     `stream.loop.AdapterLoop` passes copies of the dict fields and resets `holdout` at a promotion or a rollback (the
     new served version does not inherit the old one's errors). The state has dict fields, so `hash(st)` raises: do not
@@ -231,6 +269,12 @@ class LoopState:
     promises: dict = field(default_factory=dict)
     detector: dict | None = None
     keys: dict | None = None
+    layers: tuple | None = None                        # additive mode: the chain's versions, L0 first (None: off)
+    deepest: int | None = None                         # additive mode: the deepest layer
+    deepest_certified: bool | None = None              # additive mode: the deepest layer's promise is certified
+    zone_share: dict | None = None                     # additive mode: layer version → P̂(Z_v), its zone's share
+    maturity: dict | None = None                       # the maturity gate's inputs (`DefaultPolicy.maturity_gate`)
+    useful_error: float | None = None                  # additive mode: β of the usefulness certificate (None: off)
 
     def __post_init__(self):
         if self.mode not in ("stream", "label"):
@@ -303,8 +347,12 @@ class Paired:
     """The candidate against the served version on the candidate's post-freeze samples (stream mode). Novel: samples
     whose key is not in the candidate's train_keys — n_novel of them, alone_novel / wrong_novel the candidate's
     answers alone / alone and wrong there, alone_served / wrong_served the served version's on the same novel samples
-    at its threshold now. Seen: the samples whose key it trained on — n_seen, the candidate's alone_seen / wrong_seen —
-    read only by the memorisation probe. A candidate with no sample yet is Paired(0, 0, 0, 0), not None.
+    at the threshold of its comparison certificate (1.4.0: a `StreamPromise` built on exactly the candidate's samples
+    with the same grid rule and the candidate's δ_v; it only ranks, it never serves) once that certificate is
+    certified, and at the served version's own threshold while it is not (thr_s: "cmp", "own" or "no_model" — a served
+    version without a model never answers alone), alone_served_own / wrong_served_own at the served version's own
+    threshold in force now (the comparison before 1.4.0, kept for the records; None when not counted). Seen: the samples whose key it trained on — n_seen,
+    the candidate's alone_seen / wrong_seen — read only by the memorisation probe. A candidate with no sample yet is Paired(0, 0, 0, 0), not None.
 
     Exact-key identity: a paraphrase of a trained item counts as novel, and calib keys (the threshold was fitted on
     them) recur as novel — a small optimism on share_k."""
@@ -316,6 +364,9 @@ class Paired:
     alone_seen: int = 0
     wrong_seen: int = 0
     wrong_served: int = 0
+    alone_served_own: int | None = None
+    wrong_served_own: int | None = None
+    thr_s: str | None = None
 
     @property
     def share_k(self) -> float:
@@ -324,6 +375,13 @@ class Paired:
     @property
     def share_s(self) -> float:
         return self.alone_served / self.n_novel if self.n_novel else 0.0
+
+    @property
+    def share_s_own(self) -> float | None:
+        """The served version's share alone at its own threshold (the old comparison); None when not counted."""
+        if self.alone_served_own is None:
+            return None
+        return self.alone_served_own / self.n_novel if self.n_novel else 0.0
 
     @property
     def err_k_novel(self) -> float | None:
@@ -450,7 +508,8 @@ class DefaultPolicy(LoopPolicy):
     off; the labels it needs before it may roll back); novel_only: the promotion's paired comparison counts only samples
     on keys the candidate never trained on (False: every sample, its train keys too — for controls; weakens the
     guarantee: a memoriser's trained items then count for it). In label mode pre_freeze=False is refused by the loop:
-    there the pre-freeze gates are the only measurement before a version is served."""
+    there the pre-freeze gates are the only measurement before a version is served. mature_patience, backlog_max: the
+    maturity gate (see the module docstring)."""
 
     def __init__(self, budget: Budget | None = None, *, s2_labels: bool = False, calib: float = 0.15,
                  holdout: float = 0.15, first: int = 300, growth: float = 1.5, window: int = 200, target_share=0.5,
@@ -459,7 +518,7 @@ class DefaultPolicy(LoopPolicy):
                  probe_min: int = 30, stale: int = 3000, trial: int = 3000, probation: int = 300, r: int = 8,
                  lr: float = 3e-4, min_updates: int = 200, max_updates: int = 3000, refreeze=None, probe: bool = True,
                  pre_freeze: bool = True, novel_risk: bool = True, min_calib: int | None = None, watch: bool = True,
-                 watch_min: int = 100, novel_only: bool = True):
+                 watch_min: int = 100, novel_only: bool = True, mature_patience="auto", backlog_max: int | None = None):
         super().__init__(budget)
         gates.split("", calib=calib, holdout=holdout)                     # the shares, checked once
         for name, v in (("first", first), ("window", window), ("min_holdout", min_holdout), ("min_novel", min_novel),
@@ -496,6 +555,13 @@ class DefaultPolicy(LoopPolicy):
         self.min_calib = min_calib
         self.watch_on, self.watch_min = bool(watch), watch_min
         self.novel_only = bool(novel_only)
+        mp = mature_patience
+        if not (mp is None or mp == "auto" or (isinstance(mp, int) and not isinstance(mp, bool) and mp >= 1)):
+            raise ValueError(f"mature_patience is 'auto', None or a number of coin samples ≥ 1, not {mp!r}")
+        if backlog_max is not None and (isinstance(backlog_max, bool) or not isinstance(backlog_max, int)
+                                        or backlog_max < 1):
+            raise ValueError(f"backlog_max is a number of labels ≥ 1 or None, not {backlog_max!r}")
+        self.mature_patience, self.backlog_max = mature_patience, backlog_max
 
     # --- collecting
     def accept(self, st, x, y, source) -> bool:
@@ -513,6 +579,14 @@ class DefaultPolicy(LoopPolicy):
             return "training in progress"
         if st.candidate is not None:
             return f"version {st.candidate} is in trial"
+        if st.deepest_certified is False:                     # additive: a candidate attaches below a certified layer
+            return f"the deepest layer (version {st.deepest}) is not certified: a candidate cannot attach below it"
+        gate = self.maturity_gate(st)
+        if gate is not None and gate["trigger"] is None:
+            return (f"maturity gate: version {gate['version']} is not mature (samples {gate['samples']}, last "
+                    f"certified/loosened at {gate['changed_at']}, first uncertified point's peak at {gate['peak_at']}, "
+                    f"patience {gate['patience']}); no alarm since the freeze at decision {gate['last_freeze']}; "
+                    f"{gate['backlog']} label(s) since it < {gate['backlog_max']}")
         have = st.labels.get("train", 0)
         if self.refreeze is None:
             top = max((r.n_train for r in st.versions), default=0)      # discarded versions too: a retrain floor
@@ -547,6 +621,33 @@ class DefaultPolicy(LoopPolicy):
         if not sig["short"]:
             return f"no improvement signal: {sig['why']}"
         return None
+
+    def maturity_gate(self, st) -> dict | None:
+        """The maturity gate on `st` (see the module docstring): None when off (mature_patience None, "auto" in
+        replacement mode, label mode, no gated promise), else its inputs and `trigger` — "mature", "alarm" (override
+        A), "backlog" (override B) or None (closed: no training)."""
+        patience = getattr(self, "mature_patience", None)           # a policy pickled before the gate: off
+        if patience == "auto":
+            patience = 150 if st.layers is not None else None
+        m = st.maturity
+        if patience is None or m is None or st.mode == "label":
+            return None
+        backlog_max = getattr(self, "backlog_max", None) or 2 * self.first
+        samples, changed, peak = m["samples"], m["changed_at"], m["peak_at"]
+        loosening = changed is not None and samples - changed < patience
+        climbing = peak is not None and samples - peak < patience
+        backlog = int(m["labels_since_freeze"])
+        if not (loosening or climbing):
+            trigger = "mature"
+        elif m["alarm"]:
+            trigger = "alarm"
+        elif backlog >= backlog_max:
+            trigger = "backlog"
+        else:
+            trigger = None
+        return {"version": m["version"], "patience": patience, "samples": samples, "changed_at": changed,
+                "peak_at": peak, "loosening": loosening, "climbing": climbing, "alarm": bool(m["alarm"]),
+                "last_freeze": m["last_freeze"], "backlog": backlog, "backlog_max": backlog_max, "trigger": trigger}
 
     def calib_floor(self, alpha) -> int:
         """The calib labels a freeze needs: min_calib, or (None) `gates.calib_min(alpha, wilson)`, the fewest with
@@ -615,13 +716,20 @@ class DefaultPolicy(LoopPolicy):
     def promote_checks(self, st, paired: Paired) -> dict:
         """Each promotion condition → {"certified", "novel", "min_share", "margin", "novel_risk", "probe"}, each with
         "ok" (novel_risk / probe only when on). The probe
-        passes only with ≥ probe_min alone answers on novel samples (an unmeasured novel side does not promote)."""
+        passes only with ≥ probe_min alone answers on novel samples (an unmeasured novel side does not promote).
+        Additive mode (st.layers set): the additive gate (decision D1) — certified, novel, novel_risk, probe; no
+        min_share and no margin (nothing to compare with: a layer serves only the zone the layer above escalates);
+        with the loop's usefulness certificate on (st.useful_error set) a fifth check, "useful": the candidate's
+        usefulness certificate (selective error among its alone answers ≤ β, anytime-valid on its own δ budget) holds
+        at its certificate's threshold in force λ_J — a layer whose alone answers are not shown to be right more
+        often than β allows never starts serving."""
         c = st.candidate_info
         out = {"certified": {"ok": bool(c is not None and c.certified)},
-               "novel": {"ok": paired.n_novel >= self.min_novel, "n_novel": paired.n_novel, "min": self.min_novel},
-               "min_share": {"ok": paired.share_k >= self.min_share, "share_k": paired.share_k},
-               "margin": {"ok": paired.share_k >= paired.share_s + self.margin, "share_k": paired.share_k,
-                          "share_s": paired.share_s}}
+               "novel": {"ok": paired.n_novel >= self.min_novel, "n_novel": paired.n_novel, "min": self.min_novel}}
+        if st.layers is None:
+            out["min_share"] = {"ok": paired.share_k >= self.min_share, "share_k": paired.share_k}
+            out["margin"] = {"ok": paired.share_k >= paired.share_s + self.margin, "share_k": paired.share_k,
+                             "share_s": paired.share_s, "share_s_own": paired.share_s_own, "thr_s": paired.thr_s}
         if self.novel_risk:
             risk = paired.wrong_novel / paired.n_novel if paired.n_novel else None
             ub = gates._wilson(paired.wrong_novel, paired.n_novel, self.wilson)[1] if paired.n_novel else None
@@ -632,6 +740,15 @@ class DefaultPolicy(LoopPolicy):
                                  f"Wilson {self.wilson:.0%} upper bound {ub:.4f} (≤ α {st.alpha:g} needed)"}
         if self.probe:
             out["probe"] = self._probe_promote(paired)
+        beta = getattr(st, "useful_error", None)
+        if st.layers is not None and beta is not None:
+            ok = bool(c is not None and c.useful)
+            thr = None if c is None or c.useful_thr is None or math.isinf(c.useful_thr) else c.useful_thr
+            out["useful"] = {"ok": ok, "beta": beta, "thr": thr,
+                             "why": (f"the usefulness certificate (error among the alone answers ≤ {beta:g}) holds at "
+                                     "the certified threshold" if ok else
+                                     f"the usefulness certificate (error among the alone answers ≤ {beta:g}) does not "
+                                     "hold at the certified threshold yet")}
         return out
 
     def _probe(self, paired):
@@ -668,8 +785,14 @@ class DefaultPolicy(LoopPolicy):
         if not c.certified and age >= self.stale:
             return f"not certified {age} decisions after its freeze ({c.samples} samples)"
         if c.certified and age >= self.trial and not self.promote(st, paired):
+            if st.layers is not None:                             # additive: the gate, no comparison
+                failed = [k for k, g in self.promote_checks(st, paired).items() if not g["ok"]]
+                return (f"certified, the additive gate did not pass {age} decisions after its freeze ({c.samples} "
+                        f"zone samples, {paired.n_novel} novel; failed: {', '.join(failed)})")
+            own = "" if paired.share_s_own is None else f", share_s_own {paired.share_s_own:.4g}"
+            own += "" if paired.thr_s is None else f", thr_s {paired.thr_s}"
             return (f"certified, not better {age} decisions after its freeze ({c.samples} samples; share_k "
-                    f"{paired.share_k:.4g}, share_s {paired.share_s:.4g}, {paired.n_novel} novel)")
+                    f"{paired.share_k:.4g}, share_s {paired.share_s:.4g}{own}, {paired.n_novel} novel)")
         return None
 
     def watch(self, st, w) -> bool:
@@ -689,6 +812,12 @@ class DefaultPolicy(LoopPolicy):
         return max(ok, default=None)
 
     def alarm(self, st, who, report) -> str:
+        if st.layers is not None:                                 # additive: per layer
+            v, j = report.get("version"), report.get("layer")
+            last = max((a["n"] for a in st.alarms if a.get("version") == v), default=None)
+            if j and last is not None and st.n - last <= self.probation:
+                return f"rollback:{j}"                            # two alarms close on layer j ≥ 1: detach it
+            return "recertify"                                    # L0 (or a first alarm): its promise restarts
         last = max((a["n"] for a in st.alarms if a.get("version") == st.served and a["n"] >= st.served_since),
                    default=None)
         if last is not None and st.n - last <= self.probation:
