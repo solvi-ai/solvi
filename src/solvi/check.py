@@ -34,6 +34,9 @@ Errors (a decision is, or can be, wrong or impossible):
   hard_check_untyped    a hard check without `-> bool` with a `return` that is plainly not True or False (`return 0`,
                         `return None`, a bare `return`, a string): on that path the check is rejected and every
                         question it governs abstains — return a bool and declare it `-> bool`
+  hard_check_never_runs a hard check with no `then=`, required by no question and read by no part: no question's flow
+                        reaches it, so it never stops an answer (System() warns about it) — add requires=[...] to the
+                        questions it guards, or then=
   rule_returns_non_option   a rule with `return <literal>` (also in `a if c else b`) that is not one of its question's
                         options (`return "aprove"`): on that path the question abstains
   reads_sensitive       a part (fn, extract, check, rule, a `then` function, an alternative producer, a constraint) reads a
@@ -42,6 +45,9 @@ Errors (a decision is, or can be, wrong or impossible):
   reads_sensitive_via   a part reads a fact computed from a sensitive field (the message gives the chain: "reads
                         'risk_band', computed from 'age'"); a fact a part computes from a tainted fact is tainted too
 Warnings:
+  rule_unchecked        a rule of a yes/no, choice, ordinal or multi-label question whose return values cannot be read (no
+                        source: made by exec, a callable object; a lambda that cannot be told apart on its line), so
+                        rule_returns_non_option did not check it
   unused_part           a part no question's flow uses (a question without a rule, fit or `uses` uses everything computable:
                         those are the candidate features of the head it will be fitted with)
   then_on_soft_check    `then=` on a check that is not hard: it is ignored
@@ -68,6 +74,18 @@ Warnings:
                         question)
   checks_one_family     the checks in a question's flow that declare family= are all of one family (two or more): they
                         err together, so agreeing does not make the answer surer — add a check of another family or code
+ The wording of a question a model answers (no rule, or a rule with model=) — what the model reads:
+  no_other_option       a choice with no catch-all option ("other", "none of these", "unknown", ..., or one described as
+                        "anything else"), no decider other= and no "not stated" (Answer.maybe): when no option fits, the
+                        model still picks one, often confidently
+  numeric_levels        a choice or ordinal whose options are bare numbers ("1".."5") without a description of each: say
+                        what each level means (a dict {level: description})
+ Of every question:
+  compound_question     a question text that asks two things (two question marks, or "and whether" / "or whether"): one
+                        answer cannot say yes to one half and no to the other — split it
+  unused_given          with System(input_model=Model): a field of the model that no part, rule, check, constraint, `uses`
+                        hint or span reads (checked only when every question has a rule or a `uses` hint: a learned
+                        head may read any given fact)
 Notes (never fail):
   mutual_producers      facts derived from each other (net from gross and gross from net), each with a producer
                         outside the loop: the system's strategist plans around it
@@ -88,6 +106,7 @@ from __future__ import annotations
 import ast
 import inspect
 import itertools
+import re
 import textwrap
 from dataclasses import asdict, dataclass, field, replace
 
@@ -182,11 +201,18 @@ def lint(obj, strict=False, max_combos=100_000, sensitive=None):
     _provenance(cat, questions, flows, rep)
     if questions:
         used = set().union(*counted.values()) if counted else set()
+        from .core.system import _idle_hard_checks
+        idle = set(_idle_hard_checks(cat, questions.values()))
         for name, p in cat.parts.items():
-            if name not in used and name not in in_cycle:
+            if name in idle:
+                rep.add("error", "hard_check_never_runs", name, "a hard check with no `then=` that no question "
+                        "requires and no part reads: it never runs, so it never stops an answer — add "
+                        f"requires=[{name!r}] to the questions it guards, or then=")
+            elif name not in used and name not in in_cycle:
                 rep.add("warning", "unused_part", name, f"no question's flow uses this {p.kind}")
         _rules(cat, questions, rep)
         _names(cat, system, questions, rep)
+        _wording(cat, system, questions, rep)
     _types(cat, system, given, rep)
     for fact, name, lost in cat.unreadable_validates():
         rep.add("error", "validate_reads_unknown", f"{fact} ({name})",
@@ -447,24 +473,24 @@ def _hard_checks(cat, questions, flows, rep):
 def _returns(func):
     """The `return` statements of a function's own body (not of functions defined inside it) → [(line, the returned
     literals)] where a literal is a constant, also in the branches of `a if c else b`; a bare `return` is the literal
-    None; a return of anything else gives no literal. None when the source is not available."""
+    None; a return of anything else gives no literal. A lambda's body is its one return. None when the source is not
+    available (or a lambda's line holds several lambdas with its arguments)."""
     f = inspect.unwrap(func)
     try:
         lines, start = inspect.getsourcelines(f)
         tree = ast.parse(textwrap.dedent("".join(lines)))
     except (OSError, TypeError, SyntaxError, IndentationError):
         return None
+    co = getattr(f, "__code__", None)
+    if co is not None and co.co_name == "<lambda>":   # a lambda: its body is the one value it returns — found on its
+        args = list(co.co_varnames[:co.co_argcount + co.co_kwonlyargcount])     # line by its arguments, or not checked
+        found = [n for n in ast.walk(tree) if isinstance(n, ast.Lambda) and n.lineno == 1
+                 and [a.arg for a in n.args.posonlyargs + n.args.args + n.args.kwonlyargs] == args]
+        return [(start, _literals(found[0].body))] if len(found) == 1 else None
     if not tree.body or not isinstance(tree.body[0], (ast.FunctionDef, ast.AsyncFunctionDef)):
         return None
 
-    def literals(e):
-        if e is None:
-            return [None]
-        if isinstance(e, ast.Constant):
-            return [e.value]
-        if isinstance(e, ast.IfExp):
-            return literals(e.body) + literals(e.orelse)
-        return []
+    literals = _literals
     out, todo = [], list(tree.body[0].body)
     while todo:
         node = todo.pop()
@@ -474,6 +500,18 @@ def _returns(func):
             out.append((start + node.lineno - 1, literals(node.value)))
         todo.extend(ast.iter_child_nodes(node))
     return sorted(out, key=lambda t: t[0])
+
+
+def _literals(e):
+    """The literals an expression plainly is: a constant, also in the branches of `a if c else b` (None: a bare
+    `return`) → [values]; [] for anything else."""
+    if e is None:
+        return [None]
+    if isinstance(e, ast.Constant):
+        return [e.value]
+    if isinstance(e, ast.IfExp):
+        return _literals(e.body) + _literals(e.orelse)
+    return []
 
 
 def _where(func, line):
@@ -493,7 +531,11 @@ def _rules(cat, questions, rep):
         if at is None or at.kind not in ("yes_no", "choice", "ordinal", "multi") or rule.func is None \
                 or getattr(rule.func, "__solvi_decision__", None) is not None:
             continue
-        for line, vals in _returns(rule.func) or ():
+        found = _returns(rule.func)
+        if found is None:                                # no source to read: say so, not "no problems found"
+            rep.add("warning", "rule_unchecked", qn, "the rule's return values cannot be read (no source, or a lambda "
+                    "not told apart on its line), so they were not checked against the question's options")
+        for line, vals in found or ():
             for v in vals:
                 if v is None or v is Ellipsis:           # None: the rule abstains on purpose
                     continue
@@ -539,6 +581,105 @@ def _names(cat, system, questions, rep):
             if x not in cat.parts and x not in fields:
                 rep.add("warning", "uses_unknown", qn, f"`uses` names {x!r}, which is neither a part of the catalog nor a "
                                                        f"field of System(input_model={m.__name__})" + how)
+
+
+# --- the wording of questions
+CATCH_ALL = ("other", "others", "none", "none of the above", "none of these", "other / none", "nothing", "unknown",
+             "not stated", "not sure", "unsure", "unclear", "n/a", "na", "not applicable", "neither", "something else",
+             "other / unknown")
+_COMPOUND = re.compile(r"\b(and|or) whether\b", re.I)
+_CATCH_ALL_TEXT = re.compile(r"\b(anything|everything|something) else\b|\bnone of\b|\bnot listed\b", re.I)
+
+
+def _catch_all(option, description=None):
+    o = " ".join(str(option).strip().lower().replace("_", " ").replace("-", " ").split())
+    return o in CATCH_ALL or o.startswith(("other ", "none ", "unknown ")) \
+        or bool(description and _CATCH_ALL_TEXT.search(str(description)))
+
+
+def _numeric(option):
+    if isinstance(option, bool):
+        return False
+    if isinstance(option, (int, float)):
+        return True
+    try:
+        float(str(option).strip())
+        return True
+    except ValueError:
+        return False
+
+
+def _wording(cat, system, questions, rep):
+    """no_other_option / numeric_levels (questions a model answers), compound_question, unused_given: the checks of a
+    question's wording that need no model."""
+    for qn, q in questions.items():
+        at = q.answer
+        rule = cat.rules.get(qn)
+        by_model = rule is None or getattr(rule, "model", None) is not None
+        if at is not None and by_model:
+            opts = list(at.options or ())
+            spec = getattr(getattr(rule, "func", None), "spec", None)      # a decider's own other= option
+            desc = at.descriptions or {}
+            if at.kind == "choice" and not at.unknown and len(opts) > 1 and getattr(spec, "other", None) is None \
+                    and not any(_catch_all(o, desc.get(o)) for o in opts):
+                rep.add("note", "no_other_option", qn,         # a note: a closed label set is often right
+                        f"the choice {opts} has no catch-all: if an input can fit none of them, add an option \"other\" "
+                        "(or \"none of these\", \"unknown\"), or Answer.maybe(...) for \"not stated\"")
+            if at.kind in ("choice", "ordinal") and len(opts) > 1 and all(_numeric(o) for o in opts) \
+                    and any(not (at.descriptions or {}).get(o) for o in opts):
+                rep.add("warning", "numeric_levels", qn,
+                        f"the levels {opts} are bare numbers: say what each means — a dict {{level: description}}, "
+                        f"e.g. {{{opts[0]!r}: \"...\", {opts[-1]!r}: \"...\"}}")
+        text = str(q.text or "")
+        why = "two question marks" if text.count("?") >= 2 else \
+            (f"\"{_COMPOUND.search(text).group(0)}\"" if _COMPOUND.search(text) else None)
+        if why:
+            rep.add("warning", "compound_question", qn,
+                    f"the text asks two things ({why}): split it into two questions, one judgement each")
+    _unused_given(cat, system, questions, rep)
+
+
+def _unused_given(cat, system, questions, rep):
+    m = getattr(system, "input_model", None)
+    fields = getattr(m, "model_fields", None)
+    if not fields:
+        return
+    rules = set(cat.rules)
+    if any(qn not in rules and not q.uses for qn, q in questions.items()):
+        return                                        # a learned head may read any given fact
+    read = {x for _, _, inputs, _ in _readers(cat) for x in inputs} | _group_reads(cat, system)
+    for q in questions.values():
+        read.update(q.uses or ())
+        read.update(q.requires or ())
+        if q.answer is not None and q.answer.kind == "span":
+            read.add(q.answer.source or "doc")
+    for x in fields:
+        if x not in read and x not in cat.parts:
+            rep.add("warning", "unused_given", x,
+                    f"System(input_model={m.__name__}) declares {x!r}, which nothing reads: read it where it matters, "
+                    "or remove it from the model (a field kept only for the record may stay)")
+
+
+def _group_reads(cat, system):
+    """The facts read by calibrations rather than by a function: a guarantee's groups= (System.guarantee, a part's or a
+    combiner's calibration per group) and a guarantee's signal= when it names a fact."""
+    out = set()
+
+    def by_names(g):
+        g = g.get("by") if isinstance(g, dict) else g
+        return list(getattr(g, "names", None) or ())
+    for g in (getattr(system, "guards", None) or {}).values():
+        out.update(by_names(getattr(g, "_by", None)))
+        sig = getattr(g, "signal", None)
+        if isinstance(sig, str) and sig not in ("confidence", "probability") and not sig.startswith("extra:"):
+            out.add(sig)
+    for p in cat.parts.values():
+        for a in list(p.alternatives or ()) + [p]:
+            out.update(by_names(getattr(a, "groups", None)))
+    for r in cat.rules.values():
+        for o in (r, getattr(r, "func", None), getattr(getattr(r, "func", None), "spec", None)):
+            out.update(by_names(getattr(o, "groups", None)))
+    return out
 
 
 # --- types

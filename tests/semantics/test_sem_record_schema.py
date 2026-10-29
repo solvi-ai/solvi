@@ -86,3 +86,38 @@ def test_a_redacted_record_with_content_left_is_rejected():
     assert validate(r, SCHEMA) == []
     r["response"] = {}
     assert validate(r, SCHEMA) != []
+
+
+def test_a_process_record_is_checked_for_the_envelope(tmp_path):
+    """solvi.experimental.process writes one record of kind "process" per run (the index of its path): the schema lists
+    the kind among those checked for the envelope only."""
+    import warnings
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        from solvi.experimental.process import Process
+    s = system()
+    p = Process("one", storage=JSONLStorage(tmp_path / "process.jsonl"), on_abstain="abstain", on_human="abstain")
+    p.node("a", s, reads=["amount", "limit"], writes={"size": "answer:size"}, end=True)
+    r = p.run({"amount": 3, "limit": 100})
+    rec = next(x for x in read_lines(tmp_path / "process.jsonl") if x["kind"] == "process")
+    assert rec["id"] == r.stored_id and validate(rec, SCHEMA) == []
+    assert "process" in SCHEMA["description"]
+    bad = dict(rec, seq=-1)
+    assert validate(bad, SCHEMA) != []
+
+
+def test_a_human_record_is_checked_for_the_envelope(tmp_path):
+    """A person's answer to a process's question is a record of kind "human" in the process store (envelope only)."""
+    import warnings
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        from solvi.experimental.process import MemoryQueue, Process
+    q = MemoryQueue()
+    p = Process("one", storage=JSONLStorage(tmp_path / "process.jsonl"), human=q)
+    p.node("ask", kind="human", question="ok", writes={"ok": "answer"}, end=True)
+    r = p.run({})
+    q.answer(r.ticket, "yes", reviewer="anna")
+    p.resume(r.run)
+    recs = list(read_lines(tmp_path / "process.jsonl"))
+    assert [x["kind"] for x in recs] == ["process", "human", "process"]
+    assert all(validate(x, SCHEMA) == [] for x in recs) and "human" in SCHEMA["description"]

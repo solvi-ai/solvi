@@ -72,6 +72,7 @@ bars `tests/test_benchmark_bars.py` keeps them to (`pytest -m slow`; speed as ra
 | `fast_head.py`, `strategist_scale.py` | `fit` (the answer head and its selection) and the strategist at scale |
 | `ask_speed.py` | milliseconds per `ask` on small and large inputs (the README quickstart, the gallery, random catalogs of 50 and 1 000 parts, a 3.7k-float stream input): the README's Speed table |
 | `ask_overhead.py` | what solvi adds to one `ask` (every gallery entry and a decider project, no real model) |
+| `contract_fingerprint.py` | the `ask` time a contract's fingerprint costs with its `applicable` source read once per code object against read on every ask (one rule, one contract; same answers in both arms) |
 | `journal_size.py` | the bytes a stored decision takes, full, compact and `sample:10` (`TraceStorage(record=...)`), on every gallery entry, a game-like loop and the credit task, and that each store verifies and replays: the guide's table under "Compact records and rotation" |
 | `trace_signature.py` | what a signature (`solvi.core.store.signature`) adds over the hash chain when one stored record is edited |
 | `octonion_signature.py` | the positional octonion signature, an experiment that left the package in 0.8 (`trace_signature.py` compares it with the syndrome code) |

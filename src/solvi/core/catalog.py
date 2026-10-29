@@ -11,6 +11,7 @@ from __future__ import annotations
 import inspect
 import json
 import math
+import warnings
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Callable
@@ -283,12 +284,16 @@ def find_whole(text, t):
 
 def cuts_number(t, i, j):
     """Does t[i:j] begin or end inside a longer number written in t? A quote [26:27] of "30" is the "3" of "30", one of
-    "3.5" or "1,300" is part of that number. (Words are not held to this: a quote with offsets may end inside a word.)"""
+    "3.5" or "1,300" is part of that number, and so is "7." of "7.5" (a separator at its edge, between two digits).
+    (Words are not held to this: a quote with offsets may end inside a word.)"""
     if not 0 <= i < j <= len(t):
         return False
     left = t[i].isdigit() and i > 0 and (t[i - 1].isdigit() or (t[i - 1] in ".," and i > 1 and t[i - 2].isdigit()))
     right = t[j - 1].isdigit() and j < len(t) and (
         t[j].isdigit() or (t[j] in ".," and j + 1 < len(t) and t[j + 1].isdigit()))
+    # a separator at the edge between two digits: "7." of "7.5", ".5" of "7.5", "1," of "1,300"
+    left = left or (t[i] in ".," and 0 < i and i + 1 < len(t) and t[i - 1].isdigit() and t[i + 1].isdigit())
+    right = right or (t[j - 1] in ".," and j >= 2 and j < len(t) and t[j - 2].isdigit() and t[j].isdigit())
     return left or right
 
 
@@ -1001,6 +1006,14 @@ class Catalog:
             src = _quote_source(f, sig, kw.get("source"))
             kw["source"] = None if src == "doc" else src
         kw = {k: v for k, v in kw.items() if v is not None or k in ("then",)}
+        dflt = [x.name for x in sig.parameters.values() if x.default is not x.empty
+                and x.kind in (x.POSITIONAL_OR_KEYWORD, x.KEYWORD_ONLY)]
+        if dflt and kind != "constraint":              # every argument is a fact: a default value is never used
+            has = "has a default value" if len(dflt) == 1 else "have default values"
+            warnings.warn(f"{kind} {f.__name__}: {', '.join(dflt)} {has}, but every argument of a part is a fact it reads — the default is never "
+                          f"used, and while no fact {dflt[0]!r} is given or computed the {kind} cannot run (a hard "
+                          "check that cannot run makes its questions abstain). Bind the value without a default "
+                          "(a closure: def make(lim): def chk(n): return n <= lim), or give the fact", stacklevel=3)
         p = Part(kind=kind, name=f.__name__, inputs=list(sig.parameters), func=f, doc=(f.__doc__ or "").strip(),
                  quotes=getattr(self, "quotes", "normalized"), **kw)
         if p.source is not None:                       # a Quote without its own source points into this text

@@ -247,22 +247,44 @@ def locate(passage, text, ignore_case=True):
     """A passage → (start, end) of its first occurrence in the text. Literal up to typographic quotes and apostrophes
     (’ ‘ “ ” as ' "), dashes (– — ‑ − as -), runs of whitespace (a new line written as a space) and, when nothing matches
     with the case kept, letter case ("wre54g" for "WRE54G"; ignore_case=False: not); nothing else. The offsets are into
-    the text as given, so text[start:end] is the text's own spelling, never the passage's. None when it is not there."""
+    the text as given, so text[start:end] is the text's own spelling, never the passage's. None when it is not there.
+    An occurrence that begins or ends inside a longer number, as solvi.core.catalog.cuts_number reads it, is skipped:
+    "7" is found as a number of its own, not as the 7 of "2017", "10" not in "109", "7." not in "7.5" — when every
+    occurrence does, None (the grounding check refuses such a quote with the same rule)."""
+    from ..catalog import cuts_number
     if not passage:
         return None
-    i = text.find(passage)
-    if i >= 0:
-        return i, i + len(passage)
+
+    def first(spans):
+        return next(((a, b) for a, b in spans if not cuts_number(text, a, b)), None)
+
+    def finds(t, p):
+        i = t.find(p)
+        while i >= 0:
+            yield i, i + len(p)
+            i = t.find(p, i + 1)
+
+    got = first(finds(text, passage))
+    if got:
+        return got
     p, t = passage.translate(_TYPO), text.translate(_TYPO)
-    i = t.find(p)
-    if i >= 0:
-        return i, i + len(p)
+    got = first(finds(t, p))
+    if got:
+        return got
     words = p.split()
     if not words:
         return None
-    rx = r"\s+".join(re.escape(w) for w in words)
-    m = re.search(rx, t) or (re.search(rx, t, re.IGNORECASE) if ignore_case else None)
-    return (m.start(), m.end()) if m else None
+    def matches_at(rx):                              # every match, overlapping ones too (finditer skips them)
+        m = rx.search(t)
+        while m:
+            yield m.start(), m.end()
+            m = rx.search(t, m.start() + 1)
+
+    rx = re.compile(r"\s+".join(re.escape(w) for w in words))
+    got = first(matches_at(rx))
+    if got is None and ignore_case:
+        got = first(matches_at(re.compile(rx.pattern, re.IGNORECASE)))
+    return got
 
 
 def _prob(v, what):
@@ -304,7 +326,56 @@ def _stated(reply, labs, answer, shape):
     return None
 
 
-def logprob_probs(content, logprobs, answer, labs):
+_ECHO_SEP = re.compile(r"\s*(?::|\s[-\u2013\u2014]|[-\u2013\u2014]\s)\s*")
+_ECHO_TRIM = " .,;:!?\u2026\"'"
+
+
+def _norm_words(x):
+    return " ".join(str(x).lower().split()).strip(_ECHO_TRIM)
+
+
+def echoed_option(ans, labs, it):
+    """The option an answer names when the model wrote the option followed by a separator and its description —
+    "contradiction: the contract states the opposite", the option's line from the prompt's list echoed back — else None.
+    Accepted only when exactly one option is followed by a separator (":", " - ", " – ", " — ") at the start and
+    something follows it, and what follows:
+    - for an option with a description: is that description (or its start, or it and more words that name no other
+      option and hold no other option's description), and is not, nor starts like, another option's description
+      ("yes: it does not" with no = "it does not", "yes: it applies, no it does not" stay invalid);
+    - for options without descriptions: names no other option ("neutral: or maybe entailment" stays invalid).
+    A bare "neutral:" stays invalid: nothing after the separator is a cut or malformed reply, not an echo."""
+    hits = []
+    for o in labs:
+        if ans.startswith(o):
+            m = _ECHO_SEP.match(ans, len(o))
+            if m and m.end() > len(o):
+                hits.append((o, ans[m.end():]))
+    if len(hits) != 1:
+        return None
+    o, rest = hits[0]
+    said = _norm_words(rest)
+    if not said:
+        return None
+    descs = {k: _norm_words(v) for k, v in zip([str(x) for x in it.options], getattr(it, "descriptions", None) or ())
+             if v}
+
+    def like(d):
+        return bool(d) and (d.startswith(said) or said.startswith(d))
+
+    def names_another(t):                            # another option by name, or another option's description
+        return any(re.search(r"(?<!\w)" + re.escape(x.lower()) + r"(?!\w)", t) for x in labs if x != o) or \
+            any(d in t for k, d in descs.items() if k != o)
+    if any(like(d) for k, d in descs.items() if k != o):
+        return None
+    if descs.get(o):
+        if not like(descs[o]):
+            return None
+        tail = said[len(descs[o]):] if said.startswith(descs[o]) else ""
+        return None if names_another(tail) else o   # "<its description>, or rather entailment" stays invalid
+    return None if names_another(said) else o
+
+
+def logprob_probs(content, logprobs, answer, labs, echo=False):
     """{label: p} from the answer's token log-probabilities, or None when they cannot be aligned. The chosen label gets the
     probability of its whole token sequence; another label shares the probability of each alternative at the answer's
     first token that it begins with (split evenly among the labels that begin with it). The rest of the mass (tokens that
@@ -324,8 +395,8 @@ def logprob_probs(content, logprobs, answer, labs):
     enc = {o: json.dumps(o, ensure_ascii=False)[1:-1] for o in labs}
     a0 = m.end()
     a1 = a0 + len(enc[answer])
-    if content[a0:a1] != enc[answer] or content[a1:a1 + 1] != '"':
-        return None
+    if content[a0:a1] != enc[answer] or (content[a1:a1 + 1] != '"' and not echo):
+        return None                                    # echo: the option, then a separator and its description
     pos, first, lp = 0, None, 0.0
     for i, (t, piece) in enumerate(zip(toks, pieces)):
         s, e = pos, pos + len(piece)
@@ -429,11 +500,16 @@ def read_reply(it, content, logprobs=None, ask="probabilities"):
         if NOT_STATED in ans and len(ans) > 1 and NOT_STATED not in it.options:
             raise InvalidOutput(f"{NOT_STATED!r} together with options")
     else:
+        echo = None
+        if isinstance(ans, str) and ans not in labs:
+            echo, ans = ans, echoed_option(ans, labs, it)
         if not isinstance(ans, str) or ans not in labs:
-            raise InvalidOutput(f"the answer {ans!r} is not one of the options {labs}")
+            raise InvalidOutput(f"the answer {ans if echo is None else echo!r} is not one of the options {labs}")
+        if echo is not None:
+            info["answer_echo"] = echo[:200]          # what the model wrote: an option followed by its description
     p = None
     if shape == "choice" and logprobs is not None:
-        p = logprob_probs(content, logprobs, ans, labs)
+        p = logprob_probs(content, logprobs, ans, labs, echo=echo is not None)
         if p is not None:
             info["probabilities"] = "logprobs"
     if p is None:
@@ -538,6 +614,7 @@ class LLMScorer(RemoteClient):
         r = (self.extra_body or {}).get("reasoning")
         self._reasoning_hidden = isinstance(r, dict) and bool(r.get("exclude"))   # asked, but not to be returned
         self._warned_unthought = False
+        self._sources, self._warned_mix = set(), False   # logprobs="auto": the probability sources seen so far
         # default: 512 for a reply alone, 2,048 when the thinking counts against the limit too
         self.max_tokens = int(max_tokens) if max_tokens is not None else (MAX_TOKENS_REASONING if self.reasoning else 512)
         self.workers = max(1, int(workers))
@@ -683,7 +760,26 @@ class LLMScorer(RemoteClient):
                 info["rejected"] = e.answer
             return {**blank, "escalate": f"invalid LLM output — {e}", "info": {"llm": info}}
         out["info"] = {"llm": {**info, **out.get("info", {})}}
+        self._note_source(out["info"]["llm"].get("probabilities"))
         return out
+
+    def _note_source(self, src):
+        """logprobs="auto": warn once, at the first reply whose probabilities come from the other source than an earlier
+        reply's (a gateway that routes to several providers) — a calibration over both is refused, so the warning comes
+        before the remaining calls are paid for."""
+        if self.logprobs != "auto" or src is None:
+            return
+        kind = "logprobs" if src == "logprobs" else "stated"
+        with self._lock:
+            self._sources.add(kind)
+            if len(self._sources) < 2 or self._warned_mix:
+                return
+            self._warned_mix = True
+        import warnings
+        warnings.warn(f"{self.model_id}: some replies carry log-probabilities and some do not (the server or gateway "
+                      "routes to several providers), so their probabilities come from two sources — a calibration over "
+                      "both is refused. Make the model with logprobs=False (or True, for a server that always returns "
+                      "them), or pin the provider (extra_body={'provider': {...}})", UserWarning, stacklevel=2)
 
     def _warn_unthought(self, fmt):
         with self._lock:

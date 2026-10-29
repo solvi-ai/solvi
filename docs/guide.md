@@ -564,6 +564,7 @@ layer before it is an answer:
 | `Span[T]` | `span` | the quoted text read as `T` (pydantic, then the date / number parsers); `result.span` the Quote | p(this span); a rule: 1 | literally in the text ("grounding"), parses as `T` ("type rejected") |
 | `Rank[Literal[...], k]` | `rank` | a tuple: the top k options, best first; `result.scores` | Plackett–Luce p(this top k in this order); a rule: 1 | only the options, distinct, at least k ("outside the options") |
 | `Estimate[edges]` | `estimate` | a number: the middle of the median bin; `result.interval` | p(value in the interval) = the mass of its bins; a plain number: 1 | a distribution over the declared bins ("outside the options") |
+| `Answer.estimate()` (no bins) | `estimate` | a plain number a rule computes (`f(a, b)`), as it is; `result.interval` = `[x, x]` | the confidence of the facts it rests on | rules only (a model needs bins); a rule's `-> float` alone is not an answer type — pass `answer=Answer.estimate()` |
 
 Every kind's confidence is **the probability that the answer, as returned, is right** — for a rule answer at most the
 confidence of the facts it rests on (quotes, decisions), as always — and the response's overall confidence is their product
@@ -755,7 +756,7 @@ q = urgency.question(cat, min_confidence=0.6)             # or: the answer of a 
 `model.decision(name, task, text_fact="doc", options=(), descriptions=None, multi=False, other=None, *, kind=None,
 type=None, min_confidence=None, min_act=None, use_act=None, max_error=None, score_value=None, not_stated=False,
 k=None, bins=None, unit=None, coverage=None, evidence=False, option_order="canonical", permutations=4, min_margin=None,
-long=None, top_k=None, rerank=False, perturb=0, retrieve_query=None)` returns a
+long=None, top_k=None, rerank=False, perturb=0, retrieve_query=None, state_keys=())` returns a
 callable catalog function named `name` that returns `Decision(value, probs)`. The question is given by `options` (a list, or
 `{option: description}`) and `kind` (`"choice"`, `"multi"`, `"score"`, `"noul"`), or by a type (`type=`, or in place of the
 options; a dict of options is then read as descriptions). `model.decisions(Schema, text_fact)` gives one part per field of a
@@ -1003,6 +1004,33 @@ answers before the shift. After a flag, stop answering alone until the threshold
 after the shift. The same promises on a whole question —
 a fitted head, a rule, a trust score you compute — are `system.guarantee` ([below](#a-guarantee-on-any-question-systemguarantee)).
 
+The arithmetic behind these promises — the binomial tails and Bonferroni / fixed-sequence tests of learn-then-test, the
+conformal-risk-control threshold, the split-conformal quantile — is checked against values computed apart from solvi's
+code (exact fractions, the Clopper–Pearson bound, the procedures as the papers state them, the exact coverage
+⌈(n + 1)(1 − α)⌉ / (n + 1)); `tests/test_reference_values.py` names the source of each expected value.
+
+A wrong calibration label moves the threshold. With `label_check=True` (opt-in), `act_guard`, `calibrate_for` (a
+part's and a combination's) and `System.guarantee` check the labels on the way — no extra model call, the decisions
+are already made: `info["label_issues"]`
+lists the examples whose label the model confidently contradicts (`count`, `ids` — the examples' positions, the
+appended `corrections=` included —, the
+`suggested` answer), and `info["warnings"]` gets a line when there are any. The rule is confident learning (Northcutt,
+Jiang & Chuang 2021, cleanlab's default "prune by noise rate", written out in `solvi.core.calibration.label_issues`):
+per answer a threshold, the mean probability of that answer over the examples labelled with it; an example counts
+towards (given y, confident k) when k is its most probable answer above its threshold; the counts, rescaled to the
+number labelled y, say how many labels y are really k, and that many examples with the largest margin p_k − p_y are
+listed. Nothing is dropped or changed: the calibration uses every label as given. False positives: an example the
+model is confidently wrong about looks exactly like a wrong label, so with a model that makes many confident
+mistakes most of the list is the model's errors — check the listed labels, fix the wrong ones, calibrate again. In a
+simulation (400 examples, 3 answers, 12 labels flipped, a model mostly sure and right) it listed 8–12 of the 12 flips
+and 0–2 other examples over ten seeds; with no flip and a model confidently wrong on 10% of the examples it listed 36
+of them. The probabilities must be out of sample: a part fitted (`fit`, `teach`) on the same examples sees its own
+labels and lists fewer. For a System question answered by a `FastHead` fitted on these examples, pass `folds=k` to
+`System.guarantee` (each example is then scored by a head fitted without it); without `folds=` the report gets a
+warning saying the check ran on in-sample probabilities. An answer with no labelled example is never suggested. It is off by default because of those false positives: on clean labels with a model
+confidently wrong on 10% of the examples it listed 36 of 400, so on by default most users would get a warning on clean
+data, and existing calls would change their `"warnings"`.
+
 #### Keeping a calibration: save_calibration, load_calibration
 
 The thresholds live in the part. Save them once, and have the catalog load them every time it starts:
@@ -1184,7 +1212,8 @@ request, `max_think` / `nothink_threshold` cap them, and the time per request is
 claims about its accuracy are its authors'. How it does inside solvi's checks is on the [benchmark page](vs_llm.md).
 
 **Reference.** The whole signature: `systemone(base_url, model, api_key=None, *, timeout=30.0, opener=None,
-extra_body=None, deterministic=False, retries=2, backoff=1.0, sleep=None, max_len=None)` → a `DecideModel` (backend
+extra_body=None, deterministic=False, retries=2, backoff=1.0, sleep=None, max_len=None, prob_floor=None,
+max_options=None)` → a `DecideModel` (backend
 `"systemone"`, id `systemone:<model>`), whose `decision(...)` / `decisions(...)` build parts as for a local checkpoint
 (the signature is in [the decider](#the-model-proposes-decisions-with-a-decider)); every option after `api_key` is
 keyword-only.
@@ -1199,6 +1228,8 @@ keyword-only.
 | `deterministic` | False (default): replay checks the recorded output instead of calling the service; True: replay re-runs it and compares (a local server whose output is reproducible) |
 | `opener` | a replacement for urllib's `urlopen` (tests, proxies) |
 | `max_len` | the tokens one request reads under `long="retrieve"` (words and punctuation × 1.3; default 512, at least 64) |
+| `prob_floor` | the smallest probability taken from a reply before its log. `None` (default): 1e-6, as before 1.4, bit for bit, same fingerprint. `"auto"` (recommended for a service that rounds its probabilities, as Jev does to 0.01): per question, half the step of the grid that question's probabilities strictly between 0 and 1 lie on (all multiples of 0.01, or of 0.1 → 0.005; on no grid of 10^-2 … 10^-4 → 1e-6; an answer whose probabilities are all exactly 0 or 1 shows no grid and keeps 1e-6 — set a float for a rounding service to cover that case too); a float: that floor for every reply. With a 1e-6 floor one rounded-to-0 probability on the right answer weighs log(1e-6) ≈ −13.8 and drags fit and calibration ([a third-party measurement on Jev](https://github.com/scienthoon/jev-ood-calibration): choice temperature refit to 3.29 with 1e-6, 1.30 with 0.005). `"auto"` and a float enter the fingerprint: switching one on changes the numbers, so calibrate again |
+| `max_options` | the most options the service takes in one choice question (Jev 255, Solar Decide 26, by their docs; "not stated" counts as one): a question with more is refused when it is built (`ValueError` naming the limit — split the label set into groups); default `None`: not checked |
 
 One question is one request: a System and `decide_pass` ask a remote model their questions about an input one after
 another (the items one scorer call is handed about one text — a multi-label question's options — share a request). The request
@@ -1208,14 +1239,26 @@ its levels), `{"type": "noul", "instructions": <task>}` for yes / no, one `noul`
 ("Does the option … apply?", chosen at 0.5), and with "not stated" allowed one more option (or one more `noul`)
 described as "The input does not state it: …". The reply must be a JSON object whose `answers` holds, per question
 name, `{"probabilities": {option: p}}` (every option, each in [0, 1]) or `{"noul": p}`; the probabilities become the
-decider's logits. `usage`, `cost`, `latency_ms`, `model` and `reasoning` (per question, Jeeves) are read when present.
+decider's logits (each clipped at `prob_floor` first). `usage`, `cost`, `latency_ms`, `model`, `reasoning` (per
+question, Jeeves) and an answer's `confidence` (Jev's Choice / Score) are read when present.
 
 Each decision records `extra["systemone"]`: `endpoint` (the URL without credentials or query), `model`, `served_by`
 (when the reply names another model), `ms` (the request's time here), `questions` (how many questions the request
 answered — the next fields are for the whole request), `usage` (`input_tokens`, `output_tokens`, `reasoning_tokens`, as
 the service gives them), `cost` (the service's own number), `latency_ms` (the service's own time) and `reasoning` (the
 question's chain, cut to 1,000 characters, with its `tokens`, `thought`, `closed` and `truncated` — for the audit; the
-answer comes from the probabilities). The scorer (`model.scorer`) keeps the totals: `requests`, `usage` and `cost`.
+answer comes from the probabilities), `confidence` (the service's own number for the question, distinct from the
+probability — [Jev's docs](https://docs.typesafe.ai/confidence); per option, as a dict, for a multi-label question, so
+a guarantee on `signal="extra:systemone.confidence"` abstains there) and `prob_floor`
+(when the floor used was not 1e-6). The scorer (`model.scorer`) keeps the totals: `requests`, `usage` and `cost`.
+
+To calibrate on the service's confidence rather than solvi's (read from the probabilities), a guarantee reads any number
+the answer's decision recorded with `signal="extra:<path>"`; the labelled examples show which signal separates right
+from wrong answers (an answer whose reply had no confidence abstains, with the reason):
+
+```python
+system.guarantee("route", examples, max_risk=0.05, signal="extra:systemone.confidence")
+```
 
 | What happens | Result |
 |---|---|
@@ -1251,7 +1294,21 @@ which: "logprobs", "stated" or "confidence"). A gateway can mix the two in one s
 log-probabilities, some do not), and they are two scales: `act_guard` / `calibrate_for` / `conformal` refuse
 calibration examples that mix them (ValueError naming the counts — make the model with `logprobs=False`, or pin the
 provider), and a part calibrated on one source records it in its guarantee (`"probabilities"`) and escalates a later
-decision whose probabilities came from the other. Yes/no, scores, multi-label questions, spans (`kind="span"`: the passage must be in the text), "not stated"
+decision whose probabilities came from the other. The mix is caught early: under `logprobs="auto"` the model warns
+(UserWarning) at the first reply from the other source, and a calibration asks an LLM its first 16 examples before the
+rest, refusing a mix there — after 16 calls, not after all of them. A calibration over an LLM is asked in chunks of 32 and
+logs its progress (`logging.basicConfig(level=logging.INFO)`, or the logger `"solvi.calibration"` at INFO: "label:
+48/303 calibration examples decided (95 s, about 505 s left)"); nothing is printed by default. A decision with no usable
+output (an invalid reply, no answer from the server) counts there as escalated and not right — never answered alone —
+and the result says how many (`"unusable"`, with a line in `"warnings"`). An answer that echoes the option's line from
+the prompt — `"contradiction: the contract states the opposite"` for options given as `{option: description}` — is read
+as that option when exactly one option is followed by a separator (`:`, ` - `, ` – `, ` — `) and by its own
+description (or its start) that is not, nor starts like, another option's — `"yes: it does not"` with `no` described as
+"it does not" stays invalid; for options without descriptions the rest must name no other option; a bare `"neutral:"`
+stays invalid (`extra["llm"]["answer_echo"]` keeps what was written). Anything else stays an invalid output. These
+calibration changes are `DecisionPart`'s; a combination (`Vote`, `Cascade`, `Route`) calibrates as before. Yes/no, scores, multi-label questions, spans (`kind="span"`: the passage must be in the text, and the decision reads exactly one **given** text fact — a
+span decision over several facts, `["header", "doc"]`, or over a computed text escalates every time, since its offsets
+must point into a text the trace holds as given: join the texts before `ask` and pass the result as one given fact), "not stated"
 (`Maybe[...]`) and `evidence=True` work; rankings and numbers are asked as a choice over the options / bins. Where the
 reply has one number (a span, `ask="confidence"`), the prompt says what it means for "not stated" — the model's
 probability that the text does not say it — and solvi reads it as p(not stated): a "not stated" at 0.2 is an unsure one.
@@ -1735,6 +1792,37 @@ On a real stream, take the reference from traffic like the stream's: a calibrati
 from the stream's can be flagged before anything has changed. A quiet monitor means "no change of this size in the
 last few dozen decisions", not "no change".
 
+#### Is the same model still answering? An identity canary for a remote decider
+
+A hosted model can change behind its name — the provider swaps the weights, a gateway routes to another provider or a
+lower quantisation — and the decider's fingerprint does not see it: it hashes the configuration solvi asked for
+(endpoint, model name, prompt, settings), not the weights that answered. `solvi.core.guarantees.canary` keeps a small
+fixed set of probe questions; their answers, probabilities and the model name the server reports are the model's
+behavioural fingerprint, asked again on a schedule or on demand:
+
+```python
+from solvi.core.guarantees.canary import IdentityCanary
+model = llm("https://openrouter.ai/api/v1", "openai/gpt-oss-20b", api_key=KEY)       # or systemone(...)
+canary = IdentityCanary([("I was charged twice", "Which team?", ["billing", "shipping"]), ...],
+                        every=500).attach(model)     # every 500 decisions of the model; every=None: canary.probe() only
+canary.probe()                                       # the reference (len(probes) calls)
+canary.events[-1]["verdict"]                         # "reference", "same", "changed", "unanswered", "error"
+```
+
+A round differs from the reference when a probe answers differently (`min_changed=1`), the mean total-variation
+distance of the probabilities is above `tol` (0.15), or the server names a model the reference did not; with `confirm=True` (the
+default) the difference is asked once more and counts only when it repeats. After a change every decision of the model
+carries `extra["canary"]["changed"]` (in the trace) until `canary.accept()` takes the new answers as the reference —
+do that after recalibrating on the new model. `on_change="flag"` (default) only marks: a `DriftMonitor` observing those
+decisions (the Decision, or the Response of `system.ask` — so a Dispatcher with that monitor too) flags `"identity"` at
+once. `on_change="escalate"` also escalates them. Probes cost calls, so nothing is asked unless a canary is attached.
+The scheduled round runs on the thread of the 500th decision, so that decision waits for it; the model's other
+decisions go on, and a round that raises is recorded as an `"error"` event without touching the decision. A replay
+never probes; under `on_change="escalate"` a recorded escalation of a deterministic remote decider replays as a
+mismatch, since the canary's state is not part of the replayed input. It is a cheap check, not a test with a false-alarm rate: choose
+probes with clear answers (a borderline one flips under the provider's own noise), and a change the probes do not touch
+is missed. Tested on fake servers only (`tests/test_identity_canary.py`).
+
 ### Inputs from outside the calibration set: OpenSetGate
 
 Every promise above holds for inputs like the calibration examples. An input whose right answer is not among the
@@ -2074,6 +2162,72 @@ requests with new intents — System 2 = an LLM's recorded answers; the details 
 Feed the calibration **every** answer System 2 vouched for, not only the cases where it disagreed with System 1: a
 threshold calibrated on disagreements alone sees only System 1's mistakes, and the verified disagreements were too few
 to move anything. The report's `labels` lists the stored ids it read; calibrating again without them undoes it.
+
+### Attaching a learner (experimental, unmeasured)
+
+A learner can be attached to a running system and replace the model it decides with only when a measured comparison
+says the new version is better (`solvi.experimental.stream`; no gain is claimed: no stand has run). On a Dispatcher
+every decision goes through the loop and each version serves under its own stream certificate; on a System alone the
+corrections are the loop's labels, only the pre-freeze gates decide (they cannot be switched off there), and a watch
+rolls a promoted version back when it measures worse than the one before it.
+
+```python
+from solvi.experimental.stream import AdapterLoop, DefaultPolicy
+
+loop = AdapterLoop.attach(dispatcher, dir="loop/", max_risk=0.05, secret=key,       # a LoRA learner on the part
+                          policy=DefaultPolicy(s2_labels=True))                     # the slow path's labels count
+dispatcher.ask(x).learning          # the version that decided, its fingerprint, the loop's coin and events
+loop.pause(); loop.resume(); loop.train_now(); loop.rollback(0); loop.status()
+loop.save("ckpt/")                  # AdapterLoop.load("ckpt/", learner, system=..., secret=key).attach_to(dispatcher)
+dispatcher.replay_all()             # each decision replayed under the version it was made with
+loop.detach()                       # version 0 back, hooks removed
+
+loop = AdapterLoop.attach(system, learner, initial=v0)   # a System alone: system.teach(...) feeds it (label mode)
+loop.status()["watch"]              # label mode after a promotion: the served version against the one before it
+```
+
+`DefaultPolicy` trains when the labels grew and the served version is short on its last held-out labels: it errs
+alone above α, or answers alone on less than `target_share` (0.5 by default) of them. The share is there because a
+certified version keeps its error alone at most α: on error alone a weak but certified version, short in coverage and
+not in error, is never retrained. The share is read on held-out labels, a selection-biased sample that is mostly
+deferred decisions, so it reads lower than the share on the whole stream, and a strong version will usually be
+retrained too; the promotion gates (the novel-only paired comparison, the memorisation probe, the novel-risk bar) are
+what keep a worse version from being served. `DefaultPolicy(target_share=None)` trains on the error alone only. The
+default is unmeasured.
+
+The control is a `LoopPolicy` subclass: give each hook, and the loop calls them.
+
+```python
+from solvi.experimental.stream import LoopPolicy
+
+class OnlyHuman(LoopPolicy):
+    def accept(self, st, x, y, source): return source == "human"
+    def split(self, st, key): return ("holdout", "calib", "train")[hash(key) % 3]   # use a stable hash in practice
+    def want_train(self, st): return st.labels["train"] >= 100 and st.served == 0
+    def select(self, st, rows): return list(rows)
+    def hyper(self, st): return {"seed": st.next_version}
+    def freeze(self, st, report): return report.right - report.wrong > report.served_right - report.served_wrong
+    def promote(self, st, paired): return True
+    def discard(self, st, paired): return None
+    def alarm(self, st, who, report): return "recertify"
+    # optional: def watch(self, st, w) — label mode's rollback after a promotion (default: False, never;
+    #           DefaultPolicy's rule is watch_rollback(w), an anytime-valid e-process and the margin)
+```
+
+A version is promoted only when it is certified (label mode: a threshold found on the calib labels), whatever
+`promote` returns.
+
+A learner is any object with `update`, `seen` and either `snapshot` (online) or `train(job)` (batch); its versions
+score (`score(x) → (answer, signal)`, `fingerprint()`) and, to serve, `install(system)` / `uninstall(system)`. Refused:
+a question answered by a Cascade, Vote or Route, or by a part that is a member of one. With a loop attached
+`System.teach` changes nothing at once (the loop owns the part). The labels the default policy takes are a person's,
+an outcome's, a rule's or an audit's; the slow path's only with `s2_labels=True`. A loop on a Dispatcher needs a label
+source: an attach whose policy takes no label from the slow path is refused (give `s2_labels=True`, a trusted oracle as
+the slow path whose Thoughts carry `{"oracle": {"label_source": "human"}}`, or use label mode on the System); refused
+labels are counted in `status()["labels"]["refused"]` and 200 in a row with none accepted warn once. With a loop, a Dispatcher serves one decision at a time, the slow
+path's call included (measured once on a stand-in, the script is not in the repository: 3.7 × slower at four threads and a 50 ms slow path). A Cascade, Vote
+or Route over a part a loop serves is refused until `detach()`. Unmeasured: nothing here says the loop improves a
+system. See [experimental](experimental.md#stream).
 
 ## Guarding an agent's tool calls
 
@@ -2567,6 +2721,15 @@ rule over the task text cut it to 0.11 but lost 3.4 points of benign utility (95
 calls the task needed; on top of hand-declared tool effects, the same rule cut attack success from 0.022 to 0.007 at
 −1.1 points. Give it the tools you know the task needs; a guessed list costs completed tasks.
 
+**The stop button.** `guard.pause("incident 42: odd payouts", by="alice")` stops the guard: every check and call that
+starts after it is denied (`guard_not_paused`; deny, not escalate, so no approval can be queued while stopped), with a
+reason naming who paused and why, and no tool runs; `resolve(..., approve=True)` raises until `guard.resume(by="alice")`.
+With a storage, the pause and the resume are events in the store's chain (meta `"guard": {"event", "by", "reason",
+"at"}`), and a call denied while paused is a decision of a small system of its own, so `guard.replay(id)` reproduces the
+denial. The pause lives in memory: a Guard made anew (a restart) starts running, and the store keeps the events — pause
+it again at start-up if it must stay stopped. It supports the "stop button" of the EU AI Act's human-oversight
+requirement (Art. 14(4)(e)).
+
 **The store.** With `storage=`, every decision is saved with its trace and `meta["guard"]`: tool, outcome, reasons,
 whether solvi ran the tool, and its error or the hash of its result (the result itself is not stored). `guard.replay(id)`
 re-computes a stored decision with the tool's current checks (`"catalog": "changed"` when they changed since),
@@ -2950,8 +3113,11 @@ tried by brute force over the answers' finite domains (yes/no, choice, ordinal, 
 a question (it never applies); a rule with a `return <literal>` that is not one of its question's options
 (`rule_returns_non_option`: `return "aprove"` — on that path the question abstains); a hard check without `-> bool`
 with a `return` that is plainly not `True` or `False` (`hard_check_untyped`: `return 0`, `return None`, a bare
-`return` — on that path the check is rejected and the questions it governs abstain). Both read the function's source:
-only literals in `return` statements (also in `a if c else b`) are judged, a returned variable or call is not.
+`return` — on that path the check is rejected and the questions it governs abstain); a hard check with no `then=` that
+no question requires and no part reads (`hard_check_never_runs`: no flow reaches it, so it never stops an answer —
+`System(...)` warns about it too). Both `return` checks read the function's source: only literals in `return`
+statements (also in `a if c else b`, and a lambda's body) are judged, a returned variable or call is not; a rule whose
+source cannot be read (made by `exec`, a callable object) is the warning `rule_unchecked`.
 **Warnings**: a rule registered for a question the system does not ask (`unused_rule`); with `System(input_model=Model)`, an
 argument that no part computes and the model does not declare (`input_not_declared`: `amout` for `amount` — it could
 only arrive as an extra key, and never when the model forbids extra keys), and a `uses` hint naming neither a part nor
@@ -2967,6 +3133,18 @@ empty or null input into a value nobody gave — the answer looks decided while 
 constant table (`{...}.get(kind, 1)`) or a default on a computed value is not flagged. Say what a missing input means (check for `None` and abstain, or declare the default in
 `System(input_model=...)`), or mark the line `# solvi: ok`. **Notes** never fail: a question without a rule abstains until
 an answer head is fitted.
+
+**The wording of questions** (warnings, and one note). For a question a model answers (no rule, or a rule backed by a
+model): a choice with no catch-all option — `"other"`, `"none of these"`, `"unknown"`, or one described as "anything
+else" — and no decider `other=` or "not stated" (`Answer.maybe`) is the note `no_other_option` (a note, so `--strict`
+passes: closed label sets such as approve / reject or low / medium / high are normal; add a catch-all only when an
+input can fit none of the options, since then a model still picks one, often with high confidence); levels that are bare numbers (`"1"`..`"5"`) without a description of each are
+`numeric_levels` (give a dict `{level: description}`). For every question: a text that asks two things — two question
+marks, or "and whether" / "or whether" — is `compound_question` (split it; a plain "and" inside one judgement is not
+flagged). With `System(input_model=Model)`, a field that no part, rule, check, constraint, `uses` hint, span or
+guarantee (its `groups=`, or a `signal=` naming the field; on a System or on a part's or combiner's calibration) reads is
+`unused_given` (checked only when every question has a rule or a `uses` hint, since a learned head may read any given
+fact). Each names the question (or the field) and the fix.
 
 **Sensitive fields.** `Catalog(sensitive={"age", "sex"})` names given facts no part may read; `lint(system,
 sensitive=...)` and `solvi check ... --sensitive age,sex` add names to the catalog's own. A part that reads one — a fn,
@@ -3431,7 +3609,19 @@ What is checked before a threshold is set, so that a promise is never made on a 
 
 The report gives both shares on the calibration examples — `"risk"` (answered alone and wrong, of all) and `"error"`
 (among the answered) — with `"answered"`, the threshold's `"support"`, `"separation"` (`auroc`, `p`), `"base_error"`
-and, for conformal risk control, `"must_escalate_at_least"`. The facts the signal and the groups read become
+and, for conformal risk control, `"must_escalate_at_least"`. `"not_gated"` (present when it is not zero) counts the
+calibration examples with no signal to gate: a forced answer (signal +inf) or one that is never answered alone (no
+signal, NaN or −inf — an abstention before the guarantee, such as a rule input a model escalated); they count in `"n"`,
+`"answered"` and `"risk"` as what they are (an abstention is never answered alone), but not in `"separation"`. The
+guarantee is kept across processes with `system.save_guarantee(question, path)` and
+`system.load_guarantee(path)` — the promise, its thresholds and report, and the catalog fingerprint, the models'
+fingerprints (`system.fingerprint()["models"]`: each model, its endpoint, settings and the question it is asked), the
+answer type and guard fingerprint it was made for (another catalog, other models, a file that names no models or another
+answer type is refused unless `strict=False`; a model that names no version is compared by name and settings, so a
+server that changes the weights behind the name is not told apart; a signal or grouping
+that was a function is passed again, `signal=` / `groups=`): stored decisions then replay against it without
+calibrating again. The file's fingerprints catch a file that does not fit or an inconsistent edit, not a forgery that
+recomputes them — keep it like code. The facts the signal and the groups read become
 required parts of the question (`requires`), so every flow computes them. Every answer of the question records its verdict as a hashed
 trace record (`guard:<question>`: the signal's value, the threshold, the promise); below the threshold the question
 abstains (safeguard low confidence) and says what it would have answered; a forced answer (a failed hard check) and an
@@ -3498,7 +3688,10 @@ reads an input the trace does not hold), `flow` (a planned step is not recorded)
 not verify because a value it rests on did not come back from storage as it was — its type is neither one the dump
 restores nor declared: no verdict on the data, see [serialization](#typed-input-state-and-serialization)), `not_kept`
 (a compact stored record does not keep what checking this step needs — see [compact records](#compact-records-and-rotation):
-no verdict on the data past it) and `error` (`replay_all`: a stored record could not be loaded, or the replay raised). When there are mismatches the result also has `"kinds"`, the count
+no verdict on the data past it), `error` (`replay_all`: a stored record could not be loaded, or the replay raised) and
+`other_system` (`replay_all`: the record answers no question of the given System — another system's record, or one
+whose questions were edited; not an integrity verdict: `replay_all` checks every record's own hash as `verify()` does,
+and a foreign full record's trace hashes; run `verify()` for the chain). When there are mismatches the result also has `"kinds"`, the count
 per kind, and `"summary"`, one line: `"data damaged: the hash chain or a record does not verify"`, `"data intact,
 catalog changed (parts missing)"`, `"data intact, catalog changed"`, `"data intact, model changed"`, `"data intact,
 steps do not recompute"`, `"not verified: a compact record does not keep this step's surroundings (no verdict on the
@@ -3537,6 +3730,7 @@ store.query(question="refund", answer="no", since="2026-09-01")
 store.query(safeguard="grounding")              # every decision where a model's quote was rejected
 store.query(model="solvi-base")                # ... this model ran in a step (id, type or fingerprint), used or rejected
 store.replay_all(system)                        # [] when every stored trace replays against the current catalog
+store.replay_all([arith, spans])                # one store written by two systems: each record against its own
 store.verify()                                  # the chain across stored records
 ```
 
@@ -4047,6 +4241,16 @@ What it shows, per question:
   system's own answers. The verdict says "within the promise", "above the promised level, not significantly", or
   "above the promise" with the binomial p-value. When only some decisions are labelled, the report says the measured
   error is that of the labelled ones: corrections are usually made where an answer looked wrong.
+- **How often a person was wrong.** A person is not an oracle. Where a decision has a person's label (a correction,
+  `label_source="human"`, or an audit label) and also an outcome label (`System.outcome`, `label_source="outcome"`) —
+  both naming it with `of=`, or on its input — the person's last answer given before the first outcome label is
+  compared with the last outcome (a label given after the outcome was known is not a judgement: decisions with only
+  such labels are counted in `after_outcome`, not paired):
+  `corrections["people"]` gives the pairs, the wrong ones, the error with a two-sided 95% Clopper–Pearson interval, and
+  the same per person (`by=`) and per question; the text report adds a "People:" line. A person's answer to a
+  decision handed over by a dispatcher is such a label too: `teach(..., of=<the dispatched decision's id>, by=...)`.
+  The pairs are the decisions whose outcome happened to be recorded, not a random sample of the person's decisions;
+  read the interval with that in mind. Before 1.4 solvi stored both labels but never paired them.
 - **Drift.** The flags the decisions recorded (an open-set gate's change point, the dispatcher's drift flag), and a
   `DriftMonitor` run over the period's decisions in order, with the stored labels where there are some: the first
   decision at which it flagged and what moved. `drift_window=` sets its window (default 100; `None` or `--no-drift`:
@@ -4536,6 +4740,19 @@ are the same (overlapping quotes, numbers within a tolerance); `unknown="human"`
 "none of the options fits" — a person decides — for closed options where a new kind of input can come.
 
 The supervision draw is a hash of `seed`, the input and the decision's number, so it is reproducible and replayed.
+`audit=` (a share of the decisions marked for labelling) draws the same way, independently. A plain hash can be
+predicted: with the public default `seed=0`, whoever can vary the inputs can compute which decisions will be supervised
+or audited and steer around them. `secret=` (bytes or str; when None the environment variable `SOLVI_AUDIT_SECRET` is
+read) keys both draws: they become HMAC-SHA256(secret, …) of the same seed, input and number. The secret never enters
+a record, the config fingerprint or the dispatcher's repr; a record says only `"draw_keyed": true`. Replay takes the
+recorded draw, so a dispatcher without the secret replays a keyed record (it does not recompute that draw); with the
+secret it recomputes and checks it. Without a secret the draws are as before, and a dispatcher that samples
+(`supervise` or `audit` strictly between 0 and 1) gives a `PredictableDrawWarning` (`solvi.core.dispatch`) once per process — filter that class where
+the draw need not be hidden.
+
+```python
+d = Dispatcher(system1, AskPath(system2), supervise=0.05, audit=0.02, secret=os.environ["MY_AUDIT_KEY"])
+```
 A drift flag stays up until `d.reset_drift()`; replay takes it as recorded (it depends on the stream before).
 
 ### The slow path
@@ -4690,17 +4907,33 @@ under its guarantee, named by `of=<stored decision>` and checked in the store. A
 is journaled: the system's own answers never become knowledge, by construction. `ks.item(id)` is the full record:
 kind, body, scope, source, who, evidence, `derived_from`, confidence counts (confirmations, refutations, uses, uses
 that were wrong, a guarantee level), status, version and `supersedes`, and two time ranges — when it held in the world
-(`valid=(since, until)`, as you give it) and when the store learned and invalidated it (journal positions). Values on
-validity intervals that do not overlap are facts together; `snapshot(valid_at=t)` keeps as facts only those valid at
-`t`, a snapshot row carries its item's `valid`, and a rule reads the value at a world time with
+(`valid=(since, until)`, as you give it; ints, ISO date strings or `datetime.date`) and when the store learned and
+invalidated it (journal positions). Values on validity intervals that do not overlap are facts together. Versions with
+different sinces are versions in time, not a contradiction: a later since closes the earlier version there, and the
+earlier one stays a fact for its own time (a price of 100 from day 0 and a promotion of 80 on days 50–80 give 100,
+then 80, then 100 again; a value announced ahead does not end the current one before its date; retracting the later
+version re-opens the earlier). Validity is per assertion: a value told for two periods holds in both under one id
+(`ks.item(id)["valid"]["claims"]` lists them, `ks.periods(id)` gives where the item holds). Claims of one item from
+one since are one version: when they give different untils, the latest claim's until decides (a correction of the
+until). A missing since is the beginning of time: an assertion without `valid` on a key where others carry one is the
+version that holds from the beginning until the first later since. Two values from the same
+since compete by rank as below, and the winner takes only the overlap. A fact derived from others (`derived_from=`)
+without its own `valid` gets the intersection of its premises' validity and holds only where they hold.
+`snapshot(valid_at=t)` keeps as facts only those that hold at `t`, a snapshot row carries its item's `valid` (and
+`"periods"` when it holds on other spans), and a rule reads the value at a world time with
 `solvi.Knowledge.value(snapshot, s, r, valid_at=t)` (without `valid_at` it reads the first matching row).
+Two kinds of rows are facts though the item's own status is not "active": an item disputed only on an overlap is a
+fact outside it, and an item derived from such a premise is a fact where every premise of one of its derivations
+holds (its status stays "hypothesis", `usable(id)` without a time is False). Without `valid_at` such a row carries
+`"periods"`; an item that holds at no time (a premise disputed on its whole validity, or a derived item whose own
+`valid` misses every period where its premises hold) is not a fact.
 
 Contradictions resolve by rank: an observation refutes whatever it contradicts (the world changed), a higher-ranked
 source (outcome > person > spec > verified) refutes a lower one, a producer's new version (`supersedes=`) refutes the
 one it names. A consequence computed from premises (`add(..., derived_from=[...], inferred=True)`, as a rule engine
 writes it) is not an observation: it competes by rank only, so two inferences of different values from equal-rank
-premises are a dispute. Anything else is a dispute: every side is `disputed`, none is given to System 1 as a fact, and one
-person question is opened per dispute event — the same two items disputed again after a resolution are asked again;
+premises are a dispute. Anything else is a dispute: every side is `disputed`, none is given to System 1 as a fact (on
+a key with `valid`: none on the overlapping span, each outside it), and one person question is opened per dispute event — the same two items disputed again after a resolution are asked again;
 `ks.disputes()` lists the open ones and `ks.resolve(key, value, by=...)` is the answer.
 
 A retraction is exact: the store after `retract(x)` has the fingerprint of the store rebuilt from its journal as if x
@@ -4716,6 +4949,14 @@ retract the conclusion (its premises stand) but marks it for review: a hypothesi
 `retest(id, ok=True)`; `ks.item(id)["consulted"]` lists them. A conclusion whose margin over the losing alternative
 rested on a retracted source is then reviewed instead of staying a fact unnoticed. Such a retraction is not exact in
 the sense above until the re-test: the rebuilt store has no review mark.
+
+Withdrawn content is not served again without a re-test. Content told again after its retraction waits for a re-test
+(`ks.pending()` lists what waits, `ks.item(id)["pending"]` says why; `retest(id, ok=)` decides). On facts told with
+`valid`, this holds whatever the item id and on any overlapping validity: every retraction (`retract`, `only_from=`,
+`retract_source`, a failed re-test, a rollback) withdraws its content on its validity; a later assertion of it waits
+for a re-test unless writers it was not withdrawn from still hold it — and then it waits from the moment they are taken
+back. One publication among identical ones is taken back with `retract(id, assertion=n)` (its journal position, listed
+in `item(id)["valid"]["claims"]`) or `retract(id, only_from=(writer, evidence))`.
 
 A decision is given `ks.snapshot(...)` as a fact: the active items that match (`facts`), the hints (hypotheses, expired
 or stale items, with why), the ids they rest on, the store's fingerprint and its journal position — so the trace shows

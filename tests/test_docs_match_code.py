@@ -201,7 +201,8 @@ def test_every_measured_number_names_a_script_or_a_model_card():
         flat = _flat(text)
         assert "not in this repository" not in flat and "cannot be reproduced from it" not in flat
     results = README.split("## Results")[1].split("## ")[0]
-    assert "comes from a script in [benchmarks/](benchmarks/) or from a published model card" in _flat(results)
+    assert ("comes from a script in [benchmarks/](https://github.com/solvi-ai/solvi/blob/main/benchmarks/) or from a "
+            "published model card") in _flat(results)
 
 
 def _sig(fn, name):

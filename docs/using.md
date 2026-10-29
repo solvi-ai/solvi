@@ -71,7 +71,8 @@ d.outcome                                    # "allow" (and the tool ran), "deny
 
 The tool must be in the catalog, its arguments must validate, values that must come from the user must be quoted from
 the user's own messages, your policies are hard checks, and an optional authorizer decides "did the user ask for
-this?" under a guarantee. Every decision is a stored, replayable trace. Guide:
+this?" under a guarantee. Every decision is a stored, replayable trace. `guard.pause(reason, by=)` is a stop button:
+every call is denied until `guard.resume(by=)`, and both are events in the store. Guide:
 [Guarding an agent's tool calls](guide.md#guarding-an-agents-tool-calls); runnable: `examples/19_agent_guard.py`.
 
 ## What a system knows: `solvi.Knowledge`

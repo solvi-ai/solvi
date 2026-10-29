@@ -37,6 +37,13 @@ minimum. So on a stream that has not changed, the chance of a false flag within 
 at most alpha (default 1%), as far as each test's p-value is exact and the reference stands for the stream; a longer
 stream gets alpha per horizon.
 
+A change of the correct answers alone — inputs, answers and scores unchanged — cannot be seen by this or any other
+label-free test, because such a stream is distributed exactly like an unchanged one: only labels show it
+(Dispatcher(audit=), AuditWatch).
+
+A decision marked by an identity canary (solvi.core.guarantees.canary: the remote model answering is not the one of the
+reference) is flagged "identity" at once, whatever min_signals says.
+
 It is a signal, not a verdict: what to do — recalibrate, escalate, ask for labels — is the caller's. Simulated on
 independent decisions (benchmarks/drift_simulation.py): 6 of 1,152 unchanged streams were flagged within 1,000
 decisions; a fall of the share answered alone from 73% to 13% was flagged 23–27 decisions later whatever the window; a
@@ -396,9 +403,12 @@ class DriftMonitor:
             self._warned = True
             warnings.warn("DriftMonitor: a Result carries no act probability, so the act signal is not tested: observe "
                           "the Response (mon.observe(res, question=...)) or the part's Decision", stacklevel=2)
+        from .canary import changed_of
+        ch = changed_of(decision, question)          # an identity canary found another model behind the name
         self.seen += 1
         if self._ref is None:
-            self.reference.append(o)
+            if ch is None:                           # a decision of a changed model is not reference material
+                self.reference.append(o)
             if len(self.reference) >= self.window:
                 self._ref = window_stats(self.reference, self.accuracy)
                 self._start_sequential()
@@ -415,6 +425,10 @@ class DriftMonitor:
                     rep["why"].append(why)
             rep["drift"] = len(rep["flags"]) >= self.min_signals
             rep["seen"] = self.seen
+        if ch is not None:
+            rep["flags"].append("identity")
+            rep["why"].append(f"the remote model changed behind its name (identity canary event {ch.get('event')})")
+            rep["drift"] = True
         self._flagged = bool(rep["drift"])
         self.history.append(rep)
         return rep
@@ -491,7 +505,10 @@ class DriftMonitor:
                         "or the part's Decision)"
                 continue
             a, b = ref[name], cur[name]
-            se = math.sqrt(max(a["std"] ** 2 / a["n"] + b["std"] ** 2 / b["n"], 1e-12))
+            # the window's spread is at least the reference's: a window that by chance misses the long tail of a
+            # skewed signal (confidence near 1, a few low values) has a higher mean AND a smaller spread, and its own
+            # spread alone makes z far heavier-tailed than normal at the levels used here (false flags "confidence up")
+            se = math.sqrt(max(a["std"] ** 2 / a["n"] + max(b["std"], a["std"]) ** 2 / b["n"], 1e-12))
             p = _p_two_sided((b["mean"] - a["mean"]) / se)
             rep["tests"][name] = {"reference": a["mean"], "window": b["mean"], "p": p}
             found.append((name, p, abs(b["mean"] - a["mean"]),
@@ -586,7 +603,7 @@ class NumericDrift:
             raise TypeError("value= is a function decision → number")
         self.alpha, self.horizon, self.allowance = float(alpha), int(horizon), float(allowance)
         self.ref_n, self.settle, self.min_sd, self.value, self.seed = int(ref_n), int(settle), float(min_sd), value, seed
-        self.mean = self.sd = self.n_ref = None
+        self.mean = self.sd = self.n_ref = self.degenerate = None
         self.cusum, self.h = None, None
         self._ref, self._skip = [], self.settle
         self._flagged, self._why = False, []
@@ -597,13 +614,27 @@ class NumericDrift:
         return self._flagged
 
     def set_reference(self, values):
-        """The reference: these values' mean and spread (and their number, for the threshold) → self."""
+        """The reference: these values' mean and spread (and their number, for the threshold) → self. A degenerate
+        reference — half of its values or more one and the same value (mostly exact zeros with rare spikes) — warns:
+        such a stream is far from Gaussian, its spread says little, and an unchanged stream can be flagged far more
+        often than alpha; `degenerate` holds why (None otherwise) and an alarm's `why` repeats it."""
+        return self._set_reference(values, stacklevel=3)
+
+    def _set_reference(self, values, small=True, stacklevel=2):
         vals = [float(v) for v in values if math.isfinite(float(v))]
         if len(vals) < 2:
             raise ValueError("a reference needs at least two finite values")
-        if len(vals) < 20:
+        if small and len(vals) < 20:
             warnings.warn(f"a reference of {len(vals)} values: its spread is too noisy for the false-alarm bound to "
-                          "hold (20 or more)", UserWarning, stacklevel=2)
+                          "hold (20 or more)", UserWarning, stacklevel=stacklevel)
+        top, k = Counter(vals).most_common(1)[0]
+        self.degenerate = None
+        if 2 * k >= len(vals):
+            self.degenerate = (f"degenerate reference: {k} of its {len(vals)} values are {top:.4g}, so the values are "
+                               "far from Gaussian and the false-alarm bound does not hold")
+            warnings.warn(f"NumericDrift: {self.degenerate} — an unchanged stream can be flagged far more often than "
+                          "alpha; watch a smoother number (an aggregate over a window, or the share of non-zero values "
+                          "with DriftMonitor)", UserWarning, stacklevel=stacklevel)
         self.mean, self.sd, self.n_ref = float(np.mean(vals)), max(self.min_sd, float(np.std(vals))), len(vals)
         self.cusum = Cusum.calibrate(["up", "down"], alpha=self.alpha, horizon=self.horizon, seed=self.seed,
                                      ref_n=len(vals), allowance=self.allowance)
@@ -614,7 +645,7 @@ class NumericDrift:
 
     def adapted(self):
         """The system changed (retrained, re-tuned): the next ref_n values (after `settle`) become the new reference."""
-        self.mean = self.sd = self.n_ref = self.cusum = self.h = None
+        self.mean = self.sd = self.n_ref = self.cusum = self.h = self.degenerate = None
         self._ref, self._skip = [], self.settle
         self._flagged, self._why = False, []
 
@@ -645,9 +676,7 @@ class NumericDrift:
                 return rep
             self._ref.append(x)
             if len(self._ref) >= self.ref_n:
-                with warnings.catch_warnings():
-                    warnings.simplefilter("ignore")
-                    self.set_reference(self._ref)
+                self._set_reference(self._ref, small=False, stacklevel=3)   # a short ref_n is the caller's choice
             rep.update(state="collecting", h=self.h)
             return rep
         rep["state"] = "watching"
@@ -660,7 +689,8 @@ class NumericDrift:
         if S >= self.h:
             self._flagged = True
             self._why = [f"the numeric stream moved {name}: CUSUM {S:.3g} ≥ h {self.h:.3g} over the last {since} values "
-                         f"(reference mean {self.mean:.4g}, sd {self.sd:.4g}, {self.n_ref} values)"]
+                         f"(reference mean {self.mean:.4g}, sd {self.sd:.4g}, {self.n_ref} values)"
+                         + (f"; {self.degenerate}" if self.degenerate else "")]
             self.alarms.append({"at": self.seen, "direction": name, "S": S, "since": since})
             rep.update(drift=True, why=list(self._why))
         return rep

@@ -1,0 +1,668 @@
+"""solvi.document: one model read per field, each fact found in the text, code computes the answer, hard checks, a
+calibrated threshold over System.guarantee, a replayable record — against a fake chat-completions server (no network)."""
+import datetime
+import io
+import json
+import re
+import warnings
+from typing import Literal
+
+import pytest
+from pydantic import BaseModel, Field
+
+import solvi
+from solvi import Answer, Span
+from solvi.core.deciders.llm import llm
+from solvi.core.guarantees.guarantee import GuaranteeWarning
+
+
+class Server:
+    """A chat-completions server: reply(user_message, body) → (answer, confidence) of a span / choice reply."""
+
+    def __init__(self, reply):
+        self.reply, self.calls, self.bodies = reply, 0, []
+
+    def __call__(self, req, timeout=None):
+        body = json.loads(req.data.decode())
+        self.calls += 1
+        self.bodies.append(body)
+        ans, conf = self.reply(body["messages"][-1]["content"], body)
+        c = json.dumps({"answer": ans, "confidence": conf, "quote": ""})
+        ch = {"index": 0, "message": {"role": "assistant", "content": c}, "finish_reason": "stop"}
+        return io.BytesIO(json.dumps({"model": body["model"], "choices": [ch],
+                                      "usage": {"prompt_tokens": 40, "completion_tokens": 9}}).encode())
+
+
+class Ops(BaseModel):
+    a: Span[float] = Field(description="The revenue, exactly as written.")
+    b: Span[float] = Field(description="The cost, exactly as written.")
+
+
+def doc_of(i, a="$1,250", b="(1,250)", w="77"):
+    return f"Case {i}. Revenue was {a} and cost was {b}. Other figure: {w}."
+
+
+def case_reply(wrong=frozenset(), unknown_a=frozenset()):
+    """Reads a and b from the case's own document; in a `wrong` case it reads the other figure for a, unsure."""
+    def reply(msg, body):
+        i = int(re.search(r"Case (\d+)\.", msg).group(1))
+        nums = re.search(r"Revenue was (\S+) and cost was (\S+)\. Other figure: (\S+)\.", msg).groups()
+        if "revenue" in msg.split("<text>")[0]:
+            if i in unknown_a:
+                return "$9,999", 0.95                     # not in the text
+            return (nums[2], 0.3) if i in wrong else (nums[0], 0.9)
+        return nums[1], 0.95
+    return reply
+
+
+def model_of(server, **kw):
+    kw.setdefault("logprobs", False)                     # chosen: the recipe keeps it (no rebuild, no warning)
+    kw.setdefault("ask", "confidence")
+    return llm("http://fake/v1", "fake-model", opener=server, workers=1, **kw)
+
+
+def ops_system(server, **kw):
+    kw.setdefault("compute", lambda f, s: f.a - f.b if s["op"] == "diff" else f.a + f.b)
+    kw.setdefault("checks", {"b_not_zero": lambda f, s: f.b != 0})
+    model = kw.pop("model", None) or model_of(server)
+    return solvi.document(Ops, model, task="A short company note.", **kw)
+
+
+def test_solvi_document_is_the_recipe_entry():
+    from solvi.solutions.document import DocumentSystem, document
+    assert solvi.document is document and "document" in solvi.__all__ and len(solvi.__all__) == 25   # "Facts" joined in 1.4 (the author's S7 call)
+    s = ops_system(Server(case_reply()))
+    assert isinstance(s, DocumentSystem) and isinstance(s.system, solvi.System)
+    assert s.fields == ["a", "b"] and s.checks == ["b_not_zero"]
+
+
+def test_grounded_facts_are_parsed_and_code_computes():
+    srv = Server(case_reply())
+    s = ops_system(srv)
+    res = s.ask({"doc": doc_of(1), "op": "diff"})
+    r = res["answer"]
+    assert r.status == "ok" and r.answer == 1250.0 - (-1250.0)      # "$1,250" → 1250; "(1,250)" → −1250
+    assert r.confidence == pytest.approx(0.9)                        # the weaker read
+    assert srv.calls == 2                                            # one read per field
+    assert res.values["a"] == "$1,250" and res.values["b"] == "(1,250)"    # the text's own substrings
+    assert s.ask({"doc": doc_of(2), "op": "sum"})["answer"].answer == 0.0
+    prompts = [b["messages"][-1]["content"] for b in srv.bodies]
+    assert all(p.startswith("Question: A short company note. The ") for p in prompts)
+    assert "op" not in prompts[0].split("<text>")[1]                 # the model reads the text alone
+
+
+NUMBERS = [  # (quote, value or None: does not read → the answer abstains)
+    ("$1,250", 1250.0), ("1,250 million", 1250.0), ("1,234 thousand", 1234.0), ("3 mn.", 3.0),
+    # one scale rule: never multiplied, word or suffix
+    ("1.5 bn", 1.5), ("$1.2 billion", 1.2), ("1.2bn", 1.2), ("1.2B", 1.2), ("$1.2M", 1.2), ("1.2m", 1.2), ("1.2k", 1.2),
+    # accounting negatives, with currency and scale around them
+    ("(1,234)", -1234.0), ("$(1,234)", -1234.0), ("(1,234) million", -1234.0), ("$(1,234) million", -1234.0),
+    ("EUR (1,234)", -1234.0), ("(EUR 1,234)", -1234.0), ("( 1,234 )", -1234.0), ("(3.5%)", -3.5), ("(3)", None),
+    ("(2019)", None), ("(1)", None), ("((5))", None), ("(-5)", None), ("-(5)", None),
+    # signs in any dash, before or after the currency, trailing
+    ("-1,234", -1234.0), ("−1,234", -1234.0), ("–1,234", -1234.0), ("—1,234", -1234.0), ("- 1,234", -1234.0),
+    ("-$1,234", -1234.0), ("$-1,234", -1234.0), ("1,234-", -1234.0), ("+5%", 5.0), ("-.5", -0.5),
+    # percentages, separators
+    ("12.5%", 12.5), ("12.5 %", 12.5), ("12.5 percent", 12.5), ("12,5%", 12.5), ("%5", None), ("1,234.5", 1234.5),
+    ("1.234,56", 1234.56), ("€1.234,56", 1234.56), ("EUR 18,851.12", 18851.12), ("2.500", None), ("1 234", None),
+    # not one number
+    ("10-12", None), ("10–12", None), ("10 to 12", None), ("1e3", None), ("1_000", None), ("nan", None), ("NaN", None),
+    ("inf", None), ("Infinity", None), ("-inf", None), ("1/2", None), ("½", None), ("3x", None), ("50 bps", None),
+    ("n/a", None), ("", None), ("$", None), ("million", None), ("-", None), ("1,2,3", None), ("0x10", None),
+]
+
+
+@pytest.mark.parametrize("raw,v", NUMBERS)
+def test_numbers_as_documents_write_them(raw, v):
+    from solvi.solutions.document import _read_number
+    if v is None:
+        with pytest.raises(ValueError):
+            _read_number(float, raw)
+    else:
+        assert _read_number(float, raw) == pytest.approx(v)
+
+
+def test_a_sign_the_quote_left_out_abstains():
+    def reply(msg, body):
+        return ("1,234", 0.9) if "revenue" in msg.split("<text>")[0] else ("5", 0.9)
+    for doc in ("Revenue was -1,234 and cost was 5.", "Revenue was (1,234) and cost was 5.",
+                "Revenue was -$1,234 and cost was 5.", "Revenue was −1,234 and cost was 5."):
+        res = ops_system(Server(reply)).ask({"doc": doc, "op": "diff"})
+        assert res["answer"].status == "abstain", doc
+        assert "left out its" in res["answer"].why and ("sign" in res["answer"].why
+                                                         or "parentheses" in res["answer"].why), doc
+    ok = ops_system(Server(reply)).ask({"doc": "Revenue was 1,234 and cost was 5.", "op": "diff"})["answer"]
+    assert ok.status == "ok" and ok.answer == 1229.0
+
+
+def test_a_result_that_is_not_finite_abstains():
+    s = ops_system(Server(case_reply()), compute=lambda f, s: float("nan"))
+    r = s.ask({"doc": doc_of(1), "op": "diff"})["answer"]
+    assert r.status == "abstain" and "not a finite number" in r.why
+    s = ops_system(Server(case_reply()), compute=lambda f, s: f.a * float("inf"))
+    assert s.ask({"doc": doc_of(1), "op": "diff"})["answer"].status == "abstain"
+
+
+def test_an_ungrounded_fact_abstains_with_the_reason():
+    s = ops_system(Server(case_reply(unknown_a={3})))
+    r = s.ask({"doc": doc_of(3), "op": "diff"})["answer"]
+    assert r.status == "abstain" and r.answer is None
+    assert "a: model escalated" in r.why and "'$9,999' is not literally in the text" in r.why, r.why
+
+
+def test_a_failed_check_abstains():
+    s = ops_system(Server(case_reply()))
+    res = s.ask({"doc": doc_of(4, b="0"), "op": "diff"})
+    r = res["answer"]
+    assert r.status == "abstain" and r.answer is None
+    assert [c.status for c in res.checks if c.name == "b_not_zero"] == ["failed"]
+
+
+def test_a_value_that_does_not_read_abstains_with_the_field_named():
+    s = ops_system(Server(case_reply()))
+    r = s.ask({"doc": doc_of(5, a="2.500"), "op": "diff"})["answer"]
+    assert r.status == "abstain" and "a: '2.500' does not read as float" in r.why, r.why
+
+
+def labelled(n, wrong):
+    out = []
+    for i in range(n):
+        a, b = 1000 + i, 10 + i % 7
+        out.append(({"doc": doc_of(i, a=f"${a:,}", b=str(b), w=str(5 + i)), "op": "diff"}, float(a - b)))
+    return out
+
+
+def test_calibrate_then_ask_store_verify_replay_and_save_load(tmp_path):
+    wrong = frozenset(range(0, 150, 5))                              # 30 of 150 read the wrong figure, unsure
+    srv = Server(case_reply(wrong=wrong))
+    path = tmp_path / "decisions.jsonl"
+    s = ops_system(srv, storage=str(path))
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", GuaranteeWarning)            # 150 examples: no "few examples" warning
+        rep = s.calibrate(labelled(150, wrong), max_risk=0.10)
+    assert rep["n"] == 150 and 0.3 < rep["threshold"] <= 0.9 and rep["answered"] == pytest.approx(0.8)
+    assert s.calibration is rep and "calibrated" in repr(s)
+    sure = s.ask({"doc": doc_of(1000, a="$2,000", b="5"), "op": "diff"})
+    assert sure["answer"].status == "ok" and sure["answer"].answer == 1995.0 and sure.stored_id
+    unsure = s.ask({"doc": doc_of(1005, a="$2,000", b="5"), "op": "diff"})    # 1005 % 5 == 0: but not in `wrong`
+    assert unsure["answer"].status == "ok"
+    srv.reply = case_reply(wrong={1010})
+    low = s.ask({"doc": doc_of(1010, a="$2,000", b="5"), "op": "diff"})["answer"]
+    assert low.status == "abstain" and low.answer is None            # below the threshold
+    assert s.verify()["ok"] and s.replay_all() == []
+    saved = s.save_calibration(tmp_path / "doc.guarantee.json")
+    fresh = ops_system(Server(case_reply()), calibration=saved)
+    assert fresh.calibration["threshold"] == rep["threshold"]
+    assert fresh.storage is None
+    from solvi.core.store import JSONLStorage
+    assert JSONLStorage(path).replay_all(fresh.system) == []        # replays without calibrating again
+    other = ops_system(Server(case_reply()), compute=lambda f, s: f.a * f.b)    # another rule: another catalog
+    with pytest.raises(ValueError, match="calibrated on catalog"):
+        other.load_calibration(saved)
+
+
+def test_tampered_record_is_caught(tmp_path):
+    path = tmp_path / "d.jsonl"
+    s = ops_system(Server(case_reply()), storage=str(path))
+    s.ask({"doc": doc_of(1), "op": "diff"})
+    lines = path.read_text().splitlines()
+    assert "2500.0" in lines[-1]
+    lines[-1] = lines[-1].replace("2500.0", "2600.0")
+    path.write_text("\n".join(lines) + "\n")
+    from solvi.core.store import JSONLStorage
+    assert not JSONLStorage(path).verify()["ok"]
+
+
+def test_fewer_than_100_examples_warn():
+    s = ops_system(Server(case_reply()))
+    with pytest.warns(GuaranteeWarning, match="calibrating on 40 examples"):
+        rep = s.calibrate(labelled(40, ()), max_risk=0.10, weak="warn")
+    assert any("calibrating on 40 examples" in w for w in rep["warnings"])
+
+
+def test_an_llm_with_auto_logprobs_is_asked_for_a_stated_confidence():
+    srv = Server(case_reply())
+    with pytest.warns(UserWarning, match="usage counters are on recipe.model"):
+        s = ops_system(srv, model=model_of(srv, logprobs="auto", ask="probabilities"))
+    assert s.model.scorer.logprobs is False and s.model.scorer.ask == "confidence"
+    s.ask({"doc": doc_of(1), "op": "diff"})
+    assert all(not b.get("logprobs") for b in srv.bodies)
+    given = model_of(Server(case_reply()), logprobs=True)
+    assert solvi.document(Ops, given, compute=lambda f, s: f.a).model is given     # chosen explicitly: kept
+
+
+def test_choice_field_asks_the_plain_option_list_with_descriptions_in_the_question():
+    class Claim(BaseModel):
+        amount: Span[float] = Field(description="The amount claimed.")
+        kind: Literal["damage", "theft"] = Field(description="What happened.", json_schema_extra={
+            "options": {"damage": "something was broken", "theft": "something was stolen"}})
+
+    def reply(msg, body):
+        if "What happened" in msg:
+            return "theft", 0.9
+        return "$300", 0.9
+    srv = Server(reply)
+    s = solvi.document(Claim, model_of(srv), compute=lambda f, s: "pay" if f.kind == "theft" and f.amount < s["limit"]
+                       else "hold", answer=Answer.choice(["pay", "hold"]))
+    r = s.ask({"doc": "A bike worth $300 was stolen.", "limit": 500})["answer"]
+    assert r.status == "ok" and r.answer == "pay"
+    kind_msg = next(b["messages"][-1]["content"] for b in srv.bodies if "What happened" in b["messages"][-1]["content"])
+    assert "The options mean: damage — something was broken; theft — something was stolen." in kind_msg
+    assert "\n- damage\n- theft\n" in kind_msg                       # the options themselves are plain
+
+
+def test_dates_text_and_one_field_without_compute():
+    class Invoice(BaseModel):
+        due: Span[datetime.date] = Field(description="The due date.")
+        vendor: Span[str] = Field(description="The vendor.")
+
+    def reply(msg, body):
+        return ("21 July 2026", 0.9) if "due date" in msg else ("Acme Ltd", 0.8)
+    s = solvi.document(Invoice, model_of(Server(reply)),
+                       compute=lambda f, s: "pay" if f.due >= s["today"] and f.vendor in s["approved"] else "hold",
+                       answer=Answer.choice(["pay", "hold"]))
+    doc = "Invoice from Acme Ltd, due 21 July 2026."
+    r = s.ask({"doc": doc, "today": "2026-07-01", "approved": ["Acme Ltd"]})["answer"]
+    assert r.status == "abstain"                                     # "2026-07-01" is a str: comparing raises
+    r = s.ask({"doc": doc, "today": datetime.date(2026, 7, 1), "approved": ["Acme Ltd"]})["answer"]
+    assert r.status == "ok" and r.answer == "pay" and r.confidence == pytest.approx(0.8)
+
+    class One(BaseModel):
+        total: Span[float] = Field(description="The total.")
+    one = solvi.document(One, model_of(Server(lambda m, b: ("$41.50", 0.9))))
+    assert one.ask({"doc": "Total due: $41.50."})["answer"].answer == 41.5
+
+
+def test_refusals_at_build_time():
+    srv = Server(case_reply())
+    with pytest.raises(ValueError, match="give compute="):
+        solvi.document(Ops, model_of(srv))
+    with pytest.raises(TypeError, match="pydantic model class"):
+        solvi.document(dict, model_of(srv), compute=lambda f, s: 1)
+
+    class Bad(BaseModel):
+        state: Span[float]
+    with pytest.raises(ValueError, match="cannot be named 'state'"):
+        solvi.document(Bad, model_of(srv))
+
+    class Elsewhere(BaseModel):
+        x: Span[float, "note"]                                       # noqa: F821 (a source name, not a type)
+    with pytest.raises(ValueError, match="span of 'note'"):
+        solvi.document(Elsewhere, model_of(srv))
+    for bad in ("a", "a_value", "units", "answer", "compute", "state", "doc"):
+        with pytest.raises(ValueError, match="check name"):
+            ops_system(srv, checks={bad: lambda f, s: True})
+    s = ops_system(srv)
+    with pytest.raises(KeyError, match="has no 'doc'"):
+        s.ask({"text": "x"})
+    with pytest.raises(ValueError, match="keeps no record"):
+        s.verify()
+
+
+def test_a_calibration_file_is_refused_for_another_model_or_prompt(tmp_path):
+    wrong = frozenset(range(0, 120, 6))
+    s = ops_system(Server(case_reply(wrong=wrong)))
+    s.calibrate(labelled(120, wrong), max_risk=0.10)
+    path = s.save_calibration(tmp_path / "g.json")
+    assert ops_system(Server(case_reply()), calibration=path).calibration["threshold"] == s.calibration["threshold"]
+    others = {"model": dict(model=llm("http://fake/v1", "other-model", opener=Server(case_reply()), workers=1,
+                                      logprobs=False, ask="confidence")),
+              "endpoint": dict(model=llm("http://elsewhere/v1", "fake-model", opener=Server(case_reply()), workers=1,
+                                         logprobs=False, ask="confidence")),
+              "reply settings": dict(model=model_of(Server(case_reply()), logprobs=True))}
+    for what, kw in others.items():
+        with pytest.raises(ValueError, match="calibrated with other models"):
+            ops_system(Server(case_reply()), calibration=path, **kw)
+    with pytest.raises(ValueError, match="calibrated on catalog .* the parts that compute the answer"):  # task=
+        solvi.document(Ops, model_of(Server(case_reply())), task="Another note.", calibration=path,
+                       compute=lambda f, s: f.a - f.b if s["op"] == "diff" else f.a + f.b,
+                       checks={"b_not_zero": lambda f, s: f.b != 0})
+
+    class Ops2(BaseModel):
+        a: Span[float] = Field(description="The total revenue, exactly as written.")
+        b: Span[float] = Field(description="The cost, exactly as written.")
+    with pytest.raises(ValueError, match="calibrated on catalog .* the parts that compute the answer"):  # a field
+        solvi.document(Ops2, model_of(Server(case_reply())), task="A short company note.", calibration=path,
+                       compute=lambda f, s: f.a - f.b if s["op"] == "diff" else f.a + f.b,
+                       checks={"b_not_zero": lambda f, s: f.b != 0})
+
+
+def test_the_default_number_judge_reads_the_label_at_its_precision():
+    from types import SimpleNamespace as R
+
+    from solvi.solutions.document import _same_number
+    assert _same_number(R(answer=33.3333), "33.33") and not _same_number(R(answer=33.3333), 33.33)
+    assert not _same_number(R(answer=33.35), "33.33") and not _same_number(R(answer=33.4), "33")   # < 100: exact
+    assert _same_number(R(answer=133.4), "133") and _same_number(R(answer=33.0), "33")
+    assert _same_number(R(answer=1500.4), "1,500") and not _same_number(R(answer=1500.2), 1500)
+    assert not _same_number(R(answer=1501.0), "1,500") and not _same_number(R(answer=1.4), 1)   # int 1: exact
+    assert not _same_number(R(answer=0.4), 1e-05) and not _same_number(R(answer=0.49), 0)
+    assert not _same_number(R(answer=33.4), 33.0) and _same_number(R(answer=1e16 + 1), 1e16)
+    assert _same_number(R(answer=-2.5), "(2.5)") and _same_number(R(answer=0.1 + 0.2), 0.3)
+    assert not _same_number(R(answer=None), 1.0) and not _same_number(R(answer=float("nan")), 1.0)
+    assert not _same_number(R(answer=1.0), "n/a")
+
+
+def test_a_failed_calibration_names_correct_for_the_default_judge():
+    s = ops_system(Server(case_reply()))
+    with pytest.raises(ValueError, match="pass correct="):
+        s.calibrate([(st, y if i % 2 else y + 1) for i, (st, y) in enumerate(labelled(60, ()))], max_risk=0.10)
+
+
+def test_the_input_is_stored_as_plain_data_and_replays(tmp_path):
+    np = pytest.importorskip("numpy")
+    path = tmp_path / "d.jsonl"
+    mk = lambda **kw: ops_system(Server(case_reply()),                     # noqa: E731
+                                 compute=lambda f, s: f.a * s["k"] + len(s["tags"]) + len(s["seen"]), **kw)
+    s = mk(storage=str(path))
+    r = s.ask({"doc": doc_of(1), "op": "diff", "k": np.float64(2.0), "tags": {"x", "y"}, "seen": ("a",),
+               "day": datetime.date(2026, 7, 1)})["answer"]
+    assert r.status == "ok" and r.answer == 2503.0
+    from solvi.core.store import JSONLStorage
+    assert s.replay_all() == [] and JSONLStorage(path).replay_all(mk().system) == []
+    with pytest.raises(TypeError, match="not stored as JSON"):
+        s.ask({"doc": doc_of(1), "op": "diff", "k": object()})
+    with pytest.raises(TypeError, match="not a string"):
+        s.ask({"doc": doc_of(1), "op": "diff", "k": {1: 2}})
+
+
+def test_one_field_without_compute_answers_its_value_or_is_refused():
+    class Kind(BaseModel):
+        kind: Literal["damage", "theft"] = Field(description="What happened.")
+    s = solvi.document(Kind, model_of(Server(lambda m, b: ("theft", 0.9))))
+    r = s.ask({"doc": "A bike was stolen."})["answer"]
+    assert r.status == "ok" and r.answer == "theft" and r.kind == "choice"
+
+    class Flag(BaseModel):
+        late: bool = Field(description="Is the payment late?")
+    assert solvi.document(Flag, model_of(Server(lambda m, b: ("yes", 0.9)))).ask({"doc": "Late."})["answer"].status == "ok"
+    for t in (str, datetime.date):
+        class One(BaseModel):
+            x: Span[t] = Field(description="The value.")
+        with pytest.raises(TypeError, match="give compute="):
+            solvi.document(One, model_of(Server(case_reply())))
+
+
+def test_a_plain_field_type_names_span():
+    for t in (float, str):
+        class Plain(BaseModel):
+            x: t = Field(description="The value.")
+        with pytest.raises(TypeError, match=rf"write Span\[{t.__name__}\]"):
+            solvi.document(Plain, model_of(Server(case_reply())), compute=lambda f, s: 1.0)
+
+
+def test_another_decider_is_used_as_given():
+    from solvi.core.deciders.llm import LLMScorer
+
+    class MyScorer(LLMScorer):
+        pass
+    m = model_of(Server(case_reply()), logprobs="auto")
+    m.scorer.__class__ = MyScorer
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", UserWarning)
+        assert ops_system(Server(case_reply()), model=m).model is m
+
+
+def two(qa, qb, **kw):
+    """A system over Ops whose model quotes qa for the revenue and qb for the cost."""
+    def reply(msg, body):
+        return (qa, 0.9) if "revenue" in msg.split("<text>")[0].lower() else (qb, 0.9)
+    kw.setdefault("compute", lambda f, s: f.a - f.b)
+    kw.setdefault("checks", {})
+    return ops_system(Server(reply), **kw)
+
+
+@pytest.mark.parametrize("doc,qa,qb,why", [
+    ("Revenue $1.2bn, cost $950 million.", "$1.2bn", "$950 million", "a in billion, b in million"),
+    ("Revenue $100, cost €100.", "$100", "€100", "a in $, b in EUR"),
+    ("Revenue 3k, cost 3,000.", "3k", "3,000", "a in thousand, b in no scale"),
+    ("Revenue US$100, cost EUR 100.", "US$100", "EUR 100", "a in USD, b in EUR"),
+])
+def test_two_numbers_in_different_units_abstain(doc, qa, qb, why):
+    res = two(qa, qb).ask({"doc": doc})
+    assert res["answer"].status == "abstain" and why in res["answer"].why, res["answer"].why
+    assert [c.status for c in res.checks if c.name == "same_units"] == ["failed"]
+    assert two(qa, qb, units="any").ask({"doc": doc})["answer"].status == "ok"
+
+
+def test_units_are_exposed_and_a_percentage_is_not_compared_as_an_amount():
+    seen = {}
+
+    def compute(f, s):
+        seen.update(f.units)
+        return f.a - f.b
+    r = two("12%", "$1,200 million", compute=compute).ask({"doc": "Margin 12%, revenue $1,200 million."})["answer"]
+    assert r.status == "ok", r.why                        # percent next to a scaled amount: exposed, not refused
+    assert seen["a"].percent and seen["a"].currency is None and seen["b"].scale == "million"
+    assert seen["b"].currency == "$" and not seen["b"].percent
+    assert two("3k", "950").ask({"doc": "Revenue 3k, cost 950."})["answer"].status == "abstain"       # "same"
+    assert two("3k", "950", units="lenient").ask({"doc": "Revenue 3k, cost 950."})["answer"].status == "ok"
+    assert two("$1.2bn", "$950m", units="lenient").ask({"doc": "Revenue $1.2bn, cost $950m."})["answer"].status \
+        == "abstain"                                       # lenient: two explicit scales still differ
+    assert two("$100", "C$100").ask({"doc": "Revenue $100, cost C$100."})["answer"].status == "abstain"   # same:
+    assert two("$100", "C$100", units="lenient").ask(                                   # "$" next to an explicit C$
+        {"doc": "Revenue $100, cost C$100."})["answer"].status == "ok"                    # lenient: any dollar
+    assert two("US$100", "C$100").ask({"doc": "Revenue US$100, cost C$100."})["answer"].status == "abstain"
+    with pytest.raises(ValueError, match='units must be "same", "lenient" or "any"'):
+        two("1", "2", units="all")
+
+
+@pytest.mark.parametrize("doc", [
+    "Revenue -US$1,234; cost 100.", "Revenue (  1,234); cost 100.", "Revenue 1,234-; cost 100.",
+    "Revenue \u20111,234; cost 100.", "Revenue \uff0d1,234; cost 100.", "Revenue \ufe631,234; cost 100.",
+    "Revenue -Rs 1,234; cost 100.", "Revenue -R$1,234; cost 100.", "Revenue (1,234 million); cost 100.",
+    "We had a loss of 1,234 this year. | Net revenue | (1,234) |. Cost 100.",      # any occurrence signed
+    "| Net | - 1,234 |\n| Cost | 100 |", "Net income: \u2212 1,234. Cost 100.", "Net income: \u2212\u20091,234. Cost 100.",
+    "Net income \u20151,234. Cost 100.", "Net income \u02d71,234. Cost 100.", "Net \u25b31,234. Cost 100.",
+    "Net EUR-1,234. Cost 100.", "Net profit -Rs. 1,234. Cost 100.", "Net profit (Rs. 1,234). Cost 100.",
+    "| Net | 1,234 | (1,234) |\n| Cost | 100 | 90 |",
+])
+def test_a_sign_at_any_occurrence_or_in_any_dash_abstains(doc):
+    r = two("1,234", "100", units="any").ask({"doc": doc})["answer"]
+    assert r.status == "abstain" and "left out its" in r.why, (doc, r.why)
+    assert "sign" in r.why or "parentheses" in r.why, r.why
+
+
+@pytest.mark.parametrize("doc,qa,part", [
+    ("Net −$1.2 bn. Cost 100.", "1.2", "sign"), ("Net 1,234 CR. Cost 100.", "1,234", "CR / DR"),
+    ("Net [1,234]. Cost 100.", "1,234", "brackets"), ("Net &minus;1,234. Cost 100.", "1,234", "sign"),
+    ("| Net |-\u2007\u20071,234 |\n| Cost | 100 |", "1,234", "sign"),
+    ("| Net | - US $1,234 |\n| Cost | 100 |", "$1,234", "sign"),
+    ("Net (\u2007\t1,234\n). Cost 100.", "1,234", "parentheses"),
+    ("| Net | $ (1,234) |\n| Cost | 100 |", "1,234", "parentheses"),
+    ("Net (1,234 million). Cost 100.", "1,234 million", "parentheses"),
+    ("Revenue $1,234 in prose. | Net | -$ 1,234 |. Cost 100.", "$1,234", "sign"),   # spaces differ: still it
+])
+def test_the_quote_must_be_the_whole_number_token(doc, qa, part):
+    r = two(qa, "100", units="any").ask({"doc": doc})["answer"]
+    assert r.status == "abstain" and "left out its" in r.why and part in r.why, (doc, r.why)
+
+
+@pytest.mark.parametrize("doc,qa", [
+    ("- 1,234 revenue\n- 100 cost", "- 1,234"),             # a list bullet is not a minus
+    ("Revenue - 1,234\nCost - 100", "- 1,234"),              # a separator is not a minus
+])
+def test_a_quote_reading_a_sign_the_text_does_not_write_abstains(doc, qa):
+    r = two(qa, "100", units="any").ask({"doc": doc})["answer"]
+    assert r.status == "abstain" and "the text does not write there" in r.why, r.why
+
+
+@pytest.mark.parametrize("doc,qa", [
+    ("Net sales SEK 1,234 m (1,100). Cost 100.", "1,100"), ("Net sales SEK 1,234 m (1,100). Cost 100.", "(1,100)"),
+    ("EBIT margin 12.3% (11.8). Cost 100.", "(11.8)"),
+])
+def test_a_number_in_parentheses_right_after_another_is_ambiguous(doc, qa):
+    r = two(qa, "100", units="any").ask({"doc": doc})["answer"]
+    assert r.status == "abstain" and "right after another number" in r.why, r.why
+
+
+@pytest.mark.parametrize("doc,qa,qb", [
+    ("Revenue Rs. 1,234, cost Rs. 100.", "Rs. 1,234", "Rs. 100"), ("Revenue Rs.500, cost Rs.100.", "Rs.500", "Rs.100"),
+    ("Revenue 12. Cost 5. Change in cost −12%.", "12", "5"),         # the −12% is another quantity
+    ("Revenue 1,234. Cost 100. Margin −100 bps.", "1,234", "100"),
+    ("| Net | $ (1,234) |\n| Cost | $ 100 |", "$ (1,234)", "$ 100"),
+    ("Net −$1.2 bn. Cost $0.1 bn.", "−$1.2 bn", "$0.1 bn"),
+    ("Total revenue 1,234 (Note 5). Cost 100.", "1,234", "100"), ("Revenue 1,234(1). Cost 100.", "1,234", "100"),
+    ("Revenue guidance 1,234–1,300. Cost 100.", "1,300", "100"), ("Revenue guidance 1,234 – 1,300. Cost 100.", "1,300", "100"),
+    ("Revenue: -- 1,234; Cost 100", "1,234", "100"), ("Revenue £1,234m (2018: £1,100m). Cost £100m.", "£1,100m", "£100m"),
+])
+def test_whole_tokens_and_unbound_marks_pass(doc, qa, qb):
+    r = two(qa, qb, units="any").ask({"doc": doc})["answer"]
+    assert r.status == "ok", (doc, r.why)
+
+
+@pytest.mark.parametrize("doc,qa", [
+    ("Revenue – $1,234 million. Cost – $100 million.", "$1,234 million"), ("- 1,234 revenue\n- 100 cost", "1,234"),
+    ("Revenue 5,000 (4,800 in 2018). Cost 100.", "4,800"), ("| Revenue | – | 1,234 |\n| Cost | 100 | – |", "1,234"),
+    ("Revenue for 2018-2019 was 1,234. Cost 100.", "1,234"), ("Per the 10-K revenue 1,234; cost 100.", "1,234"),
+    ("Revenue (non-GAAP) 1,234; cost 100.", "1,234"), ("Revenue—1,234; cost—100.", "1,234"),
+])
+def test_dashes_and_parentheses_that_are_not_signs_pass(doc, qa):
+    r = two(qa, "100" if "$100" not in doc else "$100 million").ask({"doc": doc})["answer"]
+    assert r.status == "ok", (doc, r.why)
+
+
+@pytest.mark.parametrize("raw,v", [("EBT (2019)", None), ("NET (5)", None), ("(12%)", -12.0), ("(12)%", -12.0),
+                                   ("(3.5)%", -3.5), ("-R$1,234", -1234.0), ("HK$1,234", 1234.0), ("Rs 1,234", 1234.0),
+                                   ("$1.2bn 3 million", None), ("$1 €2", None), ("$1.2bn million", None),
+                                   ("€1.2 USD", None), ("Rs. 1,234", 1234.0), ("Rs.500", 500.0), ("$1.2 USD", 1.2)])
+def test_currency_codes_and_percent_parentheses(raw, v):
+    from solvi.solutions.document import _read_quote
+    if v is None:
+        with pytest.raises(ValueError):
+            _read_quote(float, raw)
+    else:
+        assert _read_quote(float, raw)[0] == pytest.approx(v)
+    if raw == "HK$1,234":
+        assert _read_quote(float, raw)[1].currency == "HKD"
+
+
+def test_decimal_in_the_input_replays_and_an_array_is_refused(tmp_path):
+    from decimal import Decimal
+    np = pytest.importorskip("numpy")
+    path = tmp_path / "d.jsonl"
+    mk = lambda **kw: two("5", "3", compute=lambda f, s: float(s["k"]) * f.a, **kw)    # noqa: E731
+    s = mk(storage=str(path))
+    assert s.ask({"doc": "Revenue 5, cost 3.", "k": Decimal("1.10")})["answer"].answer == pytest.approx(5.5)
+    assert s.replay_all() == []
+    with pytest.raises(TypeError, match="ndarray is not stored"):
+        s.ask({"doc": "Revenue 5, cost 3.", "arr": np.arange(3)})
+
+
+def test_a_numpy_nan_result_abstains_and_a_field_name_the_recipe_uses_is_refused():
+    np = pytest.importorskip("numpy")
+    r = two("5", "3", compute=lambda f, s: np.float32("nan")).ask({"doc": "Revenue 5, cost 3."})["answer"]
+    assert r.status == "abstain" and "not a finite number" in r.why
+
+    class Clash(BaseModel):
+        a: Span[float] = Field(description="A.")
+        a_value: Span[float] = Field(description="B.")
+    with pytest.raises(ValueError, match="cannot be named 'a_value'"):
+        solvi.document(Clash, model_of(Server(case_reply())), compute=lambda f, s: 1.0)
+
+    class Units(BaseModel):
+        units: Span[float] = Field(description="A.")
+    with pytest.raises(ValueError, match="cannot be named 'units'"):
+        solvi.document(Units, model_of(Server(case_reply())))
+
+
+def test_the_value_is_shown_next_to_its_quote():
+    r = two("$1,250", "(1,250)").ask({"doc": "Revenue $1,250; cost (1,250)."})["answer"]
+    assert r.status == "ok" and "a_value = 1250.0" in r.why and "a = '$1,250'" in r.why
+
+
+def test_a_currency_or_scale_the_quote_left_out_comes_from_the_text():
+    seen = {}
+
+    def compute(f, s):
+        seen.update(f.units)
+        return f.a - f.b
+    r = two("$1.2", "$0.3", compute=compute).ask({"doc": "Revenue $1.2 billion, cost $0.3 billion."})["answer"]
+    assert r.status == "ok" and r.answer == pytest.approx(0.9) and seen["a"].scale == "billion"
+    r = two("$1.2", "$950", compute=compute).ask({"doc": "Revenue $1.2 billion, cost $950 million."})["answer"]
+    assert r.status == "abstain" and "a in billion, b in million" in r.why        # the units check sees them
+    r = two("1,234", "100", units="any").ask({"doc": "Revenue $1,234 here and €1,234 there. Cost 100."})["answer"]
+    assert r.status == "abstain" and "different currencys" not in r.why and "different currencies" in r.why
+
+
+def test_grounding_details():
+    from solvi.solutions.document import _ground, _left_out
+    assert "does not stand in the text" in _left_out("1,234", "Net 5. Cost 100.")
+    assert "parentheses" in _left_out("1,234", "Net （1,234）.")                    # full-width marks
+    assert "sign" in _left_out("1,234", "Net －1,234.")
+    assert _ground("1.2", "Revenue $1.2 billion.") == (None, {"scale": "billion", "currency": "$"})
+    for doc, q in [("Net sales 12.3 percent (11.8).", "11.8"), ("Margin 12.3 per cent (11.8).", "11.8"),
+                   ("Sales 1,234 MSEK (1,100).", "1,100"), ("Cover 2.1x (2.5).", "2.5"), ("Up 1.2 pp (0.8).", "0.8"),
+                   ("SEK 1,234 m\n(1,100)", "1,100"), ("Sales 1,234\t(1,100)", "1,100"), ("SEK 1,234 m, (1,100)", "1,100")]:
+        assert "right after another number" in (_left_out(q, doc) or ""), (doc, _left_out(q, doc))
+    assert _left_out("1,100", "| Sales | 1,234 | (1,100) |") is not None                  # a pipe: a cell's negative
+    assert "right after" not in _left_out("1,100", "| Sales | 1,234 | (1,100) |")
+    assert _left_out("1,250", "Revenue was $1,250 and cost was (1,250).") is not None     # ≥ 11 chars: not comparative
+    assert "right after" not in (_left_out("(1,250)", "Revenue was $1,250 and cost was (1,250).") or "")
+    for doc, q in [("Share 50% - 60%.", "60%"), ("Share 50%–60%.", "60%")]:
+        assert _left_out(q, doc) is None, doc
+    assert "does not write there" in _left_out("-60%", "Share 50%-60%.")
+
+
+def test_a_long_text_grounds_fast():
+    import time
+
+    from solvi.solutions.document import _ground
+    doc = ("In 2019 the company sold 2019 units; " * 8000)[:300_000] + " Net -2019."
+    t = time.perf_counter()
+    why, _ = _ground("2019", doc)
+    assert time.perf_counter() - t < 1.0 and "sign" in why
+
+
+def test_a_separator_with_a_space_beside_it_does_not_read():
+    from solvi.core.types import span_value
+    from solvi.solutions.document import _read_number
+    for t in ("1 ,234", "(1 ,234)", "1 .5"):
+        with pytest.raises(ValueError, match="separator with a space"):
+            span_value(float, t)
+        with pytest.raises(ValueError, match="separator with a space"):
+            _read_number(float, t)
+    from solvi.core.textin import ParseError, parse_number
+    with pytest.raises(ParseError, match="separator with a space"):
+        parse_number("1 ,234")
+
+
+@pytest.mark.parametrize("doc,qa", [
+    ("Revenue change | -12% |\nRevenue | 1,000 |", "12"), ("Revenue change | (12%) |\nRevenue | 1,000 |", "12"),
+    ("Margin change -80 bps.\nRevenue 1,000.", "80"),
+])
+def test_a_signed_percent_the_quote_left_out_abstains(doc, qa):
+    r = two(qa, "1,000", compute=lambda f, s: f.b * (1 + f.a / 100)).ask({"doc": doc})["answer"]
+    assert r.status == "abstain" and "left out its" in r.why, r.why
+
+
+def test_a_percent_the_quote_left_out_is_its_unit():
+    seen = {}
+
+    def compute(f, s):
+        seen.update(f.units)
+        return f.b * (1 + f.a / 100)
+    r = two("12", "$1,000 million", compute=compute).ask({"doc": "Growth | 12% |\nRevenue | $1,000 million |"})["answer"]
+    assert r.status == "ok" and r.answer == pytest.approx(1120.0) and seen["a"].percent
+
+
+@pytest.mark.parametrize("doc,q,part", [
+    ("Net -\n1,234. Cost 100.", "1,234", "sign"), ("Net △ 1,234. Cost 100.", "1,234", "sign"),
+    ("Net income ▲ 1,234.", "1,234", "sign"), ("| Net | -1\u00a0234 |", "1\u00a0234", "sign"),
+    ("Net 1,234 cr. Cost 100.", "1,234", "CR / DR"), ("Net 1,234 dr.", "1,234", "CR / DR"),
+])
+def test_more_signs_bound_to_the_number(doc, q, part):
+    from solvi.solutions.document import _left_out
+    why = _left_out(q, doc) or ""
+    assert "left out its" in why and part in why, (doc, why)
+
+
+def test_a_group_of_a_spaced_number_does_not_stand_alone():
+    from solvi.solutions.document import _left_out
+    assert "does not stand in the text" in _left_out("234", "Убыток -1 234 тыс. руб.")
+    assert "does not stand in the text" in _left_out("1", "Net -1\u2009234.")
+
+
+def test_one_quote_in_different_scales_is_ambiguous():
+    from solvi.solutions.document import _left_out
+    assert "different scales" in _left_out("1.2", "Revenue 1.2 billion; elsewhere 1.2 million.")

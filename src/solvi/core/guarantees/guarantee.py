@@ -395,6 +395,14 @@ class QuestionGuard:
             if act is None:
                 return "no act probability: the question's answer is not a model decision with an act head"
             return float(act)
+        if sig not in vals and sig.startswith("extra:"):   # a detail the answer's decision recorded (a dotted path)
+            rec = next((r for r in trace.records if r.name == f"answer:{self.question}"), None) if trace is not None else None
+            v = getattr(rec, "extra", None) if rec is not None else None
+            for k in sig[len("extra:"):].split("."):
+                v = v.get(k) if isinstance(v, dict) else None
+            if v is None:
+                return f"the answer's decision recorded no {sig[len('extra:'):]!r}"
+            return _number(v, sig)
         if sig not in vals:
             return f"the fact {sig!r} was not computed"
         v = vals[sig]
@@ -418,9 +426,54 @@ def _number(v, name):
     return v if math.isfinite(v) else f"the signal {name} is {v}"
 
 
-def _calibration_rows(system, question, examples, guard, correct, folds=None, seed=0):
-    """Ask the question on labelled examples with its guard off → (signals, right, groups, read failures)."""
+def _one_calibration_row(system, question, q, guard, correct, st, y, head=None, probs_out=None, at=None):
+    """One calibration example with its guard off → (signal, right, group, lost). An example whose ask raises counts
+    as escalated (a read failure: signal −inf, right True, the error in `lost`) — calibration goes on; the plan's
+    "errors counted as escalated". `head`: the cross-fitted head for folds (sequential only: it is set on the system
+    per example). `probs_out`/`at`: the label-check row is placed at its own index (parallel order-stable)."""
     from ..runtime import execute, vhash
+    saved_head = system.heads.get(question)
+    try:
+        if head is not None:
+            system.heads[question] = head
+        p = system._prepare(st, [question], None)
+        trace, vals = execute(system.catalog, p.flow, p.state, workers=system.workers, order=p.order,
+                              costs=system.cost_book, policy=p.policy, known=p.known)
+        r = system._results(p.questions, p.flow, trace, vals)[0][question]
+        if probs_out is not None:
+            probs_out[at] = _label_row(q, r, y)
+        if r.status == "abstain":
+            return -math.inf, True, None, None     # never answered alone: right / wrong does not count
+        ans = r.answer if r.status == "forced" else guard.would_answer(r)
+        from ..catalog import label_options
+        if correct is not None:                    # a label with several right answers (AnyOf): right if any is
+            import dataclasses
+            right = any(bool(correct(dataclasses.replace(r, answer=ans), o)) for o in label_options(y))
+        else:
+            right = any(vhash(ans) == vhash(q.answer.normalize(o)) for o in label_options(y))
+        grp = guard.group(r, vals, ans)
+        if r.status == "forced":                   # a hard check decides: answered whatever the signal
+            return math.inf, right, grp, None
+        v = guard.value(r, vals, trace)
+        if isinstance(v, str):
+            return -math.inf, True, None, v
+        return v, right, grp, None
+    except Exception as e:                         # noqa: BLE001 — one broken example escalates, calibration goes on
+        return -math.inf, True, None, f"error ({type(e).__name__}: {e})"
+    finally:
+        if head is not None:
+            if saved_head is not None:
+                system.heads[question] = saved_head
+            else:
+                system.heads.pop(question, None)
+
+
+def _calibration_rows(system, question, examples, guard, correct, folds=None, seed=0, probs_out=None,
+                      workers=1, progress=None):
+    """Ask the question on labelled examples with its guard off → (signals, right, groups, read failures). probs_out: a
+    list that receives ({answer: probability} or None, the label or None) per example, for the label check. workers > 1:
+    the examples run in a thread pool, the results in input order (folds stay sequential: the cross-fitted head is set
+    on the system per example). progress: (done, total) after every example (a heartbeat counter)."""
     q = system.questions[question]
     examples = list(examples)
     if not examples:
@@ -429,39 +482,37 @@ def _calibration_rows(system, question, examples, guard, correct, folds=None, se
     if folds:
         heads = _fold_heads(system, question, examples, int(folds), seed)
     sig, ok, grp, lost = [], [], [], []
+    if probs_out is not None:
+        probs_out.extend([None] * len(examples))   # rows land at their own index (parallel order-stable)
     saved = system.guards.pop(question, None)
     was_head = system.heads.get(question)
     try:
-        for i, (st, y) in enumerate(examples):
-            if heads[i] is not None:
-                system.heads[question] = heads[i]
-            p = system._prepare(st, [question], None)
-            trace, vals = execute(system.catalog, p.flow, p.state, workers=system.workers, order=p.order,
-                                  costs=system.cost_book, policy=p.policy, known=p.known)
-            r = system._results(p.questions, p.flow, trace, vals)[0][question]
-            if r.status == "abstain":
-                sig.append(-math.inf)
-                ok.append(True)                   # never answered alone: right / wrong does not count
-                grp.append(None)
-                continue
-            ans = r.answer if r.status == "forced" else guard.would_answer(r)
-            from ..catalog import label_options
-            if correct is not None:               # a label with several right answers (AnyOf): right if any is
-                import dataclasses
-                right = any(bool(correct(dataclasses.replace(r, answer=ans), o)) for o in label_options(y))
-            else:
-                right = any(vhash(ans) == vhash(q.answer.normalize(o)) for o in label_options(y))
-            ok.append(right)
-            grp.append(guard.group(r, vals, ans))
-            if r.status == "forced":              # a hard check decides: answered whatever the signal
-                sig.append(math.inf)
-                continue
-            v = guard.value(r, vals, trace)
-            if isinstance(v, str):
-                lost.append(v)
-                sig.append(-math.inf)
-            else:
-                sig.append(v)
+        if workers and workers > 1 and not folds:
+            from concurrent.futures import ThreadPoolExecutor
+            n = len(examples)
+            with ThreadPoolExecutor(max_workers=workers) as ex:
+                for i, (s_, ok_, g_, l_) in enumerate(ex.map(
+                        lambda t: _one_calibration_row(system, question, q, guard, correct, t[0], t[1],
+                                                       None, probs_out, t[2]),
+                        [(st, y, i) for i, (st, y) in enumerate(examples)])):
+                    sig.append(s_)
+                    ok.append(ok_)
+                    grp.append(g_)
+                    if l_:
+                        lost.append(l_)
+                    if progress is not None:
+                        progress(i + 1, n)
+        else:
+            for i, (st, y) in enumerate(examples):
+                s_, ok_, g_, l_ = _one_calibration_row(system, question, q, guard, correct, st, y,
+                                                       heads[i], probs_out, i)
+                sig.append(s_)
+                ok.append(ok_)
+                grp.append(g_)
+                if l_:
+                    lost.append(l_)
+                if progress is not None:
+                    progress(i + 1, len(examples))
     finally:
         if was_head is not None:
             system.heads[question] = was_head
@@ -500,7 +551,8 @@ def _fold_heads(system, question, examples, folds, seed):
 
 def guard_question(system, question, examples=None, *, max_error=None, max_risk=None, method=None, delta=0.10, signal=None,
                    answer=None, groups=None, min_group=100, min_support=10, correct=None, folds=None, seed=0,
-                   weak="raise", promise=None, corrections=None, sources=None, procedure="bonferroni"):
+                   weak="raise", promise=None, corrections=None, sources=None, procedure="bonferroni", label_check=False,
+                   workers=None, progress=None, warn_small=True):
     """Put a calibrated threshold with a stated promise on a question of `system` (System.guarantee): every later answer
     is let through alone only when its signal ≥ the threshold, else the question abstains with the reason; the promise,
     the signal and the threshold are recorded with every answer. examples: [(init_state, correct answer)], not used to fit
@@ -508,7 +560,8 @@ def guard_question(system, question, examples=None, *, max_error=None, max_risk=
     see it — the head that answers is fitted on all of them, so the promise is then approximate). False removes the
     question's guarantee.
     signal: "confidence" (default — the answer's confidence), "act" (the act probability of the model decision that
-    answers it), a fact name (any number the catalog computes or the input gives), or a function (result, facts) →
+    answers it), "extra:<path>" (a number the answer's decision recorded in its extra, a dotted path: e.g.
+    "extra:systemone.confidence", a System One service's own confidence), a fact name (any number the catalog computes or the input gives), or a function (result, facts) →
     number. answer: one-sided — the question answers this alone when its signal (default: the answer's probability,
     P(answer)) ≥ the threshold, whatever the most probable answer is, and abstains otherwise ("return the query when
     P(right) ≥ 0.43"). correct: a function (result, label) → bool for answers judged otherwise than by equality (a quote
@@ -523,6 +576,12 @@ def guard_question(system, question, examples=None, *, max_error=None, max_risk=
     The other arguments, the methods and their promises: calibrate() and the module docstring.
     → the calibration report ({"threshold", "n", "answered", "error", "risk", "support", "separation", "promise", ...};
     for an attached promise, its report).
+    label_check (default False, opt-in; it reads the answers already computed, no extra call): the report's "label_issues" —
+    the examples whose label the answer's probabilities confidently contradict (solvi.core.calibration.label_issues;
+    ids are the examples' positions, the appended corrections= included) — and a line in "warnings" when there are any;
+    every label is still used. It needs out-of-sample probabilities: a fast head fitted on these examples has seen the
+    labels it is asked to contradict, so without folds= a FastHead question gets a warning to pass folds=k (each example
+    is then scored by a head fitted without it).
 
     Every call is logged in `system.guard_history`, in order: {"question", "time" (seconds since the epoch), "outcome"
     ("installed", "failed" or "removed"), "replaced" (a guarantee was in force before the call), "method", "n",
@@ -543,7 +602,8 @@ def guard_question(system, question, examples=None, *, max_error=None, max_risk=
         rep = _guard_question(system, question, examples, max_error=max_error, max_risk=max_risk, method=method,
                               delta=delta, signal=signal, answer=answer, groups=groups, min_group=min_group,
                               min_support=min_support, correct=correct, folds=folds, seed=seed, weak=weak,
-                              promise=promise, corrections=corrections, sources=sources, procedure=procedure)
+                              promise=promise, corrections=corrections, sources=sources, procedure=procedure,
+                              label_check=label_check, workers=workers, progress=progress, warn_small=warn_small)
     except Exception as e:
         old, added, q = before
         if q is not None:
@@ -566,8 +626,22 @@ def guard_question(system, question, examples=None, *, max_error=None, max_risk=
     return rep
 
 
+def _label_row(q, r, y):
+    """One calibration example for the label check: (the answer's probabilities keyed like normalized answers, the
+    normalized label) — None where it cannot be checked (no probabilities, a forced answer, several right answers)."""
+    from ..catalog import label_options
+    opts = label_options(y)
+    if r.status == "forced" or not getattr(r, "probs", None) or len(opts) != 1:
+        return None, None
+    try:
+        return {q.answer.normalize(k): float(v) for k, v in r.probs.items()}, q.answer.normalize(opts[0])
+    except (ValueError, TypeError):
+        return None, None
+
+
 def _guard_question(system, question, examples, *, max_error, max_risk, method, delta, signal, answer, groups,
-                    min_group, min_support, correct, folds, seed, weak, promise, corrections, sources, procedure="bonferroni"):
+                    min_group, min_support, correct, folds, seed, weak, promise, corrections, sources, procedure="bonferroni",
+                    label_check=False, workers=None, progress=None, warn_small=True):
     """guard_question without the log."""
     if examples is False:
         old = system.guards.pop(question, None)
@@ -576,6 +650,11 @@ def _guard_question(system, question, examples, *, max_error, max_risk, method, 
         return None
     if question not in system.questions:
         raise ValueError(f"no question {question!r} in the system")
+    if examples is not None and warn_small:
+        n_ex = len(examples) if hasattr(examples, "__len__") else None
+        if n_ex is not None and 0 < n_ex < 100:
+            warnings.warn(f"calibrating on {n_ex} examples: the threshold rests on them and can move with a "
+                          "few more (100 or more recommended)", GuaranteeWarning, stacklevel=3)
     if answer is not None:
         answer = system.questions[question].answer.normalize(answer)
     old = system.guards.pop(question, None)
@@ -592,7 +671,9 @@ def _guard_question(system, question, examples, *, max_error, max_risk, method, 
         if examples is None:
             raise ValueError("give labelled examples [(init_state, correct answer)] to calibrate on, or promise=")
         try:
-            sig, ok, grp, lost = _calibration_rows(system, question, examples, guard, correct, folds, seed)
+            rows = [] if label_check else None
+            sig, ok, grp, lost = _calibration_rows(system, question, examples, guard, correct, folds, seed, rows,
+                                                   workers=workers, progress=progress)
             with warnings.catch_warnings(record=True) as caught:
                 warnings.simplefilter("always")
                 promise = calibrate(sig, ok, max_error=max_error, max_risk=max_risk, method=method, delta=delta,
@@ -601,6 +682,12 @@ def _guard_question(system, question, examples, *, max_error, max_risk, method, 
         except BaseException:
             _drop_checkpoints(system, guard)
             raise
+        esc = sum(1 for s_ in sig if s_ == -math.inf)
+        if sig and esc / len(sig) > 0.20:
+            msg = (f"{esc} of {len(sig)} calibration examples escalate (abstain or unreadable): the threshold rests "
+                   f"on {len(sig) - esc} answers — check the examples or the model")
+            promise.report["warnings"].append(msg)
+            warnings.warn(msg, GuaranteeWarning, stacklevel=2)
         for c in caught:
             warnings.warn(c.message, c.category, stacklevel=2)
         if lost:
@@ -611,6 +698,18 @@ def _guard_question(system, question, examples, *, max_error, max_risk, method, 
                 raise ValueError(msg + " — most of them: check signal=")
             promise.report["warnings"].append(msg)
             warnings.warn(msg, GuaranteeWarning, stacklevel=2)
+        if rows is not None:                       # confident learning on the labels: reported, never applied
+            from ..calibration import label_issues, label_warning
+            issues = label_issues([p for p, _ in rows], [y for _, y in rows])
+            promise.report["label_issues"] = issues
+            lw = label_warning(issues, len(sig))
+            if lw:
+                promise.report["warnings"].append(lw)
+            from ..deciders.heads import FastHead
+            if not folds and isinstance(system.heads.get(question), FastHead):
+                promise.report["warnings"].append(
+                    "the label check ran on in-sample probabilities (a fast head fitted on these examples has seen their "
+                    "labels, so it lists fewer issues): pass folds=k to score each example by a head fitted without it")
         if groups is not None:
             promise.by = "answer" if groups == "answer" else guard._by.label()
         if folds:
@@ -754,5 +853,128 @@ def _plain(d):
     return d
 
 
-__all__ = ["GuaranteeWarning", "Promise", "QuestionGuard", "apply_guards", "calibrate", "guard_question", "promise_text",
-           "replay_guard", "separation"]
+# ------------------------------------------------------------------------------------------------ as a file
+GUARANTEE_FORMAT = "solvi guarantee v1"
+
+
+def _keyed(d):
+    """{group path (a tuple): info} → [[path as a list, info]] (JSON has no tuple keys); other values as they are."""
+    return [[list(k), v] for k, v in d.items()] if isinstance(d, dict) else d
+
+
+def _unkeyed(d):
+    return {tuple(k): dict(v) for k, v in d} if isinstance(d, list) else d
+
+
+def _answer_data(q):
+    from ..schema import dump
+    return dump(q.answer, "json") if q.answer is not None else None
+
+
+def guarantee_record(system, question):
+    """The guarantee in force on a question as JSON-ready data: the Promise (method, level, delta, thresholds per group,
+    report), how the guard reads its signal, which answer it lets through and its groups, and what it was calibrated
+    for — the catalog's fingerprint, the models' fingerprints (System.fingerprint()["models"]: each model-backed
+    part's model and its question as asked, the prompt), the question's answer type and the guard's own fingerprint
+    (what every gated decision records)."""
+    from ..calibfile import _norm
+    guard = system.guards.get(question)
+    if guard is None:
+        raise KeyError(f"no guarantee on {question!r}: calibrate one first (System.guarantee)")
+    p = guard.promise
+    if type(p) is not Promise:
+        raise ValueError(f"the guarantee on {question!r} is a {type(p).__name__}, not a calibrated Promise: only a "
+                         "Promise is saved")
+    rep = dict(p.report)
+    if isinstance(rep.get("groups"), dict):
+        rep["groups"] = _keyed(rep["groups"])
+    fn_signal, fn_groups = callable(guard.signal), callable(guard.groups)
+    from ... import __version__
+    return _norm({"format": GUARANTEE_FORMAT, "question": question, "answer_type": _answer_data(system.questions[question]),
+                  "catalog": system.fingerprint()["catalog"], "models": system.fingerprint()["models"],
+                  "guard": guard.fingerprint(),
+                  "signal": None if fn_signal else guard.signal, "signal_function": fn_signal,
+                  "answer": guard.answer, "groups": None if fn_groups else guard.groups, "groups_function": fn_groups,
+                  "promise": {"method": p.method, "level": p.level, "delta": p.delta, "threshold": p.threshold,
+                              "nodes": _keyed(p.nodes), "by": p.by, "report": rep, "why": p.why,
+                              "min_group": p.min_group, "signal": p.signal, "procedure": p.procedure},
+                  "solvi": __version__})
+
+
+def save_guarantee(system, question, path):
+    """Write the guarantee in force on a question to a JSON file (System.save_guarantee) → path."""
+    import json
+    from ..calibfile import _enc
+    rec = guarantee_record(system, question)
+    with open(path, "w", encoding="utf-8") as fh:
+        json.dump(_enc(rec), fh, ensure_ascii=False, indent=1, allow_nan=False)
+        fh.write("\n")
+    return path
+
+
+def load_guarantee(system, path, *, signal=None, groups=None, strict=True):
+    """Attach a guarantee saved by save_guarantee (System.load_guarantee) → its report. The guard it rebuilds must have the
+    saved fingerprint — the same promise, signal, answer and groups — so stored decisions replay against it as against
+    the one calibrated; a signal or grouping that was a function is passed again (`signal=`, `groups=`; its code is
+    fingerprinted and must match; for a saved fact or keyword, `signal=` / `groups=` raise). The fingerprints catch a file
+    that does not fit (another catalog, an edit that changes the promise inconsistently), not a deliberate forgery that
+    recomputes them: keep the file like code. strict (default): refuse a file made for another catalog (the signal is computed by
+    the catalog's code), for other models (another model, endpoint or reply settings, or a decision asked with other
+    words — what the models' fingerprints cover; a model that names no version is compared by its name and settings,
+    so a server that changes the weights behind the name is not told apart; a file without the models' fingerprints
+    is refused) or for another answer type of the question; strict=False attaches it anyway (the guard's fingerprint is
+    still checked)."""
+    import json
+    from ..calibfile import _dec
+    with open(path, encoding="utf-8") as fh:
+        rec = _dec(json.load(fh))
+    if rec.get("format") != GUARANTEE_FORMAT:
+        raise ValueError(f"{path}: not a solvi guarantee file (format {rec.get('format')!r}, expected {GUARANTEE_FORMAT!r})")
+    q = rec["question"]
+    if q not in system.questions:
+        raise ValueError(f"{path}: a guarantee on {q!r}, which this system does not ask")
+    if strict:
+        if rec.get("answer_type") != json.loads(json.dumps(_answer_data(system.questions[q]), default=str)):
+            raise ValueError(f"{path}: made for another answer type of {q!r} ({rec.get('answer_type')})")
+        fp = system.fingerprint()["catalog"]
+        if rec.get("catalog") != fp:
+            raise ValueError(f"{path}: calibrated on catalog #{rec.get('catalog')}, this system's catalog is #{fp}: the "
+                             "parts that compute the answer or its signal changed — calibrate again (System.guarantee), "
+                             "or load with strict=False")
+        if not isinstance(rec.get("models"), dict):
+            raise ValueError(f"{path}: the file names no models it was calibrated with (\"models\") — calibrate "
+                             "again and save (System.save_guarantee), or load with strict=False")
+        now = json.loads(json.dumps(system.fingerprint()["models"], default=str))
+        if rec["models"] != now:
+            diff = sorted(k for k in set(rec["models"]) | set(now) if rec["models"].get(k) != now.get(k))
+            raise ValueError(f"{path}: calibrated with other models than this system's — {', '.join(diff)} "
+                             "differ (the model, its endpoint or reply settings, or the question asked): calibrate "
+                             "again (System.guarantee), or load with strict=False")
+    for given, saved, what in ((signal, rec.get("signal_function"), "signal"), (groups, rec.get("groups_function"), "groups")):
+        if saved and given is None:
+            raise ValueError(f"{path}: the guarantee's {what} was a function: pass it again ({what}=that_function)")
+        if given is not None and not saved:
+            raise ValueError(f"{path}: the guarantee's {what} is {rec.get(what)!r}, not a function: {what}= is only for a "
+                             f"{what} that was a function")
+    sig = signal if rec.get("signal_function") else rec.get("signal")
+    grp = groups if rec.get("groups_function") else rec.get("groups")
+    pr = rec["promise"]
+    rep = dict(pr["report"])
+    if isinstance(rep.get("groups"), list):
+        rep["groups"] = _unkeyed(rep["groups"])
+    promise = Promise(pr["method"], pr["level"], pr["delta"], pr["threshold"], _unkeyed(pr["nodes"]), pr["by"], rep,
+                      pr["why"], pr["min_group"], pr["signal"], pr.get("procedure", "bonferroni"))
+    if isinstance(grp, list):
+        grp = list(grp)
+    answer = rec.get("answer")
+    if answer is not None:
+        answer = system.questions[q].answer.normalize(answer)
+    guard = QuestionGuard(q, promise, sig, answer, grp)
+    if guard.fingerprint() != rec.get("guard"):
+        raise ValueError(f"{path}: the rebuilt guarantee is #{guard.fingerprint()}, the saved one #{rec.get('guard')}: "
+                         "its signal, answer or groups differ (a function passed again must be the same code)")
+    return guard_question(system, q, None, promise=promise, signal=sig, answer=answer, groups=grp)
+
+
+__all__ = ["GuaranteeWarning", "Promise", "QuestionGuard", "apply_guards", "calibrate", "guard_question", "guarantee_record",
+           "load_guarantee", "promise_text", "replay_guard", "save_guarantee", "separation"]

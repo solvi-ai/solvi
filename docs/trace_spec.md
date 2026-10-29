@@ -24,8 +24,10 @@ machine-readable schema of a record is `src/solvi/core/store/record.schema.json`
   result's `extra["no_data"]` and a response check's optional `missing` — a minor version: a 2.0.0 reader may ignore
   them, and the hash body does not change; `x-schema-changes` lists each version). Records of kinds `ask`, `teach`,
   `redaction` and `segment` are closed: a new field is a new schema version (minor when readers may ignore it, major
-  when the hash body changes). Other kinds (`knowledge`, `dispatch`, `policy`, `refine`, `update`, `change`, `specialist`) are checked for the
-  envelope only. [test_sem_record_schema]
+  when the hash body changes). Other kinds (`knowledge`, `dispatch`, `policy`, `refine`, `update`, `change`, `specialist`,
+  `process` — the index of one run, or one segment of a run, of `solvi.experimental.process`; `human` — a person's
+  answer to one of its questions) are checked for the envelope only.
+  [test_sem_record_schema]
 - Formats only go up along a chain: a record of format 1 after a record of format 2 is a verify problem. [test_sem_chain]
 
 ### The envelope (every kind)
@@ -96,6 +98,97 @@ kind, name, inputs, the value's hash, quote, error, prev, and the optional field
 - The store keeps a **head** `{"count", "hash"}` next to the records (`<file>.head` for JSONL; a table for SQL).
 - The order in which a record's keys are written is not part of its hash: a record is written with its dicts in their
   own order (a decider read them in that order), and verify does not depend on it. [test_the_order_keys_are_written_in_is_not_damage]
+
+### Canonical form
+
+The bytes a record hash is taken over, exactly, for a port that recomputes hashes without Python. It describes formats 1
+and 2 as solvi writes them today (`solvi.core.store._cj`); it is not RFC 8785 (JCS) — the differences are listed below.
+A move to JCS would be a format 3 and is not decided.
+
+**Recipe.** For a stored record `r`:
+
+1. `v = r.v` (missing or null: 1). Format 1: `body = r` without `id` and `hash`. Format 2: `body` = the fields of `KEPT`
+   that `r` has, plus `"#answers"` and `"#content"` (§3 above): when `r.redacted` is an object that has `answers` /
+   `content`, those strings; otherwise `"#answers" = D(r.answers)` (`D(null)` when there are none) and
+   `"#content" = D(r without KEPT, answers, id, hash, redacted)`.
+2. `hash = D(body)`, where `D(x)` is the lowercase hex SHA-256 of the UTF-8 bytes of `C(x)`, the canonical text below.
+   `id` is the first 16 hex digits. `prev` is part of the body: the previous record's `hash`, `""` for the first.
+
+**C(x), the canonical text.** `json.dumps(x, ensure_ascii=False, sort_keys=True, separators=(",", ":"))` of Python 3:
+
+- *Whitespace*: none. Separators are `,` and `:`.
+- *Objects*: members sorted by key, comparing keys as sequences of **Unicode code points** (Python's `str` order), at
+  every level. Arrays keep their order. A key that is not a string in the writer's data is turned into its JSON string
+  first (see "Non-string keys"), so the order is always that of the strings a reader sees.
+- *Strings*: `"`, then each character as itself except: `"` → `\"`, `\` → `\\`, U+0008 → `\b`, U+0009 → `\t`, U+000A →
+  `\n`, U+000C → `\f`, U+000D → `\r`, any other character below U+0020 → `\u00XX` with **lowercase** hex (`\u001f`).
+  Nothing else is escaped: not `/`, not U+007F, not U+2028 / U+2029, not non-ASCII. The text is encoded as UTF-8. A
+  lone surrogate (U+D800–U+DFFF) has no UTF-8 form: hashing it raises, so no stored record holds one.
+- *Literals*: `true`, `false`, `null`.
+- *Integers* (a JSON number written without `.`, `e` or `E`): full decimal, any size (`18446744073709551616` stays
+  as it is: no 2^53 limit), `-` for negatives, never an exponent. `1` and `1.0` are different values and different text.
+- *Floats* (a JSON number written with `.`, `e` or `E`, as a 64-bit IEEE double): Python's `repr(float)`. Take the
+  shortest decimal digit string `d1 d2 … dn` (no trailing zeros) that reads back as the same double (round-to-nearest;
+  this is what Ryu, Grisu-with-fallback or `Number.prototype.toString` produce as digits), and its exponent `E` with
+  value = `d1.d2…dn × 10^E`.
+  - If `-4 ≤ E < 16`: positional notation with at least one digit on each side of the point: `0.1`, `0.0001`, `100.0`,
+    `1000000000000000.0`, `0.30000000000000004`.
+  - Otherwise: `d1`, then `.d2…dn` only if `n > 1`, then `e`, the sign `+` or `-` (always), and `|E|` with at least two
+    digits: `1e-05`, `1e-06`, `1e+16`, `1.2345678901234568e+17`, `5e-324`, `1.7976931348623157e+308`.
+  - `-0.0` is written `-0.0`, a negative subnormal as `-1e-320`.
+- *Non-finite floats*: solvi does not write them. Since 0.7 a non-finite float in a decision is stored as
+  `{"$float": "inf" | "-inf" | "nan"}`, and the writer refuses any record that still holds one (`ValueError`, nothing
+  appended). Records written before 0.7 may hold them; they hash with the tokens `NaN`, `Infinity`, `-Infinity` (not
+  JSON: the stored line holds the same tokens, so the reader must accept them for those records).
+
+**Reading a stored record to recompute its hash.** The stored line is written by the same encoder without key sorting
+(`json.dumps(r, ensure_ascii=False, allow_nan=False)`, separators `", "` and `": "`), so every number in it is already
+spelled canonically. A port may keep each number's text as it appears and only re-sort keys, drop spaces and re-escape
+strings; if it parses numbers, it must keep integers apart from floats (by the `.` / `e` / `E` rule above) and print
+floats by the rule above.
+
+**Differences from RFC 8785 (JCS).** Under JCS the same value gives other bytes here:
+
+| | solvi (formats 1, 2) | RFC 8785 |
+|---|---|---|
+| float spelling | Python `repr`: exponent below 1e-4 and from 1e16, sign and two digits (`1e-06`, `1e+16`) | ECMAScript: exponent below 1e-6 and from 1e21 (`0.000001`, `1e-7`, `10000000000000000`, `1e+21`) |
+| integral floats | `100.0`, `1.0` (integer and float differ) | `100`, `1` (one number type) |
+| negative zero | `-0.0` | `0` |
+| integers | any size, exact | IEEE doubles: `9007199254740993` cannot be represented, `10**30` is `1e+30` |
+| key order | Unicode code points | UTF-16 code units: a key with a character above U+FFFF sorts before one with U+E000–U+FFFF (`"😀"` < `"￿"` under JCS, after it here) |
+| NaN, Infinity | tokens, in records before 0.7 only | an error |
+| lone surrogates | an error | an error |
+| string escapes, U+2028 / U+2029, `/`, U+007F, separators, UTF-8 | the same | the same |
+
+**Non-string keys** (solvi 1.4.0 and later). Before sorting, `C` turns every dict key that is not a string into the
+string `json.dumps` writes for it: an int by its decimal form, a float by the float rule above (`NaN`, `Infinity`,
+`-Infinity` as those words), `True` / `False` / `None` as `true` / `false` / `null`; any other key type is an error.
+Keys are then sorted as strings: `{2: "a", 10: "b"}` gives `{"10":"b","2":"a"}`, the text of the same dict read back
+from JSON. Two keys that become one string (`{1: "a", "1": "b"}`) are refused (`ValueError`, nothing appended):
+`json.dumps` would write both and the stored record would not read back as it was hashed. For a port this changes
+nothing: a stored record's keys are strings. Before 1.4.0 the keys were sorted in their own type's order before being
+turned into strings, and a body with non-string keys whose number order differs from their string order (written by a
+module that passed data to `_append` without a JSON round trip) got a hash its stored text does not recompute: such
+records still fail `verify()`. Records with string keys only — every record read from a store — hash exactly as before.
+[test_every_fixture_store_verifies_as_it_did_with_the_old_canonical_json]
+
+**The signature's variant** (`solvi.core.store.signature`, §8) takes the same `C` with `default=repr`: a value that is
+not JSON data becomes the string of its `repr`. A stored record is JSON data, so this never applies to it; for other
+items passed to `sign()` a value and the string of its repr give the same digest.
+
+**Value hashes are another text.** A step's hash and `init_hash` (`vhash`) hash `json.dumps(c, ensure_ascii=False,
+sort_keys=True)` of the value's canonical form `c` (floats rounded to 9 digits, sets sorted, objects by class): with
+the default separators `", "` and `": "`, and only the first 16 hex digits. A port that re-checks a stored record's
+chain does not need it (the record carries the step hashes as strings); one that replays steps does.
+
+**Test vectors.** `tests/fixtures/canonical_json/vectors.json` (made by `make.py` next to it): each vector has `input`
+(JSON text; numbers with `.`, `e` or `E` are floats, written in another spelling than the canonical one where it can
+be, `source` naming the float), `canonical` (the expected text) and `sha256` (of its UTF-8 bytes). Kind `value`:
+`C(input)`. Kind `record`: `input` is a stored line, `canonical` is `C(body)` by the recipe and `sha256` is its `hash`
+(one format 1 record, one format 2). Kind `chain`: two consecutive stored lines; the second's `prev` is the first's
+hash and its own hash recomputes. A port passes when it produces `canonical` byte for byte and the same `sha256` for
+every vector; the legacy NaN vector applies only to a port that reads records written before 0.7.
+[tests/test_canonical_json_vectors.py]
 
 ## 4. What `verify()` guarantees
 
@@ -179,6 +272,39 @@ proposer — `Replay.from_record` is then False and `Replay.note` says so; such 
 proposer repeats itself. [tests/test_specialist_replay_record.py: a nondeterministic proposer's stored runs replay byte
 for byte without a call; `check_specialist` fails a specialist whose replay calls the proposer] On the charts
 benchmark's 50 texts with an LLM proposer every stored run replays byte for byte from its record (50 of 50).
+
+### Process runs (kinds `process` and `human`): the run record, candidate for freezing
+
+The format of a run of `solvi.experimental.process` as it stands at stage 2 — **the candidate to freeze before stage 0
+of the Rust core** (the spec, these two records and the replay walk are data and pure functions; nothing in them calls
+the host). Both kinds are envelope-only in `record.schema.json`; both carry `"run": {"id", "parent"}` in the hash.
+
+- `process` (one per segment of a run, in the process's store): `process` (name), `spec_hash` (the spec's hash),
+  `input_hash` (vhash of the given facts), `mode` and `promise` (the spec's promise record), `path` — per step
+  `{node, kind, store, stored_id, trace_hash, by, status, answers_hash, facts_in_hash, facts_out_hash, knowledge,
+  cost, edge: {to, when, loop} | null}` (+ `ticket`, `handoff` on a step of kind `human`) — `outcome: {status, at,
+  answer_hash}` (`decided` | `abstain` | `pending` | `cancelled`), `continues` (the id of the pending segment this one
+  goes on from; null for the first). A pending segment adds `ticket`, `channel` ({channel, fingerprint}), `asking`
+  (the request: process, run, node, question, reason, facts, provenance, path, answer, deadline, asked_at) and
+  `resume` (node, reason, facts, provenance, taken, state — the one record that keeps fact values). Its `run.parent`
+  is the run's last decision before it.
+- `human` (in the process's store): `process`, `ticket`, `node`, `question`, `reason`, `value`, `declined`,
+  `reviewer`, `note`, `verified`, `asked_at`, `answered_at`, `request_hash` (vhash of the request), `channel`; its
+  `run.parent` is the pending segment (or the decision before it when answered at once). A withdrawal is a `human`
+  record `{ticket, node, question, reason, cancelled: true, why, channel}` followed by a segment `cancelled`.
+- Replay (`Process.replay(run)`) walks the segments by `continues` and each path in order: (1) `record` — the node's
+  record is in its store, intact, of this run, after the decision before it, and agrees with the step; (2)
+  `trace_hash`; (3) `replay` — the node's decision re-checked by its own means (Dispatcher.replay, Trace.replay,
+  Guard.replay); (4) `facts` — the facts given are those the recorded answers upstream and the input give (in the
+  step and in the node's own record), the facts written are its recorded answers; (5) `edge` — the first edge whose
+  predicate holds on the recorded answers is the recorded one; (6) `promise` — the `end_to_end` decision rule (not
+  checked until stage 4). A person's answer is a leaf, recorded and not recomputed: its record is intact, of this
+  run, after the pending segment, the ticket's only record, through the same channel, to the request asked
+  (`request_hash`). A pending run replays to `{"ok": true, "pending": ticket}`. The first divergence is reported as
+  `{"node", "step", "segment", "position"}` with a kind `integrity` | `recompute` | `missing_part`. What the records
+  do not keep is listed under `unchecked` (a guard's tool result is stored as its hash).
+  [tests/test_experimental_process_replay.py: one tamper of a node record, an edge, a passed fact or a `human`
+  record names exactly that node, 100 of 100 seeded tampers]
 
 ## 6. Provenance kinds and statuses
 

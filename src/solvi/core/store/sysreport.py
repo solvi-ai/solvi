@@ -27,7 +27,12 @@ What it shows, per question, from the records the library already writes:
   are the system's own answers. Labels that are not a random sample (people correct what looks wrong) overstate the
   error: the report says how many decisions are labelled. A dispatcher with `audit=` marks a random share of its
   decisions for labelling; their "audit" labels are measured apart, as the audited sample, next to every promise — the
-  unbiased reading of it;
+  unbiased reading of it. Every observed error and risk on labels carries its Wilson 95 % interval ("error_wilson95",
+  "risk_wilson95"): Wilson 95 % on the random-audit sample is a reading at one time, not a running bound;
+- how often a person was wrong: a decision with a person's label ("human" or "audit") given before its first outcome
+  label ("outcome") gives a pair; `corrections["people"]` counts the pairs where they differ, with a two-sided
+  Clopper–Pearson interval, per person (`by`) and per question; a person label given only after the outcome is
+  counted apart (`after_outcome`), not judged;
 - drift: the flags the decisions recorded (an open-set gate's change point, the dispatcher's drift flag) and a
   `DriftMonitor` run over the period's decisions in order (`drift_window=`; None: not run), with the first decision at
   which it flagged and why.
@@ -37,6 +42,7 @@ recorded after the period still label its decisions."""
 from __future__ import annotations
 
 import datetime
+import math
 from dataclasses import dataclass, field
 
 from . import AUDIT, VERIFIED, _cj, _when, akey, view
@@ -94,13 +100,31 @@ def _verdict(measured, level, wrong, n):
         f"above the promised level on these labels, not significantly (p = {p:.2g})"
 
 
+def wilson(k, n, confidence=0.95):
+    """The Wilson score interval of a share with k of n → (low, high); None when n is 0.
+
+    centre (k + z²/2) / (n + z²), half-width z / (n + z²) · √(k (n − k) / n + z²/4), z the two-sided normal quantile."""
+    if n == 0:
+        return None
+    from statistics import NormalDist
+    z = NormalDist().inv_cdf(1 - (1 - confidence) / 2)
+    z2 = z * z
+    centre = (k + z2 / 2) / (n + z2)
+    half = z / (n + z2) * math.sqrt(k * (n - k) / n + z2 / 4)
+    return max(0.0, centre - half), min(1.0, centre + half)
+
+
 def _labels_block(rows, level=None, measure="error"):
-    """rows: [(alone: bool, wrong: bool | None)] of labelled decisions → counts and, against a promise, the verdict."""
+    """rows: [(alone: bool, wrong: bool | None)] of labelled decisions → counts and, against a promise, the verdict.
+    "error_wilson95" / "risk_wilson95": the Wilson 95 % interval of "error" / "risk" as [low, high] (None with no rows)."""
     n = len(rows)
     alone = [w for a, w in rows if a]
     wrong = sum(bool(w) for w in alone)
     out = {"labelled": n, "alone": len(alone), "wrong_alone": wrong,
            "error": wrong / len(alone) if alone else None, "risk": wrong / n if n else None}
+    for key, m in (("error_wilson95", len(alone)), ("risk_wilson95", n)):
+        ci = wilson(wrong, m)
+        out[key] = list(ci) if ci else None
     if level is not None:
         m = out[measure]
         out.update(measure=measure, level=level, verdict=_verdict(m, level, wrong, len(alone) if measure == "error" else n))
@@ -140,7 +164,7 @@ def system_report(store, since=None, until=None, *, question=None, price=None, d
 
     def within(t):
         return (t0 is None or t >= t0) and (t1 is None or t < t1)
-    asks, disp, policies, teach, erased, loops, specialists = [], [], {}, [], 0, [], {}
+    asks, disp, policies, teach, erased, loops, specialists, streams = [], [], {}, [], 0, [], {}, []
     for s in store.iter(None, redacted=True):
         d = s.data
         if s.kind == "teach":
@@ -155,6 +179,8 @@ def system_report(store, since=None, until=None, *, question=None, price=None, d
             asks.append(s)
         elif s.kind == "dispatch" and (question is None or d.get("question") == question):
             disp.append(s)
+        elif s.kind == "stream" and (question is None or (d.get("stream") or {}).get("question") == question):
+            streams.append(d.get("stream") or {})
         elif s.kind == "refine" and (question is None or d.get("question") == question):
             loops.append(s)
         elif s.kind == "specialist":                  # a specialist's run (solvi.core.specialist): counted by name
@@ -171,6 +197,7 @@ def system_report(store, since=None, until=None, *, question=None, price=None, d
         by_init.setdefault(_cj(untag_floats(init)), []).append(s)
     labels, sources, unmatched, in_period = {}, {}, 0, 0
     audited = {}                                  # (decision id, question) → the answer of its audit label
+    pairs = {}                                    # (decision id, question) → every label of it, in order
     for c in teach:
         d = c.data
         src = d.get("source", "human")
@@ -185,13 +212,16 @@ def system_report(store, since=None, until=None, *, question=None, price=None, d
             unmatched += 1
             continue
         key = (target.id, q)
+        if question is None or q == question:
+            pairs.setdefault(key, []).append((src, akey(store._answer_key(q, untag_floats(d.get("answer")))), d.get("by"),
+                                              c.seq))
         if src == VERIFIED and key in labels and labels[key][0] != VERIFIED:
             continue                              # a label from outside the system stays over a vouched System 2 answer
         labels[key] = (src, akey(store._answer_key(q, untag_floats(d.get("answer")))))
         if src == AUDIT:
             audited[key] = labels[key]
     s1, cost1 = _system1(asks, labels, question, price, drift_window, monitor)
-    dp, cost2 = _dispatch(disp, labels, policies, audited)
+    dp, cost2 = _dispatch(disp, labels, policies, audited, streams)
     times = [s.time for s in asks + disp]
     catalogs, models, experimental = {}, {}, {}
     for s in asks:
@@ -223,8 +253,59 @@ def system_report(store, since=None, until=None, *, question=None, price=None, d
         system1=s1, dispatch=dp, cost={"system1": cost1, "dispatch": cost2, **({"refine": _refine(loops, price)} if loops
                                                                               else {})},
         corrections={"total": len(teach), "in_period": in_period, "by_source": sources,
-                     "labelled_decisions": len(labels), "unmatched": unmatched},
+                     "labelled_decisions": len(labels), "unmatched": unmatched, "people": _people(pairs)},
         notes=notes)
+
+
+PERSON = ("human", AUDIT)          # labels a person gave (a correction, an audit of a drawn decision)
+TRUTH = ("outcome",)               # what really happened: the reference a person's answer is judged by
+
+
+def clopper_pearson(k, n, confidence=0.95):
+    """The two-sided Clopper–Pearson interval of a share with k of n → (low, high); (0, 1) when n is 0."""
+    from scipy.stats import beta
+    if n == 0:
+        return 0.0, 1.0
+    a = 1 - confidence
+    lo = 0.0 if k == 0 else float(beta.ppf(a / 2, k, n - k + 1))
+    hi = 1.0 if k == n else float(beta.ppf(1 - a / 2, k + 1, n - k))
+    return lo, hi
+
+
+def _rate(rows, confidence):
+    n, k = len(rows), sum(rows)
+    lo, hi = clopper_pearson(k, n, confidence)
+    return {"paired": n, "wrong": k, "error": k / n if n else None, "interval": [lo, hi]}
+
+
+def _people(pairs, confidence=0.95):
+    """How often a person was wrong: every decision (and question) with a person's label ("human" or "audit") given
+    before its first outcome label ("outcome") — the person's last answer before that outcome against the last outcome.
+    A person label given after the outcome was known is not a judgement (a correction made knowing the answer): a
+    decision with only such labels is counted in "after_outcome", not paired. → {"paired", "wrong", "error", "interval"
+    (two-sided Clopper–Pearson at `confidence`), "confidence", "after_outcome", "by" ({who: the same}), "by_question",
+    "rule"}."""
+    rows, by, by_q, after = [], {}, {}, 0
+    for (_, q), labs in pairs.items():
+        truth = [x for x in labs if x[0] in TRUTH]
+        if not truth:
+            continue
+        first = min(x[3] for x in truth)
+        person = [x for x in labs if x[0] in PERSON and x[3] < first]
+        if not person:
+            after += any(x[0] in PERSON for x in labs)
+            continue
+        wrong = person[-1][1] != truth[-1][1]
+        rows.append(wrong)
+        by.setdefault(person[-1][2] or "unnamed", []).append(wrong)
+        by_q.setdefault(q, []).append(wrong)
+    out = {**_rate(rows, confidence), "confidence": confidence, "after_outcome": after,
+           "by": {w: _rate(r, confidence) for w, r in sorted(by.items())},
+           "by_question": {q: _rate(r, confidence) for q, r in sorted(by_q.items())},
+           "rule": "a decision's last person label (source human or audit) given before its first outcome label (source "
+                   "outcome) against its last outcome label, both naming it (of=) or on its input; wrong when they "
+                   "differ; person labels given only after the outcome are counted in after_outcome, not judged"}
+    return out
 
 
 def _who(res, q, recs):
@@ -377,7 +458,28 @@ def _refine(loops, price):
     return out
 
 
-def _dispatch(disp, labels, policies, audited=None):
+def _stream_block(st, p):
+    """One dispatch record's stream fields into the question's stream block (Dispatcher(promise=, audit="adaptive"))."""
+    b = p.setdefault("stream", {"decisions": 0, "sampled": 0, "free": 0, "paid": 0, "missing": 0, "alone": 0,
+                                "alone_covered": 0, "alone_sampled": 0, "alone_wrong": 0, "_ipw": 0.0,
+                                "threshold": None, "v_index": None, "alarms": 0, "events": {}})
+    sam = st.get("sample") or {}
+    b["decisions"] += 1
+    alone, sampled = bool(sam.get("alone")), bool(sam.get("sampled"))
+    thr, score = sam.get("threshold"), sam.get("score")
+    b["alone"] += alone
+    b["alone_covered"] += alone and thr is not None and score is not None and score >= thr
+    if sampled:
+        b["sampled"] += 1
+        b["free"] += bool(sam.get("free"))
+        b["paid"] += not sam.get("free")
+        lab = sam.get("label_source") is not None
+        b["missing"] += not lab
+        return b, alone, lab, float(sam.get("rho") or 1.0)
+    return b, alone, None, None
+
+
+def _dispatch(disp, labels, policies, audited=None, streams=()):
     per_q, total = {}, {"system1": _cost([], 0.0, None), "slow_path": _cost([], 0.0, None)}
     total["system1"]["usd"] = total["slow_path"]["usd"] = 0.0
     for s in disp:
@@ -420,6 +522,15 @@ def _dispatch(disp, labels, policies, audited=None):
             p["policies"][pk]["decisions"] += 1
         else:
             p["uncalibrated"] += 1
+        if d.get("stream"):
+            b, alone, lab, rho = _stream_block(d["stream"], p)
+            cert = d["stream"].get("certificate") or {}
+            b["threshold"], b["v_index"] = cert.get("threshold"), cert.get("v_index")
+            if lab is not None:                      # a sample: its deployed loss (a missing label on an alone answer: a loss)
+                b["alone_sampled"] += alone
+                wrong = alone and (not lab or (d.get("disagreement") or {}).get("s2_accepted", False))
+                b["alone_wrong"] += wrong
+                b["_ipw"] += wrong / rho
         p["_marked"] += bool(d.get("audit"))
         au = (audited or {}).get((s.id, q))
         if au is not None and d.get("audit"):
@@ -438,7 +549,16 @@ def _dispatch(disp, labels, policies, audited=None):
             p["_slices"].setdefault(d.get("slice") or "none (System 1 alone)", []).append(row)
             if pol is not None:
                 p["policies"][pol["policy"].get("fingerprint")]["_labels"].append(row)
+    for e in streams:
+        p = per_q.get(e.get("question"))
+        if p is not None and "stream" in p:
+            ev = p["stream"]["events"]
+            ev[e.get("event")] = ev.get(e.get("event"), 0) + 1
+            p["stream"]["alarms"] += e.get("event") == "alarm"
     for p in per_q.values():
+        if "stream" in p:
+            b = p["stream"]
+            b["risk_ipw"] = b.pop("_ipw") / b["decisions"]
         L = p.pop("_labels")
         p["labels"] = {"all": _labels_block(L["all"]), "by_s1": _labels_block(L["s1"]), "by_s2": _labels_block(L["s2"]),
                        "by_slice": {k: _labels_block(v) for k, v in p.pop("_slices").items()}}
@@ -472,14 +592,18 @@ def _cost_line(c, what="decisions"):
     return s
 
 
+def _wilson_text(ci):
+    return f" [{ci[0]:.1%}, {ci[1]:.1%}] (Wilson 95 %)" if ci else ""
+
+
 def _labels_line(L):
     if not L["labelled"]:
         return "no labelled decisions"
     s = f"{L['labelled']} labelled; answered alone and labelled {L['alone']}, wrong {L['wrong_alone']}"
     if L["error"] is not None:
-        s += f" — error among them {L['error']:.2%}"
+        s += f" — error among them {L['error']:.2%}" + _wilson_text(L.get("error_wilson95"))
     if L["risk"] is not None:
-        s += f", alone and wrong {L['risk']:.2%} of the labelled"
+        s += f", alone and wrong {L['risk']:.2%} of the labelled" + _wilson_text(L.get("risk_wilson95"))
     return s
 
 
@@ -511,6 +635,13 @@ def render(d):
              + (" (" + ", ".join(f"{k} {v}" for k, v in sorted(C["by_source"].items())) + ")" if C["by_source"] else "")
              + f"; {C['labelled_decisions']} label a decision of this period"
              + (f"; {C['unmatched']} name no decision of it" if C["unmatched"] else "") + ".")
+    P = C.get("people") or {}
+    if P.get("paired"):
+        lo, hi = P["interval"]
+        L.append(f"People: wrong on {P['wrong']} of {P['paired']} decision(s) whose outcome is known "
+                 f"({P['error']:.1%}, {P['confidence']:.0%} interval {lo:.1%}–{hi:.1%})"
+                 + ("; " + ", ".join(f"{w} {r['wrong']}/{r['paired']}" for w, r in P["by"].items())
+                    if len(P["by"]) > 1 else "") + ".")
     for q, p in d["system1"].items():
         L += ["", f"Question {q} — System 1, asked {p['asked']} time(s)", "-" * 40]
         L.append(f"  answered alone      {p['alone']} ({_pct(p['alone'], p['asked'])})")
@@ -587,6 +718,17 @@ def render(d):
         for who, key in (("System 1", "by_s1"), ("slow path", "by_s2")):
             if lab[key]["labelled"]:
                 L.append(f"    by {who}: " + _labels_line(lab[key]))
+        if p.get("stream"):
+            b = p["stream"]
+            thr = b["threshold"]
+            L.append(f"  stream certificate  {b['sampled']} of {b['decisions']} decision(s) sampled by the calibration "
+                     f"coin ({b['free']} free: escalated anyway; {b['paid']} extra slow-path call(s); {b['missing']} "
+                     f"without a label, counted as losses); threshold now "
+                     + ("+inf (nothing certified)" if thr is None else f"{thr:.4g}") + f", version index {b['v_index']}"
+                     + f"; alarms {b['alarms']}")
+            L.append(f"    alone answers {b['alone']}, of which covered by the threshold in force {b['alone_covered']}; "
+                     f"sampled alone {b['alone_sampled']}, wrong {b['alone_wrong']}; deployed risk estimated on the "
+                     f"sample (weighted by 1/ρ) {b['risk_ipw']:.4g}")
         if p["first_drift"]:
             f = p["first_drift"]
             L.append(f"  drift flag up on {p['drift_flagged']} decision(s), first at decision {f['n']} ({f['id']}): {f['why']}")

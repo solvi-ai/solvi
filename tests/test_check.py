@@ -525,11 +525,13 @@ def test_names_that_nothing_computes_and_the_input_model_does_not_declare():
                       input_model=inputs)
     rep = lint(build(Inputs))
     got = {(f.code, f.where): f.message for f in rep.warnings}
-    assert set(got) == {("input_not_declared", "amout"), ("uses_unknown", "later")} and rep.ok
+    assert set(got) == {("input_not_declared", "amout"), ("uses_unknown", "later"),
+                        ("unused_given", "amount")} and rep.ok                   # the typo leaves `amount` unread
     assert "left reads amout" in got[("input_not_declared", "amout")] and "extra key" in got[("input_not_declared", "amout")]
     assert "'nope'" in got[("uses_unknown", "later")]
     rep = lint(build(Closed))
-    assert all("forbids extra keys, so it can never be given" in f.message for f in rep.warnings) and len(rep.warnings) == 2
+    named = [f for f in rep.warnings if f.code != "unused_given"]
+    assert all("forbids extra keys, so it can never be given" in f.message for f in named) and len(named) == 2
     assert [f.code for f in lint(build(None)).warnings] == []  # no input model: every such name is a given fact
 
 
