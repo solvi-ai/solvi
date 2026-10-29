@@ -126,3 +126,40 @@ def test_fingerprint_boundary():
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
             s5.load_calibration(p)                                   # the same reads_with: attaches
+
+
+def test_slow_hands_over_on_abstain():
+    """S7: slow= — when the recipe abstains, the answer comes from the slow path (a callable or a System), the
+    response names the hand-over, and the store keeps the recipe's own abstain (verify/replay stay exact)."""
+    import os
+    import tempfile
+    from solvi.core.store import JSONLStorage
+
+    def slow_answer(state):
+        return 42.0
+
+    with tempfile.TemporaryDirectory() as d:
+        st = JSONLStorage(os.path.join(d, "t.jsonl"), record="full")
+
+        class UnknownServer(Server):
+            """Reads "$9,999" — a number not in the text: the read is rejected, the answer abstains."""
+
+            def __call__(self, req, timeout=None):
+                out = super().__call__(req, timeout)
+                body = json.loads(req.data.decode())
+                msg = body["messages"][-1]["content"]
+                field = "a" if "The first number" in msg.split("<text>")[0] else "b"
+                c = json.loads(json.loads(out.read().decode())["choices"][0]["message"]["content"])
+                c["answer"] = "$9,999" if field == "a" else "(1,250)"
+                ch = {"index": 0, "message": {"role": "assistant", "content": json.dumps(c)},
+                      "finish_reason": "stop"}
+                return io.BytesIO(json.dumps({"model": body["model"], "choices": [ch],
+                                              "usage": {"prompt_tokens": 40, "completion_tokens": 9}}).encode())
+
+        recipe = recipe_of(UnknownServer(), slow=slow_answer, storage=st)
+        # an unknown number makes the reads reject → abstain → hand over
+        res = recipe.ask({"doc": doc_of(1), "question": "How many more dollars was the revenue than the cost?"})
+        assert res["answer"].answer == 42.0 and res["answer"].status == "ok"
+        assert res.hand_over["slow"].startswith("the slow callable")
+        assert res.hand_over["recipe_abstained"]       # the abstention's reason (reads rejected the unknown number)
+        assert recipe.replay_all() == []               # the store keeps the recipe's own abstain

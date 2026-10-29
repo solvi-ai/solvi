@@ -311,8 +311,8 @@ def test_experimental_modules_warn_on_import_and_say_their_status():
 # --- (rule 5) the public surfaces are pinned: a name added to or dropped from one is a decision, made here
 SURFACES = {
     "solvi": ["build", "document", "Agent", "Guard", "Knowledge", "Budget", "Catalog", "Question", "Answer", "System", "Response",
-              "Quote", "Claim", "Decision", "Fail", "Unknown", "Span", "Maybe", "Rank", "Estimate", "Scale", "Bins",
-              "SolviDeprecationWarning", "ExperimentalWarning"],          # LAYOUT §1: 24 names
+              "Quote", "Claim", "Decision", "Facts", "Fail", "Unknown", "Span", "Maybe", "Rank", "Estimate", "Scale", "Bins",
+              "SolviDeprecationWarning", "ExperimentalWarning"],          # LAYOUT §1: 25 names ("Facts" in 1.4, the S7 call)
     "solvi.core": ["ExperimentalWarning", "NOT_STATED", "accept", "accepts", "Answer", "AnswerType", "bin_labels",
                    "Catalog", "check_evidence", "Claim", "cuts_number", "Decision", "evidence_rows", "find_quote",
                    "find_whole", "ground", "has_evidence", "locate", "NOT_STATED_KEY", "NotStated", "Part", "plain_json",
@@ -358,7 +358,7 @@ def test_the_public_surfaces_are_the_pinned_ones():
     assert solvi.build.__module__ == "solvi.solutions.decisions" and solvi.Guard.__module__ == "solvi.solutions.guard"
     assert solvi.Agent.__module__ == "solvi.solutions.agent" and solvi.Knowledge.__module__ == "solvi.solutions.knowledge"
     assert solvi.document.__module__ == "solvi.solutions.document"
-    assert len(solvi.__all__) == 24
+    assert len(solvi.__all__) == 25   # "Facts" joined in 1.4 (the author's S7 call)
 
 
 # --- (rule 6) the 1.0 shims resolve: every 0.9 module path and every name solvi no longer exports reach the same object,

@@ -472,11 +472,12 @@ class DocumentSystem:
     reads go to), text (the text fact's name), fields (field names in order), checks (check names), calibration (the
     last calibration report, or None)."""
 
-    def __init__(self, system, schema, model, text, fields, checks):
+    def __init__(self, system, schema, model, text, fields, checks, slow=None):
         self.system, self.schema, self.model, self.text = system, schema, model, text
         self.fields, self.checks = list(fields), list(checks)
         self.catalog = system.catalog
         self.question = QUESTION
+        self.slow = slow
         self.calibration = None
 
     def given(self, state):
@@ -493,8 +494,41 @@ class DocumentSystem:
 
     def ask(self, state, **kw):
         """One input → a solvi.Response: `res["answer"]` (answer, status "ok" / "abstain", confidence, why),
-        `res.stored_id` when storage= was given. Keyword options go to System.ask."""
-        return self.system.ask(self.given(state), [QUESTION], **kw)
+        `res.stored_id` when storage= was given. Keyword options go to System.ask. When the recipe abstains and
+        `slow=` was given, the answer comes from the slow path (a System: its first non-abstaining answer; a
+        callable state → answer): the returned response then carries it (`res.hand_over` names the abstention
+        reason and the slow path), while the store keeps the recipe's own abstain — verify and replay stay exact;
+        give the slow System its own storage to record its answers."""
+        res = self.system.ask(self.given(state), [QUESTION], **kw)
+        ans = res[QUESTION]
+        if ans.status != "abstain" or self.slow is None:
+            return res
+        return self._hand_over(state, res, ans)
+
+    def _hand_over(self, state, res, ans):
+        from ..core.dispatch import SlowPath
+        slow, why = self.slow, ans.why
+        if isinstance(slow, SlowPath):
+            raise TypeError("slow=: a SlowPath is build()'s dispatcher territory; give the document recipe a "
+                            "System or a callable state → answer")
+        if hasattr(slow, "ask"):                              # a System: its first non-abstaining answer
+            sres = slow.ask(state)
+            got = next((r for r in sres.results.values() if r.status == "ok" and r.answer is not None), None)
+            if got is None:
+                return res                                    # the slow path also abstained: the abstain stands
+            value, conf = got.answer, got.confidence
+            who = f"the slow System ({type(slow).__name__})"
+        elif callable(slow):
+            value = slow(dict(state))
+            conf = None
+            who = f"the slow callable ({getattr(slow, '__name__', 'slow')})"
+        else:
+            raise TypeError(f"slow= is a System or a callable state → answer, not {type(slow).__name__}")
+        res.hand_over = {"recipe_abstained": why, "slow": who}
+        res.results[QUESTION] = res.results[QUESTION].__class__(
+            answer=value, confidence=conf if conf is not None else 1.0,
+            why=f"handed over ({who}): the recipe abstained — {why}", status="ok", source="slow path")
+        return res
 
     def calibrate(self, examples, *, max_risk=None, max_error=None, correct=None, workers=None, progress=None, **kw):
         """A calibrated threshold on the answer from labelled examples [(input, correct answer)] (System.guarantee:
@@ -603,7 +637,7 @@ def _same_number(r, y):
 
 
 def document(schema, model, *, task=None, text="doc", compute=None, answer=None, checks=None, units="same",
-             storage=None, calibration=None, record="full", workers=1, reads_with=None):
+             storage=None, calibration=None, record="full", workers=1, reads_with=None, slow=None):
     """A decision over a document (see the module docs) → DocumentSystem.
 
     schema: a pydantic model class, one field per fact to read (`Span[float]`, `Span[date]`, `Span[str]`, a
@@ -816,7 +850,7 @@ def document(schema, model, *, task=None, text="doc", compute=None, answer=None,
     if isinstance(storage, str) or hasattr(storage, "__fspath__"):
         storage = JSONLStorage(storage, record=record)
     s = System(cat, [q], storage=storage, workers=workers)
-    out = DocumentSystem(s, schema, model, text, fields, checks)
+    out = DocumentSystem(s, schema, model, text, fields, checks, slow=slow)
     if calibration is not None:
         out.load_calibration(calibration)
     return out
