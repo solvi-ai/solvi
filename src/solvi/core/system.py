@@ -1337,7 +1337,10 @@ class System:
         Below the threshold the question abstains with the reason; the promise is recorded with every answer.
         examples=False removes it. A failed call raises and keeps the guarantee in force before it (with a warning).
         Every attempt is logged in `self.guard_history` (installed, failed, removed). → the
-        calibration report. See solvi.core.guarantees.guarantee.guard_question."""
+        calibration report. See solvi.core.guarantees.guarantee.guard_question.
+        workers: ask the calibration examples in this many threads (None: one by one); the examples are independent —
+        the guard is off, nothing is stored — so the report is the same either way. With folds= the head fitting stays
+        sequential."""
         from .guarantees.guarantee import guard_question
         return guard_question(self, question, examples, **kw)
 

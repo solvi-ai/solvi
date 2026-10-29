@@ -14,9 +14,11 @@
                             compute=lambda f, s: f.a - f.b,                  # f: the facts, s: the rest of the input
                             checks={"b_not_zero": lambda f, s: f.b != 0},
                             storage="decisions.jsonl")
-    recipe.calibrate([({"doc": d, "op": op}, gold) for d, op, gold in labelled], max_risk=0.10)
+    recipe.calibrate([({"doc": d, "op": op}, gold) for d, op, gold in labelled], max_risk=0.10, workers=8)
     res = recipe.ask({"doc": text, "op": "diff"})
-    res["answer"].answer, res["answer"].status, res["answer"].why, res.stored_id
+    res.answer.answer, res.answer.status, res.answer.why, res.stored_id
+    res.facts.a, res.facts.units                  # the fields as read (a number field: its value, .units beside)
+    res.why_short                                 # one line: the reads and the outcome, without the rule's inputs
     recipe.verify(), recipe.replay_all()
 
 The scheme it sets up (all of it existing low-level blocks, wired):
@@ -465,6 +467,57 @@ def _stated_confidence(model):
     return m
 
 
+class DocumentResult:
+    """What `DocumentSystem.ask` returns: the solvi Response and its conveniences. `res.answer`: the answer's Result
+    (what `res["answer"]` gives). `res.facts`: the schema's fields as read — a number field its value, any other its
+    read value, `.units` beside them; a field that escalated is absent. `res.why_short`: the read and the outcome in
+    one line, without the rule's every input (`res.answer.why` keeps the full form). Everything else forwards to the
+    Response (`res["answer"]`, `res.stored_id`, `res.trace`, `res.overall`, ...)."""
+
+    def __init__(self, response, system):
+        self._response, self._system = response, system
+
+    def __getattr__(self, name):
+        return getattr(self._response, name)
+
+    def __getitem__(self, question):
+        return self._response[question]
+
+    @property
+    def answer(self):
+        return self._response.results.get(QUESTION)
+
+    @property
+    def facts(self):
+        vals, fields = self._response.values, self._system.schema.model_fields
+        out = {}
+        for name in self._system.fields:
+            if _is_number(fields[name]) and f"{name}_value" in vals:
+                out[name] = vals[f"{name}_value"]
+            elif name in vals:
+                out[name] = _value_reader(fields[name])(vals[name])
+        f = self._system.schema.model_construct(**out)
+        object.__setattr__(f, "units", {x: Unit(*v) for x, v in (vals.get("units") or {}).items()})
+        return f
+
+    @property
+    def why_short(self):
+        r = self.answer
+        if r is None:
+            return ""
+        reads = [f"{x} = {self._response.values[x]!r}" for x in self._system.fields if x in self._response.values]
+        head = "; ".join(reads)
+        if r.status != "abstain":
+            got = f"→ {r.answer!r} (confidence {r.confidence:.2f})"
+        else:
+            got = f"→ abstain: {r.why}"
+        return f"{head} {got}" if head else got
+
+    def __repr__(self):
+        r = self.answer
+        return f"<DocumentResult {r.status}: {r.answer!r}>" if r is not None else "<DocumentResult>"
+
+
 class DocumentSystem:
     """What solvi.document() returns (see the module docs). system: the solvi.System; catalog, schema, model (the one the
     reads go to), text (the text fact's name), fields (field names in order), checks (check names), calibration (the
@@ -490,15 +543,17 @@ class DocumentSystem:
                 STATE: _plain({k: v for k, v in state.items() if k != self.text})}
 
     def ask(self, state, **kw):
-        """One input → a solvi.Response: `res["answer"]` (answer, status "ok" / "abstain", confidence, why),
-        `res.stored_id` when storage= was given. Keyword options go to System.ask."""
-        return self.system.ask(self.given(state), [QUESTION], **kw)
+        """One input → a DocumentResult (the Response with `res.answer`, `res.facts`, `res.why_short`; see
+        DocumentResult). Keyword options go to System.ask."""
+        return DocumentResult(self.system.ask(self.given(state), [QUESTION], **kw), self)
 
     def calibrate(self, examples, *, max_risk=None, max_error=None, correct=None, **kw):
         """A calibrated threshold on the answer from labelled examples [(input, correct answer)] (System.guarantee:
         max_risk= or max_error=, and groups=, weak=, delta=, method= ...) → the calibration report (also kept as
         `self.calibration`). Fewer than 100 examples: a GuaranteeWarning. A number is judged right at the label's own
-        precision (see the module docs) unless correct=(result, label) → bool is given."""
+        precision (see the module docs) unless correct=(result, label) → bool is given. Keyword options go to
+        System.guarantee — workers=8 asks the examples in parallel threads (the report is the same, the wall time
+        shorter)."""
         from ..core.guarantees.guarantee import GuaranteeWarning
         examples = [(self.given(st), y) for st, y in examples]
         n = len(examples)
@@ -802,4 +857,4 @@ def _type_name(fi):
     return type_name(fi.annotation)
 
 
-__all__ = ["DocumentSystem", "document"]
+__all__ = ["DocumentResult", "DocumentSystem", "document"]

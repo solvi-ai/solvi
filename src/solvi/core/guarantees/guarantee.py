@@ -426,9 +426,11 @@ def _number(v, name):
     return v if math.isfinite(v) else f"the signal {name} is {v}"
 
 
-def _calibration_rows(system, question, examples, guard, correct, folds=None, seed=0, probs_out=None):
+def _calibration_rows(system, question, examples, guard, correct, folds=None, seed=0, probs_out=None, workers=None):
     """Ask the question on labelled examples with its guard off → (signals, right, groups, read failures). probs_out: a
-    list that receives ({answer: probability} or None, the label or None) per example, for the label check."""
+    list that receives ({answer: probability} or None, the label or None) per example, for the label check.
+    workers: ask the examples in this many threads (None: one by one) — the examples are independent (the guard is off,
+    nothing is stored, no cost is observed); with folds= the fitting stays sequential whatever workers says."""
     from ..runtime import execute, vhash
     q = system.questions[question]
     examples = list(examples)
@@ -437,47 +439,55 @@ def _calibration_rows(system, question, examples, guard, correct, folds=None, se
     heads = [None] * len(examples)
     if folds:
         heads = _fold_heads(system, question, examples, int(folds), seed)
-    sig, ok, grp, lost = [], [], [], []
     saved = system.guards.pop(question, None)
     was_head = system.heads.get(question)
+
+    def one(i):
+        """One example → (signal, right, group, read failure, the label row)."""
+        st, y = examples[i]
+        if heads[i] is not None:
+            system.heads[question] = heads[i]
+        p = system._prepare(st, [question], None)
+        trace, vals = execute(system.catalog, p.flow, p.state, workers=system.workers, order=p.order,
+                              costs=system.cost_book, policy=p.policy, known=p.known)
+        r = system._results(p.questions, p.flow, trace, vals)[0][question]
+        row = _label_row(q, r, y) if probs_out is not None else None
+        if r.status == "abstain":
+            return -math.inf, True, None, None, row    # never answered alone: right / wrong does not count
+        ans = r.answer if r.status == "forced" else guard.would_answer(r)
+        from ..catalog import label_options
+        if correct is not None:               # a label with several right answers (AnyOf): right if any is
+            import dataclasses
+            right = any(bool(correct(dataclasses.replace(r, answer=ans), o)) for o in label_options(y))
+        else:
+            right = any(vhash(ans) == vhash(q.answer.normalize(o)) for o in label_options(y))
+        grp = guard.group(r, vals, ans)
+        if r.status == "forced":              # a hard check decides: answered whatever the signal
+            return math.inf, right, grp, None, row
+        v = guard.value(r, vals, trace)
+        return (-math.inf if isinstance(v, str) else v), right, grp, (v if isinstance(v, str) else None), row
+
     try:
-        for i, (st, y) in enumerate(examples):
-            if heads[i] is not None:
-                system.heads[question] = heads[i]
-            p = system._prepare(st, [question], None)
-            trace, vals = execute(system.catalog, p.flow, p.state, workers=system.workers, order=p.order,
-                                  costs=system.cost_book, policy=p.policy, known=p.known)
-            r = system._results(p.questions, p.flow, trace, vals)[0][question]
-            if probs_out is not None:
-                probs_out.append(_label_row(q, r, y))
-            if r.status == "abstain":
-                sig.append(-math.inf)
-                ok.append(True)                   # never answered alone: right / wrong does not count
-                grp.append(None)
-                continue
-            ans = r.answer if r.status == "forced" else guard.would_answer(r)
-            from ..catalog import label_options
-            if correct is not None:               # a label with several right answers (AnyOf): right if any is
-                import dataclasses
-                right = any(bool(correct(dataclasses.replace(r, answer=ans), o)) for o in label_options(y))
-            else:
-                right = any(vhash(ans) == vhash(q.answer.normalize(o)) for o in label_options(y))
-            ok.append(right)
-            grp.append(guard.group(r, vals, ans))
-            if r.status == "forced":              # a hard check decides: answered whatever the signal
-                sig.append(math.inf)
-                continue
-            v = guard.value(r, vals, trace)
-            if isinstance(v, str):
-                lost.append(v)
-                sig.append(-math.inf)
-            else:
-                sig.append(v)
+        if workers and int(workers) > 1 and not folds and len(examples) > 1:
+            from concurrent.futures import ThreadPoolExecutor
+            with ThreadPoolExecutor(max_workers=int(workers)) as pool:
+                rows = list(pool.map(one, range(len(examples))))
+        else:
+            rows = [one(i) for i in range(len(examples))]
     finally:
         if was_head is not None:
             system.heads[question] = was_head
         if saved is not None:
             system.guards[question] = saved
+    sig, ok, grp, lost = [], [], [], []
+    for s, right, g, fail, row in rows:
+        sig.append(s)
+        ok.append(right)
+        grp.append(g)
+        if fail is not None:
+            lost.append(fail)
+        if probs_out is not None:
+            probs_out.append(row)
     return sig, ok, grp, lost
 
 
@@ -511,7 +521,8 @@ def _fold_heads(system, question, examples, folds, seed):
 
 def guard_question(system, question, examples=None, *, max_error=None, max_risk=None, method=None, delta=0.10, signal=None,
                    answer=None, groups=None, min_group=100, min_support=10, correct=None, folds=None, seed=0,
-                   weak="raise", promise=None, corrections=None, sources=None, procedure="bonferroni", label_check=False):
+                   weak="raise", promise=None, corrections=None, sources=None, procedure="bonferroni", label_check=False,
+                   workers=None):
     """Put a calibrated threshold with a stated promise on a question of `system` (System.guarantee): every later answer
     is let through alone only when its signal ≥ the threshold, else the question abstains with the reason; the promise,
     the signal and the threshold are recorded with every answer. examples: [(init_state, correct answer)], not used to fit
@@ -562,7 +573,7 @@ def guard_question(system, question, examples=None, *, max_error=None, max_risk=
                               delta=delta, signal=signal, answer=answer, groups=groups, min_group=min_group,
                               min_support=min_support, correct=correct, folds=folds, seed=seed, weak=weak,
                               promise=promise, corrections=corrections, sources=sources, procedure=procedure,
-                              label_check=label_check)
+                              label_check=label_check, workers=workers)
     except Exception as e:
         old, added, q = before
         if q is not None:
@@ -600,7 +611,7 @@ def _label_row(q, r, y):
 
 def _guard_question(system, question, examples, *, max_error, max_risk, method, delta, signal, answer, groups,
                     min_group, min_support, correct, folds, seed, weak, promise, corrections, sources, procedure="bonferroni",
-                    label_check=False):
+                    label_check=False, workers=None):
     """guard_question without the log."""
     if examples is False:
         old = system.guards.pop(question, None)
@@ -626,7 +637,8 @@ def _guard_question(system, question, examples, *, max_error, max_risk, method, 
             raise ValueError("give labelled examples [(init_state, correct answer)] to calibrate on, or promise=")
         try:
             rows = [] if label_check else None
-            sig, ok, grp, lost = _calibration_rows(system, question, examples, guard, correct, folds, seed, rows)
+            sig, ok, grp, lost = _calibration_rows(system, question, examples, guard, correct, folds, seed, rows,
+                                                    workers=workers)
             with warnings.catch_warnings(record=True) as caught:
                 warnings.simplefilter("always")
                 promise = calibrate(sig, ok, max_error=max_error, max_risk=max_risk, method=method, delta=delta,
