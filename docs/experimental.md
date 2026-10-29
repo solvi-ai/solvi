@@ -578,7 +578,7 @@ certified and served.
 from solvi.experimental.stream import HashedTextLearner, LearningLoop
 
 loop = LearningLoop(HashedTextLearner(), question="intent", max_risk=0.05, delta=0.05, secret=key, storage=store,
-                    versions_dir="intent.versions", system=system, feature="text")
+                    versions_dir="intent.versions", system=system, feature="text", additive=False)
 out = loop.step(text, lambda: oracle(text))   # the oracle is called only when a label is needed
 out["by"]                                     # "local" (the served version alone), "oracle" or "person"
 loop.versions()                               # each version: state, certified, threshold, δ_v, frozen at
@@ -815,7 +815,7 @@ stays `additive=False`, the replacement protocol above, with the same records an
   learning at the coin rate. `max_layers` caps the chain, base included (default 3); at the cap, and while the
   deepest layer is not certified, no training starts ("train_refused") and `train_now` is refused at the cap. Each
   layer costs one more scoring on the decisions that reach it and, with LoRA, one more staged adapter.
-- *The usefulness certificate.* `AdapterLoop(..., useful_error=0.5, delta_use=None)` (additive mode only; the
+- *The usefulness certificate.* `AdapterLoop(..., useful_error=0.5, delta_use=None, additive=False)` (additive mode only; the
   default there is 0.5, `None` turns it off). The joint certificate bounds P(answered alone and wrong) as a share of
   the zone, so a layer that answers alone on 1–3 % of its zone and is wrong on almost all of those answers passes
   it — a layer trained on noise labels does exactly that (its scores collapse, a few points at the strict end of the

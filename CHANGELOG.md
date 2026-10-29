@@ -4,8 +4,9 @@
 
 ### Added
 - **`AdapterLoop(additive=True)`: additive coverage — a certified candidate serves the zone the served version
-  escalates, instead of replacing it** (`solvi.experimental.stream`; also `LearningLoop`; experimental, default
-  `False`). The loop serves a chain of layers: a decision walks it to the first layer whose frozen routing
+  escalates, instead of replacing it** (`solvi.experimental.stream`; also `LearningLoop`; default `True` — the
+  replacement protocol lost on the stand, see the measured result at the end of this entry; `additive=False` keeps
+  it). The loop serves a chain of layers: a decision walks it to the first layer whose frozen routing
   threshold it does not pass (its owner; the zones are fixed by these thresholds), and the first layer on that path,
   from L0 down, at or above its live threshold answers alone — an upstream layer answers inside a deeper zone where
   its own live threshold allows, before the deeper layer — else the oracle (never a layer deeper than the owner).
@@ -27,10 +28,16 @@
   and `rescore=True` rescores every layer; the checkpoint of an additive loop is format v4 (a replacement loop's stays
   v1; an older library refuses v4 by name, and v3 — no usefulness certificate — and v2 — frozen layers — both
   pre-release forms, are refused by name).
-  `additive=False` writes the same
-  records and events as with `additive` omitted; both differ from 1.3 by the lazy δ charge (see Changed: `v_index` /
-  `delta_v` are `None` until a promise's first sample, "recertify" carries `None`). Checked on synthetic streams with known per-zone risk; no stand has run it, and no
-  gain is claimed.
+  `additive=False` writes the replacement
+  protocol's records and events; both differ from 1.3 by the lazy δ charge (see Changed: `v_index` /
+  `delta_v` are `None` until a promise's first sample, "recertify" carries `None`). Checked on synthetic streams with
+  known per-zone risk, and measured on a stand (4 public intent datasets × 10 seeds × 12 000 decisions, frozen
+  protocol, independent review): additive coverage answers alone on new requests +3.6 / +8.3 / +7.9 / +3.4 points
+  over no loop (bootstrap 95 % intervals clear of 0, 4 of 4 datasets), per-zone risk ≤ α (max 0.034), oracle calls
+  down to 0.73–0.86 of no-loop, and a scrambled-label control promoted a noise layer in 0 / 20 runs. The replacement
+  protocol lost on the same stand: 11–16 points below no loop on 3 of 4 datasets — additive is the default for that
+  reason. Stream-wide joint risk with `max_risk=` is not ≤ α (one dataset read 0.0506, just above α, under its bound
+  α·(1 + Σ P(Z_j))): the guarantee is per zone.
 - **Additive coverage: a usefulness certificate per layer, and a fifth start check `useful`**
   (`AdapterLoop(useful_error=0.5, delta_use=None)`, additive mode only, on by default there; `None` turns it off).
   The joint certificate alone admits a layer that answers alone on a few per cent of its zone and is wrong on almost
@@ -52,7 +59,8 @@
   (δ_use = 0.30) was falsely certified in 3/400, 0/397, 0/397 runs at indices 1–3 (bars from δ_u / G per index,
   8.0 at index 1); the composed threshold with a joint prefix reaching a bad band: 0 false in 400; a real layer
   starts later by p50 48 / p90 188 / p95 238 / max 454 zone samples and answers alone 1.14× as often as with the
-  check off in the last 2 000 decisions. No stand has run it.
+  check off in the last 2 000 decisions. On the stand (the additive entry above) the scrambled-label control promoted
+  a noise layer in 0 / 20 runs with the certificate; the same control without it had promoted one in 5 / 20.
 - **`DefaultPolicy(novel_only=...)`: the promotion's novel-only paired comparison can be switched off, for controls**
   (`solvi.experimental.stream`). Default `True`, unchanged: the comparison counts only post-freeze samples on keys the
   candidate never trained on. With `False` it counts every sample, the candidate's train keys too (the seen fields
