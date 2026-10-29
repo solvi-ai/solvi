@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.4.0 — unreleased
+## 1.4.0 — released 2026-10-30
 
 ### Added
 - **`solvi.document`: a decision over a document** (`solvi.solutions.document`; the 24th top-level name). One
