@@ -694,7 +694,7 @@ labels, 10 % of the labels discordant) rolled back in 10 / 28 / 70 % of runs by 
   on stderr every 10 s at 50+ examples, and two warnings: fewer than 100 examples (`warn_small=False` opts out at the
   guarantee level), more than 20 % of the examples escalating. The parser, `Span[date]` and EPS tables are locked by
   tests; the recipe docs (`docs/recipes/document.md`), the README recipe-first block ("Build your own" holds the
-  hand-built catalog and the rest) and `examples/27_document_decision.py` (a fake endpoint, runs in the suite).
+  hand-built catalog and the rest) and `examples/27_document_decision.py` (a fake endpoint, runs in the suite). The recipe docs name the reasoning-model `max_tokens` tradeoff measured in the flagship test (2,048 default truncates gpt-oss-120b reads; 8,192 part-fixes, 16,384 fixes more, ≈ 6× latency) — a cut-off read escalates loudly, never silently.
 
 ### Fixed
 - **A quoted number is located as a number of its own** (`solvi.core.deciders.llm.locate`). An LLM's span or quote

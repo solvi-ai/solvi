@@ -62,7 +62,9 @@ recipe.calibrate([({"doc": d}, gold) for d, gold in labelled], max_risk=0.05, wo
 Numbers read as documents write them (`1,250 million` is 1250 in millions, `(1,250)` is −1250), the unit the text
 states is kept, not multiplied in; `calibrate` sets the abstention threshold (parallel examples with `workers=`, a
 heartbeat, a warning below 100 examples); every answer carries `res.facts`, a checkable `why` (a long input text is
-named by its length and hash, never carried) and a hash-chained record
+named by its length and hash, never carried) and a hash-chained record. A reasoning model needs `max_tokens` headroom
+on the model (`llm(..., max_tokens=16384, extra_body={"reasoning": {"effort": "low"}})` for gpt-oss-120b-scale
+thinkers) — a read that runs out escalates loudly as "the reply was cut off (max_tokens)" and abstains
 ([docs/recipes/document.md](https://github.com/solvi-ai/solvi/blob/main/docs/recipes/document.md),
 [examples/27_document_decision.py](https://github.com/solvi-ai/solvi/blob/main/examples/27_document_decision.py)).
 
