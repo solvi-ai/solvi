@@ -701,6 +701,9 @@ labels, 10 % of the labels discordant) rolled back in 10 / 28 / 70 % of runs by 
   with the reason); a recipe with `reads_with=` is its own catalog fingerprint (calibrations and records do not
   cross-attach; without the parameter the fingerprint is unchanged). First measured in the flagship test (reads
   that cannot see the question capped coverage at ~5 %); `docs/recipes/document.md` has the section.
+- **`solvi.Facts`** — the example-input-by-name wrapper (`Facts(email=..., tier=...)`) is a top-level name (the
+  25th; the input docstrings named `solvi.core.deciders.Facts`, and the top-level export was the author's call on
+  the S7 list).
 
 ### Fixed
 - **A quoted number is located as a number of its own** (`solvi.core.deciders.llm.locate`). An LLM's span or quote

@@ -70,7 +70,7 @@ def ops_system(server, **kw):
 
 def test_solvi_document_is_the_recipe_entry():
     from solvi.solutions.document import DocumentSystem, document
-    assert solvi.document is document and "document" in solvi.__all__ and len(solvi.__all__) == 24
+    assert solvi.document is document and "document" in solvi.__all__ and len(solvi.__all__) == 25   # "Facts" joined in 1.4 (the author's S7 call)
     s = ops_system(Server(case_reply()))
     assert isinstance(s, DocumentSystem) and isinstance(s.system, solvi.System)
     assert s.fields == ["a", "b"] and s.checks == ["b_not_zero"]
