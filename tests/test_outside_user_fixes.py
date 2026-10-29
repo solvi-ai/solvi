@@ -180,7 +180,9 @@ def test_why_and_audit_show_the_quote_not_the_whole_document():
     why = res["label"].why
     at = DOC.index("shall not disclose")
     assert why.startswith(f"quote 'shall not disclose' (contract[{at}:{at + 18}])")
-    assert f"contract = <text, {len(DOC):,} chars>" in why and "hypothesis = 'H: no disclosure'" in why
+    import hashlib
+    h = hashlib.sha256(DOC.encode("utf-8")).hexdigest()[:12]
+    assert f"contract = doc[{len(DOC):,} chars, sha256:{h}]" in why and "hypothesis = 'H: no disclosure'" in why
     assert "Other terms. Other terms." not in why and "Other terms. Other terms." not in str(res.audit("label"))
 
 

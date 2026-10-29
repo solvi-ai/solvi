@@ -3,6 +3,7 @@ of responses and corrections (solvi.core.store)."""
 from __future__ import annotations
 
 import dataclasses
+import hashlib
 import math
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
@@ -135,19 +136,24 @@ def _model_quote(r, rule, vals):
 def _rule_why(rule, r, vals, by, legacy=False):
     """A rule's `why`: its inputs with their values — each with the reason its fact function gave (solvi.core.because /
     missing) — led by the rule's own reason when it gave one. A model decision that quoted the text (an LLM decider)
-    leads with the quote and its offsets instead, and an input text longer than WHY_TEXT_MAX is shown by its length
-    (`contract = <text, 12,345 chars>`), not whole. legacy=True: the form before 1.4 (every input whole), which a
-    replay accepts for a record stored then."""
+    leads with the quote and its offsets instead, and an input text longer than WHY_TEXT_MAX is shown by its length and
+    hash (`contract = doc[12,345 chars, sha256:0123456789ab]`), not whole. legacy=True: the form before 1.4 (every input
+    whole); legacy="1.4": the 1.4 form (`<text, 12,345 chars>` when a quote leads) — a replay accepts a record stored by
+    either (see _why_before)."""
     from .catalog import because_text
-    quote = None if legacy else _model_quote(r, rule, vals)
+    quote = None if legacy is True else _model_quote(r, rule, vals)
     parts = [quote] if quote else []
     for x in rule.inputs:
         said = because_text(by[x].extra) if x in by else None
         v = vals.get(x)
         if said and said.startswith("missing (") and v is None:
             parts.append(f"{x} = {said}")
-        elif quote and isinstance(v, str) and len(v) > WHY_TEXT_MAX:
-            parts.append(f"{x} = <text, {len(v):,} chars>" + (f" ({said})" if said else ""))
+        elif legacy is not True and isinstance(v, str) and len(v) > WHY_TEXT_MAX and (quote or legacy is False):
+            if legacy == "1.4":
+                parts.append(f"{x} = <text, {len(v):,} chars>" + (f" ({said})" if said else ""))
+            else:
+                h = hashlib.sha256(v.encode("utf-8")).hexdigest()[:12]
+                parts.append(f"{x} = doc[{len(v):,} chars, sha256:{h}]" + (f" ({said})" if said else ""))
         else:
             parts.append(f"{x} = {srepr(v)}" + (f" ({said})" if said else ""))
     own = because_text(r.extra)
@@ -160,12 +166,13 @@ def _rule_why(rule, r, vals, by, legacy=False):
     return "; ".join(parts)
 
 
-def _why_before(res, why, old):
-    """A result whose `why` names a model's quote (1.4) keeps the form an earlier version stored (every input whole)
-    as `_why_before`, not serialized: a replay of a record stored then accepts that `why` — the same reason, from the
-    same trace, written as it was written."""
-    if old != why and isinstance(res.why, str) and why in res.why:
-        res._why_before = res.why.replace(why, old)
+def _why_before(res, why, *olds):
+    """A result whose `why` names a model's quote (1.4) keeps the forms earlier versions stored (every input whole
+    before 1.4; the `<text, N chars>` marker of 1.4) as `_why_before`, not serialized: a replay of a record stored by
+    either accepts that `why` — the same reason, from the same trace, written as it was written."""
+    got = [res.why.replace(why, o) for o in olds if o != why and isinstance(res.why, str) and why in res.why]
+    if got:
+        res._why_before = got if len(got) > 1 else got[0]
     return res
 
 
@@ -952,8 +959,10 @@ class System:
             pc = path_confidence(self.catalog, trace, rule.inputs, pcache)
             conf = min(pc, r.confidence)
             why = _rule_why(rule, r, vals, by)
-            old = _rule_why(rule, r, vals, by, legacy=True) if _model_quote(r, rule, vals) else why
-            return _why_before(self._rule_result(q, r, rule, pc, conf, why, trace), why, old)
+            olds = [_rule_why(rule, r, vals, by, legacy="1.4")]
+            if _model_quote(r, rule, vals):
+                olds.append(_rule_why(rule, r, vals, by, legacy=True))
+            return _why_before(self._rule_result(q, r, rule, pc, conf, why, trace), why, *olds)
         head = self.heads.get(q.name)
         if head is None:
             return Result(None, 0.0, "no rule and the answer head is not fitted (fit)", "abstain")
