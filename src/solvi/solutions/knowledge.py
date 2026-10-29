@@ -106,31 +106,42 @@ class Knowledge:
 
     # ------------------------------------------------------------------------------------------------ writing
     def tell(self, fact, *, source, by=None, of=None, scope=None, derived_from=(), evidence=None, valid=None,
-             consulted=()):
+             consulted=(), inferred=False):
         """Write a fact — {"s", "r", "o"} or (s, r, o) — from a person, an outcome, a written spec, or a verified System 2
         answer (`of=` its stored decision). It goes through the source check and the write gates; a contradiction of
         equal rank becomes a person question (`store.disputes()`). → the item's id, or None when a gate refused it (the
         journal says why). consulted: the items looked at besides `derived_from` (an alternative's evidence): retracting
-        one marks this fact for review (see KnowledgeStore.add)."""
+        one marks this fact for review (see KnowledgeStore.add). inferred: the fact is computed from `derived_from` (a
+        rule applied to facts), not observed — it competes by rank and follows its premises (KnowledgeStore.add). A
+        fact with `derived_from` and no `valid` holds where its premises hold together (refused when they never do)."""
         if isinstance(fact, (tuple, list)) and len(fact) == 3:
             fact = {"s": fact[0], "r": fact[1], "o": fact[2]}
         if not (isinstance(fact, dict) and {"s", "r", "o"} <= set(fact)):
             raise ValueError("a fact is {'s': subject, 'r': relation, 'o': value} or (subject, relation, value)")
         return self.store.add("fact", fact, scope, source=source, by=by, of=of, derived_from=derived_from,
-                              evidence=evidence, valid=valid, consulted=consulted)
+                              evidence=evidence, valid=valid, consulted=consulted, inferred=inferred)
 
-    def retract(self, item, why=None, *, by=None, storage=None, decide=None):
+    def retract(self, item, why=None, *, by=None, storage=None, decide=None, only_from=None, assertion=None):
         """Take an item back with everything derived from it (nothing is deleted: the journal keeps it). → {"status":
         {id: (before, after)}, "answer_changes", "justification_only"} — the last two (with `storage=`, the decisions'
         TraceStorage, and `decide=`, a System or a function init → answers) list the stored decisions that rested on
-        it, re-run on the snapshot rebuilt without it: the answer changes (for a reviewer) or only the justification."""
-        status = self.store.retract(item, by=by, why=why)
+        it, re-run on the snapshot rebuilt without it: the answer changes (for a reviewer) or only the justification.
+        only_from (a writer, or (writer, evidence)) and assertion (a journal position): take back only those assertions
+        of the item (KnowledgeStore.retract)."""
+        status = self.store.retract(item, by=by, why=why, only_from=only_from, assertion=assertion)
         out = {"status": status, "answer_changes": None, "justification_only": None}
         if storage is not None and decide is not None:
             from ..core.store import open_storage
             changes, same = self.store.redecide(open_storage(storage), set(status) | {item}, decide)
             out["answer_changes"], out["justification_only"] = changes, same
         return out
+
+    def forget(self, writer, *, by=None, why=None, storage=None, decide=None):
+        """Forget a source in one call: what `writer` told is taken back, and with `storage=` (the decisions'
+        TraceStorage or its path) and `decide=` (a System or a function init → answers) the stored decisions that
+        rested on it are re-decided (KnowledgeStore.forget). → {"source", "retracted", "decisions", "changed", "same",
+        "entry"}."""
+        return self.store.forget(writer, storage, decide, by=by, why=why)
 
     def goal(self, name, done, requires=(), gates=()):
         """An agenda goal: done(state) → bool is its check in code (never a model's claim); requires: goals done first;
@@ -268,15 +279,17 @@ class Knowledge:
     def value(snapshot, s, r, default=None, *, valid_at=None):
         """The value of the active fact (s, r) in a snapshot (the fact "knowledge" a rule reads), or `default`.
 
-        valid_at: a world time — only a fact whose validity (`valid=` when it was told; the row's "valid") covers it is
-        read; a fact told without `valid` holds at any time. Without it the first matching fact is read, which on a key
+        valid_at: a world time — only a fact that holds then is read: its effective intervals (the row's "periods",
+        when a later version closes it or it was told for several periods) or else its validity (`valid=` when it was
+        told; the row's "valid"); a fact told without `valid` holds at any time. Without it the first matching fact is read, which on a key
         with several validity intervals is the first interval's value: pass the decision's world time (or take the
         snapshot with `valid_at=`)."""
         from ..core.knowledge.store import covers
         for row in (snapshot or {}).get("facts") or ():
             b = row.get("body") or {}
             if isinstance(b, dict) and b.get("s") == s and b.get("r") == r:
-                if valid_at is not None and not covers(row.get("valid"), valid_at):
+                if valid_at is not None and not (any(covers(iv, valid_at) for iv in row["periods"]) if "periods" in row
+                                                 else covers(row.get("valid"), valid_at)):
                     continue
                 return b.get("o")
         return default

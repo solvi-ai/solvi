@@ -72,6 +72,7 @@ nav:
       - High level:
           - solvi: api/solvi.md
           - solvi.solutions.decisions: api/auto.md
+          - solvi.solutions.document: api/solutions_document.md
           - solvi.solutions.agent: api/solutions_agent.md
           - solvi.solutions.knowledge: api/solutions_knowledge.md
           - solvi.solutions.guard: api/agents.md
@@ -108,6 +109,7 @@ nav:
           - solvi.core.calibfile: api/calibfile.md
           - solvi.core.guarantees.guarantee: api/guarantee.md
           - solvi.core.guarantees.openset: api/openset.md
+          - solvi.core.guarantees.canary: api/canary.md
           - solvi.core.guarantees.drift: api/drift.md
           - solvi.core.guarantees.monitor: api/monitor.md
           - solvi.core.store: api/storage.md
@@ -173,6 +175,9 @@ nav:
           - solvi.experimental.relations: api/relations.md
           - solvi.experimental.ood: api/ood.md
           - solvi.experimental.audit: api/audit_watch.md
+          - solvi.experimental.process: api/process.md
+          - solvi.experimental.stream: api/stream.md
+          - solvi.experimental.numguard: api/numguard.md
   - Changelog: changelog.md
   - Roadmap: roadmap.md
 

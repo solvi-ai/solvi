@@ -167,7 +167,12 @@ class ShiftWatch:
 
     def shift(self, records):
         """A batch of answers against the calibration answers → {"shifted", "features": {name: {"ks", "p"}}, "n",
-        "why"}: a per-feature two-sample Kolmogorov–Smirnov test, Bonferroni-corrected at alpha."""
+        "why"}: a per-feature two-sample Kolmogorov–Smirnov test, Bonferroni-corrected at alpha.
+
+        A batch test at alpha per call, not a running test: call it once per disjoint batch and budget alpha over the
+        calls (twenty calls spend up to twenty alpha). Repeated on a sliding window it flags many unchanged streams
+        (docs/best_practices.md gives the rate). For a running test with a false-alarm level over the stream use
+        DriftMonitor."""
         self._need()
         records = list(records)
         if not records:

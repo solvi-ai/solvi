@@ -345,7 +345,7 @@ def levels_demo():
             exp = list(ex.STATUS)
     except Exception:  # noqa: BLE001 — an older solvi without solvi.experimental: the line is left out
         exp = []
-    entry = [n for n in solvi.__all__ if n in ("build", "Agent", "Guard", "Knowledge")]
+    entry = [n for n in solvi.__all__ if n in ("build", "document", "Agent", "Guard", "Knowledge")]
     vocab = [n for n in solvi.__all__ if n not in entry]
     protos = [n for n in core.__all__ if n in ("Scorer", "Decider", "Adapter", "Head", "Extractor", "Strategist",
                                                  "Monitor", "Proposer", "Space", "Environment", "TraceStorage",

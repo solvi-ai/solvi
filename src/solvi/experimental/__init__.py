@@ -3,7 +3,7 @@ the rest of solvi promises. Their API may change in any release, and each one ei
 deadline.
 
     from solvi.experimental import STATUS
-    STATUS["lora"]       # {"since": "0.7", "missing": "...", "script": None, "deadline": "1.2"}
+    STATUS["lora"]       # {"since": "0.7", "missing": "...", "script": None, "deadline": "a future release"}
 
 What marks them:
 
@@ -16,13 +16,14 @@ What marks them:
 
 Graduating needs a pre-registered bar, a script in `benchmarks/` that measures it, the bar met and reviewed, no import
 of anything experimental, a conformance check and a docs move; the old path is then kept for one release. A piece that
-does not graduate by its deadline (two minor releases after 1.0), or that measures negative, is removed and the negative
-result published.
+does not graduate by its deadline, or that measures negative, is removed and the negative result published. The
+deadline set at 1.0 was 1.2; it passed with the pieces still here, so it now reads "a future release": no release is
+named until one is decided.
 
 This package itself imports none of them: `import solvi.experimental` does not warn."""
 from __future__ import annotations
 
-DEADLINE = "1.2"
+DEADLINE = "a future release"    # was "1.2" (set at 1.0); no release is named until one is decided
 
 STATUS: dict[str, dict] = {
     "lora": {"since": "0.7", "what": "a LoRA adapter on the decider for one question (adapt_lora)", "missing": "a "
@@ -224,7 +225,8 @@ STATUS: dict[str, dict] = {
     "injection": {"since": "1.2", "what": "a detector of instruction-like text in tool outputs, fitted and thresholded on your own texts: a "
                   "per-sentence logistic score over the fixed detector's rule families and hashed word n-grams, "
                   "fitted on labelled texts, its threshold set on ordinary texts to a chosen false-flag rate",
-                  "missing": "measured once on injected tool outputs of one public benchmark (InjecAgent): on 248 "
+                  "missing": "measured once (the script is not in the repository) on injected tool outputs of one public "
+                  "benchmark (InjecAgent): on 248 "
                   "held-out injections (attacker instructions and tools not used in fitting) a detector fitted on 279 "
                   "other cases and 865 ordinary texts found 76% against the fixed rules' 23%, flagging fewer "
                   "ordinary texts (1.8% against 4.2%); but a plain TF-IDF classifier did the same, half of the gain "
@@ -263,6 +265,61 @@ STATUS: dict[str, dict] = {
               "missing": "one task family and one break size measured (docs/experimental.md); a smaller break, a short "
               "reference and a break confined to the decisions the policy never checks are unmeasured",
               "script": None},
+    "process": {"since": "1.4",
+                "what": "a process of several solvi systems (stages 0 to 4 of solvi.Process): nodes, edges with "
+                "predicates written as data, merges, loops with a mandatory max_iter and the declared process promise "
+                "(union / end_to_end / per_node), as a JSON spec with a hash stable to key order, a structural diff, "
+                "a Mermaid or text drawing, and from_spec checking every system's fingerprint; run / explain: each "
+                "node's decision in its own store, chained by run_context into one run, with a \"process\" index "
+                "record of the path; questions to a person through a queue (HumanChannel, MemoryQueue, "
+                "CallbackChannel): a run waits \"pending\" and resume goes on as a new segment, the answer recorded "
+                "with its reviewer; replay / replay_all of a run from its records across its segments, a person's "
+                "answer a leaf recorded and not recomputed, the first divergence named by node and step; guarantee(): the "
+                "path promise in the modes union (split equal, given or computed, each node's own promise at its "
+                "share, loops counted), per_node (the end error is not bounded) and end_to_end (calibrate() on "
+                "end-labelled runs, learn then test over a ThresholdFamily: shared_rank by default, per_node_fixed, "
+                "or your own), and a PathWatch on the mix of paths",
+                "missing": "the retraction across nodes with cancelled and re-asked tickets (a later stage); a run "
+                "follows one path (merge \"all\" is not run yet, so the 100-node process of the promise stand "
+                "cannot run); the pre-registered stands for scale (300 systems) and retraction are not run — ten "
+                "systems exchanging facts (with 2% of the decisions asking a person) is a test, not the stand",
+                "script": "benchmarks/process_e1.py"},
+    "stream": {"since": "1.4",
+               "what": "StreamPromise: an anytime-valid learn-then-test certificate on a threshold grid, earned on "
+               "the stream (an e-process per grid point — a mixture of constant bets or the aGRAPA bet — "
+               "fixed-sequence from strict to loose, the threshold only loosens, a missing label counted as a loss, "
+               "δ spent over restarts by DeltaBudget), installed with System.guarantee(promise=); RiskDetector "
+               "(a Shiryaev–Roberts e-detector on the deployed risk) and the calibration coin wired into the "
+               "Dispatcher (audit=\"adaptive\", promise=, detector=, on_drift=\"recertify\", probation=), recorded "
+               "in the chain and rebuilt by Dispatcher.replay_stream (stages 1–2 of 4); tickets: an agent as the "
+               "oracle over MCP (stream.tickets, TicketDesk, solvi serve --mcp --agent-oracle) — blind, durable in "
+               "the store, an expired ticket a recorded loss (stage 3a); the closed learning loop (stream.versions, "
+               "LearningLoop over stream.learner's HashedTextLearner / FastHeadLearner): frozen versions, each with "
+               "its own StreamPromise calibrated only on samples drawn after its freeze, δ from one DeltaBudget, "
+               "promoted when certified, answering alone on ≥ min_share (5 %) and ≥ the served version's share + "
+               "margin (1 point) on the same samples, every freeze / promote / discard / rollback in the chain and "
+               "replayed; version 0 optionally the fitted System 1 with its own promise (initial=), a RiskDetector "
+               "and probation on the served version, a resolved ticket's verdict as a label (ticket_verdict) "
+               "(stage 3b); the adapter loop's policy (stream.policy: LoopPolicy, LoopState, Budget, DefaultPolicy) "
+               "and gate arithmetic (stream.gates); the adapter loop core (stream.loop.AdapterLoop: policy hooks, "
+               "novel-only promotion with the memorisation probe and the novel-risk bar, two alarm sources, "
+               "pause / resume / train_now / promote / rollback; LearningLoop = AdapterLoop + DefaultPolicy at the "
+               "lane's constants; stream.serving); the LoRA learner (stream.lora_learner: LoraLearner trained from the "
+               "base for each version with act_guard on calib labels, LoraVersion installed by "
+               "solvi.experimental.lora.swap — the adapter and its thresholds together) and the training runners "
+               "(stream.runner: subprocess by default, thread); the checkpoint (save / load with a signed manifest) and "
+               "attach to a Dispatcher (loop=) or a System, with a rollback watch in label mode; unmeasured",
+               "missing": "measured once (the stand's script is not in the repository); see the documented limits "
+               "in docs/experimental.md: the RiskDetector alarmed far later than the confidence CUSUM (DriftMonitor "
+               "before its 1.4.0 window z-test change) on shifts to new intents and must not "
+               "be the only alarm; the LearningLoop gained nothing with gold labels and is kept only as the core "
+               "of a planned adapter loop; TicketDesk is unmeasured on a stream. LearningLoop on its own is not "
+               "wired into the Dispatcher (it drives its own coin and oracle; AdapterLoop attaches); the expired-share stop "
+               "(max_drop) and repeated tickets for the "
+               "oracle's own noise are not built; a person's audit label does not yet replace the slow path's label",
+               "script": None},
+    "numguard": {"since": "1.4", "what": "exact values through a side channel: the model writes pointers ([k] for the k-th numeral of the input, <calc> / <date> calls computed exactly by code, @k for a call's result), code fills in the values, and a guard names the source of every number left in the text (an input numeral, a call's result, an allowed constant) or marks it unsourced, then refuses, raises or reports; a hook asks the model once more with what failed",
+                 "missing": "measured once with a prototype of the same protocol (its script is not in the repository) on three open models of 8B to 120B parameters, 100 long synthetic reports and 500 finance questions, with the wider constant set (MEASURED_CONSTANTS; the default is SMALL): numbers without a source fell to 0–0.4 % of the numerals in the reports, against 9–22 % when the model typed its numbers and 3.5–10 % with native tool calling; the price was 4–8 % of numerals pointing at the wrong input number and refusals (6–9 % of questions on the 8B model, 14–20 % of reports on the two smaller ones); it guarantees provenance, not correctness; still missing: a benchmark script in benchmarks/ run with this module, the same check on real documents, and wiring into a System's decisions", "script": None},
 }
 for _s in STATUS.values():
     _s["deadline"] = DEADLINE

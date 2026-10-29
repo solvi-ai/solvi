@@ -151,10 +151,11 @@ def test_verify_accepts_the_plan_and_catches_a_wrong_one():
 def test_the_certificate_needs_its_clean_outcomes_and_once_certified_stays_certified():
     cert = Certificate(promise=0.05, delta=0.1)
     g = math.log1p(0.9 * 0.05 / 0.95)
-    assert cert.need == math.ceil(math.log(10) / g) == 50
+    assert cert.need == math.ceil(math.log(math.pi ** 2 / 0.6) / g) == 61        # delta_1 = 6·0.1/π²
+    assert Certificate(promise=0.05, delta=0.1, delta_split=False).need == math.ceil(math.log(10) / g) == 50
     e = cert.process()
-    assert isinstance(e, EProcess) and not e.certified and e.remaining() == 50
-    for _ in range(49):
+    assert isinstance(e, EProcess) and not e.certified and e.remaining() == 61
+    for _ in range(60):
         e.update(True, alone=False)
     assert not e.certified and e.remaining() == 1
     ev = e.update(True, alone=False)
@@ -170,15 +171,16 @@ def test_the_certificate_needs_its_clean_outcomes_and_once_certified_stays_certi
 def test_the_alarm_on_alone_outcomes_restarts_the_process():
     # the default alarm: CUSUMs against 1.5x and 2x the promise, level 50 — a run of failures, not one failure
     e = Certificate(promise=0.05, delta=0.1).process()
-    for _ in range(50):
+    for _ in range(61):
         e.update(True, alone=True)
     assert e.certified
     evs = [e.update(False, alone=True)["alarm"] for _ in range(7)]   # mean(1.5^k, 2^k): 37.7 at k=6, 72.6 at k=7
-    assert evs == [False] * 6 + [True] and not e.certified and e.alarms == 1 and e.remaining() == 50
+    assert evs == [False] * 6 + [True] and not e.certified and e.alarms == 1
+    assert e.v == 2 and e.remaining() == 91          # the second certification bets against delta_2 = delta_1 / 4
 
 
 def test_the_old_alarm_on_alone_outcomes_restarts_the_process():
-    e = Certificate(promise=0.05, delta=0.1, alternatives=None).process()
+    e = Certificate(promise=0.05, delta=0.1, alternatives=None, delta_split=False).process()
     for _ in range(50):
         e.update(True, alone=True)
     assert e.certified
@@ -226,7 +228,7 @@ def test_a_recorded_failure_blocks_a_generalization_that_would_cover_it():
 
 def test_match_is_the_most_specific_certified_skill_and_retirement_and_recertification():
     env = Corridor()
-    ks = SkillSet(grammar(), certificate=Certificate(0.5, 0.5))     # need 2 clean outcomes
+    ks = SkillSet(grammar(), certificate=Certificate(0.5, 0.5, delta_split=False))  # 2 clean outcomes per restart
     general, _ = compiled(ks, env, 0)
     compiled(ks, env, 1)                                              # general: pos=0
     specific = ks.add(Skill(("colour=2", "pos=0"), ("right", "right", "right"), "door", source="verified"))
@@ -274,7 +276,7 @@ def test_without_a_grammar_a_skill_is_a_case_keyed_by_its_start_state():
 # ------------------------------------------------------------------------------------------------ knowledge
 def test_to_knowledge_writes_verified_skills_with_their_evidence_and_mirrors_retirement(tmp_path):
     env = Corridor()
-    ks = SkillSet(grammar(), certificate=Certificate(0.5, 0.5))
+    ks = SkillSet(grammar(), certificate=Certificate(0.5, 0.5, delta_split=False))  # full delta per restart
     a, _ = compiled(ks, env, 0)
     store = KnowledgeStore(JSONLStorage(tmp_path / "k.jsonl"))
     ids = ks.to_knowledge(store, {"env": "corridor"})
@@ -325,7 +327,7 @@ def run_episodes(learner, seeds, steps=20):
 def test_the_learner_plans_compiles_supervises_then_acts_alone():
     env = Corridor()
     L = SkillLearner(env, grammar(), {"door": at_goal}, horizon=6, budget=1000,
-                     certificate=Certificate(0.5, 0.5))                 # need 2 clean outcomes
+                     certificate=Certificate(0.5, 0.5, delta_split=False))   # need 2 clean outcomes at every restart
     eps = run_episodes(L, [0, 1, 2, 0, 1])
     e1, e2, e3, e4, e5 = eps
     assert e1["s2"] == 3 and e1["s1"] == 0 and e1["planner_calls"] == 1 and e1["compiled"] == 1

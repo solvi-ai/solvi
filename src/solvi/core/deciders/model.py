@@ -2,6 +2,7 @@
 solvi.core.deciders, which re-exports every name.)"""
 from __future__ import annotations
 
+import contextlib
 import dataclasses
 import json
 import os
@@ -26,6 +27,117 @@ from .adapt import Adaptation, _Spec, _basis, _fit_shift, _fit_temperature, _fro
 from .gate import Facts, act_features
 from .part import DecisionPart
 
+_SHADOW = threading.local()      # per thread: {(id(model), lora_key): adapter or None} — solvi.experimental.lora.scoring
+#                                  and .adapt: {(id(model), adaptation key): Adaptation or None} — the version's own
+
+
+class NetGate:
+    """The gate between plain forward passes on a scorer's network and changes to that network (an adapter installed,
+    switched on or removed: solvi.experimental.lora). Plain passes share it — several threads score at once; a change
+    holds it alone — it waits for the passes in flight and new ones wait for it. Without it a pass that started before
+    an adapter was installed (the model had none, so it took no lock) ran partly through the half-installed adapter,
+    and its scores were not the ones a replay recomputes. The holder of the exclusive side may enter either side again;
+    a thread inside the shared side must not ask for the exclusive one (RuntimeError, not a deadlock)."""
+
+    def __init__(self):
+        self._cond = threading.Condition(threading.Lock())
+        self._readers = 0
+        self._owner, self._depth, self._waiting = None, 0, 0
+        self._mine = threading.local()
+
+    def acquire_shared(self):
+        me = threading.get_ident()
+        with self._cond:
+            if self._owner == me:                       # the changing thread scores too: already alone
+                self._depth += 1
+                return
+            if not getattr(self._mine, "n", 0):         # a nested pass of a thread already inside never waits
+                while self._owner is not None or self._waiting:
+                    self._cond.wait()
+            self._readers += 1
+            self._mine.n = getattr(self._mine, "n", 0) + 1
+
+    def release_shared(self):
+        me = threading.get_ident()
+        with self._cond:
+            if self._owner == me:
+                self._depth -= 1
+                return
+            self._readers -= 1
+            self._mine.n -= 1
+            if not self._readers:
+                self._cond.notify_all()
+
+    def acquire(self):
+        me = threading.get_ident()
+        with self._cond:
+            if self._owner == me:
+                self._depth += 1
+                return
+            if getattr(self._mine, "n", 0):
+                raise RuntimeError("the network gate: a thread inside a plain forward pass asked to change the network")
+            self._waiting += 1
+            try:
+                while self._owner is not None or self._readers:
+                    self._cond.wait()
+            finally:
+                self._waiting -= 1
+            self._owner, self._depth = me, 1
+
+    def release(self):
+        with self._cond:
+            self._depth -= 1
+            if not self._depth:
+                self._owner = None
+                self._cond.notify_all()
+
+    def __enter__(self):
+        self.acquire()
+        return self
+
+    def __exit__(self, *exc):
+        self.release()
+        return False
+
+
+_GATE_LOCK = threading.Lock()
+_SHARED_GATE = NetGate()
+
+
+def net_gate(scorer) -> NetGate:
+    """The scorer's NetGate (created once, on the scorer)."""
+    g = getattr(scorer, "_solvi_net_gate", None)
+    if g is None:
+        with _GATE_LOCK:
+            g = getattr(scorer, "_solvi_net_gate", None)
+            if g is None:
+                g = NetGate()
+                try:
+                    scorer._solvi_net_gate = g
+                except (AttributeError, TypeError):    # a scorer that takes no attributes takes no adapter either
+                    return _SHARED_GATE
+    return g
+
+
+def _shadow(model, k):
+    """The adapter this thread scores the slot `k` of `model` with in place of its own (solvi.experimental.lora.scoring:
+    a candidate version scored in shadow), as (found, adapter or None)."""
+    m = getattr(_SHADOW, "map", None)
+    if not m:
+        return False, None
+    key = (id(model), k)
+    return (True, m[key]) if key in m else (False, None)
+
+
+def _shadow_adaptation(model, k):
+    """The adaptation this thread scores the question with adaptation key `k` of `model` with in place of the model's
+    own (solvi.experimental.lora.scoring: a version scored with its own calibration), as (found, Adaptation or None)."""
+    m = getattr(_SHADOW, "adapt", None)
+    if not m:
+        return False, None
+    key = (id(model), k)
+    return (True, m[key]) if key in m else (False, None)
+
 
 class DecideModel:
     """A decider: an input (a text or a state) + a question (task, options, kind) → a probability per option.
@@ -42,6 +154,7 @@ class DecideModel:
     long_len = _deprecate.removed_attr("long_len", "max_len_long", "DecideModel")
 
     deterministic = True
+    canary = None                           # an identity canary (solvi.core.guarantees.canary) watching a remote model
 
     def __init__(self, scorer, meta=None, model_id=None, path=None, backend=None, cache_size=4096, multi_question=None,
                  act=None, max_len_long=None):
@@ -80,6 +193,7 @@ class DecideModel:
         self.adaptations: dict[tuple, Adaptation] = {}
         self._adapt_owner: dict = {}         # question key → the part that fitted the adaptation under it first
         self.loras: dict = {}                # lora_key → an Adapter (solvi.experimental.lora.LoraAdapter; experimental: solvi.experimental.lora.adapt_lora)
+        self._lora_extra: dict = {}          # adapter name → an Adapter installed on the scorer outside any slot (scored in shadow; not in the fingerprint)
         self._cache, self._cache_size, self._lock = OrderedDict(), cache_size, threading.Lock()
         self._pass_lock = threading.Lock()
         self._block_failed = False
@@ -218,9 +332,10 @@ class DecideModel:
         """The checkpoint plus every adaptation (so a replay knows the calibration a decision used)."""
         from ..provenance import digest
         ads = {repr(k): a.params() for k, a in sorted(self.adaptations.items(), key=repr)}
-        if self.loras:                       # a model without adapters hashes as before
+        loras = self.loras                   # one snapshot (copy-on-write, see solvi.experimental.lora.swap)
+        if loras:                            # a model without adapters hashes as before
             return digest(self.weights_fingerprint(), ads, {repr(self._lora_fp_key(k)): ad.fingerprint()
-                                                             for k, ad in sorted(self.loras.items(), key=repr)})
+                                                             for k, ad in sorted(loras.items(), key=repr)})
         return digest(self.weights_fingerprint(), ads)
 
     def metadata(self):
@@ -385,22 +500,31 @@ class DecideModel:
     def _lora_fp_key(self, k):
         """An adapter slot as the model's fingerprint names it: the question alone while one part has an adapter for
         it (the fingerprint 1.1.0 gave), the question and the part when several parts asking it have one."""
-        if len(k) > 3 and sum(1 for o in self.loras if o[:3] == k[:3]) == 1:
+        if len(k) > 3 and sum(1 for o in list(self.loras) if o[:3] == k[:3]) == 1:
             return k[:3]
         return k
+
+    def _has_loras(self):
+        """Is any adapter on the scorer (in a slot, or staged for shadow scoring)? Then every question is scored with
+        the scorer's adapter switch, so a staged adapter left active never answers another question."""
+        return bool(self.loras) or bool(getattr(self, "_lora_extra", None))
 
     def _lora_of(self, sp):
         """The adapter that scores this question: the asking part's own (its slot: lora_key(sp)); for a question asked of
         the model directly (no part), the question's adapter when exactly one part has one. A part never scores with
         another part's adapter — when another part asking the same question has one, a SharedQuestionWarning names
-        both, once."""
-        if not self.loras:
-            return None
+        both, once. On a thread scoring a slot in shadow (solvi.experimental.lora.scoring), that thread's adapter."""
         k = lora_key(sp)
-        ad = self.loras.get(k)
-        others = [o for o in self.loras if o[:3] == k[:3] and o != k]
+        found, ad = _shadow(self, k)
+        if found:
+            return ad
+        loras = self.loras               # one snapshot: a swap replaces the dict (copy-on-write), never resizes it
+        if not loras:
+            return None
+        ad = loras.get(k)
+        others = [o for o in list(loras) if o[:3] == k[:3] and o != k]
         if len(k) == 3:                                  # asked of the model directly
-            return ad if ad is not None or len(others) != 1 else self.loras[others[0]]
+            return ad if ad is not None or len(others) != 1 else loras[others[0]]
         for o in others:
             mine = "its own adapter" if ad is not None else "no adapter"
             self._warn_once(("lora-shared", k[3], o[3] if len(o) > 3 else None), (
@@ -417,19 +541,41 @@ class DecideModel:
     def _ck(self, sp):
         """The cache key of a question: its key, and the adapter that scores it (two parts asking the same question
         with different adapters — or one with an adapter and one without — never share cached logits)."""
-        name = self._lora_name(sp) if self.loras else None
+        name = self._lora_name(sp) if self._has_loras() else None
         return sp.key if name is None else sp.key + (("lora", name),)
 
+    @contextlib.contextmanager
+    def _plain(self):
+        """→ whether the model has no adapter; while that is True, nothing installs or switches on an adapter on the
+        scorer's network (the shared side of its NetGate: a staging thread waits for this pass, and the check is made
+        again inside the gate, so a pass never runs through an adapter installed after the check)."""
+        if self._has_loras():
+            yield False
+            return
+        g = net_gate(self.scorer)
+        g.acquire_shared()
+        if self._has_loras():                          # an adapter came in while this thread waited for the gate
+            g.release_shared()
+            yield False
+            return
+        try:
+            yield True
+        finally:
+            g.release_shared()
+
+    @contextlib.contextmanager
     def _using(self, name):
-        """The scorer with this adapter active (None: none) while scoring — a no-op for a model without adapters. An
-        adapter does the switching itself (the Adapter protocol: using(scorer, active)), so this module imports no
-        adapter's module."""
-        if not self.loras:
-            import contextlib
-            return contextlib.nullcontext()
-        ads = list(self.loras.values())
+        """The scorer with this adapter active (None: none) while scoring — for a model without adapters, a plain pass
+        inside the scorer's NetGate. An adapter does the switching itself (the Adapter protocol: using(scorer,
+        active)), so this module imports no adapter's module."""
+        with self._plain() as plain:
+            if plain:
+                yield
+                return
+        ads = list(self.loras.values()) + list((getattr(self, "_lora_extra", None) or {}).values())
         ad = next((a for a in ads if a.fingerprint() == name), None) if name is not None else None
-        return (ad if ad is not None else ads[0]).using(self.scorer, active=ad is not None)
+        with (ad if ad is not None else ads[0]).using(self.scorer, active=ad is not None):
+            yield
 
     def _forget_cached(self, key):
         """Drop the cached logits of one question (every option order): its adapter changed."""
@@ -440,8 +586,9 @@ class DecideModel:
     def _score(self, pairs, read_len=0):
         """[(spec, text)] → scorer outputs, in order; the questions with a LoRA adapter (solvi.experimental.lora) are scored with it
         active, apart from the others. read_len: see _score_plain."""
-        if not self.loras:
-            return self._score_plain(pairs, read_len)
+        with self._plain() as plain:
+            if plain:
+                return self._score_plain(pairs, read_len)
         groups = OrderedDict()
         for i, (sp, _) in enumerate(pairs):
             groups.setdefault(self._lora_name(sp), []).append(i)
@@ -599,9 +746,16 @@ class DecideModel:
         return res[0] if one else res
 
     # --- calibrated scores
+    def _adaptation_of(self, sp, warn=False):
+        """The adaptation a question is scored with: the model's, unless this thread scores it with a version's own
+        (solvi.experimental.lora.scoring)."""
+        k = self._akey(sp, warn=warn)
+        found, a = _shadow_adaptation(self, k)
+        return a if found else self.adaptations.get(k)
+
     def _scores(self, sp, z):
         """Raw logits → calibrated scores s (softmax / sigmoid input) with this question's adaptation."""
-        a = self.adaptations.get(self._akey(sp, warn=True))
+        a = self._adaptation_of(sp, warn=True)
         z = np.asarray(z, float)
         if a is not None and a.bias is not None:
             z = z - np.asarray(a.bias)
@@ -625,6 +779,14 @@ class DecideModel:
             if sp.evidence and ptr is not None and d.value is not Unknown:
                 ev = (self.caps.get("pointer") or {}).get("evidence") or {}
                 d.evidence = pointer_evidence(ptr, ev.get("threshold", 0.15), min(sp.evidence, ev.get("max_spans", 3)))
+        if self.backend == "llm":
+            # an LLM's probabilities are numbers it wrote (or token probabilities) passed through log and softmax: a
+            # stated 0.9 comes back as 0.8999999999999999 or 0.9000000000000001 depending on the other options, and a
+            # threshold calibrated on one of them escalates the other. Rounded to 12 decimals, every stated 0.9 is 0.9 —
+            # in calibration and in every decision alike, so a threshold means the same on both sides
+            d.probs = {k: (round(v, 12) if isinstance(v, float) else v) for k, v in d.probs.items()}
+            if isinstance(d.confidence, float):
+                d.confidence = round(d.confidence, 12)
         info, why = getattr(z, "info", None), getattr(z, "escalate", None)
         if info:
             d.extra.update(info)
@@ -632,6 +794,8 @@ class DecideModel:
             d.escalate = f"{ESCALATED}: {why}"
             if sp.kind != "span":                   # nor a value: uniform logits would read as the first option
                 d.value, d.probs, d.confidence = None, {}, 0.0
+        if self.canary is not None:                 # counted, probed when due, marked after a change
+            self.canary.mark(d)
         return d
 
     def _decision_v3(self, sp, z, u):
@@ -720,7 +884,7 @@ class DecideModel:
 
     def _decision_v1(self, sp, z):
         s = self._scores(sp, z)
-        a = self.adaptations.get(self._akey(sp))
+        a = self._adaptation_of(sp)
         if sp.multi:
             p = _sig(s)
             probs = {o: float(v) for o, v in zip(sp.real, p)}
@@ -777,7 +941,7 @@ class DecideModel:
     def _finish(self, sp, d, act, escalate_below=None, act_threshold=None, use_act=None):
         """Act or escalate: the model's act signal (its probability is recorded; below the threshold → "model escalated"),
         else the calibrated confidence below escalate_below (→ "confidence … < …", the low-confidence safeguard)."""
-        if self.loras:
+        if self._has_loras():
             ad = self._lora_of(sp)
             if ad is not None:
                 d.extra["lora"] = {"adapter": ad.fingerprint(), "experimental": True}
@@ -1010,7 +1174,7 @@ class DecideModel:
                  type=None, min_confidence=None, min_act=None, use_act=None, max_error=None,
                  score_value=None, not_stated=False, k=None, bins=None, unit=None, coverage=None, evidence=False,
                  option_order="canonical", permutations=4, min_margin=None, long=None, top_k=None, rerank=False,
-                 perturb=0, retrieve_query=None, _shared=frozenset()):
+                 perturb=0, retrieve_query=None, state_keys=(), _shared=frozenset()):
         """A catalog part: text_fact (a fact name, or a list of them) → Decision(value, probs).
 
         The question: `options` (a list, or {option: description}) and `kind` ("choice", "multi", "score", "noul"; default
@@ -1101,12 +1265,17 @@ class DecideModel:
             raise ValueError('long must be None (truncate), "retrieve" or "full"')
         if long == "full":
             self._check_full(name)
-        return DecisionPart(self, name, task, text_fact, options, descriptions, multi, other, kind=kind, as_bool=as_bool,
+        part = DecisionPart(self, name, task, text_fact, options, descriptions, multi, other, kind=kind, as_bool=as_bool,
+                            state_keys=state_keys,
                             escalate_below=escalate_below, act_threshold=act_threshold, use_act=use_act,
                             option_order=option_order, permutations=permutations, min_margin=min_margin,
                             long=long, top_k=top_k, rerank=rerank, perturb=perturb, retrieve_query=retrieve_query,
                             score_value=score_value, **{x: v for x, v in prim.items() if v not in (None, False, 0)
                                                          or x == "coverage"})
+        check = getattr(self.scorer, "check_item", None)    # a scorer's own limits (systemone's max_options): ValueError
+        if callable(check):                                 # here, at build time, not on every request
+            check(name, self._item(part.spec, ""))
+        return part
 
     def _check_full(self, name):
         """long="full" needs a long-input length: declared by the checkpoint, or forced at load (with a warning)."""

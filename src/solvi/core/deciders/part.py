@@ -2,10 +2,15 @@
 solvi.core.deciders, which re-exports every name.)"""
 from __future__ import annotations
 
+import contextlib
 import dataclasses
 import inspect
+import logging
 import math
+import threading
+import time
 import warnings
+import weakref
 
 import numpy as np
 
@@ -19,6 +24,36 @@ from .wire import Logits, _respan
 from .backends import LONG_CPU_TOKENS, SECTION_TOKENS
 from .adapt import ADAPTERS, _Spec, lora_key
 from .gate import Facts, GroupBy, _group_guard, _group_promise, _shown, _threshold, _vkey, confidence_source, group_record, guard_promise, guard_rule, no_separation, one_source
+
+
+_VERSION_LOCKS: "weakref.WeakKeyDictionary" = weakref.WeakKeyDictionary()
+STATE_FACT = "state"               # the fact name the document recipe builds for the input without the text
+CALIB_PROBE = 16      # a remote model's first calibration chunk: mixed probability sources are refused after it
+CALIB_CHUNK = 32      # then chunks of this many examples, each logged (logging "solvi.calibration", INFO)
+_CALIB_LOG = logging.getLogger("solvi.calibration")
+
+_VERSION_LOCKS_GUARD = threading.Lock()
+
+
+def version_lock(part, create=True):
+    """The part's version lock (an RLock), taken by each of its decisions (call, decide, in_pass) for the whole decision
+    and by solvi.experimental.lora.swap while it changes the part's adapter and thresholds together, so a decision sees
+    one version: an adapter with its own thresholds. Created on first use by the swap (create=True); None for a part
+    that never had one (its decisions take no lock). Kept outside the part, so the part copies and pickles as before."""
+    lk = _VERSION_LOCKS.get(part)
+    if lk is None and create:
+        with _VERSION_LOCKS_GUARD:
+            lk = _VERSION_LOCKS.get(part)
+            if lk is None:
+                lk = _VERSION_LOCKS[part] = threading.RLock()
+    return lk
+
+
+def _unusable_line(ds, n):
+    """The warning of a calibration in which some decisions gave no usable output (an invalid LLM reply, no answer)."""
+    first = next(d.escalate for d in ds if d.value is None and d.escalate is not None)
+    return (f"{n} of {len(ds)} calibration decisions gave no usable output and escalated (counted as escalated and not "
+            f"right, never answered alone); the first: {first[:160]}")
 
 
 class DecisionPart:
@@ -38,7 +73,7 @@ class DecisionPart:
     def __init__(self, model, name, task, text_fact, options, descriptions=None, multi=False, other=None, *, kind=None,
                  as_bool=False, escalate_below=None, act_threshold=None, use_act=None, score_value="median",
                  option_order="canonical", permutations=4, min_margin=None, long=None, top_k=None, rerank=False,
-                 perturb=0, retrieve_query=None, **prim):
+                 perturb=0, retrieve_query=None, state_keys=(), **prim):
         self.model = model
         self.long, self.top_k, self.rerank = long, None if top_k is None else max(1, int(top_k)), bool(rerank)
         self.retrieve_query = str(retrieve_query).strip() or None if retrieve_query is not None else None
@@ -64,6 +99,9 @@ class DecisionPart:
         self.perturb = max(0, int(perturb or 0))  # re-ask without instruction-like sentences (solvi.core.deciders.perturb), up to k times
         self._orders = self._option_orders()
         self.facts = [text_fact] if isinstance(text_fact, str) else list(text_fact)
+        self.state_keys = tuple(state_keys or ())
+        if self.state_keys and len(self.facts) != 1:
+            raise ValueError(f"{name}: state_keys= reads one text fact plus the state, not {self.facts}")
         self.escalate_below, self.act_threshold, self.use_act = escalate_below, act_threshold, use_act
         self.guarantee = None                   # what the escalation threshold promises (act_guard / calibrate_for)
         self.conformal_set = None               # the answer-set quantile (conformal)
@@ -74,8 +112,9 @@ class DecisionPart:
         self.__qualname__ = name
         self.spec.owner = name                  # its LoRA adapter slot is this part's, not the question text's
         self.__doc__ = task
-        self.__signature__ = inspect.Signature([inspect.Parameter(f, inspect.Parameter.POSITIONAL_OR_KEYWORD)
-                                                for f in self.facts])
+        self.__signature__ = inspect.Signature(
+            [inspect.Parameter(f, inspect.Parameter.POSITIONAL_OR_KEYWORD) for f in self.facts]
+            + ([inspect.Parameter(STATE_FACT, inspect.Parameter.POSITIONAL_OR_KEYWORD)] if self.state_keys else []))
         self.__solvi_model__ = self
         self.__solvi_provenance__ = "decided"
         self.__solvi_options__ = None if self._shown is None else list(self._shown)
@@ -149,6 +188,7 @@ class DecisionPart:
                                                                        for k, v in self.groups["nodes"].items()))),
                                 ("option_order", None if self.option_order != "average" else
                                  (self.option_order, self.permutations)),
+                                ("state_keys", self.state_keys or None),
                                 ("long", self.long_key()),
                                 ("memory", None if self.correction_memory is None else self.correction_memory.fingerprint()),
                                 ("lora", None if self.lora is None else self.lora.fingerprint()))
@@ -168,12 +208,44 @@ class DecisionPart:
         return state_text({f: (v.value if isinstance(v, Quote) else v) for f, v in zip(self.facts, vals)},
                           self.model.state_format)
 
+    def _one_version(self):
+        """The part's version lock for one decision (a no-op unless solvi.experimental.lora.swap gave it one)."""
+        lk = _VERSION_LOCKS.get(self)
+        return contextlib.nullcontext() if lk is None else lk
+
     def __call__(self, *args, **kw):
-        vals = dict(zip(self.__signature__.parameters, args))
-        vals.update(kw)
-        text = self.text_of(vals)
-        self.asked += 1
-        return self._bind(self._one(text, self._ctx(text, vals=vals)), vals)
+        with self._one_version():
+            vals = dict(zip(self.__signature__.parameters, args))
+            vals.update(kw)
+            text = self.text_of({f: vals[f] for f in self.facts})
+            self.asked += 1
+            if self.state_keys:
+                sp = self._spec_with_state(vals.get(STATE_FACT) or {})
+                return self._bind(self._one_sp(sp, text, vals), vals)
+            return self._bind(self._one(text, self._ctx(text, vals=vals)), vals)
+
+    def _spec_with_state(self, state):
+        """The part's spec with the state block in the task: the reads see the state keys (reads_with=) while the
+        text — and so the span grounding and the quote offsets — stay exactly the one given text fact."""
+        missing = [k for k in self.state_keys if k not in state]
+        if missing:
+            raise ValueError(f"{self.__name__}: reads_with={list(self.state_keys)} — the input has no "
+                             f"state key(s) {missing}")
+        block = self.model.text({k: state[k] for k in self.state_keys})
+        task, desc, multi, other, kind, as_bool, sv, prim = self._spec_args
+        sp = _Spec(f"{task}\n\n<state>\n{block}\n</state>", list(self.spec.options), desc, multi, other, kind,
+                   as_bool, sv, **prim)
+        sp.owner = self.spec.owner
+        return sp
+
+    def _one_sp(self, sp, text, vals):
+        """_one with a per-call spec (state_keys=): the option order is "given" for such parts (a span or a number
+        reads one text; the block path is not supported with state_keys in 1.4)."""
+        if self.option_order == "average":
+            raise ValueError(f"{self.__name__}: state_keys= does not combine with option_order=\"average\"")
+        ctx = self._ctx(text, vals=vals)
+        z, a = self._raw_at([text], sp=sp)[0]
+        return self._finish(self.model._decision(sp, z), a, ctx=ctx)
 
     def _ctx(self, text, vals=None, raw=None):
         """What _finish needs besides the model's output: the input's text and, with thresholds per group, its group."""
@@ -206,6 +278,10 @@ class DecisionPart:
         """Called by the runtime for a part in a shared pass (flow.batches): score every sibling's question about the same
         input in one forward pass (cached, so the siblings read it) and return this part's decision; the decision's extra
         records the pass."""
+        with self._one_version():
+            return self._in_pass(siblings, args, names)
+
+    def _in_pass(self, siblings, args, names=None):
         text = self.text_of(args)
         ctx = self._ctx(text, vals=args)
         m = self.model
@@ -413,9 +489,9 @@ class DecisionPart:
                 "proportion to its length, so this is many times a 512-token pass. Use a GPU, or long=\"retrieve\" "
                 "with a larger max_len (e.g. max_len=2048), which reads the text's relevant sections."))
 
-    def _raw_at(self, texts, read_len=0):
+    def _raw_at(self, texts, read_len=0, sp=None):
         if self.option_order != "average":           # given, or canonical (the spec itself is in sorted order)
-            return self.model._raw_full([(self.spec, t) for t in texts], read_len=read_len)
+            return self.model._raw_full([(sp or self.spec, t) for t in texts], read_len=read_len)
         task, desc, multi, other, kind, as_bool, sv, prim = self._spec_args
         opts = (lambda o: o + [self.spec.other] if self.spec.other is not None and self.spec.other not in o else o)
         specs = [_Spec(task, opts(list(o)), desc, multi, other, kind, as_bool, sv, **prim) for o in self._orders]
@@ -575,7 +651,12 @@ class DecisionPart:
 
     # the model's methods for this decision
     def decide(self, text):
-        """An input (a text, a state, or Facts by name) → Decision; a list of inputs → a list."""
+        """An input (a text, a state, or facts by name: `from solvi.core.deciders import Facts`,
+        Facts(contract=..., hypothesis=...)) → Decision; a list of inputs → a list."""
+        with self._one_version():
+            return self._decide(text)
+
+    def _decide(self, text):
         one = isinstance(text, Facts) or _single(text)
         xs = [text] if one else list(text)
         ts = [self._input_text(x) for x in xs]
@@ -685,13 +766,36 @@ class DecisionPart:
         from ..catalog import label_options              # a label with several right answers (AnyOf): any of them
         gold = [[self._answer_key(o) for o in label_options(y)] for _, y in ex]
         conf, act, ok, ds = [], [], [], []
-        for (z, a), y in zip(self._read([t for t, _ in ex]), gold):    # a long input: the window a decision reads
-            d = self.model._decision(self.spec, z)
-            ds.append(d)
-            ok.append(float(self._answer_key(d.value) in y))
-            conf.append(d.conf)
-            act.append(None if a is None else self.model.act_probability(self.spec, d, a))
+        texts, n = [t for t, _ in ex], len(ex)
+        # a model that is called over the network (an LLM: deterministic False) is asked in chunks: the first
+        # CALIB_PROBE examples are checked for mixed probability sources before the rest is paid for, and every chunk
+        # logs its progress (logging "solvi.calibration", INFO); a local model reads every example in one batch
+        remote = getattr(self.model, "deterministic", True) is False
+        bounds = ([0] + list(range(min(CALIB_PROBE, n), n, CALIB_CHUNK)) + [n]) if remote else [0, n]
+        t0 = time.monotonic()
+        for c0, c1 in zip(bounds, bounds[1:]):
+            for (z, a), y in zip(self._read(texts[c0:c1]), gold[c0:c1]):   # a long input: the window a decision reads
+                d = self.model._decision(self.spec, z)
+                ds.append(d)
+                if d.value is None and d.escalate is not None:
+                    # no usable output (an invalid LLM reply, no answer from the server): the decision escalates
+                    # whatever the threshold, so it is never answered alone — signal −1, below every threshold a
+                    # calibration keeps, and not right (it counts in base_error, never in the risk)
+                    ok.append(0.0)
+                    conf.append(-1.0)
+                    act.append(None if a is None else -1.0)
+                    continue
+                ok.append(float(self._answer_key(d.value) in y))
+                conf.append(d.conf)
+                act.append(None if a is None else self.model.act_probability(self.spec, d, a))
+            if c0 == 0 and c1 < n:
+                one_source(ds, f"the first {c1} calibration examples (of {n})")   # refused before the rest is asked
+            if _CALIB_LOG.isEnabledFor(logging.INFO):
+                dt = time.monotonic() - t0
+                _CALIB_LOG.info("%s: %d/%d calibration examples decided (%.0f s%s)", self.__name__, c1, n, dt,
+                                f", about {dt / c1 * (n - c1):.0f} s left" if c1 < n else "")
         self._source = one_source(ds)                 # mixed log-probabilities and written numbers: refused
+        self._unusable = sum(1 for d in ds if d.value is None and d.escalate is not None)
         has_act = all(a is not None for a in act)
         if signal == "act" and not has_act:
             raise ValueError("the model gives no act signal: use signal='confidence'")
@@ -707,6 +811,20 @@ class DecisionPart:
             gate = self.model.act_threshold
             conf = [c if a >= gate else -1.0 for c, a in zip(conf, act)]
         return (act if use_act else conf), ok, ("act" if use_act else "confidence"), ds
+
+    def _label_report(self, ds, examples):
+        """Confident learning over the calibration decisions (solvi.core.calibration.label_issues) → its result, or None
+        for a question with several answers per input (multi-label, ranking, span)."""
+        from ..calibration import label_issues
+        from ..catalog import label_options
+        if self.spec.multi or self.kind in ("rank", "span"):
+            return None
+        probs, labels = [], []
+        for d, (_, y) in zip(ds, examples):
+            opts = label_options(y)
+            probs.append({self._answer_key(k): float(v) for k, v in (d.probs or {}).items()})
+            labels.append(self._answer_key(opts[0]) if len(opts) == 1 else None)
+        return label_issues(probs, labels)
 
     def _sourced(self, g):
         """A guarantee record with the source of the calibration's probabilities when the model names one (an LLM:
@@ -734,7 +852,7 @@ class DecisionPart:
                                                 for f in self.facts + extra])
 
     @_deprecate.removed_kwargs(error="max_error")
-    def calibrate_for(self, examples, *, max_error=0.05, signal="auto", method="empirical", delta=0.10):
+    def calibrate_for(self, examples, *, max_error=0.05, signal="auto", method="empirical", delta=0.10, label_check=False):
         """Choose the escalation threshold for a target error rate among the answers given alone, on labelled examples
         [(input, correct)]. method="empirical": the lowest threshold at which the calibration decisions it lets through
         are wrong at most `error` of the time — no guarantee on new inputs (on another data set the error can be several
@@ -749,8 +867,11 @@ class DecisionPart:
         Changes the part's fingerprint. → {"signal", "threshold", "answered" (the share answered alone on the
         examples), "error" (among them), "n", "max_error", "method", "guarantee"}. For a guarantee on the share of all
         questions answered wrongly, see act_guard. Every option after the examples is keyword-only (error= and the
-        result's keys "coverage" / "target_error", the 0.7 names, were removed in 0.9)."""
-        from ..calibration import accuracy_at, check_rate, ltt_threshold
+        result's keys "coverage" / "target_error", the 0.7 names, were removed in 0.9).
+        label_check (default False, opt-in; no model call): "label_issues" — the examples whose label the model confidently
+        contradicts (solvi.core.calibration.label_issues), with a line in "warnings" when there are any; the
+        calibration uses every label as given."""
+        from ..calibration import accuracy_at, check_rate, label_warning, ltt_threshold
         error = max_error
         examples = list(examples)
         if method not in ("empirical", "ltt"):
@@ -758,7 +879,7 @@ class DecisionPart:
         check_rate("error", error, zero=method == "empirical")     # ltt cannot certify 0 (math domain error before)
         if method == "ltt":
             check_rate("delta", delta)
-        sig, ok, name, _ = self._labelled(examples, signal)
+        sig, ok, name, ds = self._labelled(examples, signal)
         if method == "ltt":
             thr = ltt_threshold(sig, [1 - o for o in ok], error, delta)
             g = {"method": "ltt", "error": error, "delta": delta, "n": len(ok), "signal": name,
@@ -771,13 +892,26 @@ class DecisionPart:
         thr = max(thr, 0.0) if name == "confidence" else thr      # −1 marks an example the act gate escalates
         self._set_threshold(name, thr, self._sourced(g))
         acc, cov = accuracy_at(sig, ok, thr)
-        return {"signal": name, "threshold": thr, "answered": cov, "error": (1 - acc) if cov else 0.0,
-                "n": len(ok), "max_error": error, "method": method, "guarantee": g["promise"]}
+        out = {"signal": name, "threshold": thr, "answered": cov, "error": (1 - acc) if cov else 0.0,
+               "n": len(ok), "max_error": error, "method": method, "guarantee": g["promise"]}
+        bad = getattr(self, "_unusable", 0)
+        if bad:
+            out["unusable"] = bad
+            out["warnings"] = [_unusable_line(ds, bad)]
+        issues = self._label_report(ds, examples) if label_check else None
+        if issues is not None:
+            out["label_issues"] = issues
+            lw = label_warning(issues, len(ok))
+            if lw:
+                out.setdefault("warnings", []).append(lw)
+        return out
 
     @_deprecate.removed_kwargs(risk="max_risk")
-    def act_guard(self, examples, *, max_risk=0.10, signal="auto", groups=None, min_group=100, delta=0.10):
+    def act_guard(self, examples, *, max_risk=0.10, signal="auto", groups=None, min_group=100, delta=0.10,
+                  label_check=False):
         """Answer alone only as far as a guarantee allows (conformal risk control), from labelled examples of your own
-        stream [(input, correct)] — a few hundred is typical: the escalation threshold is set so that, for inputs like
+        stream [(input, correct)] — a few hundred is typical; an input is a text, a state, or facts by name
+        (`from solvi.core.deciders import Facts`) — the escalation threshold is set so that, for inputs like
         the examples, P(answered alone AND wrong) ≤ risk — a share of all questions (answered or escalated), not of
         the answered ones. `correct`: an option (a value), Unknown for "not stated", for a span question the passage's
         text (or a Quote: its text is compared), for a ranking the order. It holds for your stream, not under a shift of domain: recalibrate when the inputs change.
@@ -813,14 +947,24 @@ class DecisionPart:
 
         The decider protocol: a combination (solvi.core.deciders.combine) takes the same act_guard(examples, *, max_risk, signal,
         groups, min_group, delta) and returns the same keys. Every option after the examples is keyword-only; risk= is
-        the 0.7 name of max_risk= (removed in 0.9)."""
-        from ..calibration import check_rate, crc_threshold
+        the 0.7 name of max_risk= (removed in 0.9).
+
+        label_check (default False, opt-in; it reads the decisions already made, no model call): "label_issues" — the examples
+        whose label the model confidently contradicts by confident learning (solvi.core.calibration.label_issues:
+        their count, ids — the examples' positions — and the suggested answers), with a line in "warnings" when there
+        are any. Nothing is dropped: the threshold is calibrated on every label as given. A model's confident mistakes
+        are flagged too, so read it as a list to check, not as label errors found.
+
+        A remote model (an LLM) is asked in chunks: mixed probability sources are refused after the first 16 examples,
+        and each chunk logs its progress to the logger "solvi.calibration" at INFO (silent by default). A decision with
+        no usable output (an invalid reply, no answer) counts as escalated and not right: "unusable" gives their number."""
+        from ..calibration import check_rate, crc_threshold, label_warning
         risk = max_risk
         check_rate("max_risk", risk)                      # risk=10 (a percent) or 1.5 would be recorded as a promise
         if groups is not None and delta is not None:
             check_rate("delta", delta)
         examples = list(examples)
-        sig, ok, name, _ = self._labelled(examples, signal)
+        sig, ok, name, ds = self._labelled(examples, signal)
         s, o = np.asarray(sig, float), np.asarray(ok, float)
         base = float(1 - o.mean())
         if groups is None:
@@ -851,10 +995,20 @@ class DecisionPart:
                "risk": float(((1 - o) * auto).mean()), "n": len(ok), "guarantee": g["promise"],
                "promise": guard_promise(risk, err, bool(auto.any())),
                "base_error": base, "must_escalate_at_least": max(0.0, (base - risk) / (1 - risk)), **out}
-        warn = no_separation(sig, ok, name, err, base) if auto.any() else None
+        usable = [i for i, d in enumerate(ds) if not (d.value is None and d.escalate is not None)]
+        warn = no_separation([sig[i] for i in usable], [ok[i] for i in usable], name, err, base) if auto.any() else None
         if warn:
             out["warnings"] = [warn]
             warnings.warn(warn, UserWarning, stacklevel=2)
+        if len(usable) < len(ds):
+            out["unusable"] = len(ds) - len(usable)
+            out.setdefault("warnings", []).append(_unusable_line(ds, len(ds) - len(usable)))
+        issues = self._label_report(ds, examples) if label_check else None
+        if issues is not None:
+            out["label_issues"] = issues
+            lw = label_warning(issues, len(ok))
+            if lw:
+                out.setdefault("warnings", []).append(lw)
         return out
 
     def conformal(self, examples, coverage=0.90):
@@ -873,6 +1027,9 @@ class DecisionPart:
         scores, sizes = [], []
         from ..catalog import label_options
         for d, (_, y) in zip(ds, examples):
+            if d.value is None and d.escalate is not None:
+                scores.append(math.inf)              # no usable output: no answer can be ruled out (counted, never dropped)
+                continue
             keys = list(d.probs)
             sc = set_scores([d.probs[k] for k in keys], ordinal, Unknown in keys)
             best = []                                # several right answers (AnyOf): the set covers any one of them
@@ -885,8 +1042,9 @@ class DecisionPart:
         q = conformal_quantile(scores, 1 - coverage)
         self.conformal_set = {"coverage": coverage, "quantile": q, "n": len(scores), "ordinal": ordinal}
         for d in ds:
-            sizes.append(len(self.candidates(d)))
-        return {"coverage": coverage, "quantile": q, "n": len(scores), "mean_size": float(np.mean(sizes))}
+            if not (d.value is None and d.escalate is not None):
+                sizes.append(len(self.candidates(d)))
+        return {"coverage": coverage, "quantile": q, "n": len(scores), "mean_size": float(np.mean(sizes)) if sizes else 0.0}
 
     # --- the calibration file's state of this part (solvi.core.calibfile reads and writes only the file format)
     _calibration_kind = "DecisionPart"

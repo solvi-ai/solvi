@@ -9,6 +9,18 @@ task and options in one process — the folds of a cross-validation — each hav
 another part's adapter (a `SharedQuestionWarning` names both parts once). The `lora` extra needs `peft>=0.19`; an older
 peft is refused before any training.
 
+Versions of one part (the adapter loop, `solvi.experimental.stream.lora_learner`): `swap(part, adapter, calibration)`
+changes the adapter and its calibration (`calibration(part)`: the thresholds, the guarantee, the conformal set, the
+adaptation) together under the part's version lock (`version_lock(part)`, taken by each of the part's decisions) and
+the scorer's lock, so a decision of the part never sees an adapter without its own thresholds, and a decision on
+another question of the same model is not disturbed (the model's adapter slots are replaced, never changed in place) —
+except through a combination (Cascade, Vote, Route) over the part, which reads the part without its version lock and
+can pair one version's scores with the other's thresholds during a swap. adapt_lora and load_lora leave that window
+open (the adapter is on, the thresholds are cleared until act_guard runs). Swapping back is bit-exact (the
+part's and the model's fingerprints, the probabilities). `stage(part, adapter)` installs an adapter inactive, outside
+any slot; `scoring(part, adapter)` scores the part's question with it on the calling thread only.
+`adapter_by_hash(folder, hash)` finds an adapter file by the hash a decision recorded. Unmeasured beyond the tests.
+
 ## Install on x86_64 macOS (Intel)
 
 The last torch for x86_64 macOS is 2.2.2. transformers 5 and NumPy 2 do not run with it, and on Python 3.12 the

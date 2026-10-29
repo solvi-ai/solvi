@@ -15,6 +15,8 @@ A part backed by a model (an extractor, a head, a rule list, any object) records
 whether the model that made the decision is still the one in the catalog."""
 from __future__ import annotations
 
+import contextlib
+import contextvars
 import hashlib
 import re
 import sys
@@ -105,6 +107,22 @@ def digest(*parts):
     for p in parts:
         _feed(h, p)
     return h.hexdigest()[:16]
+
+
+_NO_PROBES = contextvars.ContextVar("solvi_no_probes", default=False)
+
+
+@contextlib.contextmanager
+def no_probes():
+    """Within this block no identity canary (solvi.core.guarantees.canary) probes, counts or marks a decision: replay
+    runs under it. Defined here, in the execution layer, so the runtime need not import the guarantees. It is a
+    context variable: it holds in this thread (replay recomputes in the calling thread), but not in thread-pool workers
+    started without copying the context — `system.ask` with workers > 1 inside this block still probes."""
+    tok = _NO_PROBES.set(True)
+    try:
+        yield
+    finally:
+        _NO_PROBES.reset(tok)
 
 
 def fingerprint(model):
@@ -314,7 +332,10 @@ def _code_fp(f, seen, memo):
     """code_fingerprint's recursion. A function reached again on the same way gives "recursive", so a fingerprint can
     depend on the way that reached it (a cycle, a diamond). The memo keeps one only when it did not: no "recursive" below
     it pointed above it — then, reached again with none of the functions it reached already on the way, it is the same
-    value, and those functions are marked as reached, as the plain recursion would have marked them."""
+    value, and those functions are marked as reached, as the plain recursion would have marked them. A module global that
+    is None is left out: it is the usual "set on first use" cache (`_X = None`, then a compiled pattern or a loaded table
+    the first call stores), and hashing it made the fingerprint depend on whether the code had run yet — it gave None
+    before the first call and nothing (an object) after it."""
     if id(f) in seen:
         seen.low = min(seen.low, seen[id(f)])
         return "recursive"
@@ -342,7 +363,7 @@ def _code_fp(f, seen, memo):
     glob = []
     g = getattr(f, "__globals__", {}) or {}
     for name in sorted(_code_names(co)):
-        if name in g:
+        if name in g and g[name] is not None:   # None: a global set on first use (_X = None): see _code_fp
             # co_names holds attribute names too: `type(x).__name__` reads the module's own __name__ here, recorded
             # as its 0.9 name
             if isinstance(g[name], _MUTABLE):
@@ -430,7 +451,7 @@ def own_code_fingerprint(f):
     glob = []
     g = getattr(f, "__globals__", {}) or {}
     for name in sorted(_code_names(co)):
-        if name not in g:
+        if name not in g or g[name] is None:     # a global set on first use: as in code_fingerprint
             continue
         v = g[name]
         if inspect.isfunction(v):

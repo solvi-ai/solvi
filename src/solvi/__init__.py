@@ -4,6 +4,8 @@ parts whose every answer is grounded, a hash chain over stored decisions and ind
 The high level, ready to use and configure:
 
     solvi.build(question, examples, ...)   a decision system: System 1 fitted, its guarantee, a slow path, a store
+    solvi.document(schema, model, ...)     a decision over a document: one read per field, each fact found in the text,
+                                            code computes the answer, a calibrated threshold, a replayable record
     solvi.Agent(env, knowledge=km)          an environment agent: System 1 on what the knowledge predicts, System 2 a
                                             search, hard checks from the agenda and the action model, replay
     solvi.Guard(storage=...)                an agent's tool calls checked before they run
@@ -24,21 +26,27 @@ from .core.system import Response, System
 from .core.types import Bins, Estimate, Maybe, Rank, Scale, Span
 from .solutions.agent import Agent
 from .solutions.decisions import build
+from .solutions.document import document
 from .solutions.guard import Guard
 from .solutions.knowledge import Knowledge
 
-__version__ = "1.3.0"
+__version__ = "1.4.0"
 
 _deprecate.install_old_paths()             # the 0.9 module paths import for one release, with a warning (CHANGELOG 1.0)
 
 
 def __getattr__(name):
-    """A name solvi exported in 0.9 and no longer does (`solvi.JSONLStorage`), or a moved module (`solvi.typed`): found
-    at its 1.0 place, with a SolviDeprecationWarning, until 1.1."""
+    """`solvi.Facts` (lazy: a top-level export must not drag `solvi.core.deciders` into every `import solvi` —
+    the import-layers rule), a name solvi exported in 0.9 and no longer does (`solvi.JSONLStorage`), or a moved
+    module (`solvi.typed`): found at its 1.0 place, with a SolviDeprecationWarning, until 1.1."""
+    if name == "Facts":
+        from .core.deciders import Facts
+        return Facts
     return _deprecate.old_attribute(__name__, name)
 
 
-# 23 names (LAYOUT §1)
-__all__ = ["build", "Agent", "Guard", "Knowledge", "Budget", "Catalog", "Question", "Answer", "System", "Response", "Quote", "Claim", "Decision",
+# 25 names (LAYOUT §1; "document" added in 1.4 by the author's decision, 2026-10-27; "Facts" in 1.4 by the
+# author's decision on the S7 list, 2026-10-30)
+__all__ = ["build", "document", "Agent", "Guard", "Knowledge", "Budget", "Catalog", "Question", "Answer", "System", "Response", "Quote", "Claim", "Decision", "Facts",
            "Fail", "Unknown", "Span", "Maybe", "Rank", "Estimate", "Scale", "Bins", "SolviDeprecationWarning",
            "ExperimentalWarning"]

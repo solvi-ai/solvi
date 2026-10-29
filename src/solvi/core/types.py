@@ -16,6 +16,7 @@ pydantic is imported on the first typed part (or BaseModel input, or serializati
 from __future__ import annotations
 
 import inspect
+import re
 import sys
 import types
 import typing
@@ -161,6 +162,8 @@ def span_value(vtype, text, strict=False):
     reading only."""
     t = text.strip()
     ta = adapter(vtype)
+    if vtype in _NUMBER_TYPES() and re.search(r"\d\s+[.,]\s*\d|\d[.,]\s+\d", t):
+        raise ValueError(f"{t!r}: a separator with a space beside it (\"1 ,234\") — one number or two?")
     if not strict and vtype in _NUMBER_TYPES():       # a number: what the guarded parser calls ambiguous ("2.500": two
         from .textin import ParseError, parse_number  # and a half, or two thousand five hundred?) is not read by the
         try:                                          # type's own reading either
@@ -644,7 +647,10 @@ def answer_type_of(t, ordinal=False):
         return Answer.yes_no()
     cv = closed_values(s)
     if cv is None:
-        raise TypeError(f"no answer type for {type_name(t)}: use bool, Literal[...], an Enum, or list[Literal[...]]")
+        hint = ("; a number a rule computes: Question(..., answer=Answer.estimate()) — an estimate without bins is the "
+                "rule's number as it is (confidence: the facts it rests on) — or Estimate[edges]; a number quoted from a "
+                "text: Span[float]") if s in (int, float) or type_name(t) in ("Decimal", "Fraction") else ""
+        raise TypeError(f"no answer type for {type_name(t)}: use bool, Literal[...], an Enum, or list[Literal[...]]{hint}")
     vals, multi = cv
     if multi:
         return Answer.multi(vals)

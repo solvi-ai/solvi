@@ -3,6 +3,7 @@ of responses and corrections (solvi.core.store)."""
 from __future__ import annotations
 
 import dataclasses
+import hashlib
 import math
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
@@ -114,17 +115,47 @@ def experimental_of(system):
 
 
 
-def _rule_why(rule, r, vals, by):
+WHY_TEXT_MAX = 200     # with a model's quote, an input text longer than this is shown by its length in `why`
+
+
+def _model_quote(r, rule, vals):
+    """The supporting quote a model gave for its decision (an LLM decider's extra["llm"]["quote"]) → its words in `why`:
+    the quote and where it is — `contract[20:38]` when it occurs exactly once in exactly one input text, else its
+    offsets in the text the model read — or None."""
+    info = (r.extra or {}).get("llm") if isinstance(r.extra, dict) else None
+    q = info.get("quote") if isinstance(info, dict) else None
+    if not (isinstance(q, (list, tuple)) and len(q) == 3 and isinstance(q[0], str) and q[0]):
+        return None
+    text, s, e = q
+    at = [(x, vals[x].find(text)) for x in rule.inputs
+          if isinstance(vals.get(x), str) and vals[x].count(text) == 1]
+    where = f"{at[0][0]}[{at[0][1]}:{at[0][1] + len(text)}]" if len(at) == 1 else f"[{s}:{e}] of the text the model read"
+    return f"quote {text!r} ({where})"
+
+
+def _rule_why(rule, r, vals, by, legacy=False):
     """A rule's `why`: its inputs with their values — each with the reason its fact function gave (solvi.core.because /
-    missing) — led by the rule's own reason when it gave one."""
+    missing) — led by the rule's own reason when it gave one. A model decision that quoted the text (an LLM decider)
+    leads with the quote and its offsets instead, and an input text longer than WHY_TEXT_MAX is shown by its length and
+    hash (`contract = doc[12,345 chars, sha256:0123456789ab]`), not whole. legacy=True: the form before 1.4 (every input
+    whole); legacy="1.4": the 1.4 form (`<text, 12,345 chars>` when a quote leads) — a replay accepts a record stored by
+    either (see _why_before)."""
     from .catalog import because_text
-    parts = []
+    quote = None if legacy is True else _model_quote(r, rule, vals)
+    parts = [quote] if quote else []
     for x in rule.inputs:
         said = because_text(by[x].extra) if x in by else None
-        if said and said.startswith("missing (") and vals.get(x) is None:
+        v = vals.get(x)
+        if said and said.startswith("missing (") and v is None:
             parts.append(f"{x} = {said}")
+        elif legacy is not True and isinstance(v, str) and len(v) > WHY_TEXT_MAX and (quote or legacy is False):
+            if legacy == "1.4":
+                parts.append(f"{x} = <text, {len(v):,} chars>" + (f" ({said})" if said else ""))
+            else:
+                h = hashlib.sha256(v.encode("utf-8")).hexdigest()[:12]
+                parts.append(f"{x} = doc[{len(v):,} chars, sha256:{h}]" + (f" ({said})" if said else ""))
         else:
-            parts.append(f"{x} = {srepr(vals.get(x))}" + (f" ({said})" if said else ""))
+            parts.append(f"{x} = {srepr(v)}" + (f" ({said})" if said else ""))
     own = because_text(r.extra)
     if own:
         b = r.extra["because"] if "because" in r.extra else None
@@ -133,6 +164,16 @@ def _rule_why(rule, r, vals, by):
                 if b is not None else own)
         parts.insert(0, lead)
     return "; ".join(parts)
+
+
+def _why_before(res, why, *olds):
+    """A result whose `why` names a model's quote (1.4) keeps the forms earlier versions stored (every input whole
+    before 1.4; the `<text, N chars>` marker of 1.4) as `_why_before`, not serialized: a replay of a record stored by
+    either accepts that `why` — the same reason, from the same trace, written as it was written."""
+    got = [res.why.replace(why, o) for o in olds if o != why and isinstance(res.why, str) and why in res.why]
+    if got:
+        res._why_before = got if len(got) > 1 else got[0]
+    return res
 
 
 class System:
@@ -271,6 +312,21 @@ class System:
                         warnings.warn(f"hard check {part.name}: `then` answers {qn!r} with {ans!r}: {e} — when the check "
                                       f"fails, {qn!r} will abstain", stacklevel=2)
 
+        asked = sorted({x for p in list(catalog.parts.values()) + list(catalog.rules.values()) for x in p.inputs
+                        if x in self.questions and x not in catalog.parts})
+        if asked:                                     # answers are not facts: such an argument is read from the input,
+            import warnings                           # and without it the reader cannot run (its question abstains)
+            warnings.warn(f"{', '.join(map(repr, asked))} {'is a question' if len(asked) == 1 else 'are questions'} of "
+                          "this system and an argument of a part or rule: answers are not facts, so it is read from the "
+                          "given facts, never from the answer — give it in the input, or compute it with a part "
+                          "(cat.fn) of that name", stacklevel=2)
+        idle = _idle_hard_checks(catalog, self.questions.values())
+        if idle:                                      # a hard check no question's flow can reach never runs: an answer
+            import warnings                           # it should have stopped would be given without a word
+            warnings.warn(f"hard {'check' if len(idle) == 1 else 'checks'} {', '.join(idle)}: no `then=` and no "
+                          "question of this system requires it, so it never runs and never stops an answer — add "
+                          f"requires=[{idle[0]!r}] to the questions it guards, or then={{question: answer}}",
+                          stacklevel=2)
         if self.strategist is not None:
             self._then_wired()
         self._cache = None
@@ -817,6 +873,23 @@ class System:
                 lines.append(f"  {i18n.label(k, lang):{w}s} {st[key]}")
         return "\n".join(lines)
 
+    @staticmethod
+    def _rule_result(q, r, rule, pc, conf, why, trace):
+        """The answer a computed rule gives (its value, or the abstention when it returned None / a value outside the
+        options), with its `why`."""
+        src = rule.func.__name__ if rule.func is not None else rule.name
+        if r.value is None:                       # the rule itself declined to answer (e.g. a split vote): a deliberate abstention
+            return Result(None, 0.0, f"the rule abstained (returned None); {why}", "abstain", provenance=r.origin,
+                          source=src, guard="rule_abstained")
+        if q.answer.primitive or q.require_evidence or (r.extra is not None and "evidence" in r.extra):
+            return _resolved(q, r, pc, why, src, trace.init, getattr(rule, "quotes", "normalized"))
+        try:
+            return Result(q.answer.normalize(r.value), conf, why, probs=dict(r.probs or {}), provenance=r.origin,
+                          source=src)
+        except ValueError:
+            return Result(None, 0.0, f"rule returned {srepr(r.value)}, not one of the answer options; {why}", "abstain",
+                          provenance=r.origin, source=src, guard="outside_options")
+
     def _answer(self, q, flow, trace, vals, by, hard, pcache=None):
         facts = flow.per_question.get(q.name, [])
         # hard checks: a false hard check in the question's flow decides the answer (the model cannot override it).
@@ -830,9 +903,9 @@ class System:
         if failed:
             f, part = failed[0]
             r = by[f]
+            because = (r.extra or {}).get("reasons") if isinstance(r.extra, dict) else None   # refine.Fail
+            said = f"hard check {f} is false" + (": " + "; ".join(because) if because else "")
             if q.name in part.then:
-                because = (r.extra or {}).get("reasons") if isinstance(r.extra, dict) else None   # refine.Fail
-                said = f"hard check {f} is false" + (": " + "; ".join(because) if because else "")
                 if callable(part.then[q.name]):   # a function of facts gives the answer (1.0): run and recorded here
                     return _then_answer(self.catalog, part, q, trace, vals, flow, said)
                 try:
@@ -841,8 +914,9 @@ class System:
                     return Result(None, 0.0, f"hard check {f} is false and its `then` answer is not usable: {e}",   # still
                                   "abstain", source=f, guard="hard_check")                                         # decides
                 return Result(forced, 1.0, said, "forced", provenance=r.origin, source=f, guard="hard_check")
-            return Result(None, 0.0, f"hard check {f} is false and no answer is set for it", "abstain", source=f,
-                          guard="hard_check")
+            text = (f"{said} and no answer is set for it" if because   # the reason kept
+                    else f"hard check {f} is false and no answer is set for it")
+            return Result(None, 0.0, text, "abstain", source=f, guard="hard_check")
         for f, part in hard:                          # a governing hard check that could not be evaluated: the answer
             r = by.get(f)                             # is unknown, never "passed"
             if r is not None and r.value is MISSING and governs(part, q):
@@ -885,18 +959,10 @@ class System:
             pc = path_confidence(self.catalog, trace, rule.inputs, pcache)
             conf = min(pc, r.confidence)
             why = _rule_why(rule, r, vals, by)
-            src = rule.func.__name__ if rule.func is not None else rule.name
-            if r.value is None:                       # the rule itself declined to answer (e.g. a split vote): a deliberate abstention
-                return Result(None, 0.0, f"the rule abstained (returned None); {why}", "abstain", provenance=r.origin,
-                              source=src, guard="rule_abstained")
-            if q.answer.primitive or q.require_evidence or (r.extra is not None and "evidence" in r.extra):
-                return _resolved(q, r, pc, why, src, trace.init, getattr(rule, "quotes", "normalized"))
-            try:
-                return Result(q.answer.normalize(r.value), conf, why, probs=dict(r.probs or {}), provenance=r.origin,
-                              source=src)
-            except ValueError:
-                return Result(None, 0.0, f"rule returned {srepr(r.value)}, not one of the answer options; {why}", "abstain",
-                              provenance=r.origin, source=src, guard="outside_options")
+            olds = [_rule_why(rule, r, vals, by, legacy="1.4")]
+            if _model_quote(r, rule, vals):
+                olds.append(_rule_why(rule, r, vals, by, legacy=True))
+            return _why_before(self._rule_result(q, r, rule, pc, conf, why, trace), why, *olds)
         head = self.heads.get(q.name)
         if head is None:
             return Result(None, 0.0, "no rule and the answer head is not fitted (fit)", "abstain")
@@ -1284,6 +1350,22 @@ class System:
         from .guarantees.guarantee import guard_question
         return guard_question(self, question, examples, **kw)
 
+    def save_guarantee(self, question, path):
+        """Write the guarantee in force on a question (System.guarantee) to a JSON file — the promise, its thresholds (per
+        group too) and report, how its signal is read, and what it was calibrated for (the catalog's fingerprint, the
+        question's answer type, the guard's fingerprint) → path. A new process attaches it with load_guarantee instead of
+        calibrating again, and its stored decisions replay against it (solvi.core.guarantees.guarantee.save_guarantee)."""
+        from .guarantees.guarantee import save_guarantee
+        return save_guarantee(self, question, path)
+
+    def load_guarantee(self, path, *, signal=None, groups=None, strict=True):
+        """Attach a guarantee written by save_guarantee → its report. Refuses (ValueError) a file made for another
+        catalog or answer type (strict=False: attaches it anyway) and one whose rebuilt guard is not the saved one; a
+        signal or grouping that was a function is passed again (`signal=`, `groups=`). Logged in `guard_history` like
+        System.guarantee (solvi.core.guarantees.guarantee.load_guarantee)."""
+        from .guarantees.guarantee import load_guarantee
+        return load_guarantee(self, path, signal=signal, groups=groups, strict=strict)
+
     learning = gone_in_1_0("learning()", "solvi.experimental.changes: a labelled update is a candidate change — "
                            "Pipeline(stages, journal, targets=[LearningTarget(system, ...)]).propose(Change(source, "
                            "artifact=\"update\")); the learning loop itself was removed in 1.1", "System")
@@ -1299,7 +1381,10 @@ class System:
         System.guarantee(..., corrections=, sources=); no head or decision learns from it (a head fed such labels gained
         on one task of three), and a system without storage raises ValueError. With an update target attached (solvi.experimental.changes.LearningTarget(system, ...,
         gate_teach=True)) nothing learns at once: the correction is only stored, and the update's gates decide whether it
-        is learned.
+        is learned. With an adapter loop attached for the question (solvi.experimental.stream.AdapterLoop.attach) nothing
+        learns at once either: on a System alone (label mode) the correction is the loop's label (a source its policy
+        refuses raises UntrustedLabel before anything is stored), through a Dispatcher (stream mode) it is only stored —
+        the loop's labels come with its decisions.
         An unknown question raises KeyError and an answer that is not one of the question's options ValueError, before
         anything is learned or stored; the answer is stored normalized (True → "yes"). When nothing learned at once and
         there is no storage, the correction is lost: a UserWarning says so."""
@@ -1318,6 +1403,18 @@ class System:
                 raise ValueError("teach(label_source='verified') stores the label for System.guarantee(corrections=): "
                                  "the system has no storage, and no head or decision learns from a verified label")
             self.storage.save_correction(question, init_state, correct, label_source=source, by=by, of=of)
+            return None
+        al = getattr(self, "adapter_loop", None)
+        if al is not None and al.question == question:   # an adapter loop owns the part: nothing learns at once
+            if al.mode == "label":
+                al._taught(self, init_state, correct, source)   # a source its policy refuses raises before storing
+            if self.storage is not None:
+                self.storage.save_correction(question, init_state, correct, label_source=source, by=by, of=of)
+            elif al.mode != "label":                  # stream mode: not the loop's label, and nowhere to keep it
+                import warnings
+                warnings.warn(f"teach({question!r}): an adapter loop in stream mode takes its labels with its "
+                              "decisions, not from teach, and the system has no storage to keep it: the correction is "
+                              "lost", stacklevel=2)
             return None
         loop = getattr(self, "_learning", None)
         if loop is not None and loop.gate_teach:
@@ -1389,6 +1486,9 @@ class System:
         correct = self.questions[question].answer.normalize(value)       # ValueError: not one of the options
         from .schema import untag_floats
         init = untag_floats((v.get("trace") or {}).get("init") or {})
+        al = getattr(self, "adapter_loop", None)
+        if al is not None and al.question == question and al.mode == "label":
+            al._taught(self, init, correct, "outcome")      # the attached loop's label (refused: raises, not stored)
         return self.storage.save_correction(question, init, correct, label_source="outcome", by=by, of=sid, note=note)
 
 
@@ -1649,6 +1749,15 @@ def _then_answer(catalog, check, q, trace, vals, flow, said):
     return Result(answer, 1.0, f"{said}; then {getattr(fn, '__name__', 'function')}("
                   + ", ".join(f"{x} = {srepr(plain[x])}" for x in names) + f") = {srepr(answer)}", "forced",
                   provenance="computed", source=check.name, guard="hard_check")
+
+
+def _idle_hard_checks(catalog, questions):
+    """Hard checks that no question of a system can reach: no `then=`, required by none of its questions and read by no
+    part (a hard check enters a question's flow only through one of these) → [names], in catalog order."""
+    questions = list(questions)
+    read = {x for p in list(catalog.parts.values()) + list(catalog.rules.values()) for x in p.inputs}
+    return [p.name for p in catalog.parts.values() if p.kind == "check" and p.hard and not p.then
+            and p.name not in read and not any(p.name in q.requires for q in questions)]
 
 
 def governs(part, question):

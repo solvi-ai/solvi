@@ -13,7 +13,7 @@ What is checked, per Space (the direct *.static.hf.space page, not the huggingfa
   (solvi's answers stay the same) and replays the trace ("replay ok"); the "New in 1.0" tab, when the deployed page has
   it, runs each demo: `solvi.build` + `explain()` (who answered 200 requests), `res.checks` with a `then=` function
   (the forced answer "partial", the trace replays), quotes (a quote typed otherwise accepted on the normalized view, a
-  made-up one refused), the compact journal (bytes per decision full vs compact) and the two levels (23 names); the
+  made-up one refused), the compact journal (bytes per decision full vs compact) and the two levels (24 names); the
   "New in 0.8" tab ("New in 0.7" on a page deployed before 0.8), when the deployed page has it, runs its first demo
   (its output, or a note that the solvi it loaded is too old);
 - arcade: tic-tac-toe loads; "O (solvi starts)" makes solvi move and explain the move ("solvi plays …"); the "Agent and

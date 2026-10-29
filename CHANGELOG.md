@@ -1,5 +1,1058 @@
 # Changelog
 
+## 1.4.0 — released 2026-10-30
+
+### Added
+- **`solvi.document`: a decision over a document** (`solvi.solutions.document`; the 24th top-level name). One
+  model read per field of a pydantic schema (`Span[float]`, `Span[date]`, `Span[str]`, a `Literal` choice), each span
+  found in the text as the text writes it (a number as a number of its own), quoted numbers read as documents write
+  them — one scale rule, never multiplied (`1,250 million`, `$1.2bn` → 1250, 1.2, in the document's unit), a sign in
+  any dash or trailing, parentheses as a negative around a number with a separator, decimals, a currency or a percent
+  (`$(1,234) million` → −1234; `(2019)` does not read), anything ambiguous or not finite abstains; a number whose sign
+  the quote must be the whole number token at its place — at every occurrence of its digits the token is extended
+  over a sign in any dash, minus or `&minus;`, a currency, closing parentheses or brackets, a CR / DR marker, a scale
+  and a percent; a sign, parentheses or marker the quote left out (`1,234` of `-1,234` or `(1,234)`), a sign the
+  text does not write there (a `- ` list bullet) or digits that do not stand in the text abstain (a group of `1 234`
+  does not stand alone), while a currency, scale or percent the quote left out is taken from the text into the
+  field's unit (`$1.2` of `$1.2 billion` is in billion, `12` of `-12%` is a percent and its sign is checked;
+  occurrences that disagree abstain); a number in parentheses after another number on its line (`SEK 1,234 m
+  (1,100)`, `12.3 percent (11.8)`) is ambiguous and abstains; each number's unit is `facts.units`, and a hard check
+  `same_units` abstains when the amounts differ in scale (a field without one next to one with one included) or
+  currency (`$` next to `C$` included; percentages are not compared) — `units="lenient"` lets a field without a scale
+  match any and `$` any dollar, `units="any"` turns it off —
+  `compute=(facts, state)` as the
+  question's rule (a number by default, `answer=` otherwise; confidence the weakest read; a result that is not finite
+  abstains), `checks=` as hard checks, `calibrate(examples, max_risk=)` over `System.guarantee` (a warning below 100
+  examples; a number judged at a string label's written precision — a whole number below 100 exactly — and a
+  numeric label up to float noise), `save_calibration` / `document(..., calibration=)`,
+  `storage=` with `verify()` / `replay_all()`; the rest of the input stored as plain JSON data (numpy scalars as
+  numbers, sets and tuples as lists). An LLM made with `logprobs="auto"` is read with one stated confidence per read
+  (a copy, with a warning); `llm()`'s own default is unchanged. Built only from the low level; `DocumentSystem` holds
+  a `System` (`.system`), it does not subclass it.
+- **A number with a space beside its separator does not read** (`solvi.core.textin.parse_number`, and so every
+  parser path and `solvi.core.types.span_value`): `"1 ,234"` was read as 1 and `"(1 ,234)"` as −1; both are now
+  refused as ambiguous (one number or two?).
+- **A saved guarantee names its models** (`System.save_guarantee` / `load_guarantee`): the file carries
+  `System.fingerprint()["models"]` (each model-backed part's model, endpoint, reply settings and question as asked),
+  and `load_guarantee` refuses a file calibrated with other models, and one that names none (strict=False attaches
+  either). Every model of the System is compared as it fingerprints itself (endpoint, name, settings, the question
+  asked): a server that changes the weights behind an unversioned model name is not told apart.
+- **Exact values through a side channel (experimental)** (`solvi.experimental.numguard`). The model writes `[k]`
+  for the k-th numeral of the input (`annotate` numbers them for the prompt), `<calc>` / `<date>` calls that code
+  computes exactly (`Decimal` with 50 digits, calendar arithmetic: days, weeks, months to the month's end, years,
+  days between, the weekday) and `@k` for a call's result; `fill` writes the values in, an input numeral as the input
+  writes it. `check` names the source of every number left in a text — an input numeral (sign ignored unless
+  `signed=True`, scale words normalised, a whole-scale rescale only with `rescale=True`, rounding only with
+  `rounding=True`, each reported in `how`), a call's result or a tool output passed in, a constant
+  (by default `SMALL`, integers 0–12 and 100; the wider `MEASURED_CONSTANTS` the measurement used, integers 0–100
+  and a few common factors, opt-in; `years()`, or a predicate) — or marks it `unsourced`; dates and the years of dates
+  are matched; identifiers ("A-10457", "COVID-19") are skipped or, with `ids="check"`, wanted verbatim in the input.
+  `NumberGuard(on_fail="refuse" | "raise" | "report")` runs both; `run_with_retry(generate, source)` asks once more
+  through any callable with the errors and the unsourced numbers. Measured once with a prototype of the protocol
+  (its script is not in the repository, with `MEASURED_CONSTANTS`): numbers without a source 0–0.4 % of the numerals in long reports against
+  9–22 % typed and 3.5–10 % with native tool calling, at 4–8 % of numerals pointing at the wrong input number and
+  refusals; a provenance guarantee, not a correctness one.
+- **numguard typed calls: `<table>`, `<cmp>`, `<scale>`, `<count>`** (`solvi.experimental.numguard`). They share
+  the `@k` numbering with `<calc>` / `<date>` and run on their own as `table_calc`, `cmp_calc`, `scale_calc`,
+  `count_calc`: a table cell by row and column (numbers or labels) and sum / avg / count / max / min / argmax /
+  argmin over a column with a row range and a `where` filter (pipe tables of the source, `parse_tables`, or
+  `tables=`; a caption "in thousands" applied under `norm`); comparisons with and / or / not, shown as yes / no
+  (`booleans=`); thousand / million / percent / bp / time-unit conversions in `Decimal`, days against months only
+  with a rule; counts and membership. Wrong types, pointers out of range, mixed units or scale words, empty ranges
+  and averages over no rows raise `ProgramError`. `check` reports their numbers with the mode as `how` and the
+  source cells as `cells`.
+- **numguard: row aggregates, time and speed units, `pi`, a mode registry** (`solvi.experimental.numguard`).
+  `<table>` aggregates over a row (`sum(row "Alpha", "2021".."2023", where "Type" == "actual")`), `argmax` /
+  `argmin` over a row give the column label ("which year had the highest X"); the column syntax is unchanged
+  (`column` may be written). `<count>` takes `row(...)`. `<scale>` adds seconds, minutes, hours and speed (m/s,
+  km/h, km/s, mph), with one division at the end so 1 m/s is exactly 3.6 km/h. `PI` (28 digits, an approximation)
+  is `pi` in calls, opt-in through `constants=SMALL | {PI}`. `MODES` lists every call kind with its slot grammar,
+  result type, validator and executor; `register_mode` adds one that `fill` runs (fail closed on a crash or a
+  result that fails the validator).
+- **`AdapterLoop(additive=True)`: additive coverage — a certified candidate serves the zone the served version
+  escalates, instead of replacing it** (`solvi.experimental.stream`; also `LearningLoop`; default `True` — the
+  replacement protocol lost on the stand, see the measured result at the end of this entry; `additive=False` keeps
+  it). The loop serves a chain of layers: a decision walks it to the first layer whose frozen routing
+  threshold it does not pass (its owner; the zones are fixed by these thresholds), and the first layer on that path,
+  from L0 down, at or above its live threshold answers alone — an upstream layer answers inside a deeper zone where
+  its own live threshold allows, before the deeper layer — else the oracle (never a layer deeper than the owner).
+  Every layer keeps learning on coin
+  samples of its whole zone (a restarted one on the decisions it owns, with no bet below its routing threshold). A
+  candidate is attached below the certified deepest layer, whose routing threshold is then frozen; during its trial
+  every decision of its zone is labelled, and its certificate is read on that zone only; `DefaultPolicy`'s additive gate
+  (certified, novel, novel-risk, probe; no share or margin comparison) makes it the deepest layer. `max_layers=3` caps
+  the chain (then no training starts, "train_refused"). One `RiskDetector` per layer: an alarm restarts only that
+  layer; `rollback(j)` detaches layer j and the deeper ones. The guarantee is per zone, at level α, with one δ budget
+  over every layer and restart; stream-wide nothing is ≤ α: with `max_risk=` the joint risk is bounded by
+  α·(1 + Σ_{j≥1} P(Z_j)) (up to 2α with one layer), with `max_error=` the error among the alone answers by
+  α·(1 + Σ_{k≥1} P(overlap_k) / P(answered)) (overlap_k: the rows layer k would answer that an upstream layer took),
+  reported in `status()["zones"]` with each zone's share and realised risk. `status()["zones"]["layers"]` rows:
+  `learning` is `"base"` or `"owned"` (the regime), `s_alone` is renamed `s_answered`, and `answered` (the decisions
+  the layer answered alone anywhere in its zone) is new. Records carry `owner`, `layer`, `zone`, `path`, `trial_zone`,
+  `answered_by`,
+  `answer_layer`, `answer_thr`, `base`, `rho_base` and `path_would`; `replay()` recomputes the routing and the answer
+  and `rescore=True` rescores every layer; the checkpoint of an additive loop is format v4 (a replacement loop's stays
+  v1; an older library refuses v4 by name, and v3 — no usefulness certificate — and v2 — frozen layers — both
+  pre-release forms, are refused by name).
+  `additive=False` writes the replacement
+  protocol's records and events; both differ from 1.3 by the lazy δ charge (see Changed: `v_index` /
+  `delta_v` are `None` until a promise's first sample, "recertify" carries `None`). Checked on synthetic streams with
+  known per-zone risk, and measured on a stand (4 public intent datasets × 10 seeds × 12 000 decisions, frozen
+  protocol, independent review): additive coverage answers alone on new requests +3.6 / +8.3 / +7.9 / +3.4 points
+  over no loop (bootstrap 95 % intervals clear of 0, 4 of 4 datasets), per-zone risk ≤ α (max 0.034), oracle calls
+  down to 0.73–0.86 of no-loop, and a scrambled-label control promoted a noise layer in 0 / 20 runs. The replacement
+  protocol lost on the same stand: 11–16 points below no loop on 3 of 4 datasets — additive is the default for that
+  reason. Stream-wide joint risk with `max_risk=` is not ≤ α (one dataset read 0.0506, just above α, under its bound
+  α·(1 + Σ P(Z_j))): the guarantee is per zone.
+- **Additive coverage: a usefulness certificate per layer, and a fifth start check `useful`**
+  (`AdapterLoop(useful_error=0.5, delta_use=None)`, additive mode only, on by default there; `None` turns it off).
+  The joint certificate alone admits a layer that answers alone on a few per cent of its zone and is wrong on almost
+  all of those answers (a layer trained on noise labels does this). Each candidate and layer now also carries a
+  selective certificate at β = `useful_error` on the same samples, tested pointwise over its grid (each point at
+  δ_u / G) on its own δ budget `delta_use` (default the loop's δ). A candidate starts serving only where it holds;
+  a layer answers at the loosest point certified by both. Two guarantees, separate budgets: per zone, P(a layer ever
+  answers alone at a threshold whose risk on its zone is above α) ≤ δ, as before; and P(a layer ever answers alone at
+  a point whose error among its alone answers on its zone is β or more) ≤ δ_use — a layer trained on noise starts
+  serving with probability at most δ_use (it stays out with probability ≥ 1 − δ_use). β = 0.5 is a noise guard, not a quality promise. New: `StreamPromise(procedure="pointwise")` with
+  `certified_at`, `log_wealth_at`, `level_now`; promote-event fields `useful`, `useful_lw`, `useful_level`,
+  `useful_v_index`, `useful_delta_v`, `useful_error`, `joint_thr`, `alone_k`, `wrong_k`; per-record `useful`;
+  `useful_*` events; `status()["delta_use_spent"]`; `VersionInfo.useful` (at the joint point λ_J, the start
+  gate's check) / `useful_at_answer` (at the composed answer point) / `useful_thr`, the same pair as `ok` /
+  `ok_at_answer` in a layer's `status()` `useful` block; `LoopState.useful_error`.
+  `useful_error=None` writes the records of the additive loop without it, and replacement mode is unchanged; a
+  `StreamPromise` built without `procedure` keeps its records, dumps and fingerprint. Checked on synthetic streams,
+  400 seeds each: a noise layer was promoted in 0/400 runs (bar 28.2 at δ_use = 0.05); the usefulness null at β
+  (δ_use = 0.30) was falsely certified in 3/400, 0/397, 0/397 runs at indices 1–3 (bars from δ_u / G per index,
+  8.0 at index 1); the composed threshold with a joint prefix reaching a bad band: 0 false in 400; a real layer
+  starts later by p50 48 / p90 188 / p95 238 / max 454 zone samples and answers alone 1.14× as often as with the
+  check off in the last 2 000 decisions. On the stand (the additive entry above) the scrambled-label control promoted
+  a noise layer in 0 / 20 runs with the certificate; the same control without it had promoted one in 5 / 20.
+- **`DefaultPolicy(novel_only=...)`: the promotion's novel-only paired comparison can be switched off, for controls**
+  (`solvi.experimental.stream`). Default `True`, unchanged: the comparison counts only post-freeze samples on keys the
+  candidate never trained on. With `False` it counts every sample, the candidate's train keys too (the seen fields
+  are still counted for the probe); with `probe=False, novel_risk=False` too, a memoriser that the defaults refuse is
+  promoted on its trained items. For controls; it weakens the guarantee. The policy is pickled, so replay and the
+  checkpoint carry the setting; a policy pickled before the switch reads as `True`.
+- **Process (experimental): a process of several solvi systems as data** (`solvi.experimental.process`, stage 0 of
+  `solvi.Process`). Nodes (a `solvi.build` result, a System, a Guard or a question to a person), edges with predicates
+  written as data (a closed language: `answer` with eq / in / lt / gt, `status`, `by`, `confidence_below`,
+  `budget_over`, `drift`, and / or / not), merges, loops that must carry `max_iter` (a cycle without one is a
+  `ValueError`) and the declared process promise (`union` with its split, `end_to_end` with its threshold family,
+  `per_node`). `spec()` is JSON with a SHA-256 hash stable to the order of keys; `from_spec` reads it back byte for
+  byte and refuses a system or channel whose fingerprint is not the recorded one (`strict=False` marks it); `diff`
+  names every change by node and edge; `render` draws Mermaid or text. Running, replay, the path promise and the
+  channel to a person come in later stages.
+- **Process (experimental), stage 1a: running a process.** `Process.run(facts)` follows one path through the nodes —
+  each node's own system decides on the facts it reads (plain values; a provenance label per written fact, given to a
+  node only when it reads `"provenance"`), the first edge whose predicate holds leads on — and `explain(result)` says
+  it in words. Node runners behind one protocol (`NodeRunner.run(facts) → NodeResult`): `DecisionNode` (a
+  `solvi.build` result), `SystemNode` (a System), `GuardNode` (a Guard: the fact `call`; an escalation is a person's
+  decision). The node decisions are those of calling the systems by hand in the same order (tested record for record).
+  Each node runs inside `run_context(parent=` the previous node's decision `)`, so `chronology(stores, run=)` gives the
+  path; `Process(storage=)` appends one record of kind `"process"` per run (ids and hashes of the path; the record
+  schema lists the kind among those checked for the envelope). `on_abstain` / `on_human="abstain"` stops the run at a
+  node that abstains or sends its decision to a person. A merge of `"all"` inputs is not run yet (one path).
+- **Process (experimental), stage 1b: asking a person through a queue.** `HumanChannel` is an abstract class (submit a
+  `HumanRequest` → a ticket, `poll(ticket)` → a `HumanAnswer` or None, `cancel`, `fingerprint`) that you subclass with
+  your own way to ask; `MemoryQueue` (answer / open) and `CallbackChannel(fn)` are built in, and
+  `solvi.experimental.process.check_human_channel` checks an implementation (a ticket per question, none lost, one
+  answer per ticket, cancel, pending / resume through a process). `Process(human=)` asks through it at a node of kind
+  `"human"` and on a hand-off (`on_abstain` / `on_human="handoff"`); an answer not given at once ends the run
+  `"pending"` with its ticket; `p.pending()` lists the waiting questions and `p.resume(run)` goes on when the answer
+  comes, also from a process loaded afresh from the same spec and stores. Each segment of a run is a `"process"`
+  record (`continues`: the segment before); the answer is a `"human"` record (reviewer, note, the channel's
+  fingerprint, parent: the pending segment) and goes on as the node's answer labelled `by: "human"`.
+  `HumanAnswer(declined=True)` stops the run, `p.cancel(run, why)` withdraws the question, `Process(user_verifier=)`
+  binds an answer to who gave it. A human node and a hand-off without a channel are a `ProcessRunError` (they were
+  `NotImplementedError`). On ten units over three rounds, 30 runs with 2% of the decisions asking a person lost no
+  ticket (a test, not the stand). The record schema lists the kind `"human"` (envelope only).
+- **Process (experimental), stage 2: replay of a process.** `p.replay(run)` re-checks a run from its records alone,
+  across its segments (`continues`) and node by node: the node's record intact in its store and chained to the
+  decision before it, its trace hash, its decision replayed by its own means (`Dispatcher.replay`, `Trace.replay`,
+  `Guard.replay`), the facts it was given against the recorded answers upstream and the input, and the edge taken
+  against its predicate on the recorded answers. A person's answer is a leaf, recorded and not recomputed (its record
+  intact, after the pending segment, the ticket's only answer, the same channel, the request asked). The report names
+  the first divergence (`at`: node, step, segment, position; `kind`: integrity / recompute / missing_part) and lists
+  what the records cannot show (`unchecked`); a pending run replays to `{"ok": True, "pending": ticket}`.
+  `p.replay_all()` replays every run and verifies every store. One tamper of a node record, an edge choice, a passed
+  fact or a `"human"` record (answer, reviewer, parent) names exactly that node in 100 of 100 seeded tampers. The run
+  record format (kinds `"process"` and `"human"`) is written down in `docs/trace_spec.md` as the candidate to freeze
+  before the Rust core's stage 0. A run and its replay take each step through one function, so the replay recomputes
+  what the run recorded.
+- **Process (experimental), stage 3: the path promise in the modes `union` and `per_node`.** `p.guarantee()` says
+  what the declared promise gives — the statement, whether it is in force and why not, the bound, each node's share
+  `r_i` and the most runs `m_i` it can make in one run — and every run that ends carries `automatic` (an end node
+  answered with no person on the path) and `risk` (the process risk while the promise is in force); `explain` ends
+  with the promise. `union`: P(a run ends automatically and its end answer is wrong) ≤ Σ r_i·m_i ≤ r over every
+  automatic node of the graph — the standard union (Bonferroni) bound; what is new is the declared promise, replayable
+  with the run, and its in-force conditions. No independence between nodes is assumed; it assumes each node was
+  calibrated in place, on what reaches it in the process (a node calibrated on clean inputs breaks it); `split="equal"` (r / K_auto), `{node: r_i}` or a
+  function of the spec (Σ r_i ≤ r checked); in force when each automatic node keeps its own promise at its share (CRC
+  risk ≤ r_i; an LTT node counts at its error level with Bonferroni over the δ's and a warning), a loop leaves room
+  for the node's repeated runs, no node was loaded against another fingerprint and the path watch has not flagged.
+  `per_node`: each node keeps its own promise and the statement says the end error is not bounded. `PathWatch`
+  (`p.monitor(watch, reference=runs)`) follows the share of runs taking each edge with Bernoulli CUSUMs whose h is
+  simulated by resampling the reference runs; a flag puts the union promise out of force. The harness of the promise
+  stand (a synthetic insurance claim with a known truth) is `benchmarks/process_e1.py`.
+- **Process (experimental), stage 4: the `end_to_end` promise.** `p.promise(mode="end_to_end", risk=r, delta=δ,
+  family=...)` and `p.calibrate([(input, end_label), ...])`: P(a run ends automatically and its end answer is wrong)
+  ≤ r with probability ≥ 1 − δ over n end-labelled runs, by learn then test on a finite grid of thresholds on the
+  nodes' signals (their confidence), reusing the library's LTT test — not conformal risk control, as the loss is not
+  monotone once routing depends on the answers. Each example runs once with no threshold (decisions stored, nobody
+  asked); the loss at each threshold is recomputed from the recorded signals. The threshold family is the user's
+  choice: `ThresholdFamily` (`grid`, `automatic`, `fingerprint`, `procedure` "bonferroni" | "fixed"); built in
+  `"shared_rank"` (the documented default: one rank threshold shared by every node, 64 values, Bonferroni) and
+  `"per_node_fixed"` (a rank threshold per node, nodes opened one at a time in the declared order — by default from
+  the end back to the start — as a fixed sequence at the full δ). A family of your own is valid only if its grid and
+  order ignore the labels; its fingerprint is recorded and `from_spec(spec, family=obj)` refuses another. The chosen
+  threshold and what it was calibrated on (n, the examples' hash, the process's hash without its promise, the
+  family's fingerprint) are kept in the promise. At run time a node held back by the threshold hands its question to
+  a person; each decision step records `{"signal", "automatic"}` and `replay` re-checks it (step `"promise"`).
+  `guarantee()` is in force when calibrated on this very process and family and the path watch has not flagged;
+  it assumes the end-labelled runs are exchangeable with the stream, and it bounds the share of all runs that end
+  automatically and wrong, not the error rate among automatic decisions;
+  nothing certified sends every node's answer to a person. The default order of `"per_node_fixed"` is now from the
+  end nodes back to the start (it was start to end). The harness has the end_to_end arms (`--stage 4`).
+- **`Guard.fingerprint()`**: what decides a guard's calls as one hash, read from its declarations (tools with their
+  schemas and functions, policies, functions, firewalls, the authorizer, settings); building nothing. The process
+  records it per guard node instead of reading the guard's private attributes.
+- **`systemone`: a probability floor for services that round** (`prob_floor="auto"`, opt-in). Hosted decision
+  models round probabilities (Jev to 0.01), and an exact 0 on the right option becomes log(1e-6) ≈ −13.8, which drags
+  fit, teach and calibration (a third-party measurement on Jev, https://github.com/scienthoon/jev-ood-calibration:
+  choice temperature refit to 3.29 with a 1e-6 floor, 1.30 with 0.005). `prob_floor="auto"` — recommended for a
+  service that rounds, such as Jev — takes the floor per question as half the step of the grid that question's
+  probabilities strictly between 0 and 1 lie on (0.01 or 0.1 → 0.005); an answer on no grid of 10^-2 … 10^-4, or
+  whose probabilities are all exactly 0 or 1, keeps 1e-6 (a float floor covers that case for a service known to
+  round). A float sets the floor for every reply. The default stays `None` (1e-6): existing systems read bit for bit
+  as before, under the same fingerprint. `"auto"` and a float enter the fingerprint, so switching one on is a new
+  model: calibrate again. A decision records the floor in `extra["systemone"]["prob_floor"]` when it is not 1e-6.
+- **`systemone`: the service's own `confidence` is kept** in `extra["systemone"]["confidence"]` (Jev's Choice / Score
+  number, distinct from the probability; per option, as a dict, for a multi-label question — a guarantee on
+  `signal="extra:systemone.confidence"` abstains on such a question), and a guarantee can be set on it:
+  `System.guarantee(..., signal="extra:systemone.confidence")` — the new `signal="extra:<path>"` reads any number the
+  answer's decision recorded; an answer without it abstains with the reason.
+- **`systemone(max_options=)`**: the most options the service takes in a choice (Jev 255, Solar Decide 26, by their
+  docs); a question with more is refused when it is built, with a `ValueError` that names the limit, instead of
+  escalating on every request. A scorer can declare such limits with `check_item(name, item)`, called by
+  `DecideModel.decision`.
+- **Stream certificate (experimental), stage 1: `StreamPromise`** (`solvi.experimental.stream`). A promise earned on
+  the stream: an anytime-valid learn-then-test certificate on a threshold grid. One e-process per grid point against
+  "the risk at this threshold is above α" — a mixture of constant bets (fractions 0.9 / 0.5 / 0.25 / 0.1, weights
+  0.6 / 0.25 / 0.1 / 0.05) or `bets="agrapa"` (`MeanBound` mirrored) — certified at 1/δ_v; the threshold in force is
+  the loosest grid point with every stricter one certified (fixed-sequence over a grid fixed before any label: the
+  scores of the first `grid_from` = 200 decisions, `"fixed"` or a list), +inf until the first, and it only loosens.
+  `max_risk=` (joint: P(answered alone and wrong)) or `max_error=` (selective: the error among the answers given
+  alone). A missing label (`learn(..., label=None)`) is a loss wherever it would have been answered alone.
+  `restart(why)` takes the next (v, δ_v) from `DeltaBudget` (δ_v = `skills.Certificate.delta_at(v)`, 6δ/(π²v²)).
+  Installed with `System.guarantee(question, promise=sp)` like `OpenSetGate`: every gated decision records its state
+  (v_index, delta_v, threshold, n, evidence and grid fingerprints), a replay takes the recorded threshold, and the
+  same samples rebuild the same state. Clean samples to certify at α = δ = 5 %: 85 (v = 1), 116 (v = 2), 134 (v = 3);
+  74 for the mixture at the full δ (93 with aGRAPA), against 59 for a one-shot binomial test. Unmeasured: the stand,
+  the sampling coin, the change detector and the Dispatcher wiring are later stages.
+- **Stream certificate (experimental), stage 2: the detector, the calibration coin and the Dispatcher wiring.**
+  `RiskDetector` (`solvi.experimental.stream`): a Shiryaev–Roberts mixture e-detector on the deployed loss
+  1{answered alone and wrong} of the sampled decisions, null at α (`alternatives=` moves it to min·α), alarm at
+  `arl` = A; its statement is E[samples to a false alarm] ≥ A, not a per-horizon probability. It reproduces the
+  design's script bit for bit (α = 5 %, A = 1000: mean run 1 333 at α, 153 samples at 2×, 36 at 4×). `Dispatcher(
+  audit="adaptive", promise=sp, detector=det, on_drift="recertify", probation=300, sampling=)`: a calibration coin
+  HMAC(secret, "sample|question|seed|n") with no input bytes, at a rate from the past only (1 until certified and in
+  probation, else min(1, max(floor, budget / share alone))); an escalated decision that wins the coin is a free sample
+  (the slow path's accepted answer is the label), an alone one is checked by the slow path; a sample without a label
+  is a loss. An alarm restarts the certificate (next δ_v, threshold +inf) and escalates everything for `probation`
+  decisions and until re-certified; with `on_drift="human"` it is the latched drift flag. Every dispatch record
+  carries `stream` (sample, certificate, detector), each state change is a record of kind `stream` (`stream` is
+  KEPT by a redaction), `Dispatcher.replay_stream()` rebuilds the certificate, detector and rate from the records and
+  recomputes each coin where the secret is given; the system report gets one block. A control in the tests:
+  calibrating on escalations only loosens the threshold past α on 12 of 12 seeds; the coin over every decision on 0.
+  Fixed on the way: `StreamPromise.promise` no longer names the current δ_v (a replay after a restart re-derived a
+  different reason text). The design's α/2 numbers are not what the code gives: about 1.5 % of streams at α/2 alarm
+  within 1 000 samples (44 of 3 000), not ≤ 1 %, and some do within 20 000 (19 of 100), not none. Without the new
+  options a dispatcher's records and config fingerprint are unchanged. Unmeasured: the stand (stage 4).
+- **Stream certificate (experimental), stage 3a: tickets — an agent as the oracle over MCP.**
+  `solvi.experimental.stream.tickets`: `AgentOracle` (the Dispatcher's slow path when it is an agent outside the
+  process) and `TicketDesk` (`decide` → the decision or a blind ticket, `resolve(ticket, label, source="s2" |
+  "human")`, `expire`, `sweep`, `open`); `solvi serve module:desk --mcp --agent-oracle` serves `decide` and `resolve`
+  as MCP tools (serve does not import the experimental code). A ticket shows the question, all options, the input,
+  the question's text and the time left — no model answer, probabilities, reason or kind; audit and escalation tickets
+  have the same payload. Tickets are chain records (kind `pending`, `pending_expired`; "pending" is KEPT), issued with
+  the decision's number, coin and rate fixed and completed later; the stream sample of a ticket records
+  `label_source` and `label_of` (the ticket's record id; `None` before this stage). A ticket past its ttl or given up
+  sends the input to a person and, when sampled, is a loss for the certificate (every grid point where System 1 would
+  have answered alone) and for the detector (1). New in `solvi.core.dispatch` (provisional): `Dispatcher.start` /
+  `complete` (`ask` split in two, records unchanged), `Started`, `Dispatcher.resume()` (a fresh dispatcher continues
+  from its store: numbers, spend, runs, drift flag, the stream state), `Dispatched.pending`; `replay_stream()` reads a
+  ticket's gate and coin where it was issued. Not built: the expired-share stop, repeated tickets for the oracle's
+  noise. Unmeasured.
+- **Stream certificate (experimental), stage 3b: the closed learning loop.** `solvi.experimental.stream.versions`:
+  `LearningLoop` — a live learner (`stream.learner`: the `Learner` / `Frozen` protocols, `HashedTextLearner` = hashed
+  word and character n-grams with an online softmax in numpy, `FastHeadLearner` = solvi's `FastHead` over facts) takes
+  every accepted oracle label and is never served; at max(300, 2 × the served version's labels at its freeze) labels a
+  copy is frozen as the candidate with its own `StreamPromise`, its (v, δ_v) from one `DeltaBudget` over every
+  version; a version's promise reads only samples drawn after its freeze; a certified candidate is promoted when, on
+  its own samples, it answers alone at least as often as the served version (margin 0, and more than nothing); an
+  uncertified one is discarded after 1 500 samples (its δ_v stays spent); version 0 is "no model" and never
+  certifies; `rollback(v)`. Labels from trusted sources by default; slow-path labels ("s2", "verified") only with
+  `s2_labels=True`, recorded as "s2". Each decision is a record of kind `loop`; freeze / promote / discard / rollback
+  are records of kind `stream`; `replay(rescore=)` rebuilds which version served each decision, the certificates and
+  the events, and checks the pickled versions (`versions_dir=`). New in `solvi.core.versions`: `serve_head(system,
+  question, head)`, the hook that installs a served version as the question's answer head. Found on the way: under
+  the joint promise a model of shuffled labels can be certified at a strict threshold and promoted (it answers almost
+  nothing alone; the design's shuffled-label control assumed it cannot certify); under `max_error=` it is never promoted. Not
+  wired into the Dispatcher yet. No gain is claimed (see the stream limits below).
+- **Learning loop: the promotion floor, version 0 = System 1, the detector, tickets** (experimental,
+  `solvi.experimental.stream.versions`; changes the stage-3b rule). Promotion now needs ℓ_k ≥ `min_share` (default
+  0.05) AND ℓ_k ≥ ℓ_s + `margin` (default 0.01, was 0), both on the candidate's own post-freeze samples (author's
+  decision, 2026-10-23): under the joint promise a model of shuffled labels was certified at a near-empty strict
+  threshold and promoted with margin 0; with the floor shuffled labels never promote under `max_risk=` or
+  `max_error=` (3 seeds each). `initial=` (opt-in; default still "no model"): version 0 is an existing frozen model
+  with its own `StreamPromise` (the budget's first δ_v), fed from decision 1, its fingerprint the "start" event;
+  `FrozenFast.of_system(system, question)` freezes a System's fitted head for it. `detector=RiskDetector(...)`,
+  `probation=300`: stage 2's detector on the served version — an alarm ("alarm" event) restarts the served promise
+  (new δ_v, threshold +inf) and nothing is answered alone for `probation` decisions and until re-certified; a
+  certified candidate is promoted at once but waits out probation; promotion and rollback reset the detector. The
+  oracle may return a `Verdict(label, source, label_of)`; `ticket_verdict(desk, resolved)` reads one from a ticket
+  resolved on a `TicketDesk` (the agent's: source "s2"; an expired one: no label); decisions record `label_of`,
+  `probation`, `left` and the detector's state. With `system=`, rolling back to version 0 puts back the head the
+  System had. Still no `Dispatcher(loop=)`. Unmeasured. Fix (found by the stage-4 smoke): an alarm now restarts the
+  candidate's promise too, certified or not (new δ_v, threshold +inf, its paired samples dropped; a "restart" event
+  with why "alarm" per restarted version, the served one included), so the promotion rule reads only post-freeze and
+  post-alarm samples — before, a candidate certified before the shift was promoted at the alarm (ℓ_s = 0) and served
+  the moved world on its old threshold, above the promise. A retired version certified before an alarm
+  restarts when it is rolled back to.
+- **Stream certificate (experimental): measured once; what held and the documented limits** (`docs/experimental.md`,
+  section `stream`; the numbers, their setting and the prior work in best practices). What held: no threshold a stream
+  certificate had in force, and no version the learning loop served, had a risk above the promise on the regime it was
+  certified on — under the method's assumptions (the stream i.i.d. between change points with the answerer frozen, a
+  sampling coin independent of the input, the risk relative to the oracle's labels) and with the window between a
+  change and the detector's alarm exempt; this is the method's known statement, checked on the implementation. The
+  replay rebuilt the certificate, detector, rate and coin of every decision, and every version decision of the loop,
+  with no mismatch. A simulation of `RiskDetector` matched its run-length bound, which counts samples, not decisions.
+  Known limits: `RiskDetector` reads only the sampled decisions and
+  alarmed far later than the confidence CUSUM on shifts to new intents, or not at all, so it must not be the only
+  alarm — keep it next to the score monitor; the `LearningLoop` gained nothing with gold labels (what it promoted
+  answered alone mostly on items it had been given labels for) and stays only as the core of a planned adapter (LoRA)
+  loop; `TicketDesk` / `AgentOracle` are unmeasured on a stream; the promise holds between change points, not in the
+  gap between a shift and its alarm.
+- **Adapter (LoRA) learning loop, stage 1: the policy and the gates** (experimental, `solvi.experimental.stream.policy`
+  and `stream.gates`; not wired into a loop yet). `LoopPolicy`, the abstract class a developer controls the loop
+  with: hooks `accept`, `split`, `want_train`, `select`, `hyper`, `freeze`, `promote`, `discard`, `alarm`, and a
+  `budget`; each reads a `LoopState` (a frozen snapshot: decisions, served and candidate versions, label counts by
+  split, the versions table, the served version's latest held-out outcomes, alarms, trainings started, the wall
+  clock, paused, the mode). `Budget`: trainings over the life and per 24 h, the interval between two, the seconds of
+  one, threads, device, rows per training, adapter files kept; `Budget.refuse` says why a training may not start.
+  `DefaultPolicy`: trusted label sources (slow-path ones only with `s2_labels=True`); a 70 / 15 / 15 train / calib /
+  holdout split by a hash of the content key with the change pipeline's salt (a key never changes split, and the
+  loop never trains on a key the change pipeline holds out); train at ≥ 300 labels and ≥ 1.5 × the largest n_train
+  of any version (a discarded one included), never while a training is in flight, only with an improvement signal
+  (the served version errs alone above α, or answers nothing alone, on its last 200 held-out labels, or has fewer
+  than 100 of them); one label per key (the latest), then a class-balanced, half-recent selection; r 8, lr 3e-4, updates
+  clamp(⌈n / 4⌉, 200, 3000), seed = the version; freeze on ≥ 100 held-out labels with a gain of 0.01 in (right −
+  wrong) answered alone, an `act_guard` threshold, honesty within 0.02 and the time budget (label mode adds a paired
+  Wilson sign test > 0, safe only together with the held-out gate); promote when certified, with ≥ 100 samples on
+  keys the candidate never trained on, ≥ 5 % alone on them and ≥ the served share + 1 point, ≥ 30 alone answers on
+  them, and the memorisation probe (error alone on novel − on seen ≤ 0.10); discard when the probe shows the gap
+  beyond noise (Wilson bounds), uncertified after 1 500 samples or not better after 1 500; on a second alarm on the
+  current serving within 300 decisions roll back to the highest retired version below it with no alarm on record.
+  `LabelRow`, `TrainReport`, `Paired`, `VersionInfo` (with the trained key set) carry what the hooks read. Policies
+  pickle (they go into the loop's checkpoint). Unmeasured: the numbers are the design's, not tuned.
+- **Adapter (LoRA) learning loop, stage 2: the loop core** (experimental, `solvi.experimental.stream.loop` and
+  `stream.serving`). `AdapterLoop` is the lane's learning loop with its constants turned into `LoopPolicy` hooks: each
+  label is split by its content key (a key keeps the split it first got) and only train labels reach the learner; an
+  online learner is frozen as a snapshot, a batch learner gets a `TrainJob` (the rows of `select`, the settings of
+  `hyper`) — `HashedTextTrainer` is the stand-in batch learner (no torch); the loop checks the policy's `Budget`
+  before every training; a `TrainReport` scores the trained model and the served one on the held-out labels (its
+  threshold from the calib labels: the model's own `act_threshold`, else a fixed-set Wilson stand-in for act_guard,
+  `gates.calib_threshold`), and a refused freeze is a version discarded at birth with no δ spent. The paired
+  comparison counts only post-freeze samples whose key the candidate never trained on (`train_keys`, a frozenset
+  snapshotted at the freeze); the samples on keys it trained on feed the memorisation probe. Two alarm sources, OR-ed:
+  the `RiskDetector` and a score monitor on the served version's scores (default `NumericDrift`; a detector without
+  a monitor is refused); the policy's `alarm` says recertify, roll back (to `rollback_target`) or ignore. Controls:
+  `pause` / `resume` (no training, freezing or promotion while paused; labels and promises go on), `train_now`
+  (ignores the schedule, not the budget; in process until the runners of stage 3), `promote(force=)` (never without
+  the certificate), `rollback`, `versions`, `status` (with the training in flight, `job`). A served version is
+  installed through `Served.install` (`HeadVersion` over a frozen model's head, `BaseVersion` for version 0).
+  `LearningLoop` is now `AdapterLoop` with `DefaultPolicy` at the lane's constants (`lane_policy`; its records gain
+  the content key, the split, the wall clock and a "train" event per freeze). `DefaultPolicy` gains `refreeze`,
+  `probe`, `pre_freeze`, `novel_risk` and `min_calib` switches, and a promotion bar (author's decision): the
+  candidate's error on novel samples, wrong alone over all novel samples, ≤ α, read as its Wilson 95 % upper bound
+  (`core.store.sysreport.wilson`), not the point estimate — looked at on every decision, the point estimate passed a
+  candidate with a true novel error of 6.4 % in 56 % of simulated 1 000-sample trials, the bound in 1.4 %; at 3 % the
+  bound leaves about 6 % of candidates unpromoted within such a trial. `want_train` waits for the labels the pre-freeze
+  gates need (`min_holdout` held-out labels and `gates.calib_min(α)` calib labels, 73 at α = 0.05), so the first
+  training is not refused at birth, and reads the improvement signal only once the held-out window holds
+  min(`min_holdout`, `window`) outcomes, so no training follows a promotion before the new served version was
+  measured. A hook that raises after a decision or a control began to change the state stops the loop: the decision is
+  recorded with an "error" event (the hook, its place, the exception), `status()["state"]` is "error", `step` and the
+  controls refuse, and `replay()` raises the recorded error at the same place, so it stays exact. `status()` takes no
+  lock (it answers from another thread during an in-process training and shows the job); `versions()` and `replay()`'s
+  snapshot take it. A learner's `keys()` is united with the rows it was handed into the version's training keys (a
+  warm-started or stateful learner does not leak keys into "novel"). The learner's `update` is called with `key=` /
+  `source=` only when its signature takes them, a `TypeError` inside it is no longer retried. A refused `train_now`
+  writes its "train" event. Not built yet: the LoRA learner and swap, runners, the checkpoint, label mode and attach.
+  Unmeasured.
+- **The adapter loop's LoRA learner (experimental), stage 3** (`solvi.experimental.stream.lora_learner`,
+  `solvi.experimental.stream.runner`, `solvi.experimental.lora`). `LoraLearner` is a batch learner: each version is a
+  LoRA adapter trained from the base checkpoint (a `warm_start` setting is refused) on the rows the policy selected,
+  then `act_guard` at the loop's α on the calib labels, on a copy of the part. `LoraVersion` is the adapter with that
+  calibration, both the loop's frozen model and its `Served`: `score` runs the part's question with its adapter on
+  the calling thread only (`lora.scoring`; the served part, other questions and the fingerprints are unchanged),
+  `install` / `uninstall` swap it in and out, `save` / `load` write and check `<v>.lora.safetensors` and
+  `<v>.calib.json`; `LoraVersion.of_part(part)` is version 0. `lora.swap(part, adapter, calibration)` changes the
+  adapter and its calibration together under a per-part version lock and then the scorer's lock: it closes the window
+  adapt_lora and load_lora leave open, in which the adapter is on and the thresholds are cleared. Each decision of a
+  part with a version lock holds it (`DecisionPart.__call__`, `decide`, `in_pass`; parts that never had a swap take
+  no lock); a combination over the part is not covered. The model's adapter slots (and the staged adapters) are
+  replaced on every change, never changed in place, so a decision on another question of the same model reads a
+  whole old or new set during a swap (it raised "dictionary changed size during iteration" before; tested with two
+  threads deciding another question through 400 swap pairs). Swap then rollback is bit-exact (the part's and the model's
+  fingerprints and the probabilities, tested); a test with two deciding threads and 60 swaps found no decision mixing
+  one version's adapter with the other's thresholds or probabilities, and found mixes once the part's lock was
+  removed. `lora.stage` installs an adapter inactive outside any slot (the model's fingerprint unchanged; once one is
+  staged every question is scored through the scorer's adapter switch); `lora.adapter_by_hash(folder, hash)` finds an
+  adapter file by its hash; `lora.train` takes `updates=` and a per-update `log=` callback. Runners: `SubprocessRunner`
+  (the default: a fresh process, nice 10, threads capped at `Budget.cpu_threads`, `Budget.device "auto"` → a GPU with
+  `free_gpu_mb` free, read with nvidia-smi, else the CPU, and the CPU again after a GPU out-of-memory error; the
+  training is refused before it starts when the estimate from its first update is above `Budget.max_train_s`;
+  `train_<job>.log` with a heartbeat every 30 s; killed past its estimate + `grace_s` (120 s) counted from the estimate
+  line — before it, `max_train_s` + `grace_s` from the start — so a training within its estimate is not killed for
+  loading and calibration, or after `stall_s` without a log line; under `CUDA_VISIBLE_DEVICES` nvidia-smi's GPU index is
+  mapped to torch's ordinal) and `ThreadRunner` (in process, for tests and tiny data). In the loop a batch learner's
+  `TrainJob` also carries the calib labels, the budget, α and the live `status()["job"]` dict (pid, log, device, eta,
+  last line); a training refused by its estimate is a "train" event with state "refused" (counted against the budget); a
+  `RunnerError` (the process died or went silent) stops the loop with status "error" at the hook "learner.train", replay
+  exact; `initial=` with `install` / `uninstall` is version 0's `Served`; replay takes the recorded install fingerprints
+  (it failed before whenever a loop with `system=` promoted). `Served.release()` (optional; `LoraVersion` unstages its
+  adapter) is called on a discarded candidate and on the version copies a replay loads to check the files, so staged
+  adapters do not pile up; retired versions stay staged (they are rollback targets). `LoraVersion.save` / `load`
+  round-trip version 0 with an adaptation (its parameters; the kept examples are not saved) or thresholds per group (by
+  fact names; by a function: `load(..., groups=fn)`). Unmeasured: tests on a tiny random checkpoint only, no stand.
+- **The adapter loop: deferred apply (experimental), stage 3b** (`solvi.experimental.stream.loop`, `.runner`,
+  `.learner`, `.policy`). A batch learner's training now runs in a thread of its own (its runner beside it; the
+  subprocess runner by default for `LoraLearner`) and `step` / `train_now()` return at once: the loop goes on deciding
+  on the served version, and no decision waits (tested with a training held for 300 decisions: each decision under
+  0.5 s). The pre-freeze report is computed in that thread, on the labels and the served version of the moment the
+  training started. The result is applied on the first decision after it is in (not while paused) through the stage-3
+  paths — gates, then freeze or discard; failed; refused by its estimate; a `RunnerError` (a crash or a silent process
+  found while the loop decides) stops the loop at that decision — and recorded there: a "train_start" event where it
+  began, and the "train" event with `started_at` and `applied` ("decision" or "train_now"). `replay()` applies each
+  recorded result at the decision or control its record names, with no clock read (tested exact across done, failed,
+  refused, discard, eviction, a runner error and close). One training at a time, counted against the budget when it
+  starts. `AdapterLoop(wait=True)` and `train_now(wait=True)` keep the blocking form (the existing tests use it; a
+  `train_now(wait=True)` result is applied inside the control). New: `close()` (also a context manager) cancels a
+  training in flight — `TrainJob.cancel`, a `threading.Event`; `runner.run(..., cancel=)` kills a subprocess and raises
+  `TrainingCancelled`, a thread runner stops waiting — and `step` and the controls refuse after it; an error stop
+  cancels it too; `wait_training(timeout)`; `status()` "closed", `job` with `state` ("running" / "ready") and
+  `started_at`, `versions_kept`. `Budget.max_versions_kept` is enforced: after each change of the served version the
+  oldest retired versions past the limit (version 0 counted) are evicted — "evict" event, `Served.release()`, state
+  "evicted", no longer a rollback target, files kept for replay — never the served version, the rollback target or
+  version 0; a candidate refused at the freeze is released at once. Lock order: `step` and every control take the
+  part's version lock (`part=`, else the learner's or `initial`'s `part`) before the loop's, so a decision of the part
+  that reaches the loop under its own lock cannot deadlock with the loop's shadow scoring (tested with a timeout: the
+  old order deadlocks); the cost is that the part's own decisions wait while a step runs (the whole training with
+  `wait=True`). Unmeasured: fake learners and a tiny random checkpoint only, no stand; the background training's cost
+  to live decisions is not measured.
+  Fixes after review: the served version at a training's start is recorded (`served_at_start` in "train_start" and
+  "train"); when it changed during the training (a rollback) the result is recorded with state "stale" and the
+  candidate is discarded and released, not gated on that stale comparison (chosen over recomputing the report on the
+  decision thread, which would hold the part's lock for a whole held-out pass); the report stops between labels on a
+  cancel or such a change, and scores the served side under the part's version lock, so an evicted version is never
+  staged again. The "error" event names the cancelled training (`cancelled`); `train_now(wait=False)` on an online
+  learner records the wait asked (`wait` False, `inline` True); "evicted" is in `policy.STATES`; an exception that is
+  not an `Exception` in the training's thread is a failed training. The `BatchLearner` contract says `train(job)` runs
+  on another thread than `update`, `seen` and `keys`. Records written by the stage-3 code (a "train" event marked
+  `control` with a `job` and no "train_start") do not replay with this code; nothing was released with them.
+- **The adapter loop: the checkpoint (experimental), stage 4** (`solvi.experimental.stream.checkpoint`, `.loop`,
+  `.certificate`, `.detector`). `AdapterLoop.save(dir, cancel=False)` writes the loop's whole state: every version
+  (state, fingerprint, frozen_at, the keys it trained on, its paired samples, its `StreamPromise`) and the files of the
+  versions that still have a model (`Served.save`; version 0 too, a model without `save` as a `HeadVersion`; the files
+  of discarded and evicted versions copied from `versions_dir`), the served version and the rollback history, the δ
+  budget's index, the training budget's counters, the policy (now and as built), the `RiskDetector`, the score monitor,
+  the rate's window, alarms, probation, the held-out window, pause / close / error, the label store `labels.jsonl` (an
+  input or label that does not round-trip through JSON is pickled in its line) and the records `records.jsonl` (with a
+  `TraceStorage`: its chain head and this loop's record count). Layout: `dir/CURRENT` names `dir/ckpt-<n>-<id>/`; the
+  folder is written under a temporary name, synced, renamed, then `CURRENT` is replaced with `os.replace` — a crash
+  leaves the previous checkpoint usable (tested by failing the save after every file was written and while the version
+  files were written). `manifest.json` holds every file's SHA-256, the learner's class, the model's weights fingerprint
+  and the configuration; `manifest.sig` is HMAC-SHA256 under the loop's secret (SHA-256 without one; the secret is
+  never written). `AdapterLoop.load(dir, learner, system=, storage=, versions_dir=, part=, initial=, key=, served=,
+  clock=, secret=, groups=)` refuses a changed or missing file, a manifest with another signature, a missing or other
+  secret, another learner class, a learner that is not as built, a part whose model has other weights, a version file
+  whose fingerprint is not the recorded one, a store without the checkpoint's chain head or with records of the loop
+  after it, and a missing System when the loop served on one; it installs the served version and feeds the learner the
+  saved train labels again. A training in flight refuses the save unless `cancel=True`, which cancels it with the new
+  control `cancel_training()` (a "cancel" event, replayed; the training stays counted against the budget; nothing
+  restarts it). A save and a load write no record. New: `StreamPromise.dump()` / `restore()` (the e-processes, the
+  certified flags, the grid or its buffer, the events; a restore checks the configuration and the evidence
+  fingerprint), `Mixture` / `MirrorBound.dump()` / `restore()`, `RiskDetector.dump()` / `restore()` / `config()`.
+  Tested: a loop saved at decision 2 500 and loaded continues on 6 500 more decisions with the same outputs, records
+  (except a training's measured wall time) and versions as the loop it was saved from, with a freeze, a promotion and a
+  rollback after the load, and replays all 9 000 decisions; the same with a `TraceStorage`; tampered state, labels,
+  records, policy and version files, an edited manifest and another secret are refused; on the tiny LoRA checkpoint a
+  version trained in a subprocess is promoted, saved, loaded in a new process (the adapter installed), continued with
+  the same decisions and records, and the rescored replay is exact. Unmeasured: no stand; the files are trusted once
+  their hashes match (pickles are loaded), so load only checkpoints you wrote. Fixed after review: `load` refuses a
+  folder holding a file the manifest does not list and writes the version files into `versions_dir` from the
+  verified bytes (before, an unlisted `versions/<v>.pkl` was copied and unpickled by `replay(rescore=True)`); a
+  checkpoint saved with a secret is refused without one (`keyed` is recorded in the signed manifest); a load without
+  a secret warns (`CheckpointTrustWarning`: a plain SHA-256 detects damage, not tampering); the removal of older
+  folders runs under the save's locks and never removes the folder `CURRENT` names (before, two concurrent saves could
+  leave `CURRENT` naming a removed folder); a save holds the part's version lock for all its writes, so the part's
+  decisions wait for it (unmeasured). The version loaders read the verified bytes, not the folder: they are written to
+  a private temporary folder first, so a version file swapped in the checkpoint after its hash was checked is never
+  read (before, `load` read `versions/` again after the check; tested with a swap between the check and the load).
+- **The adapter loop: attach (experimental), stage 5** (`solvi.experimental.stream.loop`, `solvi.core.dispatch`,
+  `solvi.core.system`, `solvi.core.deciders.combine`). `AdapterLoop.attach(host, learner=None, *, question=, dir=,
+  policy=, initial="auto", part=, **kw)` attaches a learning loop to a running system: to a `Dispatcher` (stream mode:
+  every `ask` is one decision of the loop, each version under its own stream certificate) or to a `System` alone (label
+  mode, `AdapterLoop(..., mode="label")`: the corrections of `teach` and `outcome` are the loop's labels, through
+  `loop.label(x, y)`; no coin, no promise, no alarm; a version serves at its own act_guard threshold on the calib
+  labels; `status()["guarantee"]` says "fixed-set (act_guard on calib labels); no anytime certificate"). Without a
+  learner it is a `LoraLearner` on the question's decision part. `loop.attach_to(host)` / `Dispatcher(..., loop=)`
+  attach a loop built by hand (any `LoopPolicy` subclass, any learner); `loop.detach()` cancels a training in flight,
+  puts version 0 back, removes the hooks and closes the loop (a "detach" event, replayed). In stream mode the loop
+  reads a decision before the dispatch (the served and candidate scores, the coin, whether its rule answers alone) and
+  takes its step after it, with the slow path's accepted answer as the label; neither runs inside the part's call, and
+  a Dispatcher's loop decisions run one at a time under a lock taken before the part's and the loop's (order:
+  dispatcher → part → loop). The dispatch escalates what the loop's rule does not answer alone and checks what its coin
+  draws. Every `Dispatched` records `learning` (the loop's decision number, the version served and its fingerprint,
+  the candidate, the coin, the label it took, its events); System 1's trace records the part's fingerprint, which
+  changes with the version; `Dispatcher.replay` / `replay_all` replay each decision with its version installed for the
+  duration (`loop.serving(v)`). With a loop attached `System.teach` changes nothing at once (the loop owns the part):
+  label mode feeds the loop (a source its policy refuses raises `UntrustedLabel` before anything is stored), stream
+  mode only stores the correction. A label whose source the policy refuses is a missing label for the loop (the default
+  policy takes the slow path's "s2" only with `s2_labels=True`). Refused: a question answered by a combination, a part
+  that is a member of one (new: `solvi.core.deciders.combine.combinations_of(part)`, a weak registry filled when a
+  Cascade, Vote or Route is built), a Dispatcher with its own `promise=`, a second loop on a System, `start` /
+  `complete` with a loop attached (tickets with a loop are not built; use `ask`). The checkpoint saves the mode and
+  label mode's thresholds. Tested without torch through a real System and Dispatcher with a stand-in learner (3 000
+  decisions with promotions: System 1 decided with the version the loop recorded on every decision, `replay_all`
+  exact across the versions and a rollback; a background training while decisions go on; controls through the
+  handle; save, load on a new System and Dispatcher, the same decisions; detach; label mode from `teach` and
+  `outcome`; a custom `LoopPolicy`; the refusals; three deciding threads, the part's own calls, controls and a
+  background training with no deadlock under a timeout); and on the tiny LoRA checkpoint: attach, a
+  background training, promotion, the trace's fingerprint and `extra["lora"]`, a rollback, save and load on a fresh
+  model, the same decisions and an exact replay. Unmeasured: no stand has run; nothing here says the loop improves a system. Costs:
+  each decision with a loop attached scores the served version once more (and the candidate in shadow while its grid
+  is not fixed and on coin-sampled decisions), and the loop's decisions of one Dispatcher do not run in parallel.
+- **The adapter loop: attach, review fixes (experimental)** (`solvi.experimental.stream.loop`, `.policy`,
+  `.checkpoint`, `solvi.core.dispatch`, `solvi.core.system`, `solvi.core.deciders.combine`). Label mode never serves an
+  unmeasured version: `DefaultPolicy(pre_freeze=False)` is refused there (the pre-freeze gates are its only measurement;
+  before, every training was served on the next label), and the automatic promotion needs the candidate certified as
+  the `promote()` control does (before, a candidate with no calib threshold was promoted; stream mode checks the same).
+  New in label mode: a watch after each promotion — on every calib or held-out label the served version and the
+  version served before it are scored on the same input (+1 alone and right, −1 alone and wrong, 0 not alone); after
+  ≥ `watch_min` (100) labels it rolls back when an anytime-valid e-process on the discordant labels
+  (`policy.watch_eprocess()`, the package's `Mixture(0.5)` fed 1 when the served version wins one, 0 when the earlier
+  one does) reaches wealth 1 / (1 − `wilson`) (20), the earlier version won more of them, and the margin per label is
+  ≥ `min_gain`: P(a false rollback) ≤ 5 % per promotion at any horizon (Ville). Simulated, not a stand (2 000 runs per
+  cell): false rollbacks with both versions equally good 0.4–1.4 % within 300 watched labels,
+0.5–1.9 % within 1 000 and 0.8–2.1 % within 3 000; a served version truly worse (it wins 40 % of the discordant
+labels, 10 % of the labels discordant) rolled back in 10 / 28 / 70 % of runs by those horizons, a truly better one in
+≤ 0.2 %; watched labels are the calib and held-out ones, about 30 % of all labels at the default split. A first draft used the paired sign test's Wilson bound looked at on every label: in the same
+  simulation 8–12 % false rollbacks within 300 watched labels, 21–23 % within 3 000 — replaced before release. A
+  `LoopPolicy.watch(st, Watch)` hook, opt-in (the base returns False; `DefaultPolicy` has the rule on,
+  `DefaultPolicy(watch=False)`, `watch_min=`; `policy.Watch` with `log_e`, `policy.watch_rollback`); the rollback is a
+  recorded "rollback" event (`by: "policy"`, the counts and the e-process under `watch`), replayed from the recorded
+  scores and saved in the checkpoint with the e-process; `status()["watch"]` shows them. Before, nothing watched a
+  promoted version in label mode. One more scoring per calib or held-out label while it runs (train labels: none). A promote event in label mode carries `l_k`, `l_s`, `n_novel`, `n_seen`
+  as None (there are no paired samples), and `versions()` reports label mode's threshold and certificate. The loop's
+  controls on a Dispatcher take its per-decision lock first (order dispatcher → part → loop), so a control waits for
+  the decision in flight and never lands between the loop's read and System 1's call (before, the decision could be
+  recorded under a version System 1 did not decide with). With a loop a Dispatcher serves one decision at a time, the
+  slow path's call included: throughput ≤ 1 / the slow path's latency (measured once on a stand-in: 40 decisions in
+  four threads with a 50 ms slow path, 3.7 × as long as without a loop); a test pins the serialisation. A stream-mode
+  attach whose `DefaultPolicy` refuses the slow path's labels is refused with the options (`s2_labels=True`, a trusted
+  oracle as the slow path — a slow path that says `label_source = "human"` and whose Thoughts carry
+  `{"oracle": {"label_source": "human"}}` — or label mode): the loop had no label source, never certified and escalated
+  every decision. The refusal comes before any state is set, so a refused loop can attach elsewhere. Since the
+  attribute is only a declaration, the run time checks it: labels the policy refuses on the attached path are counted
+  (`status()["labels"]["refused"]`) and after `warn_refused` (200) of them in a row with none accepted the loop warns
+  once that it learns nothing. The candidate is scored in shadow only while its grid is not
+  fixed and on coin-sampled decisions (before, on every decision); the record's `shadow` is None otherwise and
+  `replay(rescore=True)` skips it. `teach` in stream mode without storage warns that the correction is lost. A Cascade,
+  Vote or Route built over a part a loop serves is refused at construction until `detach()`
+  (`combine.serve_by_loop` / `served_by_loop`). Tests: each fix with a mutation that makes its test fail; a
+  label-mode save / load continues as the unbroken run (thresholds, watch). Unmeasured.
+- **A secret for the supervision and audit draws: `Dispatcher(secret=)`** (`solvi.core.dispatch`; security). The
+  draws were `sha256(f"{seed}|{input hash}|{n}")` with the public default `seed=0`, so whoever could vary the inputs
+  could compute which decisions would be supervised or audited and avoid them. With `secret=` (bytes or str; None reads
+  the environment variable `SOLVI_AUDIT_SECRET`) both draws are HMAC-SHA256(secret, …) of the same message. The secret
+  enters no record, config fingerprint or repr; a record made with it carries `"draw_keyed": true`
+  (`Dispatched.keyed`). Replay takes the recorded draw: a dispatcher without the secret replays a keyed record (that
+  draw is not recomputed), one with the secret recomputes and checks it, and a wrong secret is a `draw` mismatch.
+  Without a secret the draws, records and config fingerprints are unchanged bit for bit; a dispatcher that samples
+  (`supervise` or `audit` strictly between 0 and 1) then gives a `PredictableDrawWarning` once per process (a class
+  of its own, so it can be filtered). `solvi.experimental.audit.AuditWatch`'s own draw (used when a decision carries no audit mark) is still
+  a hash of its seed.
+- **The canonical form of a record hash, byte for byte, with test vectors.** `docs/trace_spec.md` §3 now says exactly what
+  a record hash is taken over, so a verifier in another language can recompute it: the hash body by format, then the
+  canonical text — keys sorted by Unicode code point, Python's float spelling (`1e-06`, `1e+16`, `100.0`, `-0.0`;
+  positional from 1e-4 up to 1e16), integers of any size kept apart from floats, which characters are escaped (U+2028
+  and U+2029 are not), `NaN` / `Infinity` only in records written before 0.7 (the writer refuses them) — and where it
+  differs from RFC 8785. `tests/fixtures/canonical_json/vectors.json`: 21 values, a format 1 and a format 2 record and
+  a chain link (22 values since the fix under Fixed), each with its canonical text and SHA-256, recomputed by `tests/test_canonical_json_vectors.py`. Nothing
+  written changes: the format and every hash are as before.
+- **A stop button for Guard: `guard.pause(reason, by=)` / `guard.resume(by=)`.** While paused, every check and call
+  (sync, async, through a session) is denied before any other check (`guard_not_paused`; deny, not escalate, so no
+  approval can be queued while stopped), the reason names who paused and why, no tool runs, and
+  `resolve(..., approve=True)` raises `PermissionError` until `resume`. A pause takes effect for every call that starts
+  after it (a lock around the state; each event is written under the same lock, so concurrent pauses and resumes are
+  chained in the order they took effect). With a storage, pause and resume are events in the store's chain (meta
+  `"guard": {"event", "by", "reason", "at"}`), and a call denied while paused is a decision of a small system of its
+  own, so `guard.replay(id)` reproduces the denial. The pause lives in memory: a Guard made anew starts running; the
+  store keeps the events. It supports the "stop button" of the EU AI Act's human-oversight requirement (Art. 14(4)(e)).
+- **`solvi check`: the wording of questions (warnings, and one note).** `no_other_option` (a note: closed label sets
+  are normal, so it never fails `--strict`) — a choice a model answers with no catch-all option ("other", "none of
+  these", "unknown", or one described as "anything else"), no decider `other=` and no "not stated"; `numeric_levels` — levels that are bare numbers without a description of each; `compound_question` —
+  a question text with two question marks or "and whether" / "or whether"; `unused_given` — a `System(input_model=)`
+  field nothing reads (only when every question has a rule or a `uses` hint; a field read by a guarantee's `groups=`
+  or named as its `signal=` counts as read). Each names the question or field and the fix in one line; none is an
+  error, so `solvi check` without `--strict` exits as before, and the examples raise no new warning under `--strict`.
+  `solvi init --with-model`'s refunds and minimal templates get an `"other"` option.
+- **Known-answer tests for the guarantee arithmetic** (`tests/test_reference_values.py`, tests only). `ltt_certified` /
+  `ltt_threshold` (Bonferroni and fixed sequence), `crc_threshold` and `conformal_quantile` are checked against values
+  computed apart from solvi's code: exact rational binomial tails and scipy's `binom.cdf`; the one-sided
+  Clopper–Pearson bound (the same Bonferroni test written through the Beta quantile); the learn-then-test procedure
+  rewritten from Angelopoulos et al. (2021) with exact p-values (the fixed-sequence start is solvi's own documented
+  rule, not from the paper, so that one is a regression check); conformal risk control from Theorem 1 of Angelopoulos
+  et al. (2022); the split-conformal rank ⌈(n + 1)(1 − α)⌉ and its exact coverage k / (n + 1) by seeded simulation.
+  Each test names its source. All agreed; no code changed. MAPIE and confseq are not used (not dependencies).
+- **An identity canary for remote deciders** (`solvi.core.guarantees.canary.IdentityCanary`). A hosted model can
+  change behind its name (other weights, another provider or quantisation) while the decider's fingerprint, which
+  hashes the configuration asked for, stays the same. `IdentityCanary(probes, every=N).attach(model)` asks a small
+  fixed probe set of an `llm(...)` or `systemone(...)` decider — on demand (`probe()`) or every N decisions of the
+  model — and compares the answers, the probabilities (mean total-variation distance above `tol`) and the model name
+  the server reports with the reference round; a difference is asked once more before it counts (`confirm=True`).
+  After a change every decision of the model carries `extra["canary"]["changed"]` in its trace until `accept()`;
+  `DriftMonitor.observe` flags such a decision — a Decision, or the Response of a System ask, whose
+  `answer:<question>` trace record holds the mark, so a Dispatcher with that monitor treats it as drift — as the
+  signal `"identity"`, and keeps it out of its reference; `on_change="escalate"` escalates them. Off by default: no
+  probe is sent unless a canary is attached (probes cost `len(probes)` calls a round). A scheduled round runs on the
+  thread of the decision that made it due (that decision waits), outside the canary's lock (other decisions go on, one
+  round at a time); a round that raises is recorded as an `"error"` event and the decision is returned untouched.
+  `Trace.replay` runs under `no_probes()`: a replay never probes, counts or marks; under `on_change="escalate"` a
+  recorded escalation of a deterministic remote decider replays as a mismatch (the canary's state is not replayed). Not a statistical test: its false alarms come from
+  the provider's own noise on the probes; tested on fake servers only (`tests/test_identity_canary.py`).
+- **A label check before calibration, opt-in** (`label_check=True` on `act_guard` / `calibrate_for` of a part and of
+  a combination, and on `System.guarantee`; default `False`; `solvi.core.calibration.label_issues`). Confident learning
+  (Northcutt et al. 2021, cleanlab's "prune by noise rate", about 40 lines, no dependency) over the decisions the
+  calibration already made: the report's `"label_issues"` lists the examples whose label the model confidently
+  contradicts (count, ids, suggested answer) and `"warnings"` gets a line when there are any. It never changes the
+  calibration: every label is used as given. It needs out-of-sample probabilities: on a `FastHead` fitted on the same
+  examples, `System.guarantee(label_check=True)` without `folds=` adds a warning to pass `folds=` (cross-fitted heads). Simulated (400 examples, 3 answers): with 12 planted flips it listed 8–12
+  of them and 0–2 other examples over ten seeds; with no flip and a model confidently wrong on 10% of the examples it
+  listed 36 — it cannot tell a wrong label from a confident model mistake. That false-positive rate is why it is
+  opt-in: on by default most users would see a warning on clean data and existing calls would change their
+  `"warnings"`.
+- **How often a person was wrong, in the system report** (`corrections["people"]`, a "People:" line in the text
+  report; `solvi.core.store.sysreport.clopper_pearson`). The store already kept a person's label of a decision
+  (`teach`, source "human" or "audit", `of=`, `by=`) and its outcome (`System.outcome`, source "outcome") but never
+  paired them. Now every decision with both gives a pair — the person's last answer against the last outcome — and the
+  report gives the pairs, the wrong ones, the error with a two-sided 95% Clopper–Pearson interval, per person and per
+  question. Only existing store fields are read; no new record kind (the JSON report gains the key
+  `corrections["people"]`). Only person labels given before the outcome is recorded are paired (a correction made
+  after the outcome was known is not a judgement); those after are counted apart. The pairs are the decisions whose
+  outcome was recorded, not a random sample.
+- **A Wilson 95 % interval on every observed error in the system report** (`solvi.core.store.sysreport`,
+  `System.report`, `solvi report --overview`). Each labels block (System 1's labels, a promise's labels, the
+  dispatcher's final answers, its audited sample) gains `error_wilson95` and `risk_wilson95` (`[low, high]`, `None`
+  with no labels) beside the unchanged keys; the text appends the interval after each rate, e.g. `error among them
+  7.50% [2.6%, 19.9%] (Wilson 95 %)`. On the audited sample (`Dispatcher(audit=)`) it is the interval of the live
+  error; on labels that are not a random sample it is the interval of the labelled decisions only. `wilson(k, n)` is
+  checked against scipy's `binomtest(...).proportion_ci(method="wilson")`. The interval is for a random-audit sample,
+  a fixed-time reading: not a running bound over the stream.
+- **Laws (experimental): `admit_by_probes(..., falsify="leftover")`, default off.** Once the split phase would accept,
+  the leftover budget is spent on safe pool probes not yet asked where the accepted law would be the applied law,
+  drawn at random with `seed`; any answer other than the law's effect makes the admission "undetermined" and commits
+  nothing. The falsification probes are in `asked` (ids `falsify-…`) and `cost["probes"]`, never above `budget`;
+  `noise=` and `max_new=2` refuse it (`ValueError`), as does any value other than None and `"leftover"`. With the
+  option unset the admission is unchanged. Measured on synthetic boolean worlds in two pre-registered runs (the
+  reproduction gate was revised after the first run failed it, disclosed before the second): at budget 20, 1 wrong law
+  admitted against 131 for the default where the grammar cannot express the true law — the one survivor was
+  probe-starved, with no leftover probe in its wrong region; no loss in sound admissions (124 vs 123 at budget 8,
+  251 vs 236 at budget 20); little effect at budget 8; the price is asks. Covered by
+  [tests/test_laws_falsify.py](tests/test_laws_falsify.py).
+- **Laws (experimental): `residual_check(refit, level=0.995)`, an opt-in χ² check on a fitted numeric law**
+  (`solvi.experimental.laws`; default off, nothing changes unless it is passed). It returns a `confirm=` closure: the
+  caller's `refit(candidate)` fits the law's constants on the design and held-out rows together and returns the
+  residuals in σ units and the number of constants k; the law is kept only while Σ r² ≤ χ²_0.995(n − k). Used with
+  `tol=math.inf` (the row band off; under it the sized bound is vacuous and the χ² level, which has no term for the
+  number of candidates, is the only false-accept control). Measured once on synthetic physics worlds re-created from
+  another group's description: wrong pendulum laws at 1–2σ bias accepted 0.60 → 0.14 (70 worlds), Kepler at Tycho's
+  precision 4 → 12 of 12, no loss where the truth is in the list (179 of 200 right, 0 wrong). A flexible wrong model
+  can pass (a 25-constant epicycle system on 1 of 12 extra skies): the refit χ² checks goodness of fit, not
+  prediction. The sign test and the fit-variance-widened tolerance were measured and are not shipped. A default change
+  waits for a second task outside physics.
+- **`solvi.document` S2–S4: the reads as data, a short `why`/`audit`, parallel calibration** (`solvi.core.response`,
+  `solvi.core.guarantees`, `solvi.solutions.document`). `res.facts` — the quoted facts as data from the trace: name,
+  value, the offsets and the quoted text itself (`fact.quote == doc[start:end]`), for every system, not only the
+  recipe. `why` and the audit name an input text longer than 200 chars by its length and hash
+  (`doc[12,345 chars, sha256:0123456789ab]`), never whole — the audit of a 12k-char document stays under 1 KB; a
+  replay accepts both historical `why` forms (pre-1.4 whole inputs, the 1.4 `<text, N chars>` marker).
+  `calibrate(..., workers=)` asks the calibration examples in a thread pool (results in input order; one example whose
+  ask breaks counts as escalated; folds stay sequential), `progress=(done, total)` per example and a default heartbeat
+  on stderr every 10 s at 50+ examples, and two warnings: fewer than 100 examples (`warn_small=False` opts out at the
+  guarantee level), more than 20 % of the examples escalating. The parser, `Span[date]` and EPS tables are locked by
+  tests; the recipe docs (`docs/recipes/document.md`), the README recipe-first block ("Build your own" holds the
+  hand-built catalog and the rest) and `examples/27_document_decision.py` (a fake endpoint, runs in the suite). The recipe docs name the reasoning-model `max_tokens` tradeoff measured in the flagship test (2,048 default truncates gpt-oss-120b reads; 8,192 part-fixes, 16,384 fixes more, ≈ 6× latency) — a cut-off read escalates loudly, never silently.
+- **`solvi.document` reads_with=: state-conditioned reads** — the question (and other state keys) reach every
+  field read as a `<state>` block in its prompt; the grounding and the quote offsets stay on the one text fact
+  (a span is still read from the document alone); a missing key fails that read naming it (the answer abstains
+  with the reason); a recipe with `reads_with=` is its own catalog fingerprint (calibrations and records do not
+  cross-attach; without the parameter the fingerprint is unchanged). First measured in the flagship test (reads
+  that cannot see the question capped coverage at ~5 %); `docs/recipes/document.md` has the section.
+- **`solvi.Facts`** — the example-input-by-name wrapper (`Facts(email=..., tier=...)`) is a top-level name (the
+  25th; the input docstrings named `solvi.core.deciders.Facts`, and the top-level export was the author's call on
+  the S7 list).
+
+### Fixed
+- **A quoted number is located as a number of its own** (`solvi.core.deciders.llm.locate`). An LLM's span or quote
+  `"7"` was located at the 7 of "2017" (`"10"` in "109", `"1.0"` in "41.0"), and the grounding check then rightly
+  rejected it: an occurrence that begins or ends inside a longer number (as `cuts_number` reads it) is now skipped for
+  the next standalone one, overlapping occurrences included, and when there is none the passage is not found.
+  `cuts_number` also reads a separator at a quote's edge between two digits as inside the number ("7." of "7.5",
+  "1," of "1,300"), which the grounding check now refuses too — stricter, not looser.
+- **A number a rule computes: `Answer.estimate()`** (no bins: the rule's number as it is). A rule's `-> float` alone
+  is still not an answer type; its error now names `Answer.estimate()` (and `Span[float]` for a quoted number), and the
+  guide's answer-type table has the row. No new public name.
+- **`System.save_guarantee(question, path)` / `System.load_guarantee(path)`**: a question's guarantee as a file (the
+  promise, thresholds per group, report, how its signal is read), refused for another catalog or answer type (unless
+  `strict=False`) and when the rebuilt guard's fingerprint is not the saved one; stored decisions replay against it
+  without calibrating again (`solvi.core.guarantees.guarantee`). The fingerprints catch a file that does not fit or an
+  inconsistent edit, not a forgery that recomputes them: keep the file like code. `signal=` / `groups=` are only for a
+  signal or grouping that was a function (otherwise ValueError).
+- **One store, two systems** (`TraceStorage.replay_all`). Replaying a store that two Systems wrote against one of them
+  reported every other record as a changed catalog, missing inputs and a changed guarantee; `replay_all([a, b])`
+  replays each record against the system that asks its questions, and a record no given system asks is one mismatch of
+  kind `other_system`. That is not an integrity verdict (which questions a record answers is its own, editable content):
+  `replay_all` now checks every record's own hash as `verify()` does (an edited record: `integrity`, also one whose
+  questions were renamed to look foreign), a foreign full record's trace hashes too, and says so when it cannot — a
+  compact foreign record keeps no trace (`not_kept`), a trace that does not load with this system is an `error`.
+- **Docs: `not_gated` in the guarantee report** (calibration examples with no signal to gate: forced or never
+  answered alone) **and a span decision reads exactly one given text fact** (several facts or a computed text
+  escalate every time).
+- **An invalid LLM reply no longer crashes a calibration** (`DecisionPart.act_guard` / `calibrate_for` /
+  `conformal`). A calibration decision escalated as invalid output (value None) raised `ValueError: None is not one of
+  [...]`; it now counts as escalated and not right, never answered alone, and the result says how many (`"unusable"`,
+  with a line in `"warnings"`). Covered by `tests/test_outside_user_fixes.py`.
+- **Mixed probability sources are found after a few calls** (`solvi.core.deciders.llm`). Under `logprobs="auto"` a
+  gateway that answers some requests with log-probabilities and some without was refused only after every calibration
+  call was paid for; the model now warns at the first reply from the other source, and a calibration over an LLM asks
+  its first 16 examples first and refuses a mix there.
+- **An answer that echoes `option: description` is read as the option** (`solvi.core.deciders.llm`). With options
+  given as `{option: description}` a model answered `"contradiction: the contract states the opposite"`, an invalid
+  output; it is read as that option when exactly one option is followed by `:`, ` - `, ` – ` or ` — ` and by its own
+  description (or its start) that is not, nor starts like, another option's description (`"yes: it does not"` with `no`
+  described as "it does not" stays invalid); without descriptions the rest must name no other option, and a bare
+  `"neutral:"` stays invalid (`extra["llm"]["answer_echo"]` keeps what was written).
+- **A stated 0.9 is 0.9** (`solvi.core.deciders.DecideModel`, LLM backend). The log and softmax turned a stated 0.9 into
+  0.8999999999999999 or 0.9000000000000001 depending on the other options, so a threshold calibrated at one escalated
+  the other; an LLM decision's probabilities are rounded to 12 decimals, in calibration and in every decision.
+  Upgrading: a calibration of an LLM part saved before this change keeps its threshold (e.g. 0.9000000000000001),
+  which the rounded confidences now meet less often — such a part escalates more, never less, than when it was
+  calibrated; recalibrate LLM parts to get the intended threshold back.
+- **`why` and the audit show a model's quote, not the whole input** (`System`). A model decision that quoted the text
+  leads its `why` with the quote and where it is (`quote 'shall not disclose' (contract[20:38])`) and shows an input text
+  over 200 characters by its length; without a quote the `why` is as before. A record stored with the earlier `why`
+  still replays.
+- **The docstrings say where `Facts` comes from** (`DecisionPart.decide`, `act_guard`, `Combination.decide`):
+  `from solvi.core.deciders import Facts`.
+- **The README's links work on PyPI.** Relative links (`docs/guide.md`, `examples/...`) are absolute GitHub links.
+- **Calibration progress** (`DecisionPart` over an LLM). A calibration is asked in chunks of 32 and logs its progress
+  to the logger `"solvi.calibration"` at INFO (`label: 48/303 calibration examples decided (95 s, about 505 s left)`);
+  nothing is printed by default. The unusable count, the early mixed-source refusal and the progress log are
+  `DecisionPart`'s calibration; a combination (`Vote`, `Cascade`, `Route`) calibrates as before (an invalid reply did
+  not crash it; mixed sources are still refused after all its calls).
+- **A stored record keeps the input once** (`solvi.core.store`). A full record held the given facts in the trace and
+  again in the response's `values` (a 12k-character contract twice); `values` now keeps a name the trace holds with
+  null, and loading takes the value from the trace, as it always did.
+- **`LoraLearner` trains at the part's own input length** (`solvi.experimental.stream`). The training payload
+  carried the multi-question layout's `max_len` instead of the model's, so a part loaded with `max_len=768` was retrained
+  at the default 512 and every training of a question longer than 512 tokens (77 intents with descriptions) failed.
+  Covered by `tests/test_stream_lora.py::test_the_training_reads_the_question_at_the_parts_own_max_len`.
+- **The adapter loop's first training is no longer refused at the freeze for repeated held-out labels**
+  (`solvi.experimental.stream`). `DefaultPolicy.want_train` checked the pre-freeze floors (100 held-out labels, the
+  calib labels the threshold needs) on label counts with repeats, while the freeze report scores the latest label per
+  content key, so a stream that relabels inputs started a training the freeze then refused ("98 held-out label(s) <
+  100"), wasting it and raising the retrain floor. `LoopState.keys` now carries the distinct labelled keys by split
+  (rebuilt from the label store on a checkpoint load) and the floors read it; a state built without it falls back to
+  `labels`.
+- **A pass in flight is no longer touched by an adapter being installed on its network** (`solvi.core.deciders`,
+  `solvi.experimental.lora`). A model with no adapter scored without the adapter lock, so when another thread staged
+  one (the adapter loop's training thread binding its version, or a shadow score) the network changed under a pass
+  in flight: the trained adapter was on for part of it, and that decision's recorded score (version 0) was not the one
+  `replay(rescore=True)` computes (off by 1e-8 to 2e-4 in about one run in three of the deferred-apply test). The
+  scorer now has a gate: plain passes share it, and every change to the network (install, switch, remove, the copy a
+  training starts from) holds it alone, so passes in flight finish first and new ones wait. Plain passes still run in
+  parallel; the adapter's disabled path gives the plain checkpoint's logits bit for bit (tested while an adapter is
+  staged and unstaged 40 times beside a scoring thread, and by a pass held mid-way while another thread stages the
+  adapter and switches it on). With `ThreadRunner` the copy a training starts from is made in the loop's process
+  under the gate, so decisions on the model wait while it is made; unmeasured (the default `SubprocessRunner` copies
+  in the child).
+- **DriftMonitor no longer flags "mean confidence up" on an unchanged stream** (`solvi.core.guarantees.drift`). The
+  window z test of the mean confidence (and act probability) used the window's own spread; on a skewed signal
+  (confidence near 1 with a few low values) a window that by chance misses the low tail has a higher mean and a much
+  smaller spread, so z was far heavier-tailed than normal at the test's level (up-tail ~95× nominal at z = 4.8). The
+  window's spread is now at least the reference's. Stationary streams like `solvi.build(monitor="auto")` sees (reference
+  2,000, 200 streams × 5,000 decisions): 13 flagged before (10 by confidence), 3 after (none by confidence).
+- **A skill certificate spends δ over its restarts** (`solvi.experimental.skills.Certificate`). After an alarm, or a
+  skill condition widened by the condition rule, the process restarted and certified again at the full δ, so after k restarts the chance that
+  some certificate it issued was wrong was bounded only by k·δ, not by the δ the promise states. The v-th
+  certification of a process (v = 1 for a fresh one, one more after each restart) now bets against
+  δ_v = 6δ/(π²v²); Σ_v δ_v = δ, so every certificate a process ever issues holds together with probability ≥ 1 − δ.
+  Only an alarm and the condition rule restart a process: a lattice generalization (`footprint`, a condition widened
+  to `()`) widens a skill without a restart, so its certificate keeps its wealth and its `v` (as before 1.4).
+  The process records `v`, `delta_v` and `delta_spent` (Σ δ_u for u ≤ v) in `EProcess.to_dict()` (so in the skill
+  set's report and the evidence written by `to_knowledge`), and `Certificate.to_dict()` records `delta_split`;
+  `Certificate.delta_at(v)` and `need_at(v)` give the numbers. The price: more clean outcomes per certification — at
+  5% and δ 0.1, 61 / 91 / 108 for v = 1 / 2 / 3 against 50 at every restart before; 30 at 10% and 14 at 20% for a
+  fresh process (25 and 12 before). `Certificate(delta_split=False)` keeps the old behaviour number for number (each
+  certificate holds alone, not together). A Certificate or EProcess pickled before this change has no `delta_split`
+  / `v` and keeps the full δ, so it replays as it ran; the old keys of `to_dict()` are unchanged. The skills numbers
+  in docs/best_practices.md and docs/experimental.md (the gridworld toy, Crafter: "fifty clean uses") were measured
+  before this change, with the full δ at each restart; they were not re-measured, and with the split a certificate
+  takes longer to reach, so System 1's shares there may be lower. The toy tests that count outcomes pass
+  `delta_split=False`.
+- **Process (experimental): a `solvi.build` node that sends its decision to a person is handed over.** A node whose
+  dispatcher answers `by="human"` (status `"human"`) with no edge for it stopped the run `"abstain"` instead of putting
+  its question to the channel (`on_human="handoff"`): the hand-off skipped every result by a person, the dispatcher's
+  included, not only an answer that came through the channel. Run and replay now skip only the channel's answer. Found
+  by the harness of the process promise stand.
+- **A record with non-string dict keys now verifies.** The canonical JSON a record hash is taken over sorted a dict's
+  keys before turning them into strings, so a body appended with `{2: …, 10: …}` was hashed in number order while its
+  stored text reads back as `{"10": …, "2": …}`: `verify()` reported it as edited. Keys are now turned into their JSON
+  strings first (int and float by their JSON form, `True` / `False` / `None` as `true` / `false` / `null`), recursively,
+  and two keys that become one string (`{1: …, "1": …}`) are refused with `ValueError` (json would have written both).
+  Applies to the record hash and to the trace signature's item digests. Every record with string keys only hashes the
+  same bytes as before (every fixture store verifies as it did; the golden fingerprints are unchanged), so no valid
+  stored record changes its hash; records written before the fix with such keys still fail `verify()`. Decisions,
+  corrections and specialist runs convert their data to JSON first and were not affected; writers that pass a body to
+  the store as it is could be (not confirmed for any of them): the knowledge store, `refine`'s stored runs,
+  `solvi.testing.history`, `solvi.experimental.process`, the dispatcher's policy record and the eval access log of
+  `solvi.experimental.changes`. Canonicalizing a 10 KB record takes about 90 µs more (one walk over its dicts).
+- **A code fingerprint no longer depends on whether the code has run yet.** A module global set on first use
+  (`_X = None`, filled by the first call) was hashed as None before that call and left out after it, so a Guard tool's
+  `System.fingerprint()` taken before the first `guard.call` gave `argument_errors` another fingerprint than one taken
+  after it (and two equal guards called in a different order disagreed). A module global that is None is now left out
+  of `code_fingerprint` and `own_code_fingerprint`: the fingerprint after the first call is the one it had before this
+  fix; a function that reads a module constant that stays None gets a new fingerprint (the golden fingerprints are
+  unchanged).
+- **`Guard.replay(id)` of a call denied outside a session's allowed tools** replayed it with the tool's own checks and
+  reported a mismatch (`in_session_tools` "not in the catalog"); a stored decision is now replayed with the system that
+  made it, read from its recorded steps (also in the process replay of a guard node).
+- **A hard check that no question's flow reaches is no longer silent.** A hard check with no `then=`, that no question
+  requires and no part reads, is never planned, so it never ran and never stopped an answer, and nothing said so (`solvi
+  check` listed it as an ordinary `unused_part` warning). `System(...)` now warns about it, naming the check and the
+  two ways to wire it (`requires=[...]` on the questions it guards, or `then=`), and `solvi check` reports it as the
+  error `hard_check_never_runs`, so `rep.ok` is False for such a system. Behaviour change by design: the new warning and
+  the lint error; answers are unchanged.
+- **The `Fail` reason of a hard check reached through `requires=` is kept in `why`.** A hard check without a `then=`
+  answer for the question that failed with `Fail("...")` gave `why` = "hard check X is false and no answer is set for
+  it"; the reason now follows, as it does when `then=` sets the answer ("hard check adult is false: age 9 < 18 and no
+  answer is set for it"). Only the text of `why` changes.
+- **`solvi check` reads lambda rules and says when it cannot read a rule.** `rule_returns_non_option` skipped a lambda
+  (`cat.rule("q")(lambda x: "aprove")`) and a rule without source (made by `exec`, a callable object) without a word,
+  so a misspelled option passed as "no problems found". A lambda's body is now checked as its return value (found on
+  its line by its arguments); a rule whose return values cannot be read is the new warning `rule_unchecked`. Behaviour
+  change by design: new findings from `solvi check`; `ask` is unchanged.
+- **Two silent ways a part never runs now warn.** A rule or part argument named like a question of the system is read
+  from the given facts, never from that question's answer (answers are not facts), so without it in the input the
+  reader could not run and its question abstained ("cannot compute: a"); `System(...)` now warns about it (`solvi
+  check` already listed it as `question_as_fact`). An argument with a default value is a fact the part reads like any
+  other, so its default is never used: `def chk(n, _lim=lim)` waits for a fact `_lim`, and a hard check written so
+  abstained with "no data for hard check chk: missing _lim". Registering such a part (fn, rule, check, extract) now
+  warns and shows how to bind the value without a default. Behaviour change by design: the two warnings only — how
+  arguments are read, and every answer, are unchanged.
+- **`KnowledgeStore.forget(writer, storage=<path>)` no longer fails after a partial write.** A path was not opened: the
+  source's retraction was already journaled when re-deciding the stored decisions failed (`AttributeError: 'str'
+  object has no attribute 'iter'`), so the journal changed and nothing was re-decided. `forget` and `redecide` now
+  open a path as `System(storage=)` does (`open_storage`), before anything is written; a storage that cannot be opened
+  raises with the journal unchanged. `Knowledge.forget(writer, by=, why=, storage=, decide=)` is the facade, beside
+  `Knowledge.retract`. With a TraceStorage nothing changes.
+- **`NumericDrift` warns on a degenerate reference.** On a stream that is mostly one exact value with rare spikes (a
+  cost that is 0 on most decisions) the reference's spread is near zero, the values are far from Gaussian, and an
+  unchanged stream was flagged far more often than alpha with no word (the reference warning fired only below 20
+  values, and not at all for a reference collected from the stream). When half of the reference's values or more are
+  one and the same value, `set_reference` and the reference collected from the stream now warn, `NumericDrift.degenerate`
+  says why (None otherwise), and an alarm's `why` repeats it. A robust scale (MAD, quantiles) would not help here: it
+  is zero on such a reference too; watch an aggregate over a window instead. Behaviour change by design: the warning
+  and the longer `why`; the test and its flags are unchanged.
+- **Knowledge: three narrow fixes to the two-writer dispute on a key with `valid`.** (1) A value another writer still
+  asserts is disputed, not refuted, when a writer that had confirmed it tells a new value from the same since: the
+  rule judged "another writer" by the last assertion only, so the regulator's 23 followed by a wiki's confirming 23 and
+  then the wiki's 21 refuted the regulator's value, while without the wiki's confirmation the two disputed. Every
+  writer seen asserting the value now counts; one writer changing its own value still refutes it. (2) Two unbounded
+  sinces (`valid=(None, None)` from two writers) are the same since, so the two values dispute as two equal given
+  sinces do; the later writer refuted the earlier one silently. A missing since against a given one, and keys whose
+  assertions carry no `valid` at all, resolve as before. (3) An item pending re-test (content told again after a
+  retraction) takes no side on its key: it was a hypothesis and still made the other value `disputed` and opened a
+  dispute; after `retest(id, ok=True)` it takes its side again. Behaviour change by design in these three cases (item
+  statuses, `disputes()` and the snapshots built from them); every other key resolves as before.
+- **A contract's fingerprint reads `applicable`'s source once per code object.** A System's questions fingerprint,
+  built on every `ask`, took each contract's fingerprint, which ran `inspect.getsource` on `applicable` each time (the
+  dispatcher's fingerprint of a slow path's contract too). The text hashed is now kept per function and read again when
+  its code changes (a new `__code__` or qualified name, or another function); the fingerprint itself is unchanged.
+  `benchmarks/contract_fingerprint.py` measures the `ask` time with and without the memo on a one-rule system (same
+  answers in both arms); on one machine the median ask was about 39% shorter (one run, 4,000 asks per arm).
+
+### Changed
+- **The δ index is taken at a promise's first sample, not when it is built or restarted (lazy δ charge)**
+  (`solvi.experimental.stream`, `StreamPromise`, `AdapterLoop` / `LearningLoop`, both modes). **Behaviour change.**
+  A candidate discarded, or a restart rolled back, before its first labelled sample now spends no index, so later
+  versions get a smaller index (a larger δ_v, slightly fewer samples to certify) than before; indices stay in the
+  order they are taken and Σ δ_v ≤ δ as before. What you see: `StreamPromise.v` / `delta_v` are `None` until the
+  first sample after the grid is fixed, `restart()` returns `(None, None)`, "recertify" and "alarm" records carry
+  `v_index: None` until the next sample, a promise with no index yet dumps as format v2 (a charged one stays v1), and
+  a finite threshold without an index is refused (in `learn`, `threshold_of` / `allows` and `restore`).
+- **`DefaultPolicy(mature_patience="auto", backlog_max=None)`: a maturity gate on when a training starts**
+  (`solvi.experimental.stream`). No training while the deepest layer (additive mode) or the served version is still
+  loosening its threshold, or its first uncertified point's evidence is still climbing, within its last 150 coin
+  samples; an alarm on it since the latest freeze, or ≥ `backlog_max` (default 2 × `first`) labels since then, opens
+  the gate anyway. "auto" is on in additive mode and **off in replacement mode** (replacement runs train when they did
+  before); an int turns it on in both modes, `None` off. The reason the gate opened is in the "train_start" / "train"
+  events (`gate`) and in `why_not_train`. A promise dump saved before the gate (no `peaks`) restores with its
+  loosening history empty: the gate then waits up to `mature_patience` samples longer than the uninterrupted run would
+  have (conservative, but the continuation of such an old dump is not identical to the run it was saved from).
+- **The promotion compares the candidate and the served version certified the same way on the same samples**
+  (`solvi.experimental.stream`, `AdapterLoop` / `LearningLoop`). **Behaviour change.** ℓ_s, the served version's
+  share alone in the paired rule ℓ_k ≥ ℓ_s + `margin`, is now read at the threshold of a comparison certificate: a
+  `StreamPromise` for the served version built on exactly the candidate's post-freeze decisions and samples, with the
+  same grid rule and the candidate's δ_v, restarted with the candidate. Before, ℓ_s was read at the served version's
+  own threshold, from a certificate that had read hundreds to thousands of samples and loosened at a larger δ_v,
+  while the candidate's was ~200 samples old at a smaller δ_v: the candidate lost on the age of the certificate, not
+  on its answers. In one LoRA stand (40 runs, 78 certified candidates) none was promoted; with the served certificate
+  rebuilt on the candidate's samples at the candidate's δ_v, 53 would have been (a diagnosis on that stand's
+  evaluation data; a gain counts only on a new run). The comparison is a decision rule, not a guarantee: it spends
+  nothing from the δ budget (it never serves, it only ranks; it reuses the candidate's δ_v value, so both
+  certifications follow the same rule on the same samples at the same δ — their grids differ, each comes from its own
+  version's scores), the served version still answers at its own threshold and a promoted candidate at its own
+  certificate's, so every served answer's guarantee is unchanged. While the comparison certificate is not yet
+  certified (a fresh candidate can certify first), ℓ_s is read at the served version's own threshold, the rule before
+  this change — not at +inf, which would put ℓ_s at 0 and let the margin pass on the candidate alone; a served
+  version 0 without a model gets no comparison and ℓ_s stays 0, as before. Which threshold was used is recorded:
+  `Paired.thr_s` ("cmp" / "own" / "no_model"), `thr_s` in the promote event, the margin check and the discard
+  reason. The candidate must still be certified, and the
+  margin, `min_share`, the probe and the novel-risk bar are unchanged. The old ℓ_s stays in the records: `Paired`
+  gains `alone_served_own` / `wrong_served_own` (`share_s_own`), the promote event `l_s_own`, `thr_s_cmp` and
+  `thr_s_own`, the discard reason `share_s_own`; the checkpoint saves the comparison certificate, and replay rebuilds
+  it from the recorded decisions. A checkpoint saved before this change with a candidate in trial has none: that
+  candidate is compared at the served version's own threshold, as before (a test checks it).
+- **`DefaultPolicy(stale=, trial=)` count decisions since the candidate's freeze, not coin samples; defaults
+  1 500 → 3 000** (`solvi.experimental.stream`; also `LearningLoop` / `lane_policy`). **Behaviour change.** A candidate
+  not certified `stale` decisions after its freeze, or certified and not promotable `trial` decisions after it, is
+  discarded. Before, both limits counted coin-sampled decisions: at a sampling rate of 0.08–0.17, 1 500 samples were
+  9 000–18 000 decisions, so a certified candidate that never cleared the share margin stayed in trial for a whole
+  12 000-decision stream and `want_train` refused every later training. New `LoopState.since_freeze` (n − the
+  candidate's `frozen_at`) is what the rule reads; `frozen_at` is already in the records and the checkpoint, so replay
+  stays exact. Why 3 000 and not 1 500 decisions: the grid opens 200 decisions after the freeze, and a point with
+  0–1 % risk certifies after about 120–280 samples (the 2nd–4th version's δ_v) at 6–12 decisions per sample, i.e.
+  900–3 600 decisions after the freeze (arithmetic from the certificate's constants, not measured); 1 500 would
+  discard even a zero-risk candidate at 12 decisions per sample. The clock runs from the freeze: an alarm's restart
+  drops the paired samples but does not reset it. A policy pickled before 1.4.0 keeps its numbers, now read as
+  decisions.
+- **`DefaultPolicy(target_share=0.5)`: the improvement signal also reads coverage** (`solvi.experimental.stream`).
+  **Behaviour change**: the default was `None`. The served version is now also short when it answers alone on less
+  than half of its last `window` held-out labels, not only when its error alone is above α. With the error alone as
+  the only signal a weak but certified incumbent was never retrained: certification keeps its error alone ≤ α, so it
+  is short in coverage, not in error (in one smoke run, its script not in the repository, solvi-base on Banking77
+  answered 0.090 of its held-out labels alone with no error from about decision 960 to 2 000 and the loop never
+  trained). The share is read on held-out labels, a selection-biased sample that is mostly deferred decisions, so it
+  reads low (0.09 there against 0.30 on the whole stream in that run): a strong incumbent will usually be retrained
+  too, and the promotion gates (the novel-only paired comparison, the memorisation probe, the novel-risk bar) are what
+  keep a worse version from being served. `target_share=None` restores the error-only signal. Unmeasured: the stand
+  will measure the default.
+- **Versions in time on a key with `valid`.** **Behaviour change**: on a key with `valid`, a later `since` on an
+  overlapping interval closes the earlier version at that `since` instead of refuting it (a bounded version gives the
+  old value back after it; a retracted version re-opens what it closed; a missing since is the beginning of time);
+  validity is per assertion, so a value told for two periods holds in both under one id (claims of one item from one
+  since are one version, and the latest claim's until is its until); the winner of a same-since
+  contest or of a person's answer takes only the overlap, and a dispute is contested only there; a derived item's
+  validity is the intersection of its premises' (refused when they never hold together or their times do not
+  compare) and it holds only where its premises hold; re-published withdrawn content waits for a re-test whatever its
+  id, and a copy admitted while another writer held the content goes pending when that holder is cut or when the
+  holder's version is refuted, disputed or closed there (a holder must hold); taking back a duplicate while the same
+  writer's other claim stands is not a withdrawal; an inferred item follows its premise after the
+  premise's re-test. New: `KnowledgeStore.pending()` (with the reason in `item(id)["pending"]`), `periods(id)`,
+  `retract(id, assertion=n)` and `retract(id, only_from=(writer, evidence))`, `item(id)["valid"]["claims"]` /
+  `["effective"]`, a snapshot row's `"periods"`, `Knowledge.tell(inferred=)`, `Knowledge.retract(only_from=,
+  assertion=)`; `datetime.date` works as a time (kept as its ISO text). Fingerprints of stores with overlapping
+  `valid` change once (an item that was refuted by a later since is active); keys without `valid` are unchanged, and
+  journals written before load, verify and replay. This supersedes the sentence of the dispute-rule fix above that "a
+  missing since against a given one ... resolve[s] as before": on a key where some assertion carries `valid`, a missing
+  since is now the beginning-of-time version and a given since closes it instead of the two contesting — so an
+  assertion told without `valid` after a dated one on that key (even a later observation) holds only before the dated
+  version's since, where it used to refute it and be read at every time (an outcome `B` from 5, then an outcome `A`
+  without `valid`: before, `A` refuted `B` and was read at 10; now `B` is read at 10 and `A` at 3). Two missing sinces
+  still dispute as that fix says, and keys whose assertions carry no `valid` at all resolve as before. Journal: taking
+  back one assertion (`retract(id, assertion=)`, `only_from=(writer, evidence)`, a failed re-test of copies) writes a
+  new op, `"retract_assertions"`; a store before 1.4 refuses such a journal ("unknown knowledge journal op") instead of
+  reading the entry as a whole retraction, so a journal that has one opens only on 1.4 or later.
+  Measured once on a pre-registered stand (script not in the repository; our own synthetic worlds, 30 seeds, and
+  one public data set, the ECB key interest rates: four series 1999–2026, 191 changes). On the ECB stream the
+  store reads the current value 6,636 of 6,636 times (before: 6,186), the value as of an earlier day 1,799 of
+  1,799 (before: 245), an announced value on its announcement day 182 of 182 (before: 182) and the old value in
+  the window between announcement and effect 855 of 855 (before: 0). On the synthetic worlds: current 7,812 of
+  7,813 (before: 7,236), as of an earlier day 7,813 of 7,813 (before: 1,580); withdrawn content served again
+  without a re-test 0 of 959 probes (before: 239; Wilson 95 % upper bound 0.004); correct derivations blocked
+  21 of 2,260 (0.9 %; before: 294), expired derivations served 0 of 7,358 (before: 50); 251 re-tests asked
+  where 248 were needed. Writing the ECB stream takes about 2.0× the time it took (medians of 5 runs, 0.129 s
+  against 0.065 s, one machine). 230 journals without overlapping `valid` are byte-identical in both versions;
+  260 journals written by the previous version open, verify and replay, and on the 30 with overlapping `valid`
+  the differences are 21 items refuted or disputed before and active now, plus 6 items of two kinds that follow
+  from the rule (a derivation over a premise that used to be refuted; withdrawn content re-told as a rule where
+  a fact was withdrawn, now pending). Caveats: one run; the ECB part and the 260 journals were read during
+  development, so they are regression checks and the confirmatory weight is on the 30 synthetic seeds, whose
+  seeds were derived from the frozen pre-registration; the simulated re-checker always answers right; the
+  synthetic gold follows the store's own convention that a writer's later value replaces its earlier one at the
+  same since (fixed on development seeds); the synthetic generator was set to produce enough probes (six
+  vendor tries per key) before any confirmatory seed existed.
+  Known limitations, both fixed after the measurement; the fixes were regression-checked on development seeds
+  only (the numbers above are as measured, before the fixes). A derived item was blocked where it should hold
+  when its premise's content was told on two validity periods and the premise was disputed on one of them: the
+  check read the premise's item-level "disputed" status instead of its validity at the asked time (this is the
+  21 of 2,260 correct derivations blocked above). Fixed: such a derived item stays a hypothesis as a whole, but
+  `usable(id, valid_at=)` and `snapshot(valid_at=)` give it as a fact at a time where every premise of one of
+  its derivations is usable, and a snapshot without a time carries the periods where it holds. Four claims at
+  one since by two writers, each telling one value and then another, left both items disputed, so no value was
+  read for that key at that time (the one synthetic current-value miss above). Fixed: a writer's later value at
+  one since replaces its own earlier one before the writers are compared, so when both writers end on the same
+  value that value holds and the other is refuted; while any writer still asserts the old value the two still
+  dispute.
+- **The experimental deadline reads "a future release".** The deadline set at 1.0 for every experimental piece was 1.2;
+  it passed with the pieces still here, and the import warning of 1.3 and 1.4 still said "it is removed in 1.2 unless it
+  graduates". `solvi.experimental.DEADLINE`, each `STATUS[...]["deadline"]`, the warning and docs/experimental.md now say
+  "a future release": no release is named until one is decided. The old paths of the pieces that graduated in 1.1
+  (`solvi.experimental.specialist`, `.mcp`, `.counterfactual`) say the same in their warning. Only text changes.
+
+
+### Upgrading from 1.1: behaviour changes of 1.2 outside its Breaking list
+1.2.0 changed the behaviour of some experimental modules, and of the knowledge store's re-told content, under its
+"Fixed" heading only; its headline "Breaking" list did not name them. A pipeline or simulation written for 1.1 can
+score differently on 1.2 and later with no code change. Each one, with the switch that restores 1.1 where there is one:
+- **Knowledge (stable): content told again after a retraction waits for a re-test.** It is a hypothesis until
+  `retest(id, ok=True)`, and so is every item that rested on it; under 1.1 the new assertion revived it at once. No
+  switch: call `retest` where the content was checked again.
+- **`solvi.experimental.changes`: a rollback with a reason is a failure.** `Pipeline.rollback(v, why=...)` records the
+  undone changes as failed, and the failure memory (`KnownFailures`) then refuses the same proposal again.
+  `rollback(..., failed=False)` per call, or `KnownFailures(rollbacks=False)`, keeps 1.1's behaviour.
+- **`solvi.experimental.changes`: a stage that raises gives status `"error"`**, not a rejection remembered for ever; the
+  candidate runs again once the stage is fixed. `Pipeline(raise_stage_errors=True)` re-raises after journaling.
+- **`solvi.experimental.laws`: support and precision are counted where the candidate would be the applied law.**
+  `LawSet(support_on="matched")` restores 1.1's count.
+- **`solvi.experimental.laws`: the sized acceptance's N counts distinct candidates**, so re-scoring the same candidates
+  no longer raises the bar. No switch.
+- **`solvi.experimental.laws`: `admit_by_probes` keeps witnesses** when more than one law may be missing, and a lone
+  survivor waits for them. `assume_one_law=True` keeps 1.1's rule. The noisy admission's fit check (`fit_level`,
+  default on) refuses a law that does not fit the noise; `fit_level=None` turns it off.
+
+### Docs
+- **Drift and audit: measured caveats** (best practices; the `ShiftWatch.shift`, `DriftMonitor` and `sysreport`
+  docstrings). A change of the correct answers alone is invisible to every label-free test by construction; read it
+  from audit labels. `ShiftWatch.shift` is a batch test at alpha per call, not a running test. A conformal test
+  martingale started once was valid but slower than `DriftMonitor`'s restarting CUSUM, and a prediction-powered
+  (PPI++) live-error estimate was not a better reading than the Wilson interval below about 100 audit labels; neither
+  is shipped. Numbers and their setting in best practices.
+
 ## 1.3.0 — 2026-10-19 — laws for rule-governed worlds: rivals, negations, a factored model
 
 ### Added

@@ -1,0 +1,195 @@
+{
+ "about": "Each vector holds its input as JSON text (`input`; read it with a parser that keeps a number written with \".\", \"e\" or \"E\" a float and every other number an integer, as Python's json does), the canonical text solvi gives it (`canonical`) and the SHA-256 of that text's UTF-8 bytes (`sha256`). Kind \"value\": the canonical JSON of the input. Kind \"record\": the input is a stored record (a line of a JSONL store); `canonical` is the canonical JSON of its hash body (record_body) and `sha256` its record hash — the `hash` it carries. Kind \"chain\": `input` is two consecutive stored records; the second one's `prev` is the first one's hash. Floats are written in `input` in another spelling than the canonical one where they can be (1E16, 0.000001, 100.00) so that a port has to reformat them; `source` says which float each was.",
+ "spec": "docs/trace_spec.md",
+ "vectors": [
+  {
+   "name": "float 0.1",
+   "kind": "value",
+   "input": "{\"x\":0.1}",
+   "source": "0.1",
+   "canonical": "{\"x\":0.1}",
+   "sha256": "2b018c1708c1cc2f4a8ed7f085c2cc748153117b173f7c076f7d5813bbb50f21"
+  },
+  {
+   "name": "float 1e-06 (Python switches to an exponent below 1e-4)",
+   "kind": "value",
+   "input": "{\"x\":0.000001}",
+   "source": "1e-06",
+   "canonical": "{\"x\":1e-06}",
+   "sha256": "89a1d9e7ce676db7f66963901ee511773bb673fa95558bceb73c91bdcc28327b"
+  },
+  {
+   "name": "float 0.0001 (still fixed)",
+   "kind": "value",
+   "input": "{\"x\":1.0E-4}",
+   "source": "0.0001",
+   "canonical": "{\"x\":0.0001}",
+   "sha256": "dabf62dd3991a10b0387fe6421e7e7b839eb811e2dff9276ad71d75af293a3ff"
+  },
+  {
+   "name": "float 1e+16 (Python switches to an exponent from 1e16)",
+   "kind": "value",
+   "input": "{\"x\":1E16}",
+   "source": "1e+16",
+   "canonical": "{\"x\":1e+16}",
+   "sha256": "21d6bea42b17fd31195fc9fc560ab7d0494ba833cdd094be2836c21506e84464"
+  },
+  {
+   "name": "float 1e15 (still fixed, with .0)",
+   "kind": "value",
+   "input": "{\"x\":1e15}",
+   "source": "1e15",
+   "canonical": "{\"x\":1000000000000000.0}",
+   "sha256": "956f5c22d16816977a4bc776eb49d24ccced0468549838f68c8174d67fa9c26d"
+  },
+  {
+   "name": "integer 10**16 (an integer stays an integer)",
+   "kind": "value",
+   "input": "{\"x\":10000000000000000}",
+   "canonical": "{\"x\":10000000000000000}",
+   "sha256": "d9ea702067d662ee3f58b5c6d52a45908d3759be54b49ff5689eabdae1b0a9d8"
+  },
+  {
+   "name": "float 5e-324 (smallest subnormal)",
+   "kind": "value",
+   "input": "{\"x\":4.9406564584124654e-324}",
+   "source": "5e-324",
+   "canonical": "{\"x\":5e-324}",
+   "sha256": "b84783c4103b7ffa2567356c19ecae80b2fb4d6796f5eaaa528e412ffa545427"
+  },
+  {
+   "name": "float max",
+   "kind": "value",
+   "input": "{\"x\":1.7976931348623157E+308}",
+   "source": "1.7976931348623157e308",
+   "canonical": "{\"x\":1.7976931348623157e+308}",
+   "sha256": "64c55aaa5fdffd5b3113057960dd9a7b674c0c8891527ea79e12694b81b8b80a"
+  },
+  {
+   "name": "float -0.0",
+   "kind": "value",
+   "input": "{\"x\":-0.0}",
+   "source": "-0.0",
+   "canonical": "{\"x\":-0.0}",
+   "sha256": "529436936b90ebdff10ece80ead76834aeae76aa1e44d6c334ac3ca3832a8fba"
+  },
+  {
+   "name": "float 100.0 (integral float keeps .0)",
+   "kind": "value",
+   "input": "{\"x\":100.00}",
+   "source": "100.0",
+   "canonical": "{\"x\":100.0}",
+   "sha256": "5b20168824c67261308103cb16459e1f1fdaf36ffe7b958c291a1237bcf56a2b"
+  },
+  {
+   "name": "float 0.30000000000000004",
+   "kind": "value",
+   "input": "{\"x\":0.30000000000000004}",
+   "source": "0.1 + 0.2",
+   "canonical": "{\"x\":0.30000000000000004}",
+   "sha256": "65b5c2b75dd049c607da86614690e4e9d2d95b4c92775b134c684e0ed64cb706"
+  },
+  {
+   "name": "float 1.2345678901234568e+17 (shortest round-trip digits)",
+   "kind": "value",
+   "input": "{\"x\":123456789012345678.0}",
+   "source": "123456789012345678.0",
+   "canonical": "{\"x\":1.2345678901234568e+17}",
+   "sha256": "e517b18fa902c5e76d606a4c696a80c445a13d0399df4ab53001d0632ef74c03"
+  },
+  {
+   "name": "integer 1 and float 1.0 differ",
+   "kind": "value",
+   "input": "{\"f\":1.0,\"i\":1}",
+   "canonical": "{\"f\":1.0,\"i\":1}",
+   "sha256": "cb3df04fde69a96d630bce81e01bf2e726e17914632ce0d2eb3350142e6f4b3d"
+  },
+  {
+   "name": "large integers (no 2**53 limit)",
+   "kind": "value",
+   "input": "{\"a\":18446744073709551616,\"b\":-9223372036854775808,\"c\":9007199254740993,\"d\":1000000000000000000000000000000}",
+   "canonical": "{\"a\":18446744073709551616,\"b\":-9223372036854775808,\"c\":9007199254740993,\"d\":1000000000000000000000000000000}",
+   "sha256": "6bbdf2fd452adf9dc9bc777ab8d061e6b9d6fbc11152cc98439552a4d7dd6b4f"
+  },
+  {
+   "name": "booleans, null, empty containers",
+   "kind": "value",
+   "input": "{\"e\":{},\"l\":[],\"n\":null,\"s\":\"\",\"t\":true,\"u\":false}",
+   "canonical": "{\"e\":{},\"l\":[],\"n\":null,\"s\":\"\",\"t\":true,\"u\":false}",
+   "sha256": "d7ed1d972e298e1416cc761d39946a5d694d8bec9b3ab0e114e1de1e6dca796a"
+  },
+  {
+   "name": "nested objects and arrays, keys sorted at every level",
+   "kind": "value",
+   "input": "{\"z\":[{\"b\":2,\"a\":1},[3,[]]],\"a\":{\"y\":{\"d\":null,\"c\":[true]},\"x\":0}}",
+   "canonical": "{\"a\":{\"x\":0,\"y\":{\"c\":[true],\"d\":null}},\"z\":[{\"a\":1,\"b\":2},[3,[]]]}",
+   "sha256": "0ea439ca82b20c2218ce4d7d776d4c9dc4415536191bc94742366c8451dca7a9"
+  },
+  {
+   "name": "non-ASCII written as is (BMP)",
+   "kind": "value",
+   "input": "{\"k\":\"ünïcode ✓ — Привет 中文\"}",
+   "canonical": "{\"k\":\"ünïcode ✓ — Привет 中文\"}",
+   "sha256": "570b1f5f684a1dcf152ec72ee72a230b79ecb54eb8b2be811f2cfc6f4fe86ee0"
+  },
+  {
+   "name": "key order: code points, not UTF-16 (astral after U+FFFF)",
+   "kind": "value",
+   "input": "{\"\\ud83d\\ude00\":1,\"\\uffff\":2,\"\\ue000\":3,\"a\":4,\"B\":5,\"\\u00e9\":6}",
+   "canonical": "{\"B\":5,\"a\":4,\"é\":6,\"\":3,\"￿\":2,\"😀\":1}",
+   "sha256": "3ff5d762a4a75b29457814e1ba1eadad213a746690309ec5762b752bbe93f10b"
+  },
+  {
+   "name": "U+2028 and U+2029 are not escaped",
+   "kind": "value",
+   "input": "{\"\\u2028\":\"a\\u2028b\\u2029c\"}",
+   "canonical": "{\" \":\"a b c\"}",
+   "sha256": "f9fc4e6af36198756ca7bb99c1696f5b91c89d055ca7649ca9cd7a05ebaa89d3"
+  },
+  {
+   "name": "escapes: quote, backslash, controls; / and DEL are not escaped",
+   "kind": "value",
+   "input": "{\"s\":\"\\\"\\\\/\\u0000\\u0001\\b\\t\\n\\u000b\\f\\r\\u001f\\u007f\"}",
+   "canonical": "{\"s\":\"\\\"\\\\/\\u0000\\u0001\\b\\t\\n\\u000b\\f\\r\\u001f\"}",
+   "sha256": "28a3483c766cc49737d7a2de5ba6b8ccc86358344fda823f7bd56d77457845b7"
+  },
+  {
+   "name": "keys that look like numbers sort as strings (a Python int key is turned into its string first)",
+   "kind": "value",
+   "input": "{\"2\":\"a\",\"10\":\"b\",\"-1\":\"c\",\"1.5\":\"d\"}",
+   "canonical": "{\"-1\":\"c\",\"1.5\":\"d\",\"10\":\"b\",\"2\":\"a\"}",
+   "sha256": "08ee4aea92da3b6862501956531bcdd2ab47e501add8e4f28d4cd5c9194d9909"
+  },
+  {
+   "name": "legacy (records before 0.7): NaN and Infinity tokens",
+   "kind": "value",
+   "input": "{\"a\":NaN,\"b\":Infinity,\"c\":-Infinity}",
+   "canonical": "{\"a\":NaN,\"b\":Infinity,\"c\":-Infinity}",
+   "sha256": "3db4e32cb94204faddd0c1f3c24c2b7ca2a5fe2b803817039bb4ba5dc8e830c7"
+  },
+  {
+   "name": "a format 1 record (solvi 0.7.1): the record without id and hash",
+   "kind": "record",
+   "input": "{\"answers\": {\"approve\": [\"yes\", 1.0, \"ok\"], \"category\": [\"travel\", 0.9094, \"ok\"]}, \"catalog\": \"fd7e9eda7e013740\", \"flow\": [\"within_limit\", \"days_old\", \"answer:approve\", \"answer:category\"], \"guards\": {}, \"hash\": \"c29d456858f6e45249145dfe8c50a52660001edddf4bc2e2790c67ffe2ada5d6\", \"id\": \"c29d456858f6e452\", \"init_hash\": \"f1363718d1eb5a90\", \"kind\": \"ask\", \"models\": [{\"fp\": \"4298f8a17a6cdd22\", \"id\": \"Words\", \"type\": \"DecisionPart\"}], \"prev\": \"\", \"records\": [[1, \"within_limit\", \"0ff79b1d1bd324ac\"], [2, \"days_old\", \"02530618039d2e4d\"], [3, \"answer:approve\", \"c384b3843e1acc05\"], [4, \"answer:category\", \"1e86f83a8b59e364\"]], \"response\": {\"feasible\": true, \"flow\": {\"batches\": [], \"per_question\": {\"approve\": [\"days_old\", \"within_limit\"], \"category\": []}, \"skipped\": {}, \"steps\": [{\"inputs\": [\"amount\", \"limit\"], \"kind\": \"check\", \"name\": \"within_limit\", \"reasons\": [\"rule approve\", \"checkpoint approve\"]}, {\"inputs\": [\"spent_on\"], \"kind\": \"fn\", \"name\": \"days_old\", \"reasons\": [\"rule approve\"]}, {\"inputs\": [\"within_limit\", \"days_old\"], \"kind\": \"rule\", \"name\": \"answer:approve\", \"reasons\": [\"answer approve\"]}, {\"inputs\": [\"note\"], \"kind\": \"rule\", \"name\": \"answer:category\", \"reasons\": [\"answer category\"]}], \"types\": {\"amount\": \"float\", \"days_old\": \"int\", \"limit\": \"float\", \"spent_on\": \"date\", \"within_limit\": \"bool\"}, \"unresolved\": {}}, \"model_outputs\": 1, \"ms\": 7.073729991912842, \"overall\": {\"abstained\": [], \"answered\": 2, \"by_kind\": {\"choice\": {\"answered\": 1, \"confidence\": 0.9094429985127419}, \"yes_no\": {\"answered\": 1, \"confidence\": 1.0}}, \"complete\": true, \"confidence\": 0.9094429985127419, \"feasible\": true, \"not_stated\": [], \"weakest\": [\"category\", 0.9094429985127419]}, \"results\": {\"approve\": {\"answer\": \"yes\", \"confidence\": 1.0, \"evidence\": [], \"extra\": null, \"guard\": null, \"kind\": \"yes_no\", \"not_stated\": false, \"probs\": {}, \"provenance\": \"computed\", \"repaired\": null, \"source\": \"approve\", \"status\": \"ok\", \"why\": \"within_limit = True; days_old = 11\"}, \"category\": {\"answer\": \"travel\", \"confidence\": 0.9094429985127419, \"evidence\": [], \"extra\": null, \"guard\": null, \"kind\": \"choice\", \"not_stated\": false, \"probs\": {\"meals\": 0.04527850074362907, \"software\": 0.04527850074362907, \"travel\": 0.9094429985127419}, \"provenance\": \"decided\", \"repaired\": null, \"source\": \"category\", \"status\": \"ok\", \"why\": \"note = 'travel to the client, train tickets'\"}}, \"safeguards\": [], \"trace\": {\"fingerprint\": {\"catalog\": \"fd7e9eda7e013740\", \"parts\": {\"answer:approve\": \"513faa98fb4d0304\", \"answer:category\": \"26ad2e9dbe43ab62\", \"days_old\": \"ec3e1ededcc184e8\", \"within_limit\": \"7aa6835daf670de5\"}, \"questions\": \"db5a93624849bc2b\"}, \"init\": {\"amount\": 120.0, \"limit\": 500.0, \"note\": \"travel to the client, train tickets\", \"spent_on\": \"2026-09-20\"}, \"init_hash\": \"f1363718d1eb5a90\", \"records\": [{\"confidence\": 1.0, \"error\": null, \"extra\": null, \"hash\": \"0ff79b1d1bd324ac\", \"inputs\": {\"amount\": \"184999fc4112ff83\", \"limit\": \"474ef07736571f2a\"}, \"kind\": \"check\", \"missing\": false, \"model\": null, \"name\": \"within_limit\", \"native\": true, \"prev\": \"f1363718d1eb5a90\", \"probs\": null, \"producer\": null, \"provenance\": \"computed\", \"quote\": null, \"step\": 1, \"tried\": null, \"value\": true}, {\"confidence\": 1.0, \"error\": null, \"extra\": null, \"hash\": \"02530618039d2e4d\", \"inputs\": {\"spent_on\": \"ced6c90c36bf967b\"}, \"kind\": \"fn\", \"missing\": false, \"model\": null, \"name\": \"days_old\", \"native\": true, \"prev\": \"0ff79b1d1bd324ac\", \"probs\": null, \"producer\": null, \"provenance\": \"computed\", \"quote\": null, \"step\": 2, \"tried\": null, \"value\": 11}, {\"confidence\": 1.0, \"error\": null, \"extra\": null, \"hash\": \"c384b3843e1acc05\", \"inputs\": {\"days_old\": \"4fc82b26aecb47d2\", \"within_limit\": \"b5bea41b6c623f7c\"}, \"kind\": \"rule\", \"missing\": false, \"model\": null, \"name\": \"answer:approve\", \"native\": true, \"prev\": \"02530618039d2e4d\", \"probs\": null, \"producer\": null, \"provenance\": \"computed\", \"quote\": null, \"step\": 3, \"tried\": null, \"value\": true}, {\"confidence\": 0.9094429985127419, \"error\": null, \"extra\": null, \"hash\": \"1e86f83a8b59e364\", \"inputs\": {\"note\": \"3c5bfc5521402d52\"}, \"kind\": \"rule\", \"missing\": false, \"model\": {\"fp\": \"4298f8a17a6cdd22\", \"id\": \"Words\", \"type\": \"DecisionPart\"}, \"name\": \"answer:category\", \"native\": true, \"prev\": \"c384b3843e1acc05\", \"probs\": {\"meals\": 0.04527850074362907, \"software\": 0.04527850074362907, \"travel\": 0.9094429985127419}, \"producer\": null, \"provenance\": \"decided\", \"quote\": null, \"step\": 4, \"tried\": null, \"value\": \"travel\"}], \"rejected\": [], \"schedule\": [], \"skipped\": [], \"timings\": {\"answer:approve\": 0.01544599945191294, \"answer:category\": 0.133039997308515, \"days_old\": 0.10285699681844562, \"within_limit\": 0.05764199886471033}, \"typed_init\": [\"spent_on\"]}, \"values\": {\"amount\": 120.0, \"answer:approve\": true, \"answer:category\": \"travel\", \"days_old\": 11, \"limit\": 500.0, \"note\": \"travel to the client, train tickets\", \"spent_on\": \"2026-09-20\", \"within_limit\": true}, \"violations\": []}, \"safeguards\": [], \"seq\": 0, \"time\": 1790970062.0467622, \"v\": 1}",
+   "canonical": "{\"answers\":{\"approve\":[\"yes\",1.0,\"ok\"],\"category\":[\"travel\",0.9094,\"ok\"]},\"catalog\":\"fd7e9eda7e013740\",\"flow\":[\"within_limit\",\"days_old\",\"answer:approve\",\"answer:category\"],\"guards\":{},\"init_hash\":\"f1363718d1eb5a90\",\"kind\":\"ask\",\"models\":[{\"fp\":\"4298f8a17a6cdd22\",\"id\":\"Words\",\"type\":\"DecisionPart\"}],\"prev\":\"\",\"records\":[[1,\"within_limit\",\"0ff79b1d1bd324ac\"],[2,\"days_old\",\"02530618039d2e4d\"],[3,\"answer:approve\",\"c384b3843e1acc05\"],[4,\"answer:category\",\"1e86f83a8b59e364\"]],\"response\":{\"feasible\":true,\"flow\":{\"batches\":[],\"per_question\":{\"approve\":[\"days_old\",\"within_limit\"],\"category\":[]},\"skipped\":{},\"steps\":[{\"inputs\":[\"amount\",\"limit\"],\"kind\":\"check\",\"name\":\"within_limit\",\"reasons\":[\"rule approve\",\"checkpoint approve\"]},{\"inputs\":[\"spent_on\"],\"kind\":\"fn\",\"name\":\"days_old\",\"reasons\":[\"rule approve\"]},{\"inputs\":[\"within_limit\",\"days_old\"],\"kind\":\"rule\",\"name\":\"answer:approve\",\"reasons\":[\"answer approve\"]},{\"inputs\":[\"note\"],\"kind\":\"rule\",\"name\":\"answer:category\",\"reasons\":[\"answer category\"]}],\"types\":{\"amount\":\"float\",\"days_old\":\"int\",\"limit\":\"float\",\"spent_on\":\"date\",\"within_limit\":\"bool\"},\"unresolved\":{}},\"model_outputs\":1,\"ms\":7.073729991912842,\"overall\":{\"abstained\":[],\"answered\":2,\"by_kind\":{\"choice\":{\"answered\":1,\"confidence\":0.9094429985127419},\"yes_no\":{\"answered\":1,\"confidence\":1.0}},\"complete\":true,\"confidence\":0.9094429985127419,\"feasible\":true,\"not_stated\":[],\"weakest\":[\"category\",0.9094429985127419]},\"results\":{\"approve\":{\"answer\":\"yes\",\"confidence\":1.0,\"evidence\":[],\"extra\":null,\"guard\":null,\"kind\":\"yes_no\",\"not_stated\":false,\"probs\":{},\"provenance\":\"computed\",\"repaired\":null,\"source\":\"approve\",\"status\":\"ok\",\"why\":\"within_limit = True; days_old = 11\"},\"category\":{\"answer\":\"travel\",\"confidence\":0.9094429985127419,\"evidence\":[],\"extra\":null,\"guard\":null,\"kind\":\"choice\",\"not_stated\":false,\"probs\":{\"meals\":0.04527850074362907,\"software\":0.04527850074362907,\"travel\":0.9094429985127419},\"provenance\":\"decided\",\"repaired\":null,\"source\":\"category\",\"status\":\"ok\",\"why\":\"note = 'travel to the client, train tickets'\"}},\"safeguards\":[],\"trace\":{\"fingerprint\":{\"catalog\":\"fd7e9eda7e013740\",\"parts\":{\"answer:approve\":\"513faa98fb4d0304\",\"answer:category\":\"26ad2e9dbe43ab62\",\"days_old\":\"ec3e1ededcc184e8\",\"within_limit\":\"7aa6835daf670de5\"},\"questions\":\"db5a93624849bc2b\"},\"init\":{\"amount\":120.0,\"limit\":500.0,\"note\":\"travel to the client, train tickets\",\"spent_on\":\"2026-09-20\"},\"init_hash\":\"f1363718d1eb5a90\",\"records\":[{\"confidence\":1.0,\"error\":null,\"extra\":null,\"hash\":\"0ff79b1d1bd324ac\",\"inputs\":{\"amount\":\"184999fc4112ff83\",\"limit\":\"474ef07736571f2a\"},\"kind\":\"check\",\"missing\":false,\"model\":null,\"name\":\"within_limit\",\"native\":true,\"prev\":\"f1363718d1eb5a90\",\"probs\":null,\"producer\":null,\"provenance\":\"computed\",\"quote\":null,\"step\":1,\"tried\":null,\"value\":true},{\"confidence\":1.0,\"error\":null,\"extra\":null,\"hash\":\"02530618039d2e4d\",\"inputs\":{\"spent_on\":\"ced6c90c36bf967b\"},\"kind\":\"fn\",\"missing\":false,\"model\":null,\"name\":\"days_old\",\"native\":true,\"prev\":\"0ff79b1d1bd324ac\",\"probs\":null,\"producer\":null,\"provenance\":\"computed\",\"quote\":null,\"step\":2,\"tried\":null,\"value\":11},{\"confidence\":1.0,\"error\":null,\"extra\":null,\"hash\":\"c384b3843e1acc05\",\"inputs\":{\"days_old\":\"4fc82b26aecb47d2\",\"within_limit\":\"b5bea41b6c623f7c\"},\"kind\":\"rule\",\"missing\":false,\"model\":null,\"name\":\"answer:approve\",\"native\":true,\"prev\":\"02530618039d2e4d\",\"probs\":null,\"producer\":null,\"provenance\":\"computed\",\"quote\":null,\"step\":3,\"tried\":null,\"value\":true},{\"confidence\":0.9094429985127419,\"error\":null,\"extra\":null,\"hash\":\"1e86f83a8b59e364\",\"inputs\":{\"note\":\"3c5bfc5521402d52\"},\"kind\":\"rule\",\"missing\":false,\"model\":{\"fp\":\"4298f8a17a6cdd22\",\"id\":\"Words\",\"type\":\"DecisionPart\"},\"name\":\"answer:category\",\"native\":true,\"prev\":\"c384b3843e1acc05\",\"probs\":{\"meals\":0.04527850074362907,\"software\":0.04527850074362907,\"travel\":0.9094429985127419},\"producer\":null,\"provenance\":\"decided\",\"quote\":null,\"step\":4,\"tried\":null,\"value\":\"travel\"}],\"rejected\":[],\"schedule\":[],\"skipped\":[],\"timings\":{\"answer:approve\":0.01544599945191294,\"answer:category\":0.133039997308515,\"days_old\":0.10285699681844562,\"within_limit\":0.05764199886471033},\"typed_init\":[\"spent_on\"]},\"values\":{\"amount\":120.0,\"answer:approve\":true,\"answer:category\":\"travel\",\"days_old\":11,\"limit\":500.0,\"note\":\"travel to the client, train tickets\",\"spent_on\":\"2026-09-20\",\"within_limit\":true},\"violations\":[]},\"safeguards\":[],\"seq\":0,\"time\":1790970062.0467622,\"v\":1}",
+   "sha256": "c29d456858f6e45249145dfe8c50a52660001edddf4bc2e2790c67ffe2ada5d6"
+  },
+  {
+   "name": "a format 2 record (solvi 1.0.0, compact): lasting fields, #answers, #content",
+   "kind": "record",
+   "input": "{\"v\": 2, \"kind\": \"ask\", \"init_hash\": \"562b920286d56988\", \"answers\": {\"step\": [\"S\", 1.0, \"forced\"], \"fight\": [\"yes\", 1.0, \"ok\"]}, \"flow\": [\"has_hearts\", \"not_looping\", \"free\", \"answer:step\", \"answer:fight\"], \"records\": [[1, \"has_hearts\", \"e484159a6a29c993\"], [2, \"not_looping\", \"772df41ab599b7a4\"], [3, \"free\", \"0f3ee730f156a0f2\"], [5, \"answer:fight\", \"9bef5442579802b5\"], [6, \"then:step\", \"f1ab6415dd5c3acc\"]], \"guards\": {\"step\": \"hard_check\"}, \"safeguards\": [[\"hard_check\", \"answer:step\", [\"step\"]]], \"models\": [], \"catalog\": \"3a8882fd6abff0b2\", \"record\": \"compact\", \"compact\": {\"trace\": {\"init_hash\": \"562b920286d56988\", \"init\": {\"plan\": \"N\", \"facing\": \"N\", \"walls\": [\"E\"], \"history\": [4, 4, 4], \"hearts\": 3, \"enemies\": 1}, \"skipped\": [[\"answer:step\", \"not needed: hard check not_looping failed\"]], \"rejected\": [], \"typed_init\": [], \"fingerprint\": {\"catalog\": \"3a8882fd6abff0b2\", \"questions\": \"fd7986acee4bc066\"}, \"records\": []}, \"results\": {\"step\": {\"answer\": \"S\", \"confidence\": 1.0, \"why\": \"hard check not_looping is false; then free_side(free = ['N', 'S', 'W'], facing = 'N') = 'S'\", \"status\": \"forced\", \"provenance\": \"computed\", \"source\": \"not_looping\", \"guard\": \"hard_check\", \"kind\": \"choice\"}, \"fight\": {\"answer\": \"yes\", \"confidence\": 1.0, \"why\": \"enemies = 1\", \"provenance\": \"computed\", \"source\": \"fight\", \"kind\": \"yes_no\"}}, \"checks\": {\"has_hearts\": [true, null], \"not_looping\": [false, null]}, \"ms\": 1.2973560094833374, \"safeguards\": [{\"kind\": \"hard_check\", \"fact\": \"answer:step\", \"detail\": \"hard check not_looping is false; then free_side(free = ['N', 'S', 'W'], facing = 'N') = 'S'\", \"questions\": [\"step\"]}]}, \"seq\": 0, \"time\": 1791094844.9970021, \"prev\": \"\", \"hash\": \"6a5e079cc0e5e0e0b64262e8da2dc96e4421b87d9d265392409d5a668f04236a\", \"id\": \"6a5e079cc0e5e0e0\"}",
+   "canonical": "{\"#answers\":\"55d04ec3df02facd1d7df148632a94cd93ee9fb54098025ca26e0a47bdda392b\",\"#content\":\"d9aa7b9683b595ddbea3688866df4b38e5e2fe0734e3a5a234c14d0dbebc0191\",\"catalog\":\"3a8882fd6abff0b2\",\"flow\":[\"has_hearts\",\"not_looping\",\"free\",\"answer:step\",\"answer:fight\"],\"guards\":{\"step\":\"hard_check\"},\"init_hash\":\"562b920286d56988\",\"kind\":\"ask\",\"models\":[],\"prev\":\"\",\"records\":[[1,\"has_hearts\",\"e484159a6a29c993\"],[2,\"not_looping\",\"772df41ab599b7a4\"],[3,\"free\",\"0f3ee730f156a0f2\"],[5,\"answer:fight\",\"9bef5442579802b5\"],[6,\"then:step\",\"f1ab6415dd5c3acc\"]],\"safeguards\":[[\"hard_check\",\"answer:step\",[\"step\"]]],\"seq\":0,\"time\":1791094844.9970021,\"v\":2}",
+   "sha256": "6a5e079cc0e5e0e0b64262e8da2dc96e4421b87d9d265392409d5a668f04236a"
+  },
+  {
+   "name": "chain link: the second record's prev is the first one's hash",
+   "kind": "chain",
+   "input": [
+    "{\"v\": 2, \"kind\": \"ask\", \"init_hash\": \"562b920286d56988\", \"answers\": {\"step\": [\"S\", 1.0, \"forced\"], \"fight\": [\"yes\", 1.0, \"ok\"]}, \"flow\": [\"has_hearts\", \"not_looping\", \"free\", \"answer:step\", \"answer:fight\"], \"records\": [[1, \"has_hearts\", \"e484159a6a29c993\"], [2, \"not_looping\", \"772df41ab599b7a4\"], [3, \"free\", \"0f3ee730f156a0f2\"], [5, \"answer:fight\", \"9bef5442579802b5\"], [6, \"then:step\", \"f1ab6415dd5c3acc\"]], \"guards\": {\"step\": \"hard_check\"}, \"safeguards\": [[\"hard_check\", \"answer:step\", [\"step\"]]], \"models\": [], \"catalog\": \"3a8882fd6abff0b2\", \"record\": \"compact\", \"compact\": {\"trace\": {\"init_hash\": \"562b920286d56988\", \"init\": {\"plan\": \"N\", \"facing\": \"N\", \"walls\": [\"E\"], \"history\": [4, 4, 4], \"hearts\": 3, \"enemies\": 1}, \"skipped\": [[\"answer:step\", \"not needed: hard check not_looping failed\"]], \"rejected\": [], \"typed_init\": [], \"fingerprint\": {\"catalog\": \"3a8882fd6abff0b2\", \"questions\": \"fd7986acee4bc066\"}, \"records\": []}, \"results\": {\"step\": {\"answer\": \"S\", \"confidence\": 1.0, \"why\": \"hard check not_looping is false; then free_side(free = ['N', 'S', 'W'], facing = 'N') = 'S'\", \"status\": \"forced\", \"provenance\": \"computed\", \"source\": \"not_looping\", \"guard\": \"hard_check\", \"kind\": \"choice\"}, \"fight\": {\"answer\": \"yes\", \"confidence\": 1.0, \"why\": \"enemies = 1\", \"provenance\": \"computed\", \"source\": \"fight\", \"kind\": \"yes_no\"}}, \"checks\": {\"has_hearts\": [true, null], \"not_looping\": [false, null]}, \"ms\": 1.2973560094833374, \"safeguards\": [{\"kind\": \"hard_check\", \"fact\": \"answer:step\", \"detail\": \"hard check not_looping is false; then free_side(free = ['N', 'S', 'W'], facing = 'N') = 'S'\", \"questions\": [\"step\"]}]}, \"seq\": 0, \"time\": 1791094844.9970021, \"prev\": \"\", \"hash\": \"6a5e079cc0e5e0e0b64262e8da2dc96e4421b87d9d265392409d5a668f04236a\", \"id\": \"6a5e079cc0e5e0e0\"}",
+    "{\"v\": 2, \"kind\": \"ask\", \"init_hash\": \"d083b61738c8635f\", \"answers\": {\"step\": [\"W\", 1.0, \"ok\"], \"fight\": [\"no\", 1.0, \"forced\"]}, \"flow\": [\"has_hearts\", \"not_looping\", \"free\", \"answer:step\", \"answer:fight\"], \"records\": [[1, \"has_hearts\", \"a028645d6964897a\"], [2, \"not_looping\", \"9a2a98e1dbf98487\"], [3, \"free\", \"181277019a64a3bc\"], [4, \"answer:step\", \"f8b51b0df47bd5d7\"]], \"guards\": {\"fight\": \"hard_check\"}, \"safeguards\": [[\"hard_check\", \"answer:fight\", [\"fight\"]]], \"models\": [], \"catalog\": \"3a8882fd6abff0b2\", \"record\": \"compact\", \"compact\": {\"trace\": {\"init_hash\": \"d083b61738c8635f\", \"init\": {\"plan\": \"W\", \"facing\": \"N\", \"walls\": [], \"history\": [1, 2, 3], \"hearts\": 0, \"enemies\": 1}, \"skipped\": [[\"answer:fight\", \"not needed: hard check has_hearts failed\"]], \"rejected\": [], \"typed_init\": [], \"fingerprint\": {\"catalog\": \"3a8882fd6abff0b2\", \"questions\": \"fd7986acee4bc066\"}, \"records\": []}, \"results\": {\"step\": {\"answer\": \"W\", \"confidence\": 1.0, \"why\": \"plan = 'W'\", \"provenance\": \"computed\", \"source\": \"step\", \"kind\": \"choice\"}, \"fight\": {\"answer\": \"no\", \"confidence\": 1.0, \"why\": \"hard check has_hearts is false\", \"status\": \"forced\", \"provenance\": \"computed\", \"source\": \"has_hearts\", \"guard\": \"hard_check\", \"kind\": \"yes_no\"}}, \"checks\": {\"has_hearts\": [false, null], \"not_looping\": [true, null]}, \"ms\": 0.2635999917984009, \"safeguards\": [{\"kind\": \"hard_check\", \"fact\": \"answer:fight\", \"detail\": \"hard check has_hearts is false\", \"questions\": [\"fight\"]}]}, \"seq\": 1, \"time\": 1791094844.9976122, \"prev\": \"6a5e079cc0e5e0e0b64262e8da2dc96e4421b87d9d265392409d5a668f04236a\", \"hash\": \"f79aefcfbcd0ca3700f8c26e5d2cdff6372809880d61fa9b172bd98e82425fe0\", \"id\": \"f79aefcfbcd0ca37\"}"
+   ],
+   "canonical": "{\"#answers\":\"0304333c3b3ef7a6cb2434c16e4a13e01d352d9c6a2b28a12a97104262889734\",\"#content\":\"8669e2d012a8dd64c42daf8e08c3e90a1019feeadd9785bd21efb48f6ff6526d\",\"catalog\":\"3a8882fd6abff0b2\",\"flow\":[\"has_hearts\",\"not_looping\",\"free\",\"answer:step\",\"answer:fight\"],\"guards\":{\"fight\":\"hard_check\"},\"init_hash\":\"d083b61738c8635f\",\"kind\":\"ask\",\"models\":[],\"prev\":\"6a5e079cc0e5e0e0b64262e8da2dc96e4421b87d9d265392409d5a668f04236a\",\"records\":[[1,\"has_hearts\",\"a028645d6964897a\"],[2,\"not_looping\",\"9a2a98e1dbf98487\"],[3,\"free\",\"181277019a64a3bc\"],[4,\"answer:step\",\"f8b51b0df47bd5d7\"]],\"safeguards\":[[\"hard_check\",\"answer:fight\",[\"fight\"]]],\"seq\":1,\"time\":1791094844.9976122,\"v\":2}",
+   "sha256": "f79aefcfbcd0ca3700f8c26e5d2cdff6372809880d61fa9b172bd98e82425fe0"
+  }
+ ]
+}

@@ -201,7 +201,7 @@ def srepr(v):
 MISSING = object()
 
 MISMATCH_KINDS = ("integrity", "recompute", "model_changed", "missing_part", "missing_input", "flow", "answer",
-                  "not_restored", "not_kept", "error")
+                  "not_restored", "not_kept", "error", "other_system")
 
 
 class Mismatch(tuple):
@@ -222,6 +222,9 @@ class Mismatch(tuple):
         not_kept       a compact record (TraceStorage(record="compact")) does not keep what checking this step needs: a
                        model step that is not re-run on replay — no verdict on the data past the record's chain
         error          the replay itself failed (the record could not be loaded, or replay raised): no verdict on the data
+        other_system   the record answers no question of the System(s) replay_all was given: another system's record,
+                       or one whose questions were edited — not an integrity verdict (its record hash and, for a full
+                       record, its trace's hashes are still checked; verify() checks the chain)
 
     It compares, unpacks and serializes as the plain triple."""
 
@@ -253,6 +256,9 @@ def mismatch_summary(mismatches, catalog=None):
         s = "data damaged: a stored answer is not the one its trace gives"
     elif set(kinds) <= {"error"}:
         s = "replay failed (no verdict on the data)"
+    elif "other_system" in kinds:
+        s = ("another system's record: not replayed by this system, no verdict on it (not an integrity verdict either: "
+             "its record hash is checked, and verify() checks the chain)")
     elif "not_kept" in kinds:
         s = "not verified: a compact record does not keep this step's surroundings (no verdict on the data)"
     elif "not_restored" in kinds:
@@ -411,6 +417,11 @@ class Trace(Serial):
         it are still checked.
         Limits: a trace rebuilt honestly from a *different* input is internally consistent — compare `init_hash` with a
         receipt you published elsewhere to catch that."""
+        from .provenance import no_probes
+        with no_probes():                              # an identity canary never probes, counts or marks in a replay
+            return self._replay(catalog, flow, trust_models)
+
+    def _replay(self, catalog, flow, trust_models):
         heads = system = None
         if hasattr(catalog, "catalog") and hasattr(catalog, "heads"):          # a System: its catalog and answer heads
             system, heads, catalog = catalog, catalog.heads, catalog.catalog
@@ -592,6 +603,10 @@ def _answers_differ(trace, system, flow):
     for q, a in now.items():
         was = stored[q]
         diff = _result_differs(was, a, why=not getattr(trace, "legacy_order", False))
+        wb = getattr(a, "_why_before", None)
+        ok_why = was.why == wb or (isinstance(wb, (list, tuple)) and was.why in wb)
+        if diff == ["why"] and ok_why:
+            continue                                  # stored by an earlier form (pre-1.4 / 1.4): same reason, older wording
         if not diff or _before_no_data(was, a, diff):
             continue
         if diff[0] in ("answer", "status"):
