@@ -482,14 +482,14 @@ def _calibration_rows(system, question, examples, guard, correct, folds=None, se
     if folds:
         heads = _fold_heads(system, question, examples, int(folds), seed)
     sig, ok, grp, lost = [], [], [], []
+    if probs_out is not None:
+        probs_out.extend([None] * len(examples))   # rows land at their own index (parallel order-stable)
     saved = system.guards.pop(question, None)
     was_head = system.heads.get(question)
     try:
         if workers and workers > 1 and not folds:
             from concurrent.futures import ThreadPoolExecutor
             n = len(examples)
-            if probs_out is not None:
-                probs_out.extend([None] * n)
             with ThreadPoolExecutor(max_workers=workers) as ex:
                 for i, (s_, ok_, g_, l_) in enumerate(ex.map(
                         lambda t: _one_calibration_row(system, question, q, guard, correct, t[0], t[1],
