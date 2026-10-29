@@ -3,6 +3,17 @@
 ## 1.4.0 — unreleased
 
 ### Added
+- **`solvi.document`: short access on the result of an ask** (`DocumentResult`, what `recipe.ask` now returns).
+  `res.answer` is the answer's Result (what `res["answer"]` gave), `res.facts` the schema's fields as read — a number
+  field its value (with `.units` beside them: `{field: Unit(scale, currency, percent)}`), any other field its read
+  value; a field that escalated is absent, its reason is in `res.why_short` / `res.answer.why`. `res.why_short`: the
+  reads and the outcome in one line (`a = '$1,250'; b = '(1,250)' → 2500.0 (confidence 0.90)`, or `→ abstain: …`),
+  without the rule's every input (values, units, the state: `res.answer.why` keeps the full form). Everything else
+  forwards to the Response underneath (`res["answer"]`, `res.stored_id`, `res.trace`, `res.overall`, ...).
+- **`System.guarantee(workers=)` / `calibrate(workers=)`: calibration in parallel threads.** The calibration examples
+  are independent — the guard is off during them and nothing is stored — so `workers=8` asks them in parallel threads
+  and gives the same report (the reads inside one ask parallelise as before through `System(workers=)`); `folds=`
+  cross-fitting stays sequential.
 - **`solvi.document`: a decision over a document** (`solvi.solutions.document`; the 24th top-level name). One
   model read per field of a pydantic schema (`Span[float]`, `Span[date]`, `Span[str]`, a `Literal` choice), each span
   found in the text as the text writes it (a number as a number of its own), quoted numbers read as documents write
