@@ -5,6 +5,7 @@ checks, constraint repairs, fallbacks).
 Also a summary: how much of the answer's support is deterministic and how much comes from models."""
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass, field
 
 from .. import _i18n as i18n
@@ -116,6 +117,14 @@ def _alt(catalog, fact, name):
 def _short(v, n=48):
     s = repr(v)
     return s if len(s) <= n else s[: n - 1] + "…"
+
+
+def _docref(v):
+    """A long input text as a verifiable reference (`doc[12,345 chars, sha256:0123456789ab]`): the audit names the
+    text it read without carrying it — the hash and length are checked against the source text, not a truncated view."""
+    if isinstance(v, str) and len(v) > 200:
+        return f"doc[{len(v):,} chars, sha256:{hashlib.sha256(v.encode('utf-8')).hexdigest()[:12]}]"
+    return None
 
 
 def _guarantee(au):
@@ -323,7 +332,8 @@ class AnswerAudit:
                  + (t("au.prov", lang, prov=i18n.provenance(self.provenance, lang)) if self.provenance else "")
                  + (t("au.by", lang, src=self.source) if self.source else "")]
         if self.given:
-            lines.append(col("col.given") + "; ".join(f"{g['name']} = {_short(g['value'], 32)}" for g in self.given))
+            lines.append(col("col.given") + "; ".join(
+                f"{g['name']} = {_docref(g['value']) or _short(g['value'], 32)}" for g in self.given))
         for c in self.computed:
             lines.append(col("col.computed") + f"{c['name']} = "
                          + (t("au.failed", lang, err=m(c["error"])) if c.get("error") else _short(c["value"])))
