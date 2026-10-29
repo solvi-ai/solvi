@@ -695,6 +695,12 @@ labels, 10 % of the labels discordant) rolled back in 10 / 28 / 70 % of runs by 
   guarantee level), more than 20 % of the examples escalating. The parser, `Span[date]` and EPS tables are locked by
   tests; the recipe docs (`docs/recipes/document.md`), the README recipe-first block ("Build your own" holds the
   hand-built catalog and the rest) and `examples/27_document_decision.py` (a fake endpoint, runs in the suite). The recipe docs name the reasoning-model `max_tokens` tradeoff measured in the flagship test (2,048 default truncates gpt-oss-120b reads; 8,192 part-fixes, 16,384 fixes more, ≈ 6× latency) — a cut-off read escalates loudly, never silently.
+- **`solvi.document` reads_with=: state-conditioned reads** — the question (and other state keys) reach every
+  field read as a `<state>` block in its prompt; the grounding and the quote offsets stay on the one text fact
+  (a span is still read from the document alone); a missing key fails that read naming it (the answer abstains
+  with the reason); a recipe with `reads_with=` is its own catalog fingerprint (calibrations and records do not
+  cross-attach; without the parameter the fingerprint is unchanged). First measured in the flagship test (reads
+  that cannot see the question capped coverage at ~5 %); `docs/recipes/document.md` has the section.
 
 ### Fixed
 - **A quoted number is located as a number of its own** (`solvi.core.deciders.llm.locate`). An LLM's span or quote
