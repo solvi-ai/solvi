@@ -67,6 +67,25 @@ recipe.calibrate([({"doc": d}, gold) for d, gold in labelled], max_risk=0.05, wo
   to receive each one instead.
 - Warnings: fewer than 100 examples (the threshold rests on them), and more than 20 % of the examples
   escalating (the threshold then rests on few answers).
+
+## When the reads need the question: `reads_with=`
+
+The reads see the text and the fields' descriptions. When the task is "answer the question about the
+document", pass the question and anything else the reads need as state keys:
+
+```python
+recipe = solvi.document(Invoice, model, task="An invoice.",
+                        reads_with=("question",),
+                        compute=lambda f, s: ...)
+res = recipe.ask({"doc": text, "question": "What is the total?"})
+```
+
+Every read's prompt then carries a `<state>` block with those keys between the task and the text — the read
+is conditioned on the question without the question being composed into the text, so a fact's quote and its
+offsets still point into the document itself. The input must carry every named key (a read without one fails
+naming it, and the answer abstains with that reason). A recipe with `reads_with=` is its own catalog: a
+calibration or a stored record made without it does not attach (and the other way round) — set it once, at
+the first `document(...)` call.
 - `save_calibration(path)` writes it; `document(..., calibration=path)` loads it (refuses a file made for
   another catalog or model).
 
@@ -85,7 +104,8 @@ recipe.calibrate([({"doc": d}, gold) for d, gold in labelled], max_risk=0.05, wo
 
 ## Knobs
 
-`text="doc"` — the input key carrying the text. `units="same"` (default) refuses amounts whose written scales
+`text="doc"` — the input key carrying the text. `reads_with=("question", ...)` — state keys every read sees as a
+`<state>` block (see "When the reads need the question" above). `units="same"` (default) refuses amounts whose written scales
 or currencies disagree; `"lenient"` lets a bare `$` match any dollar and a field without a scale match any;
 `"any"` turns the check off. `checks=` and `answer=` as in the low level. The model is anything with the
 decider interface; a `logprobs="auto"` model is read with one stated confidence per read (a copy, with a
