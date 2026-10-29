@@ -45,6 +45,7 @@ nav:
   - Mission: mission.md
   - Using solvi:
       - using.md
+      - Documents: recipes/document.md
       - Agents and knowledge: agent.md
       - Best practices: best_practices.md
       - Forgetting a source: forgetting_a_source.md
