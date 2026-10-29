@@ -756,7 +756,7 @@ q = urgency.question(cat, min_confidence=0.6)             # or: the answer of a 
 `model.decision(name, task, text_fact="doc", options=(), descriptions=None, multi=False, other=None, *, kind=None,
 type=None, min_confidence=None, min_act=None, use_act=None, max_error=None, score_value=None, not_stated=False,
 k=None, bins=None, unit=None, coverage=None, evidence=False, option_order="canonical", permutations=4, min_margin=None,
-long=None, top_k=None, rerank=False, perturb=0, retrieve_query=None)` returns a
+long=None, top_k=None, rerank=False, perturb=0, retrieve_query=None, state_keys=())` returns a
 callable catalog function named `name` that returns `Decision(value, probs)`. The question is given by `options` (a list, or
 `{option: description}`) and `kind` (`"choice"`, `"multi"`, `"score"`, `"noul"`), or by a type (`type=`, or in place of the
 options; a dict of options is then read as descriptions). `model.decisions(Schema, text_fact)` gives one part per field of a
