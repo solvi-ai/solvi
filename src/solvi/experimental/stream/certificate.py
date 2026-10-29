@@ -15,6 +15,29 @@ stream whose conditional risk given the past is constant (i.i.d. between change 
 are drawn by a coin independent of the input. Over restarts, δ_v = `DeltaBudget.next()` (Basel: 6δ/(π²v²)), so every
 threshold ever in force holds together with probability ≥ 1 − δ.
 
+Lazy δ charge. A promise takes its (v, δ_v) from the budget at its first `learn` that bets (the grid fixed), not when
+it is built or restarted: until then `v` and `delta_v` are None, its threshold is +inf (nothing is answered alone
+under it) and it has spent nothing. The indices stay a fixed function of the order in which they are handed out
+(the budget's `next()`, chronological), each is assigned before its certificate's first bet and at most once, and a
+certificate that never bets (a candidate discarded before its first sample, a restart re-alarmed or rolled away from
+before its first post-alarm sample) spends no index — the conditions under which Σ δ_v ≤ δ bounds every certificate
+together hold unchanged (DESIGN_DELTA_CADENCE §1, C1–C3). A finite threshold without an index is refused everywhere
+(`learn`, `threshold_of`, `restore`).
+
+Maturity. Per grid point the promise keeps the running maximum of its log-wealth and the sample count at which it
+was last set (`peak_at()`: that count for the first uncertified point — the one that would loosen next); with the
+"certified" / "loosened" events' `n` it tells a policy whether the certificate is still loosening
+(`DefaultPolicy.mature_patience`). Kept in `dump()` (key "peaks"), not in `state()`.
+
+Procedure. "fixed" (the default): the fixed-sequence rule above, each point at level 1/δ_v. "pointwise": each grid
+point is its own test at level G/δ_v (G the grid's size; Bonferroni: every point's statement holds together with
+probability ≥ 1 − δ_v), a point is certified as soon as its own wealth reaches it, whatever the stricter points did,
+and the threshold in force is the loosest certified point (no prefix rule); `certified_at(λ)` says whether one grid
+point is. The set of certified points only grows, so the threshold still only loosens. Pointwise pays log G nats per
+point and never starves on a strict point that almost no sample reaches — the reason the selective kind uses it as an
+additive layer's usefulness certificate (`AdapterLoop(useful_error=)`). A "fixed" promise's records, dumps and
+fingerprint are those of a promise built without the keyword.
+
 A missing label (`learn(..., label=None)`: an expired ticket, a failed oracle) counts as a loss at every point where
 the sample would have been answered alone: its factor is ≤ 1, so it can only lower the wealth, whatever the reason the
 label is missing.
@@ -38,6 +61,7 @@ from ._eprocess import FRACTIONS, WEIGHTS, DeltaBudget, MirrorBound, Mixture
 
 KINDS = ("joint", "selective")
 BETS = ("mixture", "agrapa")
+PROCEDURES = ("fixed", "pointwise")
 
 
 def fixed_grid(lo: float = 0.0, hi: float = 1.0) -> list:
@@ -74,7 +98,8 @@ class StreamPromise:
     min_group = None
 
     def __init__(self, max_risk=None, max_error=None, delta=None, *, kind=None, grid="auto", grid_from=200,
-                 grid_size=32, bets="mixture", fractions=FRACTIONS, weights=WEIGHTS, c=0.75, budget=None):
+                 grid_size=32, bets="mixture", fractions=FRACTIONS, weights=WEIGHTS, c=0.75, budget=None,
+                 procedure="fixed"):
         if (max_risk is None) == (max_error is None):
             raise ValueError("give the promise as max_risk= (joint: P(answered alone and wrong)) or max_error= "
                              "(selective: the error among the answers given alone)")
@@ -87,6 +112,9 @@ class StreamPromise:
             raise ValueError("the promised rate is strictly between 0 and 1")
         if bets not in BETS:
             raise ValueError(f"bets is one of {BETS}, not {bets!r}")
+        if procedure not in PROCEDURES:
+            raise ValueError(f"procedure is one of {PROCEDURES}, not {procedure!r}")
+        self.procedure = procedure
         if budget is None:
             budget = DeltaBudget(0.05 if delta is None else delta)
         elif delta is not None and abs(float(delta) - budget.delta) > 1e-15:
@@ -112,7 +140,7 @@ class StreamPromise:
         self._buffer = []                                  # the scores the auto grid is read from
         self.seen = 0
         self.events = []                                   # state changes: grid, certified, loosened, recertify
-        self.v, self.delta_v = self.budget.next()
+        self.v = self.delta_v = None                       # lazy δ charge: the index at the first bet (`_charge`)
         self._fresh()
         if pts is not None:
             self._set_grid(pts)
@@ -128,11 +156,59 @@ class StreamPromise:
         self.threshold = math.inf
         self._proc = None if self.grid is None else [self._new_bet() for _ in self.grid]
         self._cert = None if self.grid is None else [False] * len(self.grid)
+        self._peak = None if self.grid is None else [[0.0, 0] for _ in self.grid]
+
+    def _charge(self):
+        """The lazy δ charge: the budget's next (v, δ_v), once per certification, before its first bet."""
+        if self.v is None:
+            self.v, self.delta_v = self.budget.next()
+
+    def _check(self):
+        if self.v is None and not math.isinf(self.threshold):
+            raise AssertionError("a StreamPromise has a finite threshold without a δ index (lazy charge broken)")
+
+    def peak_at(self):
+        """The sample count (`n`) at which the first uncertified grid point's log-wealth last set a new running
+        maximum (0: never above its start), or None (no grid yet, or every point certified)."""
+        if self._cert is None:
+            return None
+        for i, c in enumerate(self._cert):
+            if not c:
+                return self._peak[i][1]
+        return None
+
+    def _level(self) -> float:
+        """The log-wealth a point needs: log(1/δ_v) (fixed sequence) or log(G/δ_v) (pointwise, G the grid's size)."""
+        g = len(self.grid) if self.procedure == "pointwise" else 1
+        return math.log(g / self.delta_v) - 1e-12
+
+    def certified_at(self, lam) -> bool:
+        """Whether the grid point lam is certified (False for a value that is not a grid point, or before the grid)."""
+        if self._cert is None:
+            return False
+        lam = float(lam)
+        return any(c and x == lam for x, c in zip(self.grid, self._cert))
+
+    def log_wealth_at(self, lam):
+        """The log-wealth of grid point lam's e-process now (None: not a grid point, or no grid yet)."""
+        if self._proc is None:
+            return None
+        lam = float(lam)
+        for x, p in zip(self.grid, self._proc):
+            if x == lam:
+                return p.log_wealth
+        return None
+
+    @property
+    def level_now(self):
+        """The log-wealth a point needs under the current index (None before the first bet: no δ_v yet)."""
+        return None if self.delta_v is None or self.grid is None else self._level()
 
     def _set_grid(self, pts):
         self.grid = list(pts)
         self._proc = [self._new_bet() for _ in self.grid]
         self._cert = [False] * len(self.grid)
+        self._peak = [[0.0, 0] for _ in self.grid]
         self._event("grid", why=f"{len(self.grid)} points")
 
     def _event(self, event, why=None):
@@ -146,9 +222,13 @@ class StreamPromise:
         what = ("P(answered alone and wrong) ≤ " if self.kind == "joint" else
                 "the error among the answers given alone ≤ ") + f"{self.level:g}"
         # no state in the text (not δ_v of the current restart): a replay re-derives the recorded verdicts with it
-        return (f"with probability ≥ 1 − δ_v (version index v, δ_v = 6δ/(π²v²), δ = {self.delta:g}), at every point in "
+        text = (f"with probability ≥ 1 − δ_v (version index v, δ_v = 6δ/(π²v²), δ = {self.delta:g}), at every point in "
                 f"time, {what} for the threshold in force, on a stream i.i.d. between change points (the conditional "
                 f"risk given the past is constant), sampled by a coin independent of the input")
+        if self.procedure == "pointwise":
+            text += ("; pointwise: each grid point tested at δ_v / G (G grid points, Bonferroni), so the statement "
+                     "holds at every certified point together")
+        return text
 
     @property
     def report(self) -> dict:
@@ -159,6 +239,7 @@ class StreamPromise:
     def threshold_of(self, group=None):
         if group is not None:
             raise ValueError("StreamPromise has no groups (one budget per group is a later stage)")
+        self._check()
         return self.threshold, None, None
 
     def allows(self, signal, group=None) -> bool:
@@ -179,20 +260,25 @@ class StreamPromise:
                     self._set_grid(pts)
         return self.state()
 
-    def learn(self, signal, answer, label) -> dict:
+    def learn(self, signal, answer, label, floor=None) -> dict:
         """One labelled sample: the decision's score, the answer it would give alone, its label (None: missing — a loss
-        wherever it would have been answered alone). Before the grid is fixed the sample is not read (`dropped`)."""
+        wherever it would have been answered alone). Before the grid is fixed the sample is not read (`dropped`).
+        floor: grid points below it do not bet on this sample (no wealth or peak change; `n` counts the sample once) —
+        an additive layer relearning on the rows it owns ({score ≥ Λ}), a biased sample of its zone below Λ."""
         if self.grid is None:
             self.dropped += 1
             return self.state()
+        self._charge()                                     # lazy δ charge: before the first bet (C1)
         s = _score(signal)
         wrong = True if label is None else answer != label
         self.missing += label is None
-        level = math.log(1.0 / self.delta_v) - 1e-12
+        level = self._level()
         newly = False
         for i, lam in enumerate(self.grid):
             if self._cert[i]:
                 continue                                   # certified: betting stops (Ville bounds the running max)
+            if floor is not None and lam < floor:
+                continue                                   # below the floor: no bet (its wealth waits at its value)
             alone = s >= lam
             if self.kind == "selective":
                 if not alone:
@@ -200,25 +286,32 @@ class StreamPromise:
                 loss = 1.0 if wrong else 0.0
             else:
                 loss = 1.0 if (alone and wrong) else 0.0
-            if self._proc[i].update(loss) >= level:
+            lw = self._proc[i].update(loss)
+            if lw > self._peak[i][0]:
+                self._peak[i] = [lw, self.n + 1]
+            if lw >= level:
                 self._cert[i] = newly = True
         self.n += 1
         if newly:
             thr = math.inf
             for i, lam in enumerate(self.grid):            # fixed sequence: strict → loose, stop at the first not certified
                 if not self._cert[i]:
+                    if self.procedure == "pointwise":
+                        continue                           # pointwise: the loosest certified point, no prefix rule
                     break
                 thr = lam
             if thr < self.threshold:
                 first = math.isinf(self.threshold)
                 self.threshold = thr
+                self._check()
                 self._event("certified" if first else "loosened")
         return self.state()
 
     def restart(self, why=None) -> tuple:
-        """A new certification from scratch (an alarm, a person's call): the next (v, δ_v) from the budget, every point
-        uncertified, wealth 1, the threshold +inf; the grid is kept (it was read without labels)."""
-        self.v, self.delta_v = self.budget.next()
+        """A new certification from scratch (an alarm, a person's call): every point uncertified, wealth 1, the
+        threshold +inf; the grid is kept (it was read without labels). Its (v, δ_v) is taken lazily, at its first bet,
+        so this returns (None, None); a restart that never bets spends nothing."""
+        self.v = self.delta_v = None
         self._fresh()
         self._event("recertify", why=why)
         return self.v, self.delta_v
@@ -232,50 +325,72 @@ class StreamPromise:
     # --- what is recorded
     def state(self) -> dict:
         ev = None if self._proc is None else [[round(x, 9) for x in p.vector()] for p in self._proc]
-        return {"v_index": self.v, "delta_v": self.delta_v,
-                "threshold": None if math.isinf(self.threshold) else self.threshold,
-                "n": self.n, "seen": self.seen, "missing": self.missing, "dropped": self.dropped,
-                "certified": 0 if self._cert is None else sum(self._cert),
-                "evidence_fp": _sha([ev, self._cert])[:16],
-                "grid_fp": None if self.grid is None else _sha(self.grid)[:16]}
+        out = {"v_index": self.v, "delta_v": self.delta_v,
+               "threshold": None if math.isinf(self.threshold) else self.threshold,
+               "n": self.n, "seen": self.seen, "missing": self.missing, "dropped": self.dropped,
+               "certified": 0 if self._cert is None else sum(self._cert),
+               "evidence_fp": _sha([ev, self._cert])[:16],
+               "grid_fp": None if self.grid is None else _sha(self.grid)[:16]}
+        if self.procedure != "fixed":                      # a fixed-sequence promise's state is as before
+            out["procedure"] = self.procedure
+        return out
 
     def dump(self) -> dict:
         """Everything a restore needs (JSON data): the configuration's fingerprint, (v, δ_v), the grid (or the scores
         buffered for the auto grid), the counters, the threshold, each grid point's e-process and certified flag, the
         event list, and the state's evidence_fp, which restore checks. The budget is not in it: it is the caller's
         (one DeltaBudget over every version of a loop)."""
-        return {"format": "solvi stream promise v1", "config": self.fingerprint(), "v": self.v, "delta_v": self.delta_v,
+        # v1: a charged promise (as before the lazy charge); v2: one without an index yet (v, delta_v None), which an
+        # older library refuses by its format instead of failing on the missing index
+        return {"format": "solvi stream promise v1" if self.v is not None else "solvi stream promise v2",
+                "config": self.fingerprint(), "v": self.v, "delta_v": self.delta_v,
                 "grid": None if self.grid is None else list(self.grid), "buffer": list(self._buffer), "seen": self.seen,
                 "n": self.n, "missing": self.missing, "dropped": self.dropped,
                 "threshold": None if math.isinf(self.threshold) else self.threshold,
                 "cert": None if self._cert is None else list(self._cert),
                 "procs": None if self._proc is None else [p.dump() for p in self._proc],
-                "events": [dict(e) for e in self.events], "evidence_fp": self.state()["evidence_fp"]}
+                "events": [dict(e) for e in self.events], "evidence_fp": self.state()["evidence_fp"],
+                "peaks": None if self._peak is None else [list(x) for x in self._peak],
+                **({} if self.procedure == "fixed" else {"procedure": self.procedure})}
 
     def restore(self, d) -> "StreamPromise":
         """The state of `dump()` on this promise (built with the same configuration; its budget is left as it is) →
         self. A dump of another configuration, or one whose evidence does not give back its evidence_fp, is refused
         (ValueError)."""
-        if d.get("format") != "solvi stream promise v1":
+        if d.get("format") not in ("solvi stream promise v1", "solvi stream promise v2"):
             raise ValueError(f"not a StreamPromise dump ({d.get('format')!r})")
+        if d.get("procedure", "fixed") != self.procedure:
+            raise ValueError(f"the dump is of a {d.get('procedure', 'fixed')!r} StreamPromise, this one is "
+                             f"{self.procedure!r}")
         if d.get("config") != self.fingerprint():
             raise ValueError("the dump is of a StreamPromise with another configuration")
-        self.v, self.delta_v = int(d["v"]), float(d["delta_v"])
-        if abs(self.budget.delta_at(self.v) - self.delta_v) > 1e-15:
-            raise ValueError(f"the dump's delta_v {self.delta_v} is not the budget's for v={self.v}")
+        if d["v"] is None:
+            if d.get("delta_v") is not None or d.get("threshold") is not None:
+                raise ValueError("the dump has no δ index but a delta_v or a finite threshold")
+            self.v = self.delta_v = None
+        else:
+            self.v, self.delta_v = int(d["v"]), float(d["delta_v"])
+            if abs(self.budget.delta_at(self.v) - self.delta_v) > 1e-15:
+                raise ValueError(f"the dump's delta_v {self.delta_v} is not the budget's for v={self.v}")
         self.grid = None if d["grid"] is None else [float(x) for x in d["grid"]]
         self._buffer = [float(x) for x in d["buffer"]]
         self.seen, self.n = int(d["seen"]), int(d["n"])
         self.missing, self.dropped = int(d["missing"]), int(d["dropped"])
         self.threshold = math.inf if d["threshold"] is None else float(d["threshold"])
         if self.grid is None:
-            self._proc = self._cert = None
+            self._proc = self._cert = self._peak = None
         else:
             if len(d["procs"]) != len(self.grid) or len(d["cert"]) != len(self.grid):
                 raise ValueError("the dump's e-processes do not match its grid")
             self._proc = [self._new_bet().restore(p) for p in d["procs"]]
             self._cert = [bool(c) for c in d["cert"]]
+            peaks = d.get("peaks")
+            if peaks is not None and len(peaks) == len(self.grid):
+                self._peak = [[float(lw), int(k)] for lw, k in peaks]
+            else:                                          # a dump without peaks: as if each was set now (conservative)
+                self._peak = [[p.log_wealth, self.n] for p in self._proc]
         self.events = [dict(e) for e in d["events"]]
+        self._check()
         if self.state()["evidence_fp"] != d.get("evidence_fp"):
             raise ValueError("the restored evidence is not the dumped one (evidence_fp differs)")
         return self
@@ -283,17 +398,42 @@ class StreamPromise:
     def record(self) -> dict:
         out = {"method": self.method, "kind": self.kind, "promise": self.promise, "n": self.n,
                "delta": self.delta, "delta_v": self.delta_v, "v_index": self.v, "bets": self.bets}
+        if self.procedure != "fixed":
+            out["procedure"] = self.procedure
         out["risk" if self.kind == "joint" else "error"] = self.level
         return out
 
     def fingerprint(self) -> str:
         from ...core.provenance import digest
+        extra = () if self.procedure == "fixed" else (self.procedure,)    # fixed: the fingerprint as before
         return digest("StreamPromise", self.kind, self.level, self.delta, self.budget.schedule, self.grid_spec,
-                      self.grid_from, self.grid_size, self.bets, list(self.fractions), list(self.weights), self.c)
+                      self.grid_from, self.grid_size, self.bets, list(self.fractions), list(self.weights), self.c,
+                      *extra)
 
     def __repr__(self):
         thr = "inf" if math.isinf(self.threshold) else f"{self.threshold:.4g}"
         return f"StreamPromise({self.kind}, {self.level:g}, threshold={thr}, n={self.n}, v={self.v})"
 
 
-__all__ = ["BETS", "KINDS", "StreamPromise", "fixed_grid"]
+class _Mirror:
+    """The comparison certificate's budget: its next() hands out the candidate promise's own (v, δ_v) — charging the
+    candidate first if it has no index yet (lazy δ charge: both read the same samples, so the candidate bets on this
+    sample too) — and moves nothing else: the comparison spends nothing of its own from the loop's budget."""
+
+    def __init__(self, promise):
+        self.promise = promise
+        self.delta, self.schedule = promise.budget.delta, promise.budget.schedule
+
+    def delta_at(self, v):
+        return self.promise.budget.delta_at(v)
+
+    def next(self):
+        self.promise._charge()
+        return self.promise.v, self.promise.delta_v
+
+    @property
+    def v(self):
+        return self.promise.v or 0
+
+
+__all__ = ["BETS", "KINDS", "PROCEDURES", "StreamPromise", "fixed_grid"]

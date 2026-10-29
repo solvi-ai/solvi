@@ -466,7 +466,7 @@ def test_the_loop_installs_a_version_trained_in_a_subprocess_and_rolls_back(ckpt
         policy = DefaultPolicy(_budget(), calib=0.3, holdout=0.0, pre_freeze=False, probe=False, novel_risk=False,
                                first=10 ** 6, lr=1e-2, min_updates=60, max_updates=60)
         loop = AdapterLoop(learner, question="team", max_risk=0.2, secret=KEY, policy=policy,
-                           initial=learner.version0(), system=part, versions_dir=tmp_path / "versions")
+                           initial=learner.version0(), system=part, versions_dir=tmp_path / "versions", additive=False)
         data = _toy(1200, 21)
         for x, y in data[:200]:
             loop.step(x, lambda y=y: y)
@@ -503,7 +503,7 @@ def test_deferred_apply_end_to_end_with_the_subprocess_runner(ckpt, tmp_path):
         policy = DefaultPolicy(_budget(), calib=0.3, holdout=0.0, pre_freeze=False, probe=False, novel_risk=False,
                                first=10 ** 6, lr=1e-2, min_updates=60, max_updates=60)
         loop = AdapterLoop(learner, question="team", max_risk=0.2, secret=KEY, policy=policy,
-                           initial=learner.version0(), system=part, versions_dir=tmp_path / "versions")
+                           initial=learner.version0(), system=part, versions_dir=tmp_path / "versions", additive=False)
         assert loop._part_lock is lora.version_lock(part)
         data = iter(_toy(4000, 31))
         for _ in range(200):
@@ -592,7 +592,7 @@ def test_checkpoint_end_to_end_train_promote_save_load_in_a_new_process_continue
                                first=10 ** 6, lr=1e-2, min_updates=60, max_updates=60)
         loop = AdapterLoop(learner, question="team", max_risk=0.2, secret=KEY, policy=policy,
                            initial=learner.version0(), system=part, versions_dir=tmp_path / "versions",
-                           clock=lambda: 1000.0)
+                           clock=lambda: 1000.0, additive=False)
         data = _toy(1700, 41)
         for x, y in data[:200]:
             loop.step(x, lambda y=y: y)
@@ -667,7 +667,7 @@ def test_attach_end_to_end_dispatcher_background_training_promote_rollback_save_
         fp0 = part.fingerprint()
         loop = AdapterLoop.attach(disp, LoraLearner(part, tmp_path / "loop", runner=ThreadRunner(heartbeat_s=0.5)),
                                   question="team", dir=tmp_path / "loop", policy=policy(), max_risk=0.2, secret=KEY,
-                                  clock=lambda: 1000.0)
+                                  clock=lambda: 1000.0, additive=False)
         assert loop.part is part and loop.mode == "stream" and disp.loop is loop
         xs = [{"email": x} for x, _ in data]
         out = [disp.ask(x) for x in xs[:200]]

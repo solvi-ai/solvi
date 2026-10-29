@@ -3,7 +3,8 @@
 
     from solvi.experimental.stream import AdapterLoop, DefaultPolicy, HashedTextTrainer
 
-    loop = AdapterLoop(HashedTextTrainer(), question="intent", policy=DefaultPolicy(), max_risk=0.05, secret=key)
+    loop = AdapterLoop(HashedTextTrainer(), question="intent", policy=DefaultPolicy(), max_risk=0.05, secret=key,
+                       additive=False)     # the default is additive coverage, which needs an initial= model; see below
     out = loop.step(text, oracle)          # oracle: () → the label (None: missing), called only when one is needed
     loop.pause() / loop.resume()           # no training, freezing or promotion while paused; labels and promises go on
     loop.train_now(wait=False)             # → TrainJob: ignores want_train, not the budget; returns at once
@@ -15,7 +16,9 @@
 This is the lane's `LearningLoop` (`stream.versions`) with its constants turned into `LoopPolicy` hooks
 (`stream.policy`); `LearningLoop` is now this class with `DefaultPolicy` set to the lane's constants. The protocol
 is the lane's: version 0 is "no model" (or `initial=`, with its own `StreamPromise`); every version frozen after it
-gets its own `StreamPromise`, fed only by coin samples drawn after its freeze, δ from one `DeltaBudget`; the calibration
+gets its own `StreamPromise`, fed only by coin samples drawn after its freeze, δ from one `DeltaBudget` (each index
+taken at the promise's first sample, not at its freeze or restart: a candidate or restart that never reads a sample
+spends nothing); the calibration
 coin is HMAC(secret, "sample|question|seed|n"); each decision is scored by the served version and, in shadow, by the
 candidate before its label is read; labels reach the learner only after the promises read them. See `stream.versions`
 for the statement and the records.
@@ -173,7 +176,7 @@ from collections import deque
 from typing import Any, NamedTuple
 
 from ._eprocess import DeltaBudget
-from .certificate import StreamPromise, _sha
+from .certificate import StreamPromise, _Mirror, _sha
 from .detector import RiskDetector
 from .gates import calib_threshold
 from .learner import TrainJob
@@ -356,17 +359,87 @@ class AdapterLoop:
     from construction on, every decision of that part takes this RLock, whether or not a version is ever swapped;
     warn_refused: attached to a Dispatcher, after this many labelled decisions in a row whose label the policy refused
     (none accepted in between) a `UserWarning` says the loop learns nothing, once (None: never; the count is
-    `status()["labels"]["refused"]`)."""
+    `status()["labels"]["refused"]`); trace_candidate: while a candidate is on trial, every decision's records carry
+    its score and would-be answer ("candidate_score" in the stream record, "candidate_would" in the loop payload;
+    the existing "shadow" is filled only where the protocol reads it) — for offline replays of promotion rules; the
+    protocol never reads them (no behaviour change), it costs one candidate scoring per decision; the keys are absent
+    with no candidate or with the option off (default).
+
+    additive (default True: additive coverage; `additive=False` runs the replacement protocol above, unchanged — it
+    lost on the stand: worse than no loop by 11–16 points on 3 of 4 intent datasets, while additive coverage gained
+    on 4 of 4): a candidate serves the escalation
+    zone *below* the served chain instead of replacing it. The loop serves a chain of layers [L0, L1, …] (L0 = the
+    served version); layer j has its live threshold λ_j (its promise's) and, when it is not the deepest, a frozen
+    routing threshold Λ_j, frozen when the layer below it was attached; a decision walks j = 0, 1, … to the first layer
+    it does not pass (score_j ≥ Λ_j, or the deepest) — its owner; the zones Z_j (the decisions that reach j) are fixed
+    by the Λ. Answering (decision 21): outside a trial zone the first layer on the path, from L0 down, with score ≥ its
+    live λ_j (the owner: ≥ `_thr_owner`) and not in probation answers alone — so an upstream layer whose λ loosened
+    below its Λ answers inside a deeper zone where the deeper layer escalates; none → the oracle (never a layer
+    deeper than the owner). Every layer keeps learning: certified and not in probation (the base regime), on the
+    decisions of its whole zone whose coin is below the shared base rate; otherwise (the owned regime) on the decisions
+    it owns, with no bet below its Λ. Attach (a freeze in additive mode): Λ_d := λ_d of the deepest layer d (d keeps
+    learning), the candidate's zone is {score_d < Λ_d}; every zone decision is escalated (nobody answers there) and
+    the candidate's promise learns on every one of them (no coin filter; a missing label counts as a loss), it is
+    scored on zone decisions only and has no comparison certificate. A discard drops Λ_d ("unfreeze"). Layering (the
+    policy's promote, DefaultPolicy's additive gate: certified, novel, novel_risk, probe — no share or margin comparison; or the
+    promote() control): the certified candidate becomes the deepest layer from the next decision ("promote" with
+    additive=True). max_layers: the chain's depth cap (base + layers); at the cap, and while the deepest layer is not
+    certified, the schedule starts no training ("train_refused", once per reason) and train_now is refused at the cap.
+    Drift: one RiskDetector per layer on its base-coin samples of its zone (did it answer, was it wrong), the score
+    monitor on L0's scores; an alarm on layer j restarts only j's promise and puts only j in probation (it answers
+    nowhere and relearns in the owned regime until it re-certifies); rollback(j) — a layer index — detaches the layers
+    ≥ j ("detach"), layer j−1 becomes the deepest. Attached to a Dispatcher, a decision answered by a layer below L0
+    (or, escalated, owned by one) is decided by System 1 with that layer's version installed for the call
+    (`serving`).
+    Needs stream mode and an initial model. Records: owner, layer, zone, path [[v, score, thr in force]], trial_zone,
+    answered_by, answer_layer, answer_thr, base, rho_base in the stream record, every reached layer's answer in the
+    payload's "path_would" — replay recomputes the routing and the answer from them; status() "zones" (per layer Λ, λ,
+    regime, P̂(Z), realised risk; the composite stream-wide risk, reported). Checkpoint: format v3 with the chain (a
+    replacement loop's stays v1). The guarantee is per zone, at level α (one δ budget over every layer and
+    restart). Stream-wide nothing is ≤ α: with max_error= the error among the alone answers is bounded by
+    α·(1 + Σ_{k≥1} P(overlap_k) / P(answered)) (overlap_k: rows layer k would answer that an upstream layer took — the
+    upstream layer answers first), with max_risk= the joint risk by α·(1 + Σ_{j≥1} P(Z_j)); max_risk=α / max_layers
+    keeps the joint one ≤ α (docs/experimental.md, "Additive coverage")."""
 
     def __init__(self, learner, *, question, policy=None, max_risk=None, max_error=None, delta=0.05, initial=None,
                  detector=None, monitor="auto", probation=300, source="human", secret=None, seed=0, sampling=None,
                  promise_options=None, storage=None, versions_dir=None, system=None, feature="text", key=None,
                  served=None, clock=None, wait=False, part=None, mode="stream", warn_refused=200,
+                 trace_candidate=False, additive=True, max_layers=3, useful_error="auto", delta_use=None,
                  _detector_alone=False, _batch=None):
         global _warned
         if mode not in MODES:
             raise ValueError(f"mode is 'stream' (decisions through step, a promise per version) or 'label' (labels "
                              f"only, the pre-freeze gates decide), not {mode!r}")
+        additive = bool(additive)
+        if isinstance(max_layers, bool) or int(max_layers) < 2:
+            raise ValueError("max_layers is the chain's depth cap, base included: an int ≥ 2")
+        if additive and mode == "label":
+            raise ValueError("additive coverage needs stream mode: label mode has no stream certificate per zone")
+        if additive and initial is None:
+            raise ValueError("additive coverage needs an initial model (version 0): a layer is attached below a "
+                             "certified layer, and version 0 without a model is never certified")
+        if isinstance(useful_error, str):
+            if useful_error != "auto":
+                raise ValueError(f"useful_error is a rate in (0, 1), None (off) or 'auto', not {useful_error!r}")
+            useful_error = 0.5 if additive else None
+        if useful_error is not None:
+            if not additive:
+                raise ValueError("useful_error= is an additive layer's usefulness certificate: replacement mode "
+                                 "(additive=False) has none — leave it out or give None")
+            if isinstance(useful_error, bool) or not 0.0 < float(useful_error) < 1.0:
+                raise ValueError("useful_error is the selective error a layer must be certified below, in (0, 1), "
+                                 "or None (off)")
+            useful_error = float(useful_error)
+        if delta_use is not None:
+            if useful_error is None:
+                raise ValueError("delta_use= is the usefulness certificate's δ budget: give it only with "
+                                 "useful_error= on (additive mode)")
+            if isinstance(delta_use, bool) or not 0.0 < float(delta_use) < 1.0:
+                raise ValueError("delta_use is a probability in (0, 1), or None (the loop's delta)")
+            delta_use = float(delta_use)
+        # The joint kind is allowed: its guarantee is per zone, and the stream-wide joint risk is bounded by
+        # α·(1 + Σ_{j≥1} P(Z_j)) (documented, reported in status()["zones"]) — nothing to refuse here.
         if mode == "label" and (detector is not None or (monitor is not None and monitor != "auto")):
             raise ValueError("label mode has no coin samples: no detector and no score monitor (its guarantee is "
                              "act_guard's fixed-set one on the calib labels)")
@@ -384,7 +457,20 @@ class AdapterLoop:
         self._kw = dict(question=question, max_risk=max_risk, max_error=max_error, delta=delta, initial=initial,
                         probation=probation, source=source, seed=seed, sampling=sampling,
                         promise_options=promise_options, feature=feature, key=key, served=served, wait=wait,
-                        mode=mode, warn_refused=warn_refused)
+                        mode=mode, warn_refused=warn_refused, trace_candidate=bool(trace_candidate),
+                        additive=additive, max_layers=int(max_layers),
+                        useful_error=useful_error, delta_use=delta_use)
+        self.additive, self.max_layers = additive, int(max_layers)
+        self.useful_error, self.delta_use = useful_error, delta_use
+        self._layers = [0]                                 # additive: the chain L0, L1, … (versions; L0 = served)
+        self._chain_rev = 0                                # additive: +1 at every change of the chain or of a Λ (a
+        #                                                    Dispatcher's _pre routed on the chain it read: `_post`)
+        self._route: dict = {}                             # additive: version → its frozen routing threshold Λ
+        self._dets: dict = {}                              # additive: version → its RiskDetector (L0's: self.detector)
+        self._left_of: dict = {}                           # additive: version → its probation left (L0's: self.left)
+        self._refused_why = None                           # additive: the loop's last train refusal ("train_refused")
+        self._zstat: dict = {0: self._zcount(0)} if additive else {}   # additive: version → its zone's counts
+        self.trace_candidate = bool(trace_candidate)
         if warn_refused is not None and (isinstance(warn_refused, bool) or int(warn_refused) < 1):
             raise ValueError("warn_refused is a number of labelled decisions ≥ 1, or None (never warn)")
         self.warn_refused = None if warn_refused is None else int(warn_refused)
@@ -441,6 +527,15 @@ class AdapterLoop:
             warnings.warn("AdapterLoop: the calibration coin is a public hash of the question, seed and decision "
                           "number; give secret= to key it", PredictableDrawWarning, stacklevel=2)
         self.budget = DeltaBudget(delta)                   # δ over every version (the training budget: policy.budget)
+        # additive: the usefulness certificates' own δ budget (Basel over every layer's usefulness index, lazy charge
+        # as the joint one); the loop's δ is untouched by it
+        self.useful_budget = (None if useful_error is None else
+                              DeltaBudget(delta if delta_use is None else delta_use))
+        self._ukw = None if useful_error is None else {
+            "max_error": useful_error, "procedure": "pointwise",
+            **{k: v for k, v in (promise_options or {}).items()
+               if k in ("grid", "grid_from", "grid_size", "bets", "fractions", "weights", "c")}}
+        self._uev_seen: dict = {}                          # additive: version → usefulness events already written
         self.rate = Rate(**(sampling or {}))
         self.storage, self.system = storage, system
         self._base = (initial if initial is not None and callable(getattr(initial, "install", None))
@@ -502,7 +597,16 @@ class AdapterLoop:
     def _row(v, state, model, promise, frozen_at, seen, n_train, keys, fp):
         return {"version": v, "state": state, "model": model, "promise": promise, "frozen_at": frozen_at,
                 "seen": seen, "n_train": n_train, "keys": keys, "fingerprint": fp, "samples": [], "fed": [],
-                "discarded_at": None, "served_cls": None}
+                "discarded_at": None, "served_cls": None, "cmp": None, "useful": None}
+
+    def _comparison(self, p):
+        """The served version's comparison certificate for a candidate whose promise is p: a `StreamPromise` with the
+        loop's settings and p's (v, δ_v), on a mirror of the candidate's index (`_Mirror`) — it spends nothing from
+        the loop's budget. It reads the served version's score on exactly the decisions and samples p reads (same
+        grid rule, same samples, same δ), so the promotion compares the two versions certified the same way on the same
+        data. It only ranks: nothing is ever answered at its threshold, so it is outside the δ accounting (see
+        `_paired`)."""
+        return StreamPromise(**self._pkw, budget=_Mirror(p))
 
     @contextlib.contextmanager
     def _locked(self):
@@ -526,20 +630,80 @@ class AdapterLoop:
         return self._step_t if self._step_t is not None else float(self._clock())
 
     def _threshold(self, v):
+        """Version v's answer threshold: its promise's; an additive layer or candidate with a usefulness certificate
+        answers at the composed threshold (`_composed`)."""
         if self.mode == "label":                           # label mode: the version's own fixed-set threshold
             t = self._vs[v].get("fixed")
             return math.inf if t is None else float(t)
-        p = self._vs[v]["promise"]
-        return math.inf if p is None else p.threshold
+        ver = self._vs[v]
+        p = ver["promise"]
+        if p is None:
+            return math.inf
+        return p.threshold if ver.get("useful") is None else self._composed(v)
+
+    def _joint(self, v):
+        """Version v's own certificate's threshold (the joint / max_error= promise), without the usefulness
+        composition — what the start gate and the trial counts read. Equal to `_threshold` without a usefulness
+        certificate."""
+        ver = self._vs[v]
+        if self.mode == "label" or ver.get("useful") is None or ver["promise"] is None:
+            return self._threshold(v)
+        return ver["promise"].threshold
+
+    def _composed(self, v):
+        """The composed answer threshold of version v (additive, usefulness on): the loosest point of its promise's
+        certified prefix (strict → loose: the threshold in force and every stricter point) that its usefulness
+        certificate has certified too; +inf when none. Both sets only grow, so it only loosens (until a restart)."""
+        ver = self._vs[v]
+        p, u = ver["promise"], ver["useful"]
+        if math.isinf(p.threshold):
+            return math.inf
+        if u.grid != p.grid:                               # both read the same scores: cannot happen
+            raise RuntimeError(f"version {v}: the usefulness certificate's grid is not its promise's")
+        best = math.inf
+        for lam, cj, cu in zip(p.grid, p._cert, u._cert):
+            if not cj:
+                break
+            if cu:
+                best = lam
+        return best
+
+    def _useful_ok(self, v):
+        """Additive, usefulness on: whether v's usefulness certificate holds at its promise's threshold in force λ_J
+        (None without a usefulness certificate)."""
+        u = self._vs[v].get("useful")
+        if u is None:
+            return None
+        lam = self._vs[v]["promise"].threshold
+        return math.isfinite(lam) and u.certified_at(lam)
+
+    def _useful_at_answer(self, v):
+        """Additive, usefulness on: whether v's usefulness certificate holds at the composed answer threshold — the
+        point the layer answers at (None without a usefulness certificate). `_useful_ok` reads the joint point λ_J
+        (what the start gate checks); a layer whose λ_J is not useful still answers at a useful point when one is
+        certified by both."""
+        u = self._vs[v].get("useful")
+        if u is None:
+            return None
+        lam = self._threshold(v)
+        return math.isfinite(lam) and u.certified_at(lam)
 
     def _state(self) -> LoopState:
         vs = []
         for v, ver in sorted(self._vs.items()):
-            thr = self._threshold(v)
+            thr = self._joint(v)                           # the certificate's own (= _threshold without usefulness)
+            uk = ({} if ver.get("useful") is None else
+                  {"useful": self._useful_ok(v), "useful_at_answer": self._useful_at_answer(v),
+                   "useful_thr": self._threshold(v)})
             vs.append(VersionInfo(v, ver["state"], n_train=ver["n_train"], samples=len(ver["samples"]),
-                                  certified=math.isfinite(thr), threshold=thr, fingerprint=ver["fingerprint"],
+                                  certified=math.isfinite(thr), threshold=thr, fingerprint=ver["fingerprint"], **uk,
                                   frozen_at=None if v == 0 else ver["frozen_at"], train_keys=ver["keys"],
-                                  discarded_at=ver["discarded_at"]))
+                                  discarded_at=ver["discarded_at"],
+                                  **({} if not self.additive else
+                                     {"layer": self._layers.index(v) if v in self._layers else None,
+                                      "routing_thr": self._route.get(v),
+                                      "learning": ver["promise"] is not None   # every layer learns (B)
+                                      and ver["state"] in ("served", "candidate", "layer")})))
         promises = {v: self._vs[v]["promise"].state() for v in (self.served, self.candidate)
                     if v is not None and self._vs[v]["promise"] is not None}
         return LoopState(n=self.n, served=self.served, candidate=self.candidate, labels=dict(self._split_n),
@@ -548,16 +712,63 @@ class AdapterLoop:
                          alarms=tuple(dict(a) for a in self._alarms), served_history=tuple(self._history),
                          served_since=self._served_since, trainings=tuple(self._trainings),
                          job=None if self._job is None else dict(self._job), now=self._now(), paused=self.paused,
-                         mode=self.mode, promises=promises,
-                         detector=None if self.detector is None else self.detector.state())
+                         mode=self.mode, promises=promises, maturity=self._maturity(),
+                         detector=None if self.detector is None else self.detector.state(),
+                         **({} if not self.additive else
+                            {"layers": tuple(self._layers), "deepest": self._layers[-1],
+                             "deepest_certified": math.isfinite(self._threshold(self._layers[-1])),
+                             "zone_share": self._zone_share(),
+                             **({} if self.useful_error is None else {"useful_error": self.useful_error})}))
+
+    def _maturity(self) -> dict | None:
+        """`LoopState.maturity`: the maturity gate's inputs on the deepest layer (additive) or the served version
+        (DefaultPolicy.maturity_gate); None in label mode or when that version has no promise."""
+        if self.mode == "label":
+            return None
+        g = self._layers[-1] if self.additive else self.served
+        p = self._vs[g]["promise"]
+        if p is None:
+            return None
+        changed = None
+        for e in reversed(p.events):                       # the latest change since the latest restart
+            if e["event"] == "recertify":
+                break
+            if e["event"] in ("certified", "loosened"):
+                changed = e["n"]
+                break
+        last = max((ver["frozen_at"] or 0 for v, ver in self._vs.items() if v != 0), default=0)
+        lo, hi = 0, len(self._rows)                        # labels are stored in decision order: the first after it
+        while lo < hi:
+            mid = (lo + hi) // 2
+            if self._rows[mid].t <= last:
+                lo = mid + 1
+            else:
+                hi = mid
+        return {"version": g, "samples": p.n, "changed_at": changed, "peak_at": p.peak_at(), "last_freeze": last,
+                "labels_since_freeze": len(self._rows) - lo,
+                "alarm": any(a["version"] == g and a["n"] >= last for a in self._alarms)}
 
     def _paired(self, c) -> Paired:
-        """The candidate's Paired at the thresholds in force now (see the module docstring). A policy with
-        `novel_only` False (`DefaultPolicy(novel_only=False)`, a control) gets every sample, seen ones too, in the
-        comparison fields; the seen fields are counted as always."""
-        thr_k, thr_s = self._threshold(c), self._threshold(self.served)
+        """The candidate's Paired (see the module docstring). A policy with `novel_only` False
+        (`DefaultPolicy(novel_only=False)`, a control) gets every sample, seen ones too, in the comparison fields; the
+        seen fields are counted as always.
+
+        The symmetric comparison (1.4.0): alone_served / wrong_served are the served version's answers at the threshold
+        of its comparison certificate (`_comparison`: built on exactly the candidate's post-freeze samples, the same
+        grid rule and the candidate's δ_v), so both versions are certified the same way on the same data and a fresh
+        candidate does not lose on certificate age (the served version's own certificate has read more samples and
+        loosened further). alone_served_own / wrong_served_own are the old comparison, at the served version's own
+        threshold in force now, kept for the records. The comparison is a decision rule, not a guarantee: the served
+        version always answers at its own threshold, a promoted candidate at its own certificate's, and every
+        certificate that ever serves holds under the loop's one δ budget whatever this rule decides. With no comparison
+        certificate, or while it is not certified, the comparison falls back to the served version's own threshold
+        (`_thr_served`, conservative: an uncertified comparison would put ℓ_s at 0 and the margin would pass on the
+        candidate alone); Paired.thr_s records which one was used. Deterministic from the recorded samples: replay gives
+        the same numbers."""
+        thr_k, thr_own = self._joint(c), self._threshold(self.served)   # additive: at λ_J, the start gate's point
+        thr_s, rule = self._thr_served(c)
         novel_only = bool(getattr(self.policy, "novel_only", True))   # a policy pickled before the switch: on
-        n_nov = a_nov = w_nov = a_srv = w_srv = n_seen = a_seen = w_seen = 0
+        n_nov = a_nov = w_nov = a_srv = w_srv = n_seen = a_seen = w_seen = a_own = w_own = 0
         for sk, ss, wk, ws, seen in self._vs[c]["samples"]:
             ak = _alone(sk, thr_k)
             if seen:
@@ -571,8 +782,25 @@ class AdapterLoop:
                 if _alone(ss, thr_s):
                     a_srv += 1
                     w_srv += ws
+                if _alone(ss, thr_own):
+                    a_own += 1
+                    w_own += ws
         return Paired(n_nov, a_nov, w_nov, a_srv, n_seen=n_seen, alone_seen=a_seen, wrong_seen=w_seen,
-                      wrong_served=w_srv)
+                      wrong_served=w_srv, alone_served_own=a_own, wrong_served_own=w_own, thr_s=rule)
+
+    def _thr_served(self, c):
+        """The served version's threshold for candidate c's comparison → (threshold, rule). "cmp": its comparison
+        certificate's, once certified. "own": its own threshold in force now, while the comparison is not certified or
+        absent (a checkpoint saved before 1.4.0 with a candidate in trial) — the conservative fallback: an uncertified
+        comparison (+inf) would read ℓ_s as 0. "no_model": the served version has no model (version 0 without one);
+        its scores are None and it never answers alone, as before 1.4.0."""
+        thr_own = self._threshold(self.served)
+        if self._vs[self.served]["model"] is None:
+            return thr_own, "no_model"
+        cmp = self._vs[c].get("cmp")
+        if cmp is not None and math.isfinite(cmp.threshold):
+            return cmp.threshold, "cmp"
+        return thr_own, "own"
 
     # --- the per-decision step
     def step(self, x, oracle=None, *, source=None, key=None) -> dict:
@@ -584,14 +812,19 @@ class AdapterLoop:
             self._refuse_if_stopped()
             s = self._vs[self.served]
             would_s, score_s = s["model"].score(x) if s["model"] is not None else (None, None)
-            sampled = self._draw(self.n + 1, score_s, self._threshold(self.served))[2]
-            would_k, score_k = self._shadow(x, sampled)
+            route = self._route_of(x, would_s, score_s)
+            if route is None:
+                sampled = self._draw(self.n + 1, score_s, self._threshold(self.served))[2]
+                would_k, score_k = self._shadow(x, sampled)
+            else:
+                would_k, score_k = self._zone_shadow(x, route)
             if oracle is None:
                 def oracle():
                     raise ValueError("this decision needs a label: step(x, oracle)")
             k = self._key(x) if key is None else str(key)
             return self._advance(x, k, would_s, score_s, would_k, score_k, oracle,
-                                 self.source if source is None else source, watch=self._watch_scores(x, k))
+                                 self.source if source is None else source, watch=self._watch_scores(x, k),
+                                 trial=self._trial(x, would_k, score_k, route), route=route)
 
     def _shadow(self, x, sampled):
         """The candidate's (would, score) on x when the step reads it: while its promise's grid is not fixed yet (the
@@ -603,6 +836,392 @@ class AdapterLoop:
         if c["promise"].grid is None or sampled:
             return c["model"].score(x)
         return None, None
+
+    # --- additive coverage: the chain's routing (stage B1)
+    def _route_of(self, x, would_s, score_s, scored=None) -> dict | None:
+        """Additive mode: decision x's walk down the chain → {"path": [(v, would, score)] for every layer reached,
+        "owner": the version that owns it, "layer": its index, "zone": whether x is in the zone of the candidate in
+        trial}; None in replacement mode. L0's (would, score) are the step's; a deeper layer is scored here, only when
+        the decision reaches it. Layer j is passed when it is not the deepest and its score is below its frozen routing
+        threshold Λ_j (input side only: no label enters the routing; the zones never move while the chain does not).
+        Who answers is `_answer_of`'s (a passed layer may, at its live λ_j). The candidate's zone: the decision reached
+        the deepest layer d and d's score is below Λ_d (frozen at the attach). scored: version → (would, score) read from
+        the records instead of scoring (replay: `_recorded_path`)."""
+        if not self.additive:
+            return None
+        path = [(self._layers[0], would_s, score_s)]
+        j = 0
+        while j < len(self._layers) - 1 and not _alone(path[-1][2], self._route[path[-1][0]]):
+            j += 1
+            v = self._layers[j]
+            if scored is not None:
+                would, score = scored(v)
+            else:
+                m = self._vs[v]["model"]
+                would, score = m.score(x) if m is not None else (None, None)
+            path.append((v, would, score))
+        d = self._layers[-1]
+        zone = (self.candidate is not None and j == len(self._layers) - 1 and d in self._route
+                and not _alone(path[-1][2], self._route[d]))
+        return {"path": path, "owner": path[-1][0], "layer": j, "zone": bool(zone), "thr": self._route_thr(path)}
+
+    def _route_thr(self, path) -> list:
+        """Additive mode: the thresholds in force at the draw along a routed path — Λ_v for a passed layer, the owner's
+        threshold in force (`_thr_owner`) for the last."""
+        return [self._route[v] for v, _, _ in path[:-1]] + [self._thr_owner(path[-1][0])]
+
+    def _answered(self, n, route) -> dict:
+        """Additive mode: decision n's route with the thresholds in force now ("thr"), who answers it ("answer",
+        `_answer_of`) and the base coin ("base": coin(n) below the shared base rate "rho_base", the base-regime layers'
+        learning event — equal to "sampled" when the owner's ρ is the base rate) — from the state before it."""
+        route = dict(route, thr=self._route_thr(route["path"]))
+        rb = self.rate.rate(full=False)
+        return dict(route, answer=self._answer_of(route), base=self._coin(n) < rb, rho_base=rb)
+
+    @staticmethod
+    def _recorded_path(path, woulds):
+        """Replay, additive mode: the recorded path ([[v, score, thr]] in the stream record, the answers in the loop
+        payload's "path_would") → version → (would, score), for `_route_of`. The routing itself is recomputed from
+        these scores and the rebuilt chain's thresholds; a decision whose rebuilt walk reaches a layer the record did
+        not score is an error of the replay (a mismatch), never a silent rescore."""
+        got = {}
+        woulds = list(woulds or [])
+        for i, entry in enumerate(path or []):
+            v, score = int(entry[0]), entry[1]
+            got[v] = (woulds[i] if i < len(woulds) else None, score)
+
+        def scored(v):
+            if v not in got:
+                raise RuntimeError(f"replay: the decision reaches version {v}, which the record's path did not score "
+                                   f"({sorted(got)})")
+            return got[v]
+        return scored
+
+    def _zone_shadow(self, x, route):
+        """Additive mode: the candidate's (would, score) on a decision of its zone; (None, None) outside it (the
+        candidate is not scored there)."""
+        c = self._vs.get(self.candidate)
+        if not route["zone"] or c is None or c["model"] is None:
+            return None, None
+        return c["model"].score(x)
+
+    def _attach(self, k, n) -> dict:
+        """Additive mode, candidate k frozen: the deepest layer d's routing threshold Λ_d := λ_d (now, certified: the
+        apply refused otherwise); k's zone is {score_d < Λ_d}, fixed until a discard or a detach. d's promise keeps
+        learning (its answer threshold λ_d may loosen below Λ_d; the routing does not move) → the "attach" event."""
+        d = self._layers[-1]
+        lam = self._threshold(d)
+        if not math.isfinite(lam):                         # cannot happen: _attach_refused said so before the freeze
+            raise RuntimeError(f"attach of version {k} below the uncertified layer {d}")
+        self._route[d] = lam
+        self._chain_rev += 1
+        return self._event("attach", k, n, zone_of=d, routing_thr=lam)
+
+    def _attach_refused(self) -> str | None:
+        """Additive mode: why a trained candidate cannot be attached now (None: it can). The backstop at the apply (a
+        training started by train_now, or a deepest layer restarted while it ran): the candidate is discarded at birth.
+        The schedule never starts such a training (`_train_refusal`)."""
+        d = self._layers[-1]
+        if len(self._layers) >= self.max_layers:
+            return f"max_layers: the chain has {len(self._layers)} layer(s), the cap is {self.max_layers}"
+        if not math.isfinite(self._threshold(d)):
+            return f"attach refused: the deepest layer (version {d}) is not certified"
+        return None
+
+    def _train_refusal(self, n) -> list:
+        """Additive mode, asked where the schedule would ask `want_train`: the loop refuses a training whose candidate
+        could not attach — the chain at `max_layers` (decision D3: training stops at the cap) or the deepest layer not
+        certified (nothing escalates below an uncertified layer; DefaultPolicy.why_not_train says so too, from
+        LoopState.deepest_certified). → (refused, events): one "train_refused" event each time the reason changes
+        (not one per decision); None once a training may start again."""
+        d = self._layers[-1]
+        if len(self._layers) >= self.max_layers:
+            why, detail = "max_layers", f"the chain has {len(self._layers)} layer(s), the cap is {self.max_layers}"
+        elif not math.isfinite(self._threshold(d)):
+            why, detail = "deepest_uncertified", f"the deepest layer (version {d}) is not certified"
+        else:
+            self._refused_why = None
+            return False, []
+        if why == self._refused_why:
+            return True, []
+        self._refused_why = why
+        return True, [self._event("train_refused", d, n, why=why, detail=detail, layers=list(self._layers))]
+
+    def _unfreeze(self, n) -> dict:
+        """Additive mode, the candidate attached below the deepest layer d was discarded: d's routing threshold is
+        dropped (d owns its whole zone again) → "unfreeze" (the name kept: d's promise never stopped learning)."""
+        d = self._layers[-1]
+        lam = self._route.pop(d, None)
+        self._chain_rev += 1
+        return self._event("unfreeze", d, n, routing_thr=lam)
+
+    def _layer_in(self, k, n, **extra) -> dict:
+        """Additive mode: the certified candidate k becomes the deepest layer from the next decision — it answers alone
+        in its zone at its own threshold and its promise keeps learning on coin samples (the trial's read of every
+        zone decision ends); the layer above keeps its Λ (routing) and keeps learning (answering); k gets its own
+        detector (a fresh copy of L0's) → the "promote" event (additive). Called from `_protocol` behind the policy's promote (DefaultPolicy:
+        the additive gate, decision D1) and from the promote() control. Nothing is installed on the System: L0 stays
+        installed, and on an attached Dispatcher a decision owned by a deeper layer is decided with that layer's
+        version installed for the System 1 call only (`_pre` → "answered_by", else "owner"; Dispatcher._ask_loop,
+        `serving`)."""
+        if k != self.candidate or not math.isfinite(self._threshold(k)):
+            raise ValueError(f"version {k} is not a certified candidate in trial")
+        d = self._layers[-1]
+        self._layers.append(k)
+        self._chain_rev += 1
+        self._vs[k]["state"] = "layer"
+        self._vs[k]["cmp"] = None
+        self._dets[k] = _fresh_detector(self.detector)
+        self._zstat[k] = self._zcount(n)                   # its zone's counts from the next decision
+        self.candidate = None
+        return self._event("promote", k, n, additive=True, zone_of=d, routing_thr=self._route[d],
+                           thr_k=self._threshold(k), **{"from": d, "to": k}, **extra)
+
+    @staticmethod
+    def _zcount(since) -> dict:
+        """Additive mode: a layer's counts from the decision it joined the chain (`since`; L0: 0) — "reach": decisions
+        that reached it (its zone Z_v); "owned": those it owned, "alone": the owned ones some layer answered alone;
+        "answered": the decisions it answered alone (anywhere in its zone); on its base-coin samples over its zone
+        (coin below the shared base rate, every one labelled) "sampled", "s_answered" and "s_wrong" (it answered and
+        was wrong, a missing label wrong — the quantity its certificate bounds). Rebuilt by replay, kept by the
+        checkpoint; every one is recomputable from the records (path, owner, answer_layer, base, label and the
+        payload's path_would)."""
+        return {"since": int(since), "reach": 0, "owned": 0, "alone": 0, "answered": 0, "sampled": 0,
+                "s_answered": 0, "s_wrong": 0}
+
+    def _zone_count(self, route, label):
+        ans, base = route["answer"], route["base"]
+        a_v = None if ans is None else ans[1]
+        for v, would, _ in route["path"]:
+            z = self._zstat[v]
+            z["reach"] += 1
+            mine = v == a_v
+            z["answered"] += mine
+            if base:                                       # base ⇒ sampled at the owner's ρ ≥ r_t: labelled
+                z["sampled"] += 1
+                z["s_answered"] += mine
+                z["s_wrong"] += mine and (label is None or would != label)
+        z = self._zstat[route["owner"]]
+        z["owned"] += 1
+        z["alone"] += ans is not None
+
+    def _zone_share(self) -> dict:
+        """Additive mode: layer version → P̂(Z_v), the share of the decisions since v joined the chain that reached it
+        (input side; L0: 1.0)."""
+        out = {}
+        for v in self._layers:
+            z = self._zstat[v]
+            m = self.n - z["since"]
+            out[v] = None if m <= 0 else z["reach"] / m
+        return out
+
+    def _zones(self) -> dict:
+        """Additive mode: status()'s "zones" — per layer its Λ, λ, P̂(Z), its regime ("base": it learns on coin samples
+        of its whole zone; "owned": restarted or in probation, it learns on the rows it owns), its realised risk on
+        its base-coin samples (P̂(it answers ∧ wrong | Z_v), the selective one among its answers), and the composite
+        stream-wide risk of both kinds, weighted by the zone shares (each decision is answered by one layer at most).
+        Estimates, reported, not promised: each layer's numbers are over its own window since it joined; the promise
+        is per zone, at level α — the joint kind's stream-wide bound is α·(1 + Σ_{j≥1} P(Z_j))."""
+        share = self._zone_share()
+        layers = []
+        for j, v in enumerate(self._layers):
+            z = dict(self._zstat[v])
+            thr = self._threshold(v)
+            joint = None if not z["sampled"] else z["s_wrong"] / z["sampled"]
+            sel = None if not z["s_answered"] else z["s_wrong"] / z["s_answered"]
+            nxt = share.get(self._layers[j + 1]) if j + 1 < len(self._layers) else 0.0
+            own = None if share[v] is None or nxt is None else max(0.0, share[v] - nxt)
+            layers.append({"version": v, "layer": j, "routing_thr": self._route.get(v),
+                           "threshold": None if math.isinf(thr) else thr, "certified": math.isfinite(thr),
+                           "learning": "base" if self._base_regime(v) else "owned", "probation": self._prob(v),
+                           "zone_share": share[v], "owned_share": own, **z,
+                           "risk": {"joint": joint, "selective": sel}})
+            u = self._vs[v].get("useful")
+            if u is not None:                              # usefulness on: "threshold" is the composed one
+                j = self._joint(v)
+                # ok: useful at the joint point λ_J (the start gate's check); ok_at_answer: at the composed point
+                layers[-1]["useful"] = {"joint_threshold": None if math.isinf(j) else j, "ok": self._useful_ok(v),
+                                        "ok_at_answer": self._useful_at_answer(v),
+                                        "certified": u.state()["certified"], "v_index": u.v, "delta_v": u.delta_v,
+                                        "error": self.useful_error}
+        joint = alone = 0.0                                # Σ_j P̂(Z_j)·(wrong_j, answered_j per base sample)
+        ok = True
+        for row in layers:
+            if not row["answered"]:
+                continue
+            if row["zone_share"] is None or not row["sampled"]:
+                ok = False                                 # a layer with answers and no sample: no estimate
+                continue
+            joint += row["zone_share"] * row["s_wrong"] / row["sampled"]
+            alone += row["zone_share"] * row["s_answered"] / row["sampled"]
+        d = self._layers[-1]
+        return {"layers": layers, "deepest": d, "deepest_certified": math.isfinite(self._threshold(d)),
+                "zone_share": share,
+                "composite": {"joint": joint if ok else None, "selective": joint / alone if ok and alone else None,
+                              "joint_bound": self.alpha * (1 + sum(x for v, x in share.items()
+                                                                   if v != self._layers[0] and x is not None))},
+                "max_layers": self.max_layers}
+
+    def _thr_owner(self, o):
+        """The threshold in force for owner o: its live λ_o, never below its routing threshold Λ_o when it has one. The
+        cap matters only for the deepest layer with a candidate in trial below it: its λ_o keeps loosening and may sit
+        below Λ_o, and the candidate's zone {score_o < Λ_o} stays escalated in trial; a non-deepest owner's score is
+        ≥ Λ_o anyway."""
+        thr = self._threshold(o)
+        lam = self._route.get(o)
+        return thr if lam is None else max(thr, lam)
+
+    def _owner(self, route):
+        """The owner's (would, score, threshold in force) of a routed decision."""
+        o, would, score = route["path"][-1]
+        return would, score, self._thr_owner(o)
+
+    def _base_regime(self, v) -> bool:
+        """Additive mode: layer v is in the base regime — certified (λ_v finite) and not in probation: its promise
+        learns on the base-coin samples of its whole zone, and it may answer anywhere in it. Otherwise (restarted and not yet
+        re-certified, or in probation) the owned regime: it learns on the rows it owns, with no bet below its Λ
+        (`_zone_learn`)."""
+        return math.isfinite(self._threshold(v)) and not self._prob(v)
+
+    def _answer_of(self, route):
+        """Additive mode: who answers decision `route` alone (decision 21, the top-down walk) → (layer index, version,
+        threshold) or None (escalated). Inside a trial zone nobody answers (every trial-zone decision is labelled: the
+        candidate's read of its whole zone). Elsewhere the first layer on the path, from L0 down, not in probation with
+        score ≥ its threshold in force: its live λ_v for a passed layer (the routing stays at Λ_v; λ_v may have
+        loosened below it), `_thr_owner` for the owner. Reads only the path's scores and the live thresholds."""
+        if route["zone"]:
+            return None
+        last = len(route["path"]) - 1
+        for j, (v, _, score) in enumerate(route["path"]):
+            thr = self._thr_owner(v) if j == last else self._threshold(v)
+            if not self._prob(v) and score is not None and math.isfinite(thr) and score >= thr:
+                return j, v, thr
+        return None
+
+    def _prob(self, v) -> bool:
+        """Additive mode: whether layer v is in probation (after an alarm on it: per layer, decision D4's reading —
+        an alarm on one layer leaves the others serving). L0's counter is the loop's `left`."""
+        return (self.left if v == self._layers[0] else self._left_of.get(v, 0)) > 0
+
+    def _det_of(self, v):
+        """Additive mode: layer v's RiskDetector (L0's is the loop's `detector`)."""
+        return self.detector if v == self._layers[0] else self._dets.get(v)
+
+    def _detach_layers(self, j, n, *, by=None, why=None, control=False) -> tuple:
+        """Additive mode, rollback(j): remove layers ≥ j (j a layer index ≥ 1); layer j−1 becomes the deepest and its Λ
+        is dropped (it owns its whole zone again). A candidate in trial is discarded (it was
+        attached below a removed layer). The removed versions are released (state "detached", their files stay).
+        → (the "detach" event, all events)."""
+        if isinstance(j, bool) or not isinstance(j, int) or not 1 <= j < len(self._layers):
+            raise ValueError(f"rollback of an additive loop takes a layer index in 1..{len(self._layers) - 1} (the "
+                             f"layers ≥ it are detached), not {j!r}; the chain is {self._layers}")
+        ev = []
+        self._changing = True
+        if self.candidate is not None:
+            ev.append(self._discard(self.candidate, n, "detach"))
+        removed = self._layers[j:]
+        del self._layers[j:]
+        self._chain_rev += 1
+        for v in removed:
+            ver = self._vs[v]
+            self._release(ver.get("served_as"), ver["model"])
+            ver["state"], ver["model"], ver["served_as"] = "detached", None, None
+            self._route.pop(v, None)
+            self._dets.pop(v, None)
+            self._left_of.pop(v, None)
+            self._zstat.pop(v, None)
+        p = self._layers[-1]
+        lam = self._route.pop(p, None)
+        self._refused_why = None
+        extra = {"layer": j, "removed": removed, "routing_thr": lam, "by": None if by is None else str(by), "why": why}
+        if control:
+            extra.update(control=True, t=self._now())
+        e = self._event("detach", p, n, **extra)
+        ev.append(e)
+        return e, ev
+
+    def _zone_learn(self, n, key, route, sampled, label, would_k, score_k, c, base_of):
+        """Additive mode, the promises' reads of one decision (decision 21, R4): every layer reached observes its score
+        (the auto grid). A layer in the base regime (`_base_regime`) learns on every decision of its zone whose coin is
+        below the shared base rate r_t ("base" — not the owner's ρ: one event for the whole zone, decided by the past,
+        independent of the input, and labelled since ρ ≥ r_t), with its own (score, answer) from the path. A layer in
+        the owned regime learns only on the decisions it owns (all labelled: its rate is full) and, when it is not the
+        deepest, bets only at grid points ≥ its Λ (`StreamPromise.learn(floor=)`: its owned rows are a biased sample of
+        its zone below Λ); the points below wait at their wealth until it is back in the base regime. The candidate (its
+        zone only) observes and learns on every zone decision — all of them are escalated, so each has its label (a
+        missing one counts as a loss). base_of: version → `_base_regime` at the start of the step (the snapshot
+        the step's detectors read too: a promise that re-certifies on this decision changes its regime from the next
+        one)."""
+        for v, _, score in route["path"]:
+            p, u = self._vs[v]["promise"], self._vs[v].get("useful")
+            if p is not None:
+                p.observe(score)
+            if u is not None:                              # the usefulness certificate reads what the promise reads
+                u.observe(score)
+        if route["zone"]:
+            self._vs[c]["promise"].observe(score_k)
+            if self._vs[c].get("useful") is not None:
+                self._vs[c]["useful"].observe(score_k)
+        o, would_o, score_o = route["path"][-1]
+        d = self._layers[-1]
+        for v, would, score in route["path"]:
+            ver = self._vs[v]
+            if ver["promise"] is None:
+                continue
+            if base_of[v]:
+                if not route["base"]:
+                    continue
+                floor = None
+            elif v == o and sampled:                       # an owned-regime owner: its rate is full, always sampled
+                floor = self._route.get(v) if v != d else None
+            else:
+                continue
+            if not n > ver["frozen_at"]:                   # cannot happen: a version is frozen at the end of a step
+                raise RuntimeError(f"decision {n} would calibrate version {v} frozen at {ver['frozen_at']}")
+            ver["promise"].learn(score, would, label, floor=floor)
+            if ver.get("useful") is not None:
+                ver["useful"].learn(score, would, label, floor=floor)
+            ver["fed"].append(n)
+        if route["zone"]:
+            ver = self._vs[c]
+            if not n > ver["frozen_at"]:
+                raise RuntimeError(f"decision {n} would calibrate version {c} frozen at {ver['frozen_at']}")
+            ver["promise"].learn(score_k, would_k, label)
+            if ver.get("useful") is not None:
+                ver["useful"].learn(score_k, would_k, label)
+            ver["fed"].append(n)
+            ver["samples"].append((score_k, score_o, label is None or would_k != label,
+                                   label is None or would_o != label, key in ver["keys"]))
+
+    def _route_record(self, route) -> dict:
+        """The record's view of a routed decision: owner, layer, zone (the owner's zone index), path [[v, score, thr]]
+        (Λ_v for a passed layer — the routing — and the owner's threshold in force), trial_zone (in the candidate's
+        zone); who answered it (decision 21): answered_by (version; None: escalated), answer_layer (its index on the
+        path), answer_thr (its threshold in force); base (the coin below the shared base rate rho_base: the
+        base-regime layers' learning event). Replay recomputes the routing from these path scores
+        (`_recorded_path`); the answers are in the payload's "path_would"."""
+        path = []
+        for (v, _, score), thr in zip(route["path"], route["thr"]):   # the thresholds in force at the draw (a
+            path.append([v, _num(score), None if math.isinf(thr) else thr])   # detach in the step drops a Λ)
+        ans = route["answer"]
+        return {"owner": route["owner"], "layer": route["layer"], "zone": route["layer"], "path": path,
+                "trial_zone": route["zone"], "answered_by": None if ans is None else ans[1],
+                "answer_layer": None if ans is None else ans[0], "answer_thr": None if ans is None else ans[2],
+                "base": route["base"], "rho_base": route["rho_base"]}
+
+    def _trial(self, x, would_k, score_k, route=None):
+        """trace_candidate: the candidate's (would, score) on x for the records (the shadow's when the step read it,
+        else scored here) — None with the option off or no candidate. Read by no rule. Additive mode (route given):
+        the candidate is scored on its zone only — the zone shadow's (would, score) there, None outside it (the record
+        keeps "candidate_score" None: not scored)."""
+        if not self.trace_candidate or self.candidate is None:
+            return None
+        if route is not None:
+            return (would_k, score_k) if route["zone"] else None
+        if score_k is not None:
+            return would_k, score_k
+        m = self._vs[self.candidate]["model"]
+        return m.score(x) if m is not None else (None, None)
 
     def _watch_scores(self, x, key):
         """Label mode with a watch running: the rollback target's (would, score) on x (None: no watch). Only a calib or
@@ -657,11 +1276,29 @@ class AdapterLoop:
             s = self._vs[self.served]
             would_s, score_s = s["model"].score(x) if s["model"] is not None else (None, None)
             n = self.n + 1
-            prob, rho, sampled, alone = self._draw(n, score_s, self._threshold(self.served))
-            would_k, score_k = self._shadow(x, sampled)
-            return {"n": n, "served": self.served, "candidate": self.candidate, "hist": len(self._history),
+            route = self._route_of(x, would_s, score_s)
+            if route is None:
+                prob, rho, sampled, alone = self._draw(n, score_s, self._threshold(self.served))
+                would_k, score_k = self._shadow(x, sampled)
+            else:                                          # additive: the owner's coin, the top-down answer
+                route = self._answered(n, route)
+                _, score_o, thr_o = self._owner(route)
+                prob, rho, sampled, _ = self._draw(n, score_o, thr_o, prob=self._prob(route["owner"]))
+                alone = route["answer"] is not None
+                would_k, score_k = self._zone_shadow(x, route)
+            out = {"n": n, "served": self.served, "candidate": self.candidate, "hist": len(self._history),
+                   "chain": self._chain_rev,
                     "scores": (would_s, score_s, would_k, score_k), "key": self._key(x), "sampled": sampled,
+                    "trial": self._trial(x, would_k, score_k, route),
                     "alone": alone, "probation": prob, "rho": rho, "fingerprint": s["fingerprint"]}
+            if route is not None:                          # the answering layer (else the owner) below L0: the
+                out["route"] = route                       # Dispatcher decides with its version installed for System
+                out["owner"], out["layer"] = route["owner"], route["layer"]   # 1's call (`serving`)
+                out["owner_fingerprint"] = self._vs[route["owner"]]["fingerprint"]
+                ans = route["answer"]
+                out["answered_by"] = None if ans is None else ans[1]
+                out["answer_layer"] = None if ans is None else ans[0]
+            return out
 
     def _post(self, pre, x, label, source, label_of=None) -> dict:
         """After the Dispatcher decided: the decision's step with the label it got (None: none — a decision the loop
@@ -669,17 +1306,26 @@ class AdapterLoop:
         `_pre` and here, the scores are read again (the step is the loop's record of the decision either way)."""
         with self._locked():
             self._refuse_if_stopped()
-            same = ((self.n + 1, self.served, self.candidate, len(self._history))
-                    == (pre["n"], pre["served"], pre["candidate"], pre["hist"]))
+            same = ((self.n + 1, self.served, self.candidate, len(self._history), self._chain_rev)
+                    == (pre["n"], pre["served"], pre["candidate"], pre["hist"], pre.get("chain")))
             if same:
                 would_s, score_s, would_k, score_k = pre["scores"]
+                trial = pre.get("trial")
+                route = pre.get("route")
             else:
                 s = self._vs[self.served]
                 would_s, score_s = s["model"].score(x) if s["model"] is not None else (None, None)
-                would_k, score_k = self._shadow(x, self._draw(self.n + 1, score_s, self._threshold(self.served))[2])
+                route = self._route_of(x, would_s, score_s)
+                if route is None:
+                    would_k, score_k = self._shadow(x, self._draw(self.n + 1, score_s,
+                                                                  self._threshold(self.served))[2])
+                else:
+                    would_k, score_k = self._zone_shadow(x, route)
+                trial = self._trial(x, would_k, score_k, route)
             src = self.source if source is None else source
             out = self._advance(x, pre["key"], would_s, score_s, would_k, score_k,
-                                lambda: Verdict(label, source, label_of), src, lenient=True)
+                                lambda: Verdict(label, source, label_of), src, lenient=True, trial=trial,
+                                route=route)
             out["same"] = same
             return out
 
@@ -874,12 +1520,12 @@ class AdapterLoop:
                 if loaded:
                     self._release(srv)
 
-    def _draw(self, n, score_s, thr_s):
+    def _draw(self, n, score_s, thr_s, prob=None):
         """Decision n's (probation, rate, sampled, alone) from the state before it (no state change). Label mode: no
-        coin and nothing alone — every call is a label."""
+        coin and nothing alone — every call is a label. prob: the owner's probation (additive mode; None: the loop's)."""
         if self.mode == "label":
             return False, 0.0, False, False
-        prob = self.left > 0
+        prob = self.left > 0 if prob is None else bool(prob)
         rho = self.rate.rate(full=math.isinf(thr_s) or prob)
         sampled = self._coin(n) < rho
         alone = not prob and score_s is not None and math.isfinite(thr_s) and score_s >= thr_s
@@ -908,12 +1554,21 @@ class AdapterLoop:
             self._split_of[key] = sp                       # the first state change, before the decision's own
         return sp
 
-    def _advance(self, x, key, would_s, score_s, would_k, score_k, oracle, src, lenient=False, watch=None):
+    def _advance(self, x, key, would_s, score_s, would_k, score_k, oracle, src, lenient=False, watch=None,
+                 trial=None, route=None, scored=None):
         from ...core.sources import UntrustedLabel
         n = self.n + 1
         sv, c = self.served, self.candidate
         thr_s = self._threshold(sv)
-        prob, rho, sampled, alone = self._draw(n, score_s, thr_s)
+        if self.additive:                                  # the owner's coin (one per decision), the top-down answer
+            if route is None:                              # replay: rebuilt from the recorded path scores
+                route = self._route_of(x, would_s, score_s, scored=scored)
+            route = self._answered(n, route)               # a Dispatcher's _pre route (same chain): the thresholds
+            _, score_o, thr_o = self._owner(route)         # in force now (a restart since _pre)
+            prob, rho, sampled, _ = self._draw(n, score_o, thr_o, prob=self._prob(route["owner"]))
+            alone = route["answer"] is not None
+        else:
+            prob, rho, sampled, alone = self._draw(n, score_s, thr_s)
         label, lsrc, lof, split = None, None, None, None
         if sampled or not alone:
             got = oracle()
@@ -940,7 +1595,7 @@ class AdapterLoop:
         self._step_t = t
         try:
             return self._advance_at(n, x, key, sv, c, thr_s, prob, rho, sampled, alone, label, lsrc, lof, split,
-                                    would_s, score_s, would_k, score_k, t, watch)
+                                    would_s, score_s, would_k, score_k, t, watch, trial, route)
         finally:
             self._step_t = None
 
@@ -962,7 +1617,7 @@ class AdapterLoop:
                 UserWarning, stacklevel=2)
 
     def _advance_at(self, n, x, key, sv, c, thr_s, prob, rho, sampled, alone, label, lsrc, lof, split, would_s,
-                    score_s, would_k, score_k, t, watch=None):
+                    score_s, would_k, score_k, t, watch=None, trial=None, route=None):
         # --- from here the state changes: a hook that raises from here on stops the loop (`_stop`), the decision is
         # recorded with its "error" event and replay raises the same error at the same place
         self.n = n
@@ -973,10 +1628,18 @@ class AdapterLoop:
         try:
             if self._inject is not None and self._inject["call"] == 0:
                 raise _Replayed(self._inject["why"])
-            for v, score in ((sv, score_s), (c, score_k)):
+            cmp = None if c is None else self._vs[c].get("cmp")
+            base_of = None
+            if route is not None:                          # additive: the zone reads (no comparison certificate);
+                base_of = {v: self._base_regime(v) for v, _, _ in route["path"]}   # regimes before this step's reads
+                self._zone_learn(n, key, route, sampled, label, would_k, score_k, c, base_of)
+                self._zone_count(route, label)
+            for v, score in ((sv, score_s), (c, score_k)) if route is None else ():
                 if v is not None and self._vs[v]["promise"] is not None:
                     self._vs[v]["promise"].observe(score)
-            if sampled:
+            if cmp is not None:                            # the served version, read as the candidate's promise reads
+                cmp.observe(score_s)
+            if sampled and route is None:
                 for v, score, would in ((sv, score_s, would_s), (c, score_k, would_k)):
                     if v is None or self._vs[v]["promise"] is None:
                         continue
@@ -985,25 +1648,46 @@ class AdapterLoop:
                         raise RuntimeError(f"decision {n} would calibrate version {v} frozen at {ver['frozen_at']}")
                     ver["promise"].learn(score, would, label)
                     ver["fed"].append(n)
+                if cmp is not None:
+                    cmp.learn(score_s, would_s, label)
                 if c is not None:
                     self._vs[c]["samples"].append((score_k, score_s, label is None or would_k != label,
                                                    label is None or would_s != label, key in self._vs[c]["keys"]))
             det_rep, mon_rep, ps = None, None, self._vs[sv]["promise"]
-            if sampled and det is not None and ps is not None and math.isfinite(thr_s) and not prob:
-                wrong = label is None or would_s != label
-                if ps.kind == "joint":
-                    loss, fed = (1.0 if (alone and wrong) else 0.0), True
-                else:                                      # selective: the error among the alone answers
-                    loss, fed = (1.0 if wrong else 0.0), alone
-                if fed and det.update(loss):
-                    det_rep = det.report()
-            if self.monitor is not None and not prob and score_s is not None and math.isfinite(float(score_s)):
+            det_reps = {}                                  # additive: layer version → its detector's alarm report
+            if route is None:
+                if sampled and det is not None and ps is not None and math.isfinite(thr_s) and not prob:
+                    wrong = label is None or would_s != label
+                    if ps.kind == "joint":
+                        loss, fed = (1.0 if (alone and wrong) else 0.0), True
+                    else:                                  # selective: the error among the alone answers
+                        loss, fed = (1.0 if wrong else 0.0), alone
+                    if fed and det.update(loss):
+                        det_rep = det.report()
+            else:                                          # additive (R6): each base-regime layer's detector on its
+                a_v = None if route["answer"] is None else route["answer"][1]   # base-coin samples of its zone: did
+                for v, would, _ in route["path"] if route["base"] else ():     # it answer, was it wrong
+                    det_v, pv = self._det_of(v), self._vs[v]["promise"]
+                    if det_v is None or pv is None or not base_of[v]:
+                        continue
+                    wrong = label is None or would != label
+                    if pv.kind == "joint":
+                        loss, fed = (1.0 if (v == a_v and wrong) else 0.0), True
+                    else:
+                        loss, fed = (1.0 if wrong else 0.0), v == a_v
+                    if fed and det_v.update(loss):
+                        det_reps[v] = det_v.report()
+            mon_prob = prob if route is None else self.left > 0   # additive: the monitor is L0's (decision D4)
+            if self.monitor is not None and not mon_prob and score_s is not None and math.isfinite(float(score_s)):
                 self._at("monitor")
                 rep = self.monitor.observe(float(score_s))
                 if isinstance(rep, dict) and rep.get("drift"):
                     mon_rep = rep
             if prob:
-                self.left -= 1
+                if route is None or route["owner"] == self._layers[0]:
+                    self.left -= 1
+                else:                                      # additive: the owner's probation counts down
+                    self._left_of[route["owner"]] -= 1
             if label is not None:
                 self._rows.append(LabelRow(key, x, label, lsrc, n))
                 self._split_n[split] += 1
@@ -1016,7 +1700,7 @@ class AdapterLoop:
                     self._holdout.append((_alone(score_s, thr_s), would_s != label))
             self.rate.push(alone)
             if alone and not sampled:
-                answer, by = would_s, "local"
+                answer, by = (would_s if route is None else route["path"][route["answer"][0]][1]), "local"
             elif label is not None:
                 answer, by = label, "oracle"
             else:
@@ -1024,8 +1708,9 @@ class AdapterLoop:
             if n == 1 and self._vs[0]["model"] is not None:
                 events.append(self._event("start", 0, n, fingerprint=self._vs[0]["fingerprint"], why=None))
             events += self._promise_events()
-            if det_rep is not None or mon_rep is not None:
-                events += self._on_alarm(n, sv, c, det_rep, mon_rep)
+            if det_rep is not None or det_reps or mon_rep is not None:
+                events += (self._on_alarm(n, sv, c, det_rep, mon_rep) if route is None
+                           else self._on_alarm_layers(n, det_reps, mon_rep))
             if self.mode == "label" and self._watch is not None:
                 wrec, ev_w = self._watched(n, sv, thr_s, would_s, score_s, label, split, watch)
                 events += ev_w
@@ -1036,19 +1721,27 @@ class AdapterLoop:
             events += self._promise_events() + [err]
             self._write(self._record(n, sv, c, rho, sampled, alone, by, lsrc, lof, label, prob, score_s, thr_s,
                                      score_k, det, key, split, t, error={k: err[k] for k in ("where", "call", "why")},
-                                     watch=wrec),
-                        self._payload(x, would_s, would_k, label, answer, watch), events)
+                                     watch=wrec, trial=trial, route=route),
+                        self._payload(x, would_s, would_k, label, answer, watch, c, trial, route), events)
             raise
         rec = self._record(n, sv, c, rho, sampled, alone, by, lsrc, lof, label, prob, score_s, thr_s, score_k, det,
-                           key, split, t, watch=wrec)
-        self._write(rec, self._payload(x, would_s, would_k, label, answer, watch), events)
-        return {"n": n, "answer": answer, "by": by, "served": sv, "candidate": c, "sampled": sampled, "label": label,
-                "label_source": lsrc, "events": [e["event"] for e in events]}
+                           key, split, t, watch=wrec, trial=trial, route=route)
+        self._write(rec, self._payload(x, would_s, would_k, label, answer, watch, c, trial, route), events)
+        out = {"n": n, "answer": answer, "by": by, "served": sv, "candidate": c, "sampled": sampled, "label": label,
+               "label_source": lsrc, "events": [e["event"] for e in events]}
+        if route is not None:
+            out.update(owner=route["owner"], layer=route["layer"], trial_zone=route["zone"],
+                       answered_by=None if route["answer"] is None else route["answer"][1])
+        return out
 
-    def _payload(self, x, would_s, would_k, label, answer, watch):
+    def _payload(self, x, would_s, would_k, label, answer, watch, c=None, trial=None, route=None):
         out = {"input": x, "would": would_s, "shadow_would": would_k, "label": label, "answer": answer}
+        if route is not None:                              # additive: every reached layer's answer (the owner's last;
+            out["path_would"] = [w for _, w, _ in route["path"]]   # replay and an audit read it with the path scores)
         if self.mode == "label":
             out["watch_would"] = None if watch is None else watch[0]
+        if self.trace_candidate and c is not None:
+            out["candidate_would"] = None if trial is None else trial[0]
         return out
 
     def _watched(self, n, sv, thr_s, would_s, score_s, label, split, watch):
@@ -1088,7 +1781,7 @@ class AdapterLoop:
         return rec, ev
 
     def _record(self, n, sv, c, rho, sampled, alone, by, lsrc, lof, label, prob, score_s, thr_s, score_k, det, key,
-                split, t, error=None, watch=None):
+                split, t, error=None, watch=None, trial=None, route=None):
         st = lambda v: None if v is None or self._vs[v]["promise"] is None else self._vs[v]["promise"].state()  # noqa: E731
         rec = {"n": n, "served": sv, "candidate": c, "rho": rho, "sampled": sampled, "alone": alone, "by": by,
                "label_source": lsrc, "label_of": lof, "missing": (sampled or not alone) and label is None,
@@ -1098,9 +1791,23 @@ class AdapterLoop:
                "key": key, "split": split, "t": t}
         if self.mode == "label":
             rec["watch"] = watch
+        if self.trace_candidate and c is not None:     # additive: None outside the candidate's zone (not scored)
+            rec["candidate_score"] = None if trial is None else _num(trial[1])
+        if route is not None:
+            rec.update(self._route_record(route))
+        if self.useful_error is not None:                  # additive, usefulness on: each certificate's state
+            rec["useful"] = [[v, self._vs[v]["useful"].state()] for v in self._useful_versions()]
         if error is not None:
             rec["error"] = error
         return rec
+
+    def _useful_versions(self) -> list:
+        """The layers (chain order) and the candidate that carry a usefulness certificate."""
+        out = [v for v in self._layers if self._vs[v].get("useful") is not None]
+        c = self.candidate
+        if c is not None and c not in out and self._vs[c].get("useful") is not None:
+            out.append(c)
+        return out
 
     # --- errors
     def _at(self, where):
@@ -1196,6 +1903,61 @@ class AdapterLoop:
             ev += self._rollback(target, by="policy", why=f"alarm ({who})", control=False)[1]
         return ev
 
+    def _on_alarm_layers(self, n, det_reps, mon_rep) -> list:
+        """Additive mode: an alarm per layer. det_reps: layer version → its detector's report (each detector reads its
+        layer's base-coin samples of its zone); the score monitor's alarm is about L0 (decision D4: the monitor reads
+        L0's scores only). Each alarmed layer asks policy.alarm (the report carries "version" and "layer"), from L0
+        down; "recertify" restarts only that layer's promise (λ = +inf: it answers nowhere, the decisions it owns
+        escalate to the oracle and are labelled — rate full — and it relearns on them in the owned regime until it
+        re-certifies) and puts only that layer in probation; Λ and the other layers are untouched. "rollback:<j>"
+        detaches the layers ≥ j (j a layer index). "ignore" as in replacement."""
+        l0 = self._layers[0]
+        who_of = {}
+        for v in det_reps:
+            who_of.setdefault(v, []).append("detector")
+        if mon_rep is not None:
+            who_of.setdefault(l0, []).append("monitor")
+        ev = []
+        for v in sorted(who_of, key=self._layers.index):
+            if v not in self._layers:                      # detached by the alarm handled before it
+                continue
+            j = self._layers.index(v)
+            dr = det_reps.get(v)
+            mr = mon_rep if "monitor" in who_of[v] else None
+            who = "+".join(who_of[v])
+            self._at("policy.alarm")
+            action = self.policy.alarm(self._state(), who, _json({"detector": dr, "monitor": mr, "version": v,
+                                                                  "layer": j}))
+            target = None
+            if isinstance(action, str) and action.startswith("rollback:"):
+                target = int(action.split(":", 1)[1])
+            elif action not in ACTIONS:
+                raise ValueError(f"policy.alarm returned {action!r}: 'recertify', 'rollback:<j>' or 'ignore'")
+            mon_why = None if mr is None else (mr.get("why") or [None])
+            ev.append(self._event("alarm", v, n, who=who, action=action, layer=j,
+                                  R=None if dr is None else dr["R"], detector_n=None if dr is None else dr["n"],
+                                  why=dr["why"][0] if dr is not None else
+                                  (mon_why[0] if isinstance(mon_why, list) else mon_why)))
+            self._alarms.append({"n": n, "who": who, "version": v})
+            det = self._det_of(v)                          # this layer's reference from scratch (and L0's monitor)
+            if det is not None:
+                det.reset()
+            if v == l0 and self.monitor is not None:
+                self._at("monitor.reset")
+                m = self.monitor
+                (m.adapted if callable(getattr(m, "adapted", None)) else m.reset)()
+            if action == "ignore":
+                continue
+            if v == l0:
+                self.left = self.probation
+            else:
+                self._left_of[v] = self.probation
+            ev += self._promise_events()
+            ev += self._restart(v, n)
+            if target is not None:
+                ev += self._detach_layers(target, n, by="policy", why=f"alarm ({who}) on layer {j}")[1]
+        return ev
+
     def _rereference(self):
         if self.detector is not None:
             self.detector.reset()
@@ -1218,24 +1980,34 @@ class AdapterLoop:
         if c is not None:
             paired = None if self.mode == "label" else self._paired(c)    # label mode: the pre-freeze gates decided
             st = self._state()
-            certified = math.isfinite(self._threshold(c))     # as the promote() control: never an uncertified one
+            certified = math.isfinite(self._joint(c)) and math.isfinite(self._threshold(c))   # as the promote()
+            #                                                    control: never an uncertified one (additive with a
+            #                                                    usefulness certificate: both certificates)
             if not self.paused:
                 self._at("policy.promote")
             if not self.paused and certified and self.policy.promote(st, paired):
-                ev.append(self._event("promote", c, n, **{"from": self.served, "to": c, **self._paired_fields(c, paired),
-                                                         "why": None}))
-                ev[-1]["install"] = self._serve(c, n, promoted=True)
-                ev += self._evict(n)
+                if self.additive:                          # layering: k serves its zone below the deepest layer
+                    ev.append(self._layer_in(c, n, **self._zone_fields(c, paired), why=None))
+                else:
+                    ev.append(self._event("promote", c, n, **{"from": self.served, "to": c,
+                                                             **self._paired_fields(c, paired), "why": None}))
+                    ev[-1]["install"] = self._serve(c, n, promoted=True)
+                    ev += self._evict(n)
             else:
                 self._at("policy.discard")
                 why = self.policy.discard(st, paired)
                 if why:
                     ev.append(self._discard(c, n, str(why)))
+                    if self.additive:
+                        ev.append(self._unfreeze(n))
         if self.candidate is None and not self.paused:
             if self._run is None and self._job is None:
-                self._at("policy.want_train")
-                if self.policy.want_train(self._state()):
-                    ev += self._start("schedule", n, inline=self.wait)[1]
+                refused, rev = self._train_refusal(n) if self.additive else (False, [])
+                ev += rev
+                if not refused:
+                    self._at("policy.want_train")
+                    if self.policy.want_train(self._state()):
+                        ev += self._start("schedule", n, inline=self.wait)[1]
             if self._run is not None and self._ready(n, "decision"):
                 ev += self._apply(n, "decision")[1]
         return ev
@@ -1245,16 +2017,45 @@ class AdapterLoop:
         (its measurement is the freeze's report)."""
         if paired is None:
             return {"l_k": None, "l_s": None, "samples": len(self._vs[c]["samples"]), "n_novel": None, "n_seen": None}
-        return {"l_k": paired.share_k, "l_s": paired.share_s, "samples": len(self._vs[c]["samples"]),
+        cmp = self._vs[c].get("cmp")
+        return {"l_k": paired.share_k, "l_s": paired.share_s, "l_s_own": paired.share_s_own,
+                "thr_s_cmp": None if cmp is None or not math.isfinite(cmp.threshold) else cmp.threshold,
+                "thr_s_own": (None if not math.isfinite(self._threshold(self.served))
+                              else self._threshold(self.served)), "thr_s": paired.thr_s,
+                "samples": len(self._vs[c]["samples"]),
                 "n_novel": paired.n_novel, "n_seen": paired.n_seen}
 
+    def _zone_fields(self, c, paired):
+        """An additive promote event's view of the trial: the candidate's own numbers on its zone samples (no
+        comparison with the layer above: a layer only adds coverage). With a usefulness certificate also: useful (the
+        start gate's check at λ_J), useful_lw / useful_level (its log-wealth there and the level log(G/δ_u)),
+        useful_v_index / useful_delta_v, useful_error (β), joint_thr (λ_J), alone_k / wrong_k (the trial's alone
+        answers at λ_J and the wrong ones among them: what the usefulness certificate read there)."""
+        out = {"l_k": paired.share_k, "samples": len(self._vs[c]["samples"]), "n_novel": paired.n_novel,
+               "wrong_novel": paired.wrong_novel, "n_seen": paired.n_seen}
+        u = self._vs[c].get("useful")
+        if u is not None:
+            lam = self._joint(c)
+            alone = [wk for sk, _, wk, _, _ in self._vs[c]["samples"] if _alone(sk, lam)]
+            out.update(useful=self._useful_ok(c), useful_lw=None if math.isinf(lam) else u.log_wealth_at(lam),
+                       useful_level=u.level_now, useful_v_index=u.v, useful_delta_v=u.delta_v,
+                       useful_error=self.useful_error, joint_thr=None if math.isinf(lam) else lam,
+                       alone_k=len(alone), wrong_k=sum(bool(w) for w in alone))
+        return out
+
     def _restart(self, v, n, why="alarm") -> list:
-        """Version v's promise from scratch (the next (v, δ_v), threshold +inf, wealth 1) and, for a candidate, its
-        paired samples dropped. → its "recertify" and a "restart" event."""
+        """Version v's promise from scratch (the next (v, δ_v) at its first sample, threshold +inf, wealth 1) and, for a
+        candidate, its paired samples dropped. → its "recertify" and a "restart" event."""
         ver = self._vs[v]
-        ver["promise"].restart(why)
+        ver["promise"].restart(why)                        # lazy δ charge: its next index at its first post-restart bet
+        if ver.get("useful") is not None:                  # the usefulness certificate is about the old regime too:
+            ver["useful"].restart(why)                     # its next index (own budget) at its first post-restart bet
+        if ver.get("cmp") is not None:                     # the comparison restarts with the candidate, at its new δ_v
+            ver["cmp"].restart(why)
         ver["samples"], ver["stale"] = [], False
         ev = self._promise_events()
+        if self.additive and v in self._layers:            # owned regime until it re-certifies (`_base_regime`)
+            return ev + [self._event("restart", v, n, why=why, layer=self._layers.index(v))]
         return ev + [self._event("restart", v, n, why=why)]
 
     @staticmethod
@@ -1275,6 +2076,7 @@ class AdapterLoop:
         ver["state"] = "discarded"
         self._release(ver.get("served_as"), ver["model"])
         ver["model"] = None                                # never served: its file (versions_dir) remains
+        ver["cmp"] = None                                  # out of trial: its comparison certificate is done
         ver["discarded_at"] = self._split_n["train"]
         self.candidate = None
         return self._event("discard", c, n, samples=len(ver["samples"]), why=why)
@@ -1288,6 +2090,7 @@ class AdapterLoop:
         if old != v:
             self._vs[old]["state"] = "retired"
         self._vs[v]["state"] = "served"
+        self._vs[v]["cmp"] = None                          # served: out of trial, its comparison certificate is done
         self.served = v
         if self.candidate == v:
             self.candidate = None
@@ -1376,6 +2179,8 @@ class AdapterLoop:
         if refused:
             job.state, job.why = "refused", refused
             return job, []
+        mg = getattr(self.policy, "maturity_gate", None)    # the maturity gate's inputs and trigger (None: off)
+        gate = mg(st) if trigger == "schedule" and callable(mg) else None
         self._changing = True                              # from here a control's state changes
         self._attempt += 1                                 # only trainings that start get an id
         job.id = f"{k}.{self._attempt}"
@@ -1398,6 +2203,8 @@ class AdapterLoop:
                "hist": len(self._history)}
         self._run = run
         extra = {"control": True, "wait": wait} if trigger == "train_now" else {}
+        if gate is not None:
+            run["gate"] = extra["gate"] = gate
         ev = [self._event("train_start", self.served, n, job=job.id, trigger=trigger, rows=len(job.rows),
                           hyper=job.hyper, t=job.started, inline=inline, served_at_start=self.served, **extra)]
         if self._fps is not None:                          # replay: nothing runs
@@ -1488,7 +2295,8 @@ class AdapterLoop:
             frozen = out["frozen"]
         n_train = run["n_train"] if self._batch else self._split_n["train"]
         base = {"job": job.id, "trigger": trigger, "rows": len(job.rows), "hyper": job.hyper, "t": job.started,
-                "started_at": run["n"], "applied": where, "served_at_start": run["sv"]}
+                "started_at": run["n"], "applied": where, "served_at_start": run["sv"],
+                **({"gate": run["gate"]} if run.get("gate") is not None else {})}
         if refused is not None:
             job.state, job.why = "refused", refused
             return job, [self._event("train", self.served, n, state="refused", why=refused, fingerprint=None,
@@ -1530,11 +2338,17 @@ class AdapterLoop:
         if not ok and hasattr(self.policy, "freeze_gates"):
             self._at("policy.freeze_gates")
             why = "; ".join(g["why"] for g in self.policy.freeze_gates(self._state(), report).values() if not g["ok"])
+        if ok and self.additive:                           # a candidate attaches below a certified layer only
+            why = self._attach_refused()
+            ok = why is None
+            job.frozen = ok
         ev = [self._event("train", self.served, n, state="done", why=why, fingerprint=fp,
                           report=dataclasses.asdict(report), frozen=ok, **base)]
         if ok:
             ev.append(self._freeze(k, n, frozen, keys, n_train))
             self._vs[k]["fixed"] = report.threshold        # label mode serves at it (act_guard's on the calib labels)
+            if self.additive:
+                ev.append(self._attach(k, n))
         else:
             self._release(frozen)                          # never served: unstaged at once
             row = self._row(k, "discarded", None, None, n, self.live.seen(), n_train, keys, fp)
@@ -1611,6 +2425,10 @@ class AdapterLoop:
         self._ev_seen[k] = 0
         row = self._row(k, "candidate", model, p, n, self.live.seen(), n_train, keys, fp)
         row["served_as"], row["served_cls"] = srv, None if srv is None else type(srv)
+        row["cmp"] = (None if p is None or self.additive or self._vs[self.served]["model"] is None  # additive: no
+                      else self._comparison(p))                    # comparison (a layer only adds coverage)
+        if p is not None and self.additive and self.useful_error is not None:   # its usefulness certificate:
+            row["useful"] = StreamPromise(**self._ukw, budget=self.useful_budget)   # selective at β, pointwise
         self._vs[k] = row
         self.candidate = k
         return self._event("freeze", k, n, frozen_at=n, seen=self.live.seen(), n_train=n_train,
@@ -1625,6 +2443,11 @@ class AdapterLoop:
             new = p.events[self._ev_seen.get(v, 0):]
             self._ev_seen[v] = len(p.events)
             out += [{**e, "version": v, "decision": self.n} for e in new]
+            u = ver.get("useful")
+            if u is not None:                              # its usefulness certificate's: "useful_" + the event
+                new = u.events[self._uev_seen.get(v, 0):]
+                self._uev_seen[v] = len(u.events)
+                out += [{**e, "event": "useful_" + e["event"], "version": v, "decision": self.n} for e in new]
         return out
 
     # --- controls
@@ -1668,6 +2491,8 @@ class AdapterLoop:
             k = max(self._vs) + 1
             why = ("paused" if self.paused else f"version {self.candidate} is in trial" if self.candidate is not None
                    else "a training is in flight" if self._run is not None else None)
+            if why is None and self.additive and len(self._layers) >= self.max_layers:
+                why = f"max_layers: the chain has {len(self._layers)} layer(s), the cap is {self.max_layers}"
             ev = []
             if why:
                 job = TrainJob(id=f"{k}.-", version=k, trigger="train_now", started=self._now(), state="refused",
@@ -1728,13 +2553,13 @@ class AdapterLoop:
         "manifest", "n", "files"}. Writes no record otherwise. The save holds the part's version lock and the loop's lock
         for all its writes (every version's files, each fsynced, included): the part's decisions and the loop's controls
         wait for it; unmeasured."""
-        from .checkpoint import save_loop
+        from .checkpoint import save_loop                  # additive: format v2 with the chain (stream.checkpoint)
         return save_loop(self, dir, cancel=cancel)
 
     @classmethod
     def load(cls, dir, learner, **kw) -> "AdapterLoop":
         """The loop saved in `dir`, continuing where it was saved (see `stream.checkpoint.load_loop` for the keywords:
-        system, storage, versions_dir, part, initial, key, served, clock, secret, groups)."""
+        system, storage, versions_dir, part, initial, key, served, clock, secret, groups, additive)."""
         from .checkpoint import load_loop
         return load_loop(cls, dir, learner, **kw)
 
@@ -1759,14 +2584,22 @@ class AdapterLoop:
             raise ValueError("the loop is paused: resume() before a promotion")
         if c is None or (v is not None and v != c):
             raise ValueError(f"version {v} is not the candidate in trial (candidate: {c})")
-        if not math.isfinite(self._threshold(c)):
+        if not math.isfinite(self._joint(c)):
             raise ValueError(f"version {c} is not certified: a promotion never skips the certificate")
+        if not math.isfinite(self._threshold(c)):
+            raise ValueError(f"version {c} has no point certified by both its certificate and its usefulness "
+                             "certificate: a promotion never skips a certificate")
         paired = None if self.mode == "label" else self._paired(c)
         if not force:
             self._at("policy.promote")
         if not force and not self.policy.promote(self._state(), paired):
             raise ValueError(f"the policy does not promote version {c} now (force=True skips its rule)")
         self._changing = True
+        if self.additive:                                  # the layering promote (force skips the gate, never the
+            e = self._layer_in(c, self.n, **self._zone_fields(c, paired), why=why,     # certificate)
+                               by=None if by is None else str(by), forced=bool(force), control=True, t=self._now())
+            self._write(None, None, [e] + self._promise_events())
+            return e
         e = self._event("promote", c, self.n, **{"from": self.served, "to": c, **self._paired_fields(c, paired),
                                                 "why": why, "by": None if by is None else str(by),
                                                 "forced": bool(force), "control": True, "t": self._now()})
@@ -1776,7 +2609,8 @@ class AdapterLoop:
         return e
 
     def rollback(self, v, *, by=None, why=None) -> dict:
-        """Serve an earlier version again (its certificate and threshold as it left them, unless an alarm came after it
+        """Additive mode: v is a layer index ≥ 1 — the layers ≥ v are detached ("detach"; see the class docstring).
+        Otherwise: serve an earlier version again (its certificate and threshold as it left them, unless an alarm came after it
         retired: then its promise restarts → "restart"; version 0 without a model: nothing alone). A candidate in trial
         is discarded (its δ_v stays spent); waits for a Dispatcher's decision in flight → the "rollback" event."""
         with self._locked():
@@ -1787,6 +2621,8 @@ class AdapterLoop:
             return rb
 
     def _rollback(self, v, *, by, why, control):
+        if self.additive:                                  # rollback(j) = detach the layers ≥ j (j a layer index)
+            return self._detach_layers(v, self.n, by=by, why=why, control=control)
         if v not in self._vs or self._vs[v]["state"] not in ("retired", "served") or v == self.served:
             raise ValueError(f"version {v} is not a retired version (served: {self.served}; "
                              f"{[x for x, ver in self._vs.items() if ver['state'] == 'retired']} retired)")
@@ -1881,7 +2717,9 @@ class AdapterLoop:
                     "train": lambda d: fresh.train_now(), "error": again,
                     "train_start": lambda d: fresh.train_now(wait=d.get("wait")), "close": lambda d: fresh.close(),
                     "cancel": lambda d: fresh.cancel_training(by=d.get("by"), why=d.get("why")),
-                    "detach": lambda d: fresh._detach(by=d.get("by"), why=d.get("why"), record=d)}
+                    "detach": lambda d: (fresh.rollback(d["layer"], by=d.get("by"), why=d.get("why"))
+                                         if "removed" in d else      # additive: the layers' detach (rollback(j))
+                                         fresh._detach(by=d.get("by"), why=d.get("why"), record=d))}
         for kind, d in items:
             if kind == "stream":
                 if d.get("control") and d.get("event") in controls:
@@ -1908,7 +2746,11 @@ class AdapterLoop:
                 fresh._advance(lp.get("input"), st.get("key"), lp.get("would"), st.get("score"),
                                lp.get("shadow_would"), st.get("shadow"),
                                lambda: Verdict(label, st.get("label_source") or fresh.source, st.get("label_of")),
-                               fresh.source, watch=None if wr is None else (lp.get("watch_would"), wr.get("score")))
+                               fresh.source, watch=None if wr is None else (lp.get("watch_would"), wr.get("score")),
+                               trial=(lp.get("candidate_would"), st["candidate_score"]) if "candidate_score" in st
+                               else None,
+                               scored=(fresh._recorded_path(st.get("path"), lp.get("path_would"))
+                                       if fresh.additive else None))
             except _Replayed:
                 pass
             except Exception as e:  # noqa: BLE001 — an error the records do not hold
@@ -1920,6 +2762,9 @@ class AdapterLoop:
             for f in sorted(set(st) | set(got)):
                 if st.get(f) != got.get(f):
                     bad.append((st["n"], f, f"recorded {st.get(f)}, rebuilt {got.get(f)}"))
+            if ("candidate_score" in st) != ("candidate_score" in got):    # trace_candidate: on every trial decision
+                bad.append((st["n"], "candidate_score", "recorded " + ("with" if "candidate_score" in st else
+                                                                       "without") + " the candidate's trace"))
         rebuilt_ev = [e for kk, e in fresh.log if kk == "stream"]
         if rebuilt_ev != stored_ev:
             bad.append((None, "stream records", f"{len(stored_ev)} stored, {len(rebuilt_ev)} rebuilt, or they differ"))
@@ -1953,13 +2798,26 @@ class AdapterLoop:
                 if kind != "loop":
                     continue
                 st, lp = d["stream"], d.get("loop") or {}
-                for v, key in ((st.get("served"), "score"), (st.get("candidate"), "shadow")):
-                    if key == "shadow" and st.get(key) is None:      # not scored in shadow on that decision
+                for v, key in ((st.get("served"), "score"), (st.get("candidate"), "shadow"),
+                               (st.get("candidate"), "candidate_score")):
+                    if key != "score" and st.get(key) is None:       # not scored in shadow on that decision
                         continue
                     if v in models:
                         got = models[v].score(lp.get("input"))[1]
                         if _num(got) != st.get(key):
                             bad.append((st["n"], "rescore", f"version {v}: recorded {st.get(key)}, scores {got}"))
+                for i, entry in enumerate((st.get("path") or [])[1:], 1):   # additive: every deeper layer reached
+                    v, rec_score = entry[0], entry[1]
+                    if v not in models:
+                        bad.append((st["n"], "rescore", f"version {v} (path {i}): no file to rescore it"))
+                        continue
+                    would, got = models[v].score(lp.get("input"))
+                    if _num(got) != rec_score:
+                        bad.append((st["n"], "rescore", f"version {v} (path {i}): recorded {rec_score}, scores {got}"))
+                    pw = lp.get("path_would")
+                    if pw is not None and i < len(pw) and _json(would) != pw[i]:
+                        bad.append((st["n"], "rescore", f"version {v} (path {i}): recorded answer {pw[i]!r}, "
+                                                        f"answers {would!r}"))
         live = {id(x) for ver in vs.values() for x in (ver.get("model"), ver.get("served_as")) if x is not None}
         live_fp = {ver["model"].fingerprint() for ver in vs.values() if ver.get("model") is not None}
         for v, mdl in models.items():                      # the copies loaded for the check: unstaged again, unless
@@ -1985,13 +2843,22 @@ class AdapterLoop:
                         "samples": len(ver["samples"]), "discarded_at": ver["discarded_at"],
                         "fingerprint": ver["fingerprint"],
                         "paired": dataclasses.asdict(self._paired(v)) if v == self.candidate else None})
+            u = ver.get("useful")
+            if u is not None:                              # additive, usefulness on: "threshold" is the composed one
+                j = self._joint(v)
+                out[-1].update(joint_threshold=None if math.isinf(j) else j, useful=self._useful_ok(v),
+                               useful_v_index=u.v, useful_delta_v=u.delta_v)
         return out
 
     def status(self) -> dict:
         """{"state", "error", "served", "candidate", "n", "labels": {"train", "calib", "holdout", "refused"},
         "trainings",
         "budget": {...}, "job", "paused", "alarms", "mode", "attached", "guarantee", "watch", "delta_spent",
-        "versions_kept"}. labels: the accepted labels by split and "refused", the labels the policy refused on the
+        "versions_kept"} — and "zones" in additive mode (`_zones`: per layer version, layer, routing_thr Λ, threshold λ,
+        certified, learning, probation, zone_share P̂(Z_v), owned_share, its counts and realised risk on its own coin
+        samples; the chain's deepest, deepest_certified, zone_share, the composite stream-wide joint and selective risk
+        — estimates, reported, not promised — beside the joint kind's bound α·(1 + Σ_{j≥1} P̂(Z_j))). labels: the
+        accepted labels by split and "refused", the labels the policy refused on the
         attached path (each a missing label). watch: label mode after a promotion, the watch's counts {"target", "n",
         "better", "worse", "total", "lw"} ("lw": its e-process's log wealths; None otherwise).
         attached: "dispatcher", "system" or None. state: "detached", "closed", "error" (a hook raised: the loop stopped; error: {"n", "where", "why"}), "training", "paused" or
@@ -2018,7 +2885,9 @@ class AdapterLoop:
                               "fixed-set (act_guard on calib labels); no anytime certificate"),
                 "watch": None if self._watch is None else _watch_copy(self._watch),
                 "delta_spent": self.budget.spent,
-                "versions_kept": sum(1 for ver in list(self._vs.values()) if ver["state"] in KEPT)}
+                **({} if self.useful_budget is None else {"delta_use_spent": self.useful_budget.spent}),
+                "versions_kept": sum(1 for ver in list(self._vs.values()) if ver["state"] in KEPT),
+                **({} if not self.additive else {"zones": self._zones()})}
 
     def fed(self, v) -> list:
         """The decisions whose samples reached version v's promise, in order."""
