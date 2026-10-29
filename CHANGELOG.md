@@ -683,6 +683,18 @@ labels, 10 % of the labels discordant) rolled back in 10 / 28 / 70 % of runs by 
   can pass (a 25-constant epicycle system on 1 of 12 extra skies): the refit χ² checks goodness of fit, not
   prediction. The sign test and the fit-variance-widened tolerance were measured and are not shipped. A default change
   waits for a second task outside physics.
+- **`solvi.document` S2–S4: the reads as data, a short `why`/`audit`, parallel calibration** (`solvi.core.response`,
+  `solvi.core.guarantees`, `solvi.solutions.document`). `res.facts` — the quoted facts as data from the trace: name,
+  value, the offsets and the quoted text itself (`fact.quote == doc[start:end]`), for every system, not only the
+  recipe. `why` and the audit name an input text longer than 200 chars by its length and hash
+  (`doc[12,345 chars, sha256:0123456789ab]`), never whole — the audit of a 12k-char document stays under 1 KB; a
+  replay accepts both historical `why` forms (pre-1.4 whole inputs, the 1.4 `<text, N chars>` marker).
+  `calibrate(..., workers=)` asks the calibration examples in a thread pool (results in input order; one example whose
+  ask breaks counts as escalated; folds stay sequential), `progress=(done, total)` per example and a default heartbeat
+  on stderr every 10 s at 50+ examples, and two warnings: fewer than 100 examples (`warn_small=False` opts out at the
+  guarantee level), more than 20 % of the examples escalating. The parser, `Span[date]` and EPS tables are locked by
+  tests; the recipe docs (`docs/recipes/document.md`), the README recipe-first block ("Build your own" holds the
+  hand-built catalog and the rest) and `examples/27_document_decision.py` (a fake endpoint, runs in the suite).
 
 ### Fixed
 - **A quoted number is located as a number of its own** (`solvi.core.deciders.llm.locate`). An LLM's span or quote

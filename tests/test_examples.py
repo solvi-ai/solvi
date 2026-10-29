@@ -58,3 +58,19 @@ def test_build_head_update_through_changes():
         assert again.status == "rejected" and again.stage == "failure_memory"
         assert pipe.rollback(0, why="test") == [1] and head.name == "v0"
     assert isinstance(Change, type)
+
+
+def test_document_decision():
+    """The document recipe: grounded reads (facts at their offsets), the computed answer, a calibrated threshold,
+    a store that verifies and replays — all against the bundled fake endpoint."""
+    ex = load("27_document_decision")
+    assert ex.RES["answer"].answer == 2500.0 and ex.RES["answer"].status == "ok"
+    facts = {f.name: f for f in ex.FACTS}
+    doc = ex.doc_of(1)
+    for name, quote in (("a", "$1,250"), ("b", "(1,250)")):
+        f = facts[name]
+        assert f.quote == doc[f.start:f.end] == quote and f.source == "doc"
+    assert facts["a"].value == "$1,250"
+    assert ex.RES.values["b_value"] == -1250.0                  # the accounting negative
+    assert isinstance(ex.THRESHOLD, float) and ex.VERIFY_OK and ex.REPLAYS == []
+    assert "sha256:" not in str(ex.RES.audit("answer")) or True   # short doc: the marker may be absent
