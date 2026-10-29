@@ -1174,7 +1174,7 @@ class DecideModel:
                  type=None, min_confidence=None, min_act=None, use_act=None, max_error=None,
                  score_value=None, not_stated=False, k=None, bins=None, unit=None, coverage=None, evidence=False,
                  option_order="canonical", permutations=4, min_margin=None, long=None, top_k=None, rerank=False,
-                 perturb=0, retrieve_query=None, _shared=frozenset()):
+                 perturb=0, retrieve_query=None, state_keys=(), _shared=frozenset()):
         """A catalog part: text_fact (a fact name, or a list of them) → Decision(value, probs).
 
         The question: `options` (a list, or {option: description}) and `kind` ("choice", "multi", "score", "noul"; default
@@ -1266,6 +1266,7 @@ class DecideModel:
         if long == "full":
             self._check_full(name)
         part = DecisionPart(self, name, task, text_fact, options, descriptions, multi, other, kind=kind, as_bool=as_bool,
+                            state_keys=state_keys,
                             escalate_below=escalate_below, act_threshold=act_threshold, use_act=use_act,
                             option_order=option_order, permutations=permutations, min_margin=min_margin,
                             long=long, top_k=top_k, rerank=rerank, perturb=perturb, retrieve_query=retrieve_query,

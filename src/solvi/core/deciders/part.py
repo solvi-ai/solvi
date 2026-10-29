@@ -27,6 +27,7 @@ from .gate import Facts, GroupBy, _group_guard, _group_promise, _shown, _thresho
 
 
 _VERSION_LOCKS: "weakref.WeakKeyDictionary" = weakref.WeakKeyDictionary()
+STATE_FACT = "state"               # the fact name the document recipe builds for the input without the text
 CALIB_PROBE = 16      # a remote model's first calibration chunk: mixed probability sources are refused after it
 CALIB_CHUNK = 32      # then chunks of this many examples, each logged (logging "solvi.calibration", INFO)
 _CALIB_LOG = logging.getLogger("solvi.calibration")
@@ -72,7 +73,7 @@ class DecisionPart:
     def __init__(self, model, name, task, text_fact, options, descriptions=None, multi=False, other=None, *, kind=None,
                  as_bool=False, escalate_below=None, act_threshold=None, use_act=None, score_value="median",
                  option_order="canonical", permutations=4, min_margin=None, long=None, top_k=None, rerank=False,
-                 perturb=0, retrieve_query=None, **prim):
+                 perturb=0, retrieve_query=None, state_keys=(), **prim):
         self.model = model
         self.long, self.top_k, self.rerank = long, None if top_k is None else max(1, int(top_k)), bool(rerank)
         self.retrieve_query = str(retrieve_query).strip() or None if retrieve_query is not None else None
@@ -98,6 +99,9 @@ class DecisionPart:
         self.perturb = max(0, int(perturb or 0))  # re-ask without instruction-like sentences (solvi.core.deciders.perturb), up to k times
         self._orders = self._option_orders()
         self.facts = [text_fact] if isinstance(text_fact, str) else list(text_fact)
+        self.state_keys = tuple(state_keys or ())
+        if self.state_keys and len(self.facts) != 1:
+            raise ValueError(f"{name}: state_keys= reads one text fact plus the state, not {self.facts}")
         self.escalate_below, self.act_threshold, self.use_act = escalate_below, act_threshold, use_act
         self.guarantee = None                   # what the escalation threshold promises (act_guard / calibrate_for)
         self.conformal_set = None               # the answer-set quantile (conformal)
@@ -108,8 +112,9 @@ class DecisionPart:
         self.__qualname__ = name
         self.spec.owner = name                  # its LoRA adapter slot is this part's, not the question text's
         self.__doc__ = task
-        self.__signature__ = inspect.Signature([inspect.Parameter(f, inspect.Parameter.POSITIONAL_OR_KEYWORD)
-                                                for f in self.facts])
+        self.__signature__ = inspect.Signature(
+            [inspect.Parameter(f, inspect.Parameter.POSITIONAL_OR_KEYWORD) for f in self.facts]
+            + ([inspect.Parameter(STATE_FACT, inspect.Parameter.POSITIONAL_OR_KEYWORD)] if self.state_keys else []))
         self.__solvi_model__ = self
         self.__solvi_provenance__ = "decided"
         self.__solvi_options__ = None if self._shown is None else list(self._shown)
@@ -183,6 +188,7 @@ class DecisionPart:
                                                                        for k, v in self.groups["nodes"].items()))),
                                 ("option_order", None if self.option_order != "average" else
                                  (self.option_order, self.permutations)),
+                                ("state_keys", self.state_keys or None),
                                 ("long", self.long_key()),
                                 ("memory", None if self.correction_memory is None else self.correction_memory.fingerprint()),
                                 ("lora", None if self.lora is None else self.lora.fingerprint()))
@@ -211,9 +217,35 @@ class DecisionPart:
         with self._one_version():
             vals = dict(zip(self.__signature__.parameters, args))
             vals.update(kw)
-            text = self.text_of(vals)
+            text = self.text_of({f: vals[f] for f in self.facts})
             self.asked += 1
+            if self.state_keys:
+                sp = self._spec_with_state(vals.get(STATE_FACT) or {})
+                return self._bind(self._one_sp(sp, text, vals), vals)
             return self._bind(self._one(text, self._ctx(text, vals=vals)), vals)
+
+    def _spec_with_state(self, state):
+        """The part's spec with the state block in the task: the reads see the state keys (reads_with=) while the
+        text — and so the span grounding and the quote offsets — stay exactly the one given text fact."""
+        missing = [k for k in self.state_keys if k not in state]
+        if missing:
+            raise ValueError(f"{self.__name__}: reads_with={list(self.state_keys)} — the input has no "
+                             f"state key(s) {missing}")
+        block = self.model.text({k: state[k] for k in self.state_keys})
+        task, desc, multi, other, kind, as_bool, sv, prim = self._spec_args
+        sp = _Spec(f"{task}\n\n<state>\n{block}\n</state>", list(self.spec.options), desc, multi, other, kind,
+                   as_bool, sv, **prim)
+        sp.owner = self.spec.owner
+        return sp
+
+    def _one_sp(self, sp, text, vals):
+        """_one with a per-call spec (state_keys=): the option order is "given" for such parts (a span or a number
+        reads one text; the block path is not supported with state_keys in 1.4)."""
+        if self.option_order == "average":
+            raise ValueError(f"{self.__name__}: state_keys= does not combine with option_order=\"average\"")
+        ctx = self._ctx(text, vals=vals)
+        z, a = self._raw_at([text], sp=sp)[0]
+        return self._finish(self.model._decision(sp, z), a, ctx=ctx)
 
     def _ctx(self, text, vals=None, raw=None):
         """What _finish needs besides the model's output: the input's text and, with thresholds per group, its group."""
@@ -457,9 +489,9 @@ class DecisionPart:
                 "proportion to its length, so this is many times a 512-token pass. Use a GPU, or long=\"retrieve\" "
                 "with a larger max_len (e.g. max_len=2048), which reads the text's relevant sections."))
 
-    def _raw_at(self, texts, read_len=0):
+    def _raw_at(self, texts, read_len=0, sp=None):
         if self.option_order != "average":           # given, or canonical (the spec itself is in sorted order)
-            return self.model._raw_full([(self.spec, t) for t in texts], read_len=read_len)
+            return self.model._raw_full([(sp or self.spec, t) for t in texts], read_len=read_len)
         task, desc, multi, other, kind, as_bool, sv, prim = self._spec_args
         opts = (lambda o: o + [self.spec.other] if self.spec.other is not None and self.spec.other not in o else o)
         specs = [_Spec(task, opts(list(o)), desc, multi, other, kind, as_bool, sv, **prim) for o in self._orders]

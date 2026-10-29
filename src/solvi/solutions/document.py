@@ -603,7 +603,7 @@ def _same_number(r, y):
 
 
 def document(schema, model, *, task=None, text="doc", compute=None, answer=None, checks=None, units="same",
-             storage=None, calibration=None, record="full", workers=1):
+             storage=None, calibration=None, record="full", workers=1, reads_with=None):
     """A decision over a document (see the module docs) → DocumentSystem.
 
     schema: a pydantic model class, one field per fact to read (`Span[float]`, `Span[date]`, `Span[str]`, a
@@ -616,7 +616,10 @@ def document(schema, model, *, task=None, text="doc", compute=None, answer=None,
     conflicts with nothing; percentages are not compared), "lenient" (a field without a scale matches any, a bare "$"
     any dollar) or "any" (no check; compute reads `facts.units`). storage: a path (JSONLStorage with `record=`) or a
     TraceStorage. calibration: a file written by save_calibration, attached at once. workers: parallel steps inside
-    one ask (System(workers=))."""
+    one ask (System(workers=)). reads_with: state keys every field's read sees — a `<state>` block in the read's
+    prompt between the task and the text; the grounding and the quote offsets stay on the text (a span is still read
+    from the one text fact); the input must carry each named key, and a recipe with reads_with has its own catalog
+    fingerprint (a calibration or a record made without it does not attach)."""
     from ..core.store import JSONLStorage
     from ..core.system import System
     if not (isinstance(schema, type) and isinstance(getattr(schema, "model_fields", None), dict)):
@@ -640,6 +643,12 @@ def document(schema, model, *, task=None, text="doc", compute=None, answer=None,
                          f"from field {x[:-6]!r} so")
     if text == STATE:
         raise ValueError(f"text= cannot be {STATE!r}: that fact carries the rest of the input")
+    reads_with = tuple(reads_with or ())
+    for k in reads_with:
+        if not (isinstance(k, str) and k.isidentifier()):
+            raise TypeError(f"reads_with={reads_with!r}: every state key is a Python identifier, not {k!r}")
+        if k == text:
+            raise ValueError(f"reads_with={reads_with!r}: {k!r} is the text fact itself")
     checks = dict(checks or {})
     for name, f in checks.items():
         if not isinstance(name, str) or not name.isidentifier() or name in fields or name in made \
@@ -690,7 +699,7 @@ def document(schema, model, *, task=None, text="doc", compute=None, answer=None,
         args = {k: extra[k] for k in ("min_confidence", "min_act", "use_act", "max_error", "other", "score_value",
                                       "kind", "evidence", "coverage", "unit") if k in extra}
         q = f"{task.rstrip()} {desc}" if task else desc
-        cat.fn(model.decision(name, q, text, options=opts, type=t, **args))
+        cat.fn(model.decision(name, q, text, options=opts, type=t, state_keys=reads_with, **args))
         readers[name] = _value_reader(fi)
 
     from decimal import Decimal as _Dec
