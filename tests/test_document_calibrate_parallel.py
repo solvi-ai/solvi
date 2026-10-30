@@ -2,25 +2,15 @@
 input order, one broken example counts as escalated), the heartbeat, and the two calibration warnings (fewer than
 100 examples; more than 20 % of the examples escalate). Acceptance: the same thresholds as sequential on a fixed
 fake; 300 fake cases calibrate in < 5 s with workers=8."""
-import io
-import json
-import re
 import sys
 import time
-import warnings
 
 import pytest
 
-import solvi
-from solvi import Answer
-from solvi.core.catalog import Catalog, Question
 from solvi.core.guarantees.guarantee import GuaranteeWarning
-from solvi.core.store import JSONLStorage
-from solvi.core.system import System, _rule_why
 
 sys.path.insert(0, __file__.rsplit("/", 1)[0])
-from test_document_facts import part  # noqa: E402
-from test_document_recipe import Server, case_reply, doc_of, model_of, ops_system  # noqa: E402
+from test_document_recipe import Server, case_reply, doc_of, ops_system  # noqa: E402
 
 
 def labelled(n=30):

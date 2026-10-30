@@ -1307,31 +1307,6 @@ class TraceStorage(abc.ABC):
 
         def failed(s, stage, e):
             ms = [Mismatch(0, stage, f"{type(e).__name__}: {e}", "error")]
-            return {"id": s.id, "seq": s.seq, "time": s.time, "mismatches": ms, "models": [], "catalog": None,
-                    **mismatch_summary(ms)}
-
-        systems = list(system) if isinstance(system, (list, tuple)) else [system]
-        if not systems:
-            raise ValueError("replay_all needs a System (or a list of the Systems that wrote the store)")
-        cats = [(x, x.fingerprint()["catalog"]) for x in systems if hasattr(x, "questions")]
-
-        def own(data):
-            """→ (the system to replay this record with, whether it is one that asks its questions)."""
-            if len(cats) < len(systems):              # a bare Catalog: replayed as before
-                return systems[0], True
-            qs = set(data.get("answers") or {})
-            if not qs:                                # nothing to tell it by: replayed as before
-                return systems[0], True
-            fits = [(x, c) for x, c in cats if qs and qs <= set(x.questions)]
-            exact = [x for x, c in fits if c == data.get("catalog")]
-            if exact or fits:
-                return (exact or [fits[0][0]])[0], True
-            if any(qs & set(x.questions) for x, _ in cats):
-                return next(x for x, _ in cats if qs & set(x.questions)), True
-            return systems[0], False
-
-        def failed(s, stage, e):
-            ms = [Mismatch(0, stage, f"{type(e).__name__}: {e}", "error")]
             bad.append({"id": s.id, "seq": s.seq, "time": s.time, "mismatches": ms, "models": [], "catalog": None,
                         **mismatch_summary(ms)})
 
