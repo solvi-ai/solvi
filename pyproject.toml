@@ -52,7 +52,7 @@ requires = ["uv_build>=0.9.17,<0.10.0"]
 build-backend = "uv_build"
 
 [dependency-groups]
-dev = ["pytest>=8", "fastapi>=0.141.1", "uvicorn>=0.54.0", "mcp>=2.2.0", "httpx2>=2.13.1", "duckdb>=1.0"]   # httpx2: FastAPI's TestClient; duckdb: DuckDBStorage's tests
+dev = ["pytest>=8", "pytest-rerunfailures>=15", "fastapi>=0.141.1", "uvicorn>=0.54.0", "mcp>=2.2.0", "httpx2>=2.13.1", "duckdb>=1.0"]   # httpx2: FastAPI's TestClient; duckdb: DuckDBStorage's tests; rerunfailures: the known-flaky concurrency tests retry in CI
 docs = ["mkdocs>=1.6,<2", "mkdocs-material>=9.5", "mkdocstrings[python]>=0.26"]   # the documentation site: uv run mkdocs serve
 lora = ["torch", "transformers", "peft>=0.19"]   # part.adapt_lora: tests/test_lora.py (skipped without them; torch is too big for the dev group)
 
