@@ -366,7 +366,8 @@ format (`solvi.experimental.process.Process`). Since 1.4.
 
 A node is a `solvi.build` result, a System, a Guard or a question to a person; an edge carries a predicate written as
 data (`{"answer": "kind", "in": ["auto", "property"]}`, `{"status": "abstain"}`, `{"by": "s2"}`,
-`{"confidence_below": 0.5}`, `{"drift": true}`, `and` / `or` / `not`), never a Python function; a node with several
+`{"confidence_below": 0.5}` (a decision the dispatcher sent to a person satisfies it: a hand-over has no confidence
+to compare), `{"drift": true}`, `and` / `or` / `not`), never a Python function; a node with several
 inputs merges `all` or `any`; an edge that goes back is `loop=True` with `max_iter`, and a cycle without one is a
 `ValueError`. `p.promise(mode="union" | "end_to_end" | "per_node", ...)` records the declared promise (risk, split,
 threshold family, delta); `union` and `per_node` are computed by `p.guarantee()` (below), `end_to_end` after
@@ -396,7 +397,8 @@ an answer or None, called at submit and at every poll). A node of kind `"human"`
 an explicit hand-over); a node that abstains or sends its decision to a person with no edge for it hands its question
 over (`on_abstain` / `on_human="handoff"`, the default; `"abstain"` stops the run there). The process submits and
 polls once: an answer is recorded and the run goes on; none, and `p.run` returns status `"pending"` with the
-`ticket`. `p.pending()` lists the waiting questions, `p.resume(run)` polls again — with no answer the run stays
+`ticket` and the `node` / `question` that hold it. `p.pending()` lists the waiting questions, `p.resume(run)` polls
+again — with no answer the run stays
 pending and nothing is written; with one, a record of kind `"human"` (ticket, value, reviewer, note, the channel's
 fingerprint; its parent is the pending segment) goes into the process store and the run goes on from the node that
 asked as a new `"process"` record with `continues` = the pending one. A process loaded afresh with
@@ -430,10 +432,11 @@ answered and no person answered on the path) and `r.risk` (the process risk whil
 ≤ Σ r_i·m_i ≤ r — the standard union (Bonferroni) bound, taken over every automatic node of the graph, not over the
 path a run took; what the library adds is the declared promise, replayable with the run, and the conditions under
 which it is in force. The first wrong node of a wrong path was given right inputs, so it is wrong on its own question
-and answered alone; no independence between nodes is assumed, but each node must be calibrated in place (below). `split="equal"` gives r_i = r / K_auto; `split={node: r_i}` or a function of the spec gives
-your own (a payout's error may cost more than a triage's), with Σ r_i ≤ r checked. m_i counts a node once per run a
-loop can make it run (1 plus the `max_iter` of each loop edge that leads back to it), so an equal split with a loop
-can fall out of force. The promise is in force when every automatic node keeps its own promise at its share (CRC risk
+and answered alone; no independence between nodes is assumed, but each node must be calibrated in place (below). `split="equal"` gives r_i = r / Σ m_j — the risk shared equally over the runs the nodes can make, so Σ r_i·m_i = r
+by construction and an equal split stays in force on a process with a loop; `split={node: r_i}` or a function of the
+spec gives your own (a payout's error may cost more than a triage's), with Σ r_i ≤ r checked. m_i counts a node once
+per run a loop can make it run (1 plus the `max_iter` of each loop edge that leads back to it), so a given split that
+leaves no room for the loops can fall out of force. The promise is in force when every automatic node keeps its own promise at its share (CRC risk
 ≤ r_i: `build(max_risk=r_i)`; an LTT node counts at its error level, with probability ≥ 1 − Σ δ_i, and a warning),
 no node was loaded against another fingerprint and the path watch has not flagged. It assumes each node was
 calibrated in place, on what upstream gives it in the process (its errors and the routing included); a node
@@ -483,7 +486,8 @@ System. Since 1.4.
 from solvi.experimental.stream import StreamPromise
 
 sp = StreamPromise(max_risk=0.05, delta=0.05)          # or max_error= (the error among the answers given alone)
-system.guarantee("intent", promise=sp, signal="act")    # installed as OpenSetGate is
+system.guarantee("intent", promise=sp, signal="act")    # installed as OpenSetGate is; the signal is probed once —
+                                                       # an unreadable one ("act" with no act head) refuses the install
 sp.learn(score, would_be_answer, label)                 # one labelled sample; label None: missing, counted as a loss
 sp.restart("alarm")                                     # uncertified again; the next δ_v at its first sample
 ```
@@ -536,7 +540,9 @@ adaptive rate one sample is many decisions (the simulated run lengths and the co
 [best practices](best_practices.md#guarantees-and-calibration)). With
 `on_drift="recertify"` an alarm restarts the certificate (the next δ_v, threshold +inf) and System 1 answers nothing
 alone for `probation` decisions and until certified again, every one of them a free sample; with the default
-`on_drift="human"` the alarm is the dispatcher's drift flag, as a `DriftMonitor`'s. Every dispatch record carries
+`on_drift="human"` the alarm is the dispatcher's drift flag, as a `DriftMonitor`'s. The alarm lands on the promise's
+own event list (`sp.events`, with the detector's R and sample count — the detector resets right after, so that is
+what a caller without storage reads). Every dispatch record carries
 `stream` (sample, certificate, detector), each state change is a record of kind `stream`, both kept by a redaction,
 and the system report has one block (samples, free and paid, alarms, alone answers covered by the threshold in force,
 the deployed risk estimated on the sample). A control in the tests shows why the coin covers every decision:

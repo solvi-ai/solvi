@@ -31,6 +31,43 @@
 - Docs: the module docstring now says the same-since replacement is blind to which value an erratum corrected
   (S264), and the guard's docstring states the re-test's validity scoping.
 
+### Fixed (process and the stream certificate — the 2026-10-30 external handoff, S270/S273/S275/S279/S280/S281/S282)
+- **A stream-certified node's promise is read at its risk level (S282).** `StreamPromise.record()` keeps its level
+  under "risk" (kind "joint"), while `Process.guarantee()` read "error" for every non-CRC method: the per_node
+  statement said "stream-ltt error ≤ None", and in union mode the node "had no risk or error level", putting the
+  union promise silently out of force with a stream-certified node. The level lookup now reads "risk" for a joint
+  record (an LTT and a selective stream record still read "error"), the statement says "stream-ltt risk ≤ …", and a
+  joint stream node is counted with Bonferroni over its δ like an LTT one.
+- **The equal union split is weighted by the visits a loop can make (S273).** `split="equal"` gave r_i = r / K_auto,
+  so `Σ r_i·m_i` was over the risk on any looped process whatever the nodes did — the default split was never in
+  force. It now gives r_i = risk / Σ_j m_j over the automatic nodes: `Σ r_i·m_i = risk` by construction, an equal
+  split is in force on a process with a loop, and a loop-free process keeps the plain r / K_auto. New specs' shares
+  (and so their hashes) differ; a given split that leaves no room is still refused as before.
+- **`{"confidence_below": c}` sees a hand-over (S275).** A decision the dispatcher sent to a person has confidence
+  None, so the predicate never held for it and a hand-off edge had to be written `{"status": "human"}`; an edge
+  under the node's own threshold was dead code. An outcome whose decision went to a person (status "human", by
+  "human") now satisfies the predicate — no confidence to compare, and the unsure answers are exactly what it
+  routes to one; answers that carry a confidence compare as before (the slow path's None still holds nothing).
+- **A node whose fitted head reads a fact it is not given warns at build time (S270).** `node(..., reads=[…])`
+  validated and every run abstained ("cannot compute: b") into a person's hands — all runs pending, nothing at
+  spec() or guarantee() said why. `node()` (and `from_spec` binding the system) now warns, naming the facts the
+  head reads that the node is not given and its catalog cannot compute from what it is.
+- **A promise gated on a signal the answers cannot carry is refused at install (S279).** `System.guarantee(q,
+  promise=sp, signal="act")` skipped the calibration examples, so the readability check the `max_risk=` path makes
+  never ran: on a head without an act probability the certificate installed silently and could never let an answer
+  through nor observe one (seen 0, threshold +inf forever). The `promise=` path now probes its signal — asked on
+  the first example given, or structurally for "act" (the question's answer has to be a model decision with an act
+  head) — and refuses with the calibration path's ValueError; the guarantee in force before the call stays.
+- **A pending `ProcessResult` names its node and question (S280).** The node holding the waiting question lived
+  only inside the `why` string or behind `pending()` (itself a full store scan). The result now carries `node` and
+  `question` — the two fields `pending()` lists — for a pending and a cancelled run, and `resume()` before the
+  answer keeps them (additive fields at the end of the dataclass; positional construction is unaffected).
+- **The risk detector's alarm is on the promise's own event list (S281).** The alarm reached only the events the
+  driver returns to the Dispatcher (written as "stream" records with storage); the detector resets right after, so
+  a caller without storage could not read when it fired or at what statistic. An "alarm" event — with the
+  detector's R and sample count, next to the restart's "recertify" — is now appended to `StreamPromise.events`
+  (and so to `dump()`); the event the driver returns is that same record.
+
 ### Fixed (skills / check / report — the 2026-10-30 external handoff, S283/S285–S296)
 - **Skills: a world mismatch of a supervised or verified planned run is counted on the skill itself (S288).**
   `skill.outcomes["mismatch"]` — the exact model said it works, the real world did not follow. The certificate
