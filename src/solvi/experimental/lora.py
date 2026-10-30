@@ -641,6 +641,14 @@ def load(part, path, strict=True, expect=None):
 
 
 # ------------------------------------------------------------------------------------------------ versions (the adapter loop)
+def _lock_of(part):
+    """version_lock for a site that runs right after a swap: the lock exists there (the swap created it), so the
+    Optional of version_lock(part) is narrowed away once, here, for pyright."""
+    lk = version_lock(part)
+    assert lk is not None, "the version lock exists: the swap created it"
+    return lk
+
+
 def version_lock(part):
     """The part's version lock (solvi.core.deciders.part.version_lock): each of the part's decisions holds it, and swap
     holds it while it changes the adapter and the thresholds together."""
@@ -723,7 +731,7 @@ def scoring(part, ad, *, adaptation=_OWN):
     m, key = part.model, _lora_key(part)
     if ad is not None:
         stage(part, ad)
-    with version_lock(part):
+    with _lock_of(part):
         mp = getattr(_SHADOW, "map", None)
         if mp is None:
             mp = _SHADOW.map = {}
@@ -762,7 +770,7 @@ def swap(part, ad, cal, *, drop_old=True):
     if ad is not None:
         install(m.scorer, ad)
     st = _state(m.scorer) if (ad is not None or m.loras.get(key) is not None) else None
-    with version_lock(part):
+    with _lock_of(part):
         before = part.fingerprint()
         with _net(m.scorer, st) if st is not None else contextlib.nullcontext():
             old = m.loras.get(key)
