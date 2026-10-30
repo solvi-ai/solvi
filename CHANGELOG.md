@@ -24,6 +24,10 @@
   Behaviour note for 1.4.0 readers: close-not-refute kept a closed version's status `active`, so `usable(id)`
   without a `valid_at` changed from False (1.3's refuted) to True on such versions — give the store a clock if you
   relied on the old reading.
+- **`KnowledgeStore.supporters(id, at=)`: who stood behind an item when (S233).** The claims written by journal
+  position `at` (default: now) and not yet taken back there — one row per claim (by, at, source, its `valid`, a
+  derived claim's premises as "just"). A later retraction does not rewrite the answer, which is what an audit of a
+  decision made at that position needs.
 - Docs: the module docstring now says the same-since replacement is blind to which value an erratum corrected
   (S264), and the guard's docstring states the re-test's validity scoping.
 

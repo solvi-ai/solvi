@@ -827,6 +827,34 @@ class KnowledgeStore:
         self._settle()
         return sorted(i for i, st in self.state.items() if st.get("pending_retest"))
 
+    def supporters(self, iid, *, at=None):
+        """The claims standing behind the item as of journal position `at` (default: now — entries up to `at`
+        applied): one row {"by", "at", "source"} per claim written by then and not yet taken back there — by its
+        own assertion cut, its writer's cut, or the item's retraction. The answer to "who supported this when the
+        decision at that position was made": a retraction later than `at` does not rewrite it (S233). A derived
+        claim's row carries its premises as "just"; a claim with `valid` carries it."""
+        with self._lock:
+            it = self.items.get(iid)
+            if it is None:
+                raise KeyError(f"no item {iid!r}")
+            end = len(self.journal) - 1 if at is None else int(at)
+            cut0 = max((t for t in it.retracted if t <= end), default=-1)
+            out = []
+            for a in it.asserts:
+                if not (cut0 < a["t"] <= end):
+                    continue
+                if any(tc <= end and tc > a["t"] and w == a["by"] for tc, w in it.cuts):
+                    continue
+                if any(tc <= end and n == a["t"] for tc, n in it.acuts):
+                    continue
+                row = {"by": a["by"], "at": a["t"], "source": a["source"]}
+                if a.get("valid") is not None:
+                    row["valid"] = a["valid"]
+                if a.get("just"):
+                    row["just"] = list(a["just"])
+                out.append(row)
+            return out
+
     def _needs_retest(self, iid):
         it = self.items.get(iid)
         if it is None:

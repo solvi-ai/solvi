@@ -304,3 +304,19 @@ def test_redecide_splits_answer_changes_from_justification_only(tmp_path):
     assert [c["old"]["priority"][0] for c in changes] == ["yes"] and [c["new"]["priority"][0] for c in changes] == ["no"]
     assert len(same) == 1 and same[0]["old"] == same[0]["new"]
     assert len(changes) + len(same) == 2
+
+
+# --- who supported an item when (S233)
+def test_supporters_at_a_journal_position():
+    ks = KnowledgeStore()
+    i = ks.add("fact", fact("d", 5), source="person", by="ann")
+    ks.add("fact", fact("d", 5), source="person", by="bob")
+    before_cut = len(ks.journal) - 1
+    ks.retract(i, only_from="ann", by="audit", why="exposed")
+    assert [r["by"] for r in ks.supporters(i)] == ["bob"]              # now: ann's claim is taken back
+    then = sorted(r["by"] for r in ks.supporters(i, at=before_cut))
+    assert then == ["ann", "bob"]                                      # then: both stood behind it
+    p = ks.add("fact", fact("p", 1), source="outcome")
+    d = ks.add("fact", fact("q", 2), source="spec", derived_from=[p])
+    row = ks.supporters(d)[-1]
+    assert row["just"] == [p] and row["source"] == "spec"              # a derived claim names its premises
