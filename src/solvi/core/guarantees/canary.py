@@ -247,7 +247,7 @@ class IdentityCanary:
                     calls0, at = self.calls, self.seen
                 try:
                     ev = self._run(reason)
-                except Exception as e:                   # the probe path never takes the real decision down
+                except Exception as e:                   # noqa: BLE001 — the probe path never takes the real decision down
                     with self._lock:
                         self.events.append({"n": len(self.events) + 1, "at": at, "reason": reason, "verdict": "error",
                                             "error": f"{type(e).__name__}: {e}"[:200], "calls": self.calls - calls0})

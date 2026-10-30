@@ -95,7 +95,7 @@ def test_a_higher_rank_on_the_same_since_takes_only_its_overlap():
     high = ks.add("fact", {"s": "X", "r": "p", "o": 2}, source="person", by="b", valid=(10, 20))
     assert ks.status(low) == ks.status(high) == "active"
     assert ks.periods(high) == [[10, 20]] and ks.periods(low) == [[20, None]]
-    same = ks.add("fact", {"s": "X", "r": "p", "o": 3}, source="person", by="c", valid=(10, None))
+    ks.add("fact", {"s": "X", "r": "p", "o": 3}, source="person", by="c", valid=(10, None))
     assert ks.status(low) == "refuted"                       # covered whole: refuted, as before
 
 
