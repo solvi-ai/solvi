@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.4.1 — unreleased
 
 ### Fixed (knowledge store — the 2026-10-30 external handoff, S261/S262/S263/S265)
 - **An erratum of content the writer no longer stands behind now withdraws it (S262).** `_kept` read the writer's
