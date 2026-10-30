@@ -167,7 +167,12 @@ class DeltaBudget:
 
 
 def clean_need(alpha: float, delta: float, bets: str = "mixture", **kw) -> int:
-    """Clean samples (loss 0) that take a fresh e-process to 1/delta."""
+    """Clean samples (loss 0) that take a fresh e-process to 1/delta. A floor on the cost, not the useful metric: it
+    is the n of the first certification, and the first threshold in force is the strictest certified grid point — how
+    strict is distribution-dependent (on zero-loss bets every grid point grows at the same deterministic rate, so they
+    certify together at exactly this n, the loosest of them first in force). What to price on a real stream is the
+    coverage a given number of labels buys (a coverage-vs-labels curve, or a labels-to-coverage target), not n to the
+    first certification."""
     proc = Mixture(alpha, **kw) if bets == "mixture" else MirrorBound(alpha, **kw)
     level = math.log(1.0 / delta)
     while proc.log_wealth < level - 1e-12:

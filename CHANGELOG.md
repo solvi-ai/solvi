@@ -27,6 +27,47 @@
 - Docs: the module docstring now says the same-since replacement is blind to which value an erratum corrected
   (S264), and the guard's docstring states the re-test's validity scoping.
 
+### Fixed (stream — the 2026-10-30 external handoff, S297/S298/S299)
+- **`DriftMonitor.reset()` no longer re-simulates the CUSUM threshold it already has (S299).** The reset kept the
+  reference and re-ran `Cusum.calibrate` over the same 8,000 null streams × horizon steps — ~1 s per reset (3 s on
+  the reporters' box) of pure waste, h verified bit-identical. The calibration is memoized on the reference's
+  content and the monitor's configuration (the null resamples the reference's own rows, so the key must be the
+  content, not the size); a new reference — `set_reference`, the window refilled, `adapted()` — recomputes.
+- **A Dispatcher's own stream certificate no longer trips its `DriftMonitor` (S298).** While the threshold is +inf
+  every response is escalated, so the first-window reference had "answered alone" share 0.0; the first certification
+  then climbed the window to ~18 % and the z-test flagged `p = 3e-06` on an unchanged stream — a false
+  GuaranteeWarning about unchecked System 1 answers. Two fixes, as `NumericDrift` already had the first: the share
+  answered alone is not tested against a reference of 0 or 1 (no spread — every window that moved at all is
+  "significant"; warned once, said in every report's `not_tested`), and the Dispatcher calls the monitor's new
+  `adapted()` at every threshold move (certified, loosened, restarted): the reference is re-taken from the next
+  decision, gated under the new threshold. Starting the monitor at the first certification — the reporters' own
+  workaround — still false-flagged 5/6 seeds because the threshold only loosens and any reference taken mid-loosening
+  is stale for ever after; a reference must not span a threshold change, which is what the re-take guarantees. The
+  price, now stated in the Dispatcher and monitor docstrings: while the certificate loosens the monitor spends most
+  of its time re-taking its reference (phase "reference") and its window tests see nothing — and a real shift that
+  lands right on a loosening is absorbed into the new reference (the label-side `detector=` is the alarm then). A
+  real shift with no threshold move after it is flagged as before (~46 decisions on the pinning stream).
+- **The auto grid's price is said, and warned (S297).** `grid="auto"` (the default) reads no label until the first
+  `grid_from` (200) scores are observed; under a Dispatcher every one of those decisions is escalated — the first
+  `grid_from` slow-path calls are paid for labels the certificate drops, and the first S1-alone answer comes at
+  ~284, not 85 (`grid="fixed"`). The Dispatcher now warns when it is built with the auto grid and a slow path, and
+  the `Dispatcher`, `stream` and `certificate` docstrings say the cost and when to prefer `grid="fixed"` (scores
+  already on [0, 1]) or a smaller `grid_from`.
+- Docs (S300/S301/S302, design asks, no code change beyond the lines above): an expired ticket is a loss for the
+  detector whatever System 1 would have done, so the oracle's expiry rate adds to the rate the detector tests
+  (risk r seen through expiry e reads as e + (1 − e)·r) and must sit well below α — said in `stream.sampling` and
+  `stream.tickets` with the alarm→restart→probation→more-expiry loop the deferred `max_drop` would break; the
+  coin-fed RiskDetector sees a break ~1/ρ decisions after it happens (≈ 20× at the default floor) and is never the
+  only alarm — the note `loop.py` enforces for `AdapterLoop` is now in the `Dispatcher(promise=, detector=)` and
+  `detector.py` docs too; `clean_need` is a floor on labels, not the useful cost — the first threshold in force is
+  the strictest certified grid point (how strict is distribution-dependent), so price a coverage-vs-labels curve.
+- Tests: `tests/test_stream_handoff_oct30.py` (a reset loop does not resimulate — the calibration call count, not
+  wall clock; the degenerate reference warns and is not tested; `adapted()` re-takes; the worker's unchanged-stream
+  Dispatcher scenario stays unflagged while the certificate certifies and loosens; a real shift is still flagged;
+  the auto-grid warning fires with a slow path and not otherwise). `test_drift.py`'s act-probability test now
+  expects "answered" in `not_tested` for its all-alone reference — the degenerate-reference behaviour it pinned by
+  accident.
+
 ## 1.4.0 — released 2026-10-30
 
 ### Added
