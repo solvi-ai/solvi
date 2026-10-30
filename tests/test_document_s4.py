@@ -6,13 +6,11 @@ import sys
 import os
 
 import pytest
-from decimal import Decimal
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from test_llm import KEY, TEAMS, FakeLLM, model  # noqa: E402
+from test_llm import TEAMS, FakeLLM, model  # noqa: E402
 from test_document_recipe import Server, case_reply, doc_of, ops_system  # noqa: E402
 
-from solvi import Span
 from solvi.core.textin import ParseError, parse_number
 from solvi.core.types import span_value
 

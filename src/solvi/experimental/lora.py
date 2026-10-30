@@ -796,7 +796,7 @@ def adapter_by_hash(where, hash):
         try:
             with safe_open(str(f), framework="pt") as fh:
                 meta = fh.metadata() or {}
-        except Exception:  # noqa: BLE001 — not a safetensors file: not this adapter
+        except Exception:  # noqa: BLE001, S112 — not a safetensors file: not this adapter
             continue
         if meta.get("format") == FORMAT and meta.get("hash") == hash:
             return read(f)

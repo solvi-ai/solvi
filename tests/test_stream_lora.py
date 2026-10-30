@@ -28,7 +28,7 @@ with warnings.catch_warnings():
 KEY = b"lora-loop-test-key"
 
 
-def _part(ckpt):
+def _part(ckpt):  # noqa: F811 — ckpt is the imported module-scope fixture, injected by pytest
     m = DecideModel.load(ckpt, backend="torch", device="cpu")
     return m, m.decision("team", "Which team?", "email", TEAMS)
 
@@ -50,7 +50,7 @@ def _job(i=1, n=80, budget=None, alpha=0.2, updates=60):
 
 
 @pytest.fixture(scope="module")
-def trained(ckpt, tmp_path_factory):
+def trained(ckpt, tmp_path_factory):  # noqa: F811 — ckpt is the imported module-scope fixture, injected by pytest
     """A part calibrated without an adapter (version 0) and a version trained by the thread runner."""
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
@@ -103,7 +103,7 @@ def test_swap_then_rollback_is_bit_exact(trained):
     assert part.fingerprint() == fp0 and [part.decide(x).probs for x in t] == probs0
 
 
-def test_a_version_scores_with_its_own_adaptation_whatever_version_is_served(ckpt, tmp_path):
+def test_a_version_scores_with_its_own_adaptation_whatever_version_is_served(ckpt, tmp_path):  # noqa: F811 — ckpt is the imported module-scope fixture, injected by pytest
     """Version 0 of a fitted part (an adaptation) and a trained version (none of its own): each scores with its own
     calibration, so version 0 rescored after a promotion, and the candidate scored in shadow, give the served scores
     to the bit; the rollback serves version 0's scores again."""
@@ -218,7 +218,7 @@ def test_a_sibling_question_decides_unharmed_while_the_part_swaps(trained, swaps
     assert not errors and not bad and n[0] > 0, (errors[:3], bad[:3])
 
 
-def test_a_pass_in_flight_on_a_model_without_adapters_is_untouched_by_a_staging_thread(ckpt, trained, stages=40):
+def test_a_pass_in_flight_on_a_model_without_adapters_is_untouched_by_a_staging_thread(ckpt, trained, stages=40):  # noqa: F811 — ckpt is the imported module-scope fixture, injected by pytest
     """A model with no adapter scores without the adapter lock. Another thread staging an adapter (what a training's
     thread does when its version is bound) waits for the passes in flight at the scorer's network gate, and passes
     that start meanwhile wait for the change: every pass gives the logits of the plain checkpoint, bit for bit (before
@@ -272,7 +272,7 @@ def test_a_pass_in_flight_on_a_model_without_adapters_is_untouched_by_a_staging_
     assert not errors and not bad and n[0] > 0, (errors[:3], len(bad), n[0])
 
 
-def test_a_pass_held_mid_way_is_not_changed_by_a_staging_thread(ckpt, trained):
+def test_a_pass_held_mid_way_is_not_changed_by_a_staging_thread(ckpt, trained):  # noqa: F811 — ckpt is the imported module-scope fixture, injected by pytest
     """The deterministic form of the test above: a forward pre-hook on the model's second layer holds the scoring
     thread's pass mid-way; the main thread then stages the adapter and switches it on. With the network gate, stage()
     waits for the pass (the hook gives up after 1 s and the pass ends plain); without it the second half of the pass
@@ -346,7 +346,7 @@ def test_a_version_saves_loads_and_is_found_by_its_hash(trained, tmp_path):
         unbound.score(x)
 
 
-def test_version0_with_an_adaptation_and_thresholds_per_group_round_trips_its_files(ckpt, tmp_path):
+def test_version0_with_an_adaptation_and_thresholds_per_group_round_trips_its_files(ckpt, tmp_path):  # noqa: F811 — ckpt is the imported module-scope fixture, injected by pytest
     """Version 0 of a part that was fitted (an adaptation) and calibrated per group saves and loads with the same
     fingerprint and answers; grouped by a function, load needs the function again."""
     from solvi.core.deciders import Facts
@@ -379,7 +379,7 @@ def test_version0_with_an_adaptation_and_thresholds_per_group_round_trips_its_fi
         assert LoraVersion.load(tmp_path, 1, expect_fp=vf.fingerprint(), groups=dom).fingerprint() == vf.fingerprint()
 
 
-def test_a_released_version_leaves_the_scorer_and_staged_adapters_stay_bounded(ckpt, tmp_path):
+def test_a_released_version_leaves_the_scorer_and_staged_adapters_stay_bounded(ckpt, tmp_path):  # noqa: F811 — ckpt is the imported module-scope fixture, injected by pytest
     """Each trained version is staged on the scorer; the loop releases a discarded candidate (here by hand: release),
     so after N trainings and N discards the scorer holds no extra adapter."""
     with warnings.catch_warnings():
@@ -430,7 +430,7 @@ def test_the_time_estimate_refuses_a_training_above_max_train_s(trained):
                                budget=_budget(), alpha=0.2, status={}))
 
 
-def test_gpu_auto_falls_back_to_the_cpu(ckpt, tmp_path, monkeypatch):
+def test_gpu_auto_falls_back_to_the_cpu(ckpt, tmp_path, monkeypatch):  # noqa: F811 — ckpt is the imported module-scope fixture, injected by pytest
     """Too little free GPU memory → the CPU (in a subprocess); a GPU out of memory → trained again on the CPU (a thread,
     with the GPU only pretended: nothing is put on a GPU)."""
     import torch
@@ -457,7 +457,7 @@ def test_gpu_auto_falls_back_to_the_cpu(ckpt, tmp_path, monkeypatch):
     assert v2.adapter.hash == v.adapter.hash                  # the same training on the CPU (fixed seed, two threads)
 
 
-def test_the_loop_installs_a_version_trained_in_a_subprocess_and_rolls_back(ckpt, tmp_path):
+def test_the_loop_installs_a_version_trained_in_a_subprocess_and_rolls_back(ckpt, tmp_path):  # noqa: F811 — ckpt is the imported module-scope fixture, injected by pytest
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         m, part = _part(ckpt)
@@ -491,7 +491,7 @@ def test_the_loop_installs_a_version_trained_in_a_subprocess_and_rolls_back(ckpt
         assert r["ok"], r["mismatches"][:5]
 
 
-def test_deferred_apply_end_to_end_with_the_subprocess_runner(ckpt, tmp_path):
+def test_deferred_apply_end_to_end_with_the_subprocess_runner(ckpt, tmp_path):  # noqa: F811 — ckpt is the imported module-scope fixture, injected by pytest
     """Stage 3b: the training runs in a subprocess while the loop goes on deciding on version 0 (no decision waits for
     it); its result is applied on a later decision, recorded there, served, and the replay (rescored) is exact."""
     import time
@@ -571,7 +571,7 @@ json.dump({"outs": outs, "log": loop.log, "ok": r["ok"], "mm": [list(map(str, x)
 '''
 
 
-def test_checkpoint_end_to_end_train_promote_save_load_in_a_new_process_continue_replay(ckpt, tmp_path):
+def test_checkpoint_end_to_end_train_promote_save_load_in_a_new_process_continue_replay(ckpt, tmp_path):  # noqa: F811 — ckpt is the imported module-scope fixture, injected by pytest
     """Stage 4 on the tiny checkpoint: a version trained in a subprocess is promoted, the loop is saved, a new process
     loads the model and the checkpoint (the served adapter is installed), continues on the same inputs as the loop it
     was saved from, with the same decisions and records, and its rescored replay is exact."""
@@ -630,7 +630,7 @@ def test_checkpoint_end_to_end_train_promote_save_load_in_a_new_process_continue
     assert got["ok"] and got["decisions"] == n + 300, got["mm"]
 
 
-def test_attach_end_to_end_dispatcher_background_training_promote_rollback_save_load_replay(ckpt, tmp_path):
+def test_attach_end_to_end_dispatcher_background_training_promote_rollback_save_load_replay(ckpt, tmp_path):  # noqa: F811 — ckpt is the imported module-scope fixture, injected by pytest
     """Stage 5 on the tiny checkpoint: a loop attached to a Dispatcher over a System whose question is the LoRA part.
     The slow path's labels flow into the loop; a training runs in the background (thread runner) while decisions go
     on; the candidate is promoted; System 1's trace records the served adapter (the part's fingerprint, extra["lora"]);
@@ -725,7 +725,7 @@ def test_attach_end_to_end_dispatcher_background_training_promote_rollback_save_
         loop2.detach()
 
 
-def test_the_training_reads_the_question_at_the_parts_own_max_len(ckpt, tmp_path):
+def test_the_training_reads_the_question_at_the_parts_own_max_len(ckpt, tmp_path):  # noqa: F811 — ckpt is the imported module-scope fixture, injected by pytest
     # a part loaded with max_len=N trains at N: the payload carried the multi-question layout's length before, so a
     # training rebuilt the model at the default 512 and refused a question that the part itself reads (77 intents
     # with descriptions at 768 tokens)

@@ -132,6 +132,19 @@ def test_learning_loop_is_the_adapter_loop_with_the_default_policy_at_the_lanes_
         else:
             got.append([k, {**d, "stream": {f: v for f, v in d["stream"].items() if f not in new_fields["loop"]}}])
     assert len(got) == len(old) == 1506
+
+    def _canon(x):
+        """Floats rounded to 12 decimals: the replay is pinned per event, but a 1-ulp drift of a shadow score
+        across numpy/BLAS builds is not behavior (the CI runner differed from the fixture's machine at index 311
+        in exactly one last digit)."""
+        if isinstance(x, float):
+            return round(x, 12)
+        if isinstance(x, list):
+            return [_canon(v) for v in x]
+        if isinstance(x, dict):
+            return {k: _canon(v) for k, v in x.items()}
+        return x
+
     unscored, masked = 0, set()
     for n, (g, o) in enumerate(zip(got, old)):
         if g[0] == "loop" and g[1]["stream"]["shadow"] is None and o[1]["stream"]["shadow"] is not None:
@@ -142,7 +155,7 @@ def test_learning_loop_is_the_adapter_loop_with_the_default_policy_at_the_lanes_
             o = [o[0], {**o[1], "stream": {**o[1]["stream"], "shadow": None},
                         "loop": {**o[1]["loop"], "shadow_would": None}}]
         g = _lazy(g, o, masked)
-        assert g == o, n
+        assert _canon(g) == _canon(o), n
     assert unscored > 0
     # the lazy δ charge (stage B4): a promise has no index between its freeze and its first sample; the index it then
     # takes is the one the old class gave it at the freeze (the same issue order)
