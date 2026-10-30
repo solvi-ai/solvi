@@ -1040,9 +1040,11 @@ NumberGuard().run(reply, source).text
   column's over a row: `argmax(row "Revenue", "2019".."2023")` answers "which year had the highest revenue". Cells read like the input's numerals ("(300)" is −300); a dash or "n/a"
   is blank: an aggregate over a blank cell is refused, `count` skips it, a blank cell matches no condition. Values
   are the written numbers; `norm` multiplies each by its scale word and the table's caption scale ("in thousands",
-  "in millions", "'000" above the table or in its header; percent cells are not scaled), and without `norm` cells
-  with different scale words are refused. `max` / `min` keep every tied cell as a source; `argmax` / `argmin` refuse
-  a tie. `Table.describe()` lists the pointers for a prompt.
+  "in millions", "'000" above the table or in its header, or a header pairing a currency with the scale — "SEK
+  million", "£ million"; percent cells are not scaled), and without `norm` cells
+  with different scale words are refused. A units header also applies in `check`: a cell 18,742 under a "SEK
+  million" header sources "18,742 million" as a table cell. `max` / `min` keep every tied cell as a source; `argmax` /
+  `argmin` refuse a tie. `Table.describe()` lists the pointers for a prompt.
 - `<cmp>`: numbers, ISO dates and `"strings"` (only `==` / `!=`, case-insensitive), `x between a and b`
   (inclusive), `x [not] in (a, b, ...)`, and / or / not. A number against a date, "%" against "$", or two scale
   words are refused. The result is a yes/no, shown as `booleans=("yes", "no")`; a yes/no in `<calc>` is refused.

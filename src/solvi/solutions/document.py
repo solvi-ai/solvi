@@ -32,13 +32,15 @@ The scheme it sets up (all of it existing low-level blocks, wired):
   `<field>_value` (the rule's `why` shows it next to the quote). One scale rule — a scale is never multiplied, the
   number is kept in the document's own unit ("1,250 million", "$1.2bn", "1.2M", "3k" → 1250, 1.2, 1.2, 3); the
   currency (a sign — "$", "US$", "R$", "HK$", "Rs", "€" ... — or a known ISO code: "EUR", "USD"; "EBT", "NET" are not
-  currencies) dropped; a percentage as its number ("12.5%" → 12.5); a sign in any dash, before or after the currency,
-  or trailing ("1,234-"); parentheses as an accounting negative ("(1,234)", "$(1,234) million", "EUR (1,234)",
+  currencies) dropped; digits grouped by spaces read when the quote writes their currency ("€1 234" → 1234; bare
+  "1 234" does not read: it may be two numbers); a percentage as its number ("12.5%" → 12.5); a sign in any dash,
+  before or after the currency, or trailing ("1,234-"); parentheses as an accounting negative ("(1,234)", "$(1,234) million", "EUR (1,234)",
   "(12%)", "(12)%" → −1234, −12) — only around a number with a separator, decimals, a currency or a percent ("(2019)",
   "(1)" do not read: a year, a footnote). Anything else — a range, two numbers, two scales or currencies, an
-  exponent ("1e3"), "1_000", NaN or infinity, an ambiguous "2.500" — does not read, and the answer abstains with the
-  reason (a CR / DR marker or brackets do not read either: the sign depends on the account). One rule keeps the
-  quote honest: at every occurrence of its digits in the text (with at least the quote's currency and scale, any
+  exponent ("1e3"), "1_000", NaN or infinity, an ambiguous "2.500" (a single ".ddd" group: a thousands point or a
+  decimal point — `decimal="dot"` declares a document that groups thousands with a dot, "30.000" → 30000) — does not
+  read, and the answer abstains with the reason (a CR / DR marker or brackets do not read either: the sign depends
+  on the account). One rule keeps the quote honest: at every occurrence of its digits in the text (with at least the quote's currency and scale, any
   spaces between; full-width digits and marks read as their ASCII) the number token is extended over what is bound
   to the digits — a sign in any dash, minus or "&minus;" (any horizontal space after it), a currency, "(" with ")"
   closing right after (any white space inside), "[" "]", a CR / DR marker, a scale word or suffix, a percent. A sign,
@@ -112,6 +114,7 @@ QUESTION = "answer"
 STATE = "state"                     # the fact that carries the input without the text
 MIN_CALIBRATION = 100               # below this, calibrate warns: the threshold rests on few examples
 UNIT_MODES = ("same", "lenient", "any")
+DECIMAL_MODES = {"dot": ",", "comma": "."}   # the separator the document groups thousands with → the decimal mark
 
 # every dash or minus sign a document writes (length-preserving, so offsets into the text stay as they are); "△" / "▲",
 # the minus of Japanese and Chinese financial tables, stay themselves (never a separator) and read as a minus
@@ -156,11 +159,15 @@ def _same_currency(x, y):
     return x == y or (x == "$" and y in _DOLLARS) or (y == "$" and x in _DOLLARS)
 
 
-def _read_quote(vtype, text):
+def _read_quote(vtype, text, decimal=None):
     """A quoted number → (the value as vtype, its Unit). See the module docs, "numbers": the scale never multiplied,
     the currency dropped (an ISO code or a sign), a percentage as its number, a sign in any dash before or after the
     currency or trailing, parentheses as a negative around a number with a separator, decimals, a currency or a
-    percent; the digits and separators as solvi.core.types.span_value reads them. ValueError when it is not one number."""
+    percent; the digits and separators as solvi.core.types.span_value reads them — digits grouped by spaces read when
+    the quote writes their currency ("€1 234" → 1234; bare "1 234" abstains: it may be two numbers), and a single
+    ".ddd" group ("30.000") reads only when decimal declares the decimal mark ("," for a document that groups
+    thousands with a dot — what document(..., decimal="dot") passes; a declaration, never a guess). ValueError when
+    it is not one number."""
     import unicodedata
 
     from ..core.types import span_value
@@ -177,7 +184,10 @@ def _read_quote(vtype, text):
     curs = {_currency_code(m.group()) for m in _CURRENCY.finditer(t)}
     if len(curs) > 1 and not (len(curs) == 2 and _same_currency(*sorted(curs))):
         raise ValueError(f"two currencies ({', '.join(sorted(curs))})")
-    curs = {max(curs, key=len)} if curs else curs
+    kept = max(curs, key=len) if curs else None
+    cur_surf = next((m.group() for m in _CURRENCY.finditer(t) if _currency_code(m.group()) == kept), "") \
+        if kept else ""
+    curs = {kept} if kept else curs
     t = _CURRENCY.sub(" ", t)
     scales = {_SCALES[m.group(1).lower()] for rx in (_SCALE_WORD, _SCALE_SUFFIX) for m in rx.finditer(t)}
     if len(scales) > 1:
@@ -200,7 +210,17 @@ def _read_quote(vtype, text):
         t = t[1:].strip()
     if not _CORE.fullmatch(t or "-"):
         raise ValueError("not one number")
-    v = span_value(vtype, t)
+    span_t = t
+    if cur_surf and re.search(r"\d \d", t):
+        span_t = f"{cur_surf} {t}"            # space-grouped digits: the currency the quote writes is what makes
+    try:                                      # them one number ("€1 234") — keep it in the span the reader sees
+        v = span_value(vtype, span_t, spec={"decimal": decimal} if decimal else None)
+    except ValueError as e:
+        if decimal is None and "TextIn(decimal=" in str(e):
+            raise ValueError(re.sub(r"\(TextIn\(decimal=\.\.\.\) says which\)",
+                                    '(declare it: document(..., decimal="dot") — a dot that groups thousands, the '
+                                    'comma reads decimals)', str(e))) from None
+        raise
     if isinstance(v, float) and not math.isfinite(v):
         raise ValueError("not a finite number")
     return (-v if neg else v), Unit(next(iter(scales), None), next(iter(curs), None), pct)
@@ -637,7 +657,7 @@ def _same_number(r, y):
 
 
 def document(schema, model, *, task=None, text="doc", compute=None, answer=None, checks=None, units="same",
-             storage=None, calibration=None, record="full", workers=1, reads_with=None, slow=None):
+             storage=None, calibration=None, record="full", workers=1, reads_with=None, slow=None, decimal=None):
     """A decision over a document (see the module docs) → DocumentSystem.
 
     schema: a pydantic model class, one field per fact to read (`Span[float]`, `Span[date]`, `Span[str]`, a
@@ -653,7 +673,12 @@ def document(schema, model, *, task=None, text="doc", compute=None, answer=None,
     one ask (System(workers=)). reads_with: state keys every field's read sees — a `<state>` block in the read's
     prompt between the task and the text; the grounding and the quote offsets stay on the text (a span is still read
     from the one text fact); the input must carry each named key, and a recipe with reads_with has its own catalog
-    fingerprint (a calibration or a record made without it does not attach)."""
+    fingerprint (a calibration or a record made without it does not attach).
+    decimal: "dot" — the document groups thousands with a dot and writes decimals with a comma ("30.000" → 30000,
+    "12,5" → 12.5) — or "comma" (a comma groups thousands; the dot reads decimals). A per-document declaration of
+    the separator the guarded reader abstains on by default (a single ".ddd" group is a thousands point or a decimal
+    point, the text does not say — never a guess); the recipe with it is its own catalog (a calibration or a record
+    made with another decimal= does not attach)."""
     from ..core.store import JSONLStorage
     from ..core.system import System
     if not (isinstance(schema, type) and isinstance(getattr(schema, "model_fields", None), dict)):
@@ -665,6 +690,11 @@ def document(schema, model, *, task=None, text="doc", compute=None, answer=None,
     fields = list(schema.model_fields)
     if units not in UNIT_MODES:
         raise ValueError(f'units must be "same", "lenient" or "any", not {units!r}')
+    if decimal is not None and (not isinstance(decimal, str) or decimal.strip().lower() not in DECIMAL_MODES):
+        raise ValueError('decimal must be "dot" (the document groups thousands with a dot, the comma reads '
+                         'decimals: "30.000" is thirty thousand) or "comma" (a comma groups thousands), not '
+                         f'{decimal!r}')
+    dec = None if decimal is None else DECIMAL_MODES[decimal.strip().lower()]
     for bad in (text, STATE, QUESTION, "units", "same_units", "compute"):
         if bad in fields:
             raise ValueError(f"{schema.__name__}.{bad}: a field cannot be named {bad!r} (the "
@@ -741,12 +771,12 @@ def document(schema, model, *, task=None, text="doc", compute=None, answer=None,
     for name in numbers:                                   # a number field's value: read, its sign checked in the text
         vt = schema.model_fields[name].annotation
 
-        def value(kw, name=name, vt=vt):
+        def value(kw, name=name, vt=vt, dec=dec):
             raw = kw[name]
             if not isinstance(raw, str):
                 return raw
             try:
-                v = _read_quote(vt, raw)[0]
+                v = _read_quote(vt, raw, decimal=dec)[0]
             except ValueError as e:
                 raise ValueError(f"{name}: {raw!r} does not read as {vt.__name__}: {e}") from None
             why = _left_out(raw, kw[text])
@@ -766,14 +796,14 @@ def document(schema, model, *, task=None, text="doc", compute=None, answer=None,
                 raise ValueError(f"the computed answer is {v!r}, not a finite number")
         return v
 
-    def units_fact(kw):
+    def units_fact(kw, dec=dec):
         """{field: [scale, currency, percent]}: what each number's quote writes, and the currency or scale its text
         token writes where the quote left them out."""
         out = {}
         for x in numbers:
             raw = kw[x]
             try:
-                u = _read_quote(schema.model_fields[x].annotation, raw)[1]
+                u = _read_quote(schema.model_fields[x].annotation, raw, decimal=dec)[1]
             except (ValueError, TypeError):            # unreadable: its value part says why
                 u = Unit()
             why, got = _ground(raw, kw[text])

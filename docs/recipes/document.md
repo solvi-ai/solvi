@@ -107,7 +107,11 @@ the first `document(...)` call.
 `text="doc"` — the input key carrying the text. `reads_with=("question", ...)` — state keys every read sees as a
 `<state>` block (see "When the reads need the question" above). `units="same"` (default) refuses amounts whose written scales
 or currencies disagree; `"lenient"` lets a bare `$` match any dollar and a field without a scale match any;
-`"any"` turns the check off. `checks=` and `answer=` as in the low level. The model is anything with the
+`"any"` turns the check off. `decimal="dot"` declares a document that groups thousands with a dot and writes
+decimals with a comma (`"30.000"` → 30000, `"12,5"` → 12.5); `"comma"` is the comma-thousands way. Without it a
+single `".ddd"` group abstains — a thousands point or a decimal point, the text does not say (never a guess); the
+abstention reason names this knob. A recipe with a `decimal=` is its own catalog: a calibration or a record made
+with another one does not attach. `checks=` and `answer=` as in the low level. The model is anything with the
 decider interface; a `logprobs="auto"` model is read with one stated confidence per read (a copy, with a
 warning).
 

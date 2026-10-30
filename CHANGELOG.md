@@ -31,6 +31,40 @@
 - Docs: the module docstring now says the same-since replacement is blind to which value an erratum corrected
   (S264), and the guard's docstring states the re-test's validity scoping.
 
+### Fixed (document / numguard — the 2026-10-30 external handoff, S308/S310–S313)
+- **numguard reads a parenthesised number after another number as what it is: a comparative (S310).** "16.6% (18.8%)"
+  used to read −18.8 while `solvi.document`'s grounding abstained on the same text ("a comparative or a negative").
+  The two readers are aligned: document's `_AFTER_NUMBER` rule (a paren number right after another number on its
+  line — up to ten characters between, one new line, a tab or a comma allowed; a table's "|" or ";" is a separator)
+  now applies in `numerals` too: the parentheses stay, the number reads unsigned, the sign is never guessed (a
+  `fill` of `[k]` writes "(18.8%)" as the input writes it; `check` marks a model-typed −18.8 against it "sign").
+  Genuine negatives — a paren number standing alone — still read negative. API-visible: fill texts for "N (M)"
+  comparatives change.
+- **A table's units header now applies to its cells (S311).** `parse_tables` did not even recognise "SEK million"
+  / "£ million" headers (only "in thousands"-style and "'000s"), and `check` never applied a table's `scale` to
+  the cells: "18,742 million" against a cell 18,742 under a "SEK million" header was unsourced (or "rescaled",
+  which launders real scale errors). The caption parser reads the currency + scale header (setting the new
+  `Table.currency`, shown in `describe()` and used as the cells' unit in the typed tools), and `check` multiplies
+  non-percent cell numbers by the header's scale — for `tables=` given apart and for a source text's own tables
+  (`NumberGuard.run` included), so the claim sources as an exact "table cell". A bare "18,742" against a
+  millions header stays unsourced (six orders off).
+- **`document(..., decimal="dot")`: the dot-thousands declaration (S308).** A single ".ddd" group ("30.000",
+  "1.000") abstained by design (a thousands point or a decimal point, the text does not say) — and the abstain
+  reason pointed at `TextIn(decimal=…)`, an API the recipe never exposes. The knob is end-to-end now:
+  `decimal="dot"` (the document groups thousands with a dot, the comma reads decimals: "30.000" → 30000,
+  "12,5" → 12.5) or `"comma"`, plumbed through `_read_quote` into `span_value(..., spec=)` (a new keyword of
+  `solvi.core.types.span_value`) and `parse_number`; a declared reading wins over the type's own where they
+  differ. Default unchanged (never a guess); the abstain reason names `document(..., decimal="dot")`; a recipe
+  with a `decimal=` is its own catalog (a calibration or a record made with another one does not attach).
+- **Space-grouped digits read when the quote writes their currency (S313).** `_read_quote` stripped the currency
+  before the value reader, so even "€1 234" — the escape hatch textin documents for space-grouped numbers —
+  refused through `solvi.document` while raw `parse_number("€1 234")` read 1234. The currency now stays in the
+  span the reader sees: "€1 234" → 1234 in EUR. The bare "1 234" (and "1 ,234") keeps abstaining — the protected
+  never-guess decision of 2026-10-29.
+- **A scale word binds to the number on its own line (S312).** numguard's numeral regex took the scale word
+  across a new line: "£1,000\nmillion" was one numeral with the newline inside its surface. The whitespace
+  before a scale word is same-line only; the one-line form still reads "£1,000 million" (a billion pounds).
+
 ### Fixed (process and the stream certificate — the 2026-10-30 external handoff, S270/S273/S275/S279/S280/S281/S282)
 - **A stream-certified node's promise is read at its risk level (S282).** `StreamPromise.record()` keeps its level
   under "risk" (kind "joint"), while `Process.guarantee()` read "error" for every non-CRC method: the per_node

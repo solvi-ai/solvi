@@ -105,8 +105,12 @@ _NUM_RE = re.compile(
     r"(?:(?P<pct>\s?%|\s?percent\b|\s?per\s+cent\b)"
     r"|(?P<ord>st|nd|rd|th)\b"
     rf"|(?P<sg>{_SG})\b"
-    rf"|\s(?P<sw>{_SW})\b)?)", re.I)
+    rf"|[^\S\n](?P<sw>{_SW})\b)?)", re.I)
 _TOKEN_RE = re.compile(r"(?<![\w\-/.])\w(?:[\w\-/.]*\w)?")
+# a parenthesised number right after another number on its logical line (up to ten characters between, one new
+# line, a tab or a comma allowed; a table's "|" or ";" is a separator) — the same shape solvi.solutions.document
+# abstains on: "16.6% (18.8%)", "SEK 2.84 (5.45)" — a comparative or an accounting negative, the text does not say
+_AFTER_NUMBER = re.compile(r"[0-9][^\n|;()\[\]0-9]{0,10}(?:\n[^\S\n]*)?\Z")
 
 
 @dataclass(frozen=True)
@@ -115,7 +119,10 @@ class Numeral:
 
     `number` is the written number with its sign ("(12.3)" and "-12.3" → -12.3; "4.2 million" → 4.2); `scale` the
     multiplier of a scale word or suffix (1,000 for "thousand" / "k"); `value` their product. `unit` is "%", a currency
-    sign, an ordinal suffix or "". A date has `kind="date"` and `date` (a `datetime.date`, or `(month, day)` when the
+    sign, an ordinal suffix or "". A parenthesised number right after another number on its line ("16.6% (18.8%)": a
+    comparative, or an accounting negative — the text does not say) keeps its parentheses and reads unsigned, the
+    sign not guessed (what `solvi.solutions.document` abstains on, as a reader without a decision). A date has
+    `kind="date"` and `date` (a `datetime.date`, or `(month, day)` when the
     text gives no year). An identifier ("A-10457", "COVID-19") has `kind="id"` and is not a number."""
     start: int
     end: int
@@ -131,9 +138,10 @@ class Numeral:
         return None if self.number is None else self.number * self.scale
 
     def plain(self) -> str:
-        """The surface as prose would write it: a negative in parentheses as "-12.3"."""
+        """The surface as prose would write it: a negative in parentheses as "-12.3". A comparative "(18.8%)" —
+        parentheses after another number on its line, whose sign was never read — keeps them."""
         m = re.fullmatch(r"\((.*)\)(\s?%)?", self.surface, re.S)
-        if m and self.kind == "number":
+        if m and self.kind == "number" and self.number is not None and self.number < 0:
             return "-" + m.group(1).strip() + (m.group(2) or "")
         return self.surface
 
@@ -164,7 +172,10 @@ def numerals(text: str) -> list[Numeral]:
     """Every number, date and identifier with digits in `text`, in order. Dates: ISO "2024-03-15", "15.03.2024" /
     "15/03/2024" (day first), "March 15, 2024", "15 March 2024", "March 15" (no year). Numbers: a sign or a negative
     in parentheses, a currency sign, comma thousands, a decimal point, then "%" / "percent", an ordinal suffix
-    ("3rd"), a scale suffix ("12k", "3bn") or a scale word ("4.2 million"). A token where digits follow letters
+    ("3rd"), a scale suffix ("12k", "3bn") or a scale word ("4.2 million", bound to the number on its own line —
+    "£1,000\\nmillion" is the number £1,000 and the word on the next line). A number in parentheses right after
+    another number on its line ("16.6% (18.8%)" — a comparative or a negative, the text does not say) keeps its
+    parentheses and reads unsigned. A token where digits follow letters
     ("A10", "v2.1", "COVID-19", "1Z999AA1") is an identifier; a number followed by a unit ("5km") is a number."""
     out: list[Numeral] = []
     taken: list[tuple[int, int]] = []
@@ -192,9 +203,12 @@ def numerals(text: str) -> list[Numeral]:
             continue
         g = m.groupdict()
         if g["par"]:
-            n = -_dec(g["pcore"])
             unit = "%" if g["ppct"] or g["ppct2"] else (g["pcur"] or "")
-            out.append(Numeral(m.start(), m.end(), m.group(), "number", n, 1, unit))
+            before = text[max(0, m.start() - 64):m.start()].replace("\t", " ").replace(",", " ")
+            n = _dec(g["pcore"])
+            if not _AFTER_NUMBER.search(before):                     # "16.6% (18.8%)": a comparative or a negative,
+                n = -n                                               # the text does not say — the parentheses stay and
+            out.append(Numeral(m.start(), m.end(), m.group(), "number", n, 1, unit))  # the sign is not read
         else:
             n = _dec(g["core"])
             if g["sign"]:
@@ -433,8 +447,12 @@ def date_calc(expr: str) -> dt.date | int | str:
 
 
 # ============================================================================================== tables
-_CAPTION_RE = re.compile(r"\bin\s+(thousands|millions|billions|trillions)\b|(?<![\w'])(?:'000s?|000s|000's)(?!\w)",
-                         re.I)
+# a table's units header: "in thousands", "'000s", or a currency with the scale — "SEK million", "£ million",
+# "In $ millions" — whose first group is the scale word ("in thousands"), the others the currency and the scale
+_CAPTION_RE = re.compile(
+    r"(?i:in\s+(thousands?|millions?|billions?|trillions?)\b)"
+    r"|(?<![\w$€£¥₽])(?P<hcur>[$€£¥₽]|[A-Z]{3})(?:[ \t]+in)?[ \t]*(thousands?|millions?|billions?|trillions?)\b"
+    r"|(?<![\w'])(?:'000s?|000s|000's)(?!\w)")
 _SEP_ROW = re.compile(r"\|?\s*:?-{2,}:?\s*(?:\|\s*:?-{2,}:?\s*)*\|?")
 _BLANK = frozenset({"", "-", "–", "—", "n/a", "na", "n.a.", "nm", "n.m."})
 _CELL_REST = re.compile(r"[\s$€£¥₽%*†‡]*(?:[A-Z]{3})?[\s*†‡]*")
@@ -460,13 +478,16 @@ class Cell:
 class Table:
     """A table for `<table>` and `<count>`: `rows` row-major, the header row first (the column labels); with
     `row_labels=True` the first column holds the row labels. `scale` multiplies the money cells under `norm` (1,000
-    for a caption "in thousands"; percent cells are not scaled). Cells are text ("$1,250", "(3.2)", "12.5%", "—"),
+    for a caption "in thousands" or a header "SEK million"; percent cells are not scaled) and is applied to the
+    cells by `check`; `currency` is what a header "SEK million" / "£ million" states about them ("" when it does
+    not). Cells are text ("$1,250", "(3.2)", "12.5%", "—"),
     read like the input's numerals: a parenthesised number is negative, a dash or "n/a" is blank. Short rows are
     padded with blanks."""
     rows: list
     row_labels: bool = True
     scale: int = 1
     caption: str = ""
+    currency: str = ""
 
     def __post_init__(self):
         rows = [[str(c).strip() for c in r] for r in self.rows]
@@ -501,7 +522,8 @@ class Table:
         nr, nc = self.shape
         cols = ", ".join(f"{j} {c!r}" for j, c in enumerate(self.columns, 1))
         rows = ", ".join(f"{i} {r!r}" for i, r in enumerate(self.labels, 1)) or f"1..{nr} (no labels)"
-        sc = f"; values in {_SCALE_NAME[self.scale]}" if self.scale != 1 else ""
+        sc = f"; values in {f'{self.currency} ' if self.currency else ''}{_SCALE_NAME[self.scale]}" \
+            if self.scale != 1 else ""
         return f"{name}: {nr} rows ({rows}); {nc} columns ({cols}){sc}"
 
 
@@ -522,8 +544,9 @@ def _split_pipe(line: str) -> list[str]:
 def parse_tables(text: str, row_labels: bool = True) -> list[Table]:
     """The pipe (markdown) tables of a text, in order: `table1`, `table2`, ... A run of lines that start with "|" or
     hold two "|" or more is a table; a `|---|---|` line is skipped; the first row is the header. A caption "in thousands"
-    / "in millions" / "in billions" / "in trillions" (or "'000", "000s") in the last two non-blank lines of the three
-    above the table or in its header row sets `Table.scale`."""
+    / "in millions" / "in billions" / "in trillions" (or "'000", "000s"), or a header that pairs a currency with the
+    scale — "SEK million", "£ million", "In $ millions" — in the last two non-blank lines of the three above the table
+    or in its header row sets `Table.scale` (and `Table.currency` for the currency + scale form)."""
     lines = text.splitlines()
     out, i = [], 0
     while i < len(lines):
@@ -538,8 +561,12 @@ def parse_tables(text: str, row_labels: bool = True) -> list[Table]:
             above = [ln.strip() for ln in lines[max(0, i - 3):i] if ln.strip()][-2:]
             caption = " ".join(above + rows[0])
             m = _CAPTION_RE.search(caption)
-            scale = (_SCALE_WORDS[m.group(1).lower()] if m.group(1) else 1000) if m else 1
-            out.append(Table(rows, row_labels, scale, " ".join(above)))
+            scale, cur = 1, ""
+            if m:
+                sw = m.group(1) or m.group(3)
+                scale = _SCALE_WORDS[sw.lower()] if sw else 1000
+                cur = (m.group("hcur") or "") if m.group(3) else ""
+            out.append(Table(rows, row_labels, scale, " ".join(above), cur))
         i = j
     return out
 
@@ -594,7 +621,8 @@ def _cell_value(t: Table, ti: int, r: int, c: int) -> _V | None:
         if n.kind == "date" and isinstance(n.date, dt.date):
             return _V("date", n.date, cells=(cell,), label=lab)
         if n.kind == "number":
-            return _V("number", n.number, n.unit if n.unit in _UNITS else "", n.scale, t.scale, (cell,), lab)
+            unit = n.unit if n.unit in _UNITS else (t.currency if not n.unit else "")   # a "SEK million" header
+            return _V("number", n.number, unit, n.scale, t.scale, (cell,), lab)
     return _V("str", s, cells=(cell,), label=lab)
 
 
@@ -1737,9 +1765,12 @@ def check(text: str, source: str | list[Numeral] = "", results: Iterable = (), *
     when it is the year of one. With `rescale=True` a number off by a whole scale (8,220 against 8,220,000) is
     sourced as "rescaled"; with `rounding=True` a number equal to a source rounded to its own decimals (two significant
     digits at least) as "rounded". Identifiers are skipped, or with `ids="check"` must appear verbatim in the input.
-    `tables`: tables given apart from `source` (a `Table`, a list, or a text with pipe tables); a number equal to one
-    of their cells is an input with index 0 and `how="table cell"` (the tables inside a `source` text are already its
-    numerals)."""
+    `tables`: tables given apart from `source` (a `Table`, a list, or a text with pipe tables); a number equal to
+    one of their cells is an input with index 0 and `how="table cell"`. A table's units header — "in thousands" or
+    "SEK million" / "£ million" — applies to its cells: a cell 18,742 under a "SEK million" header sources
+    "18,742 million" (a percent cell is not scaled). The tables inside a `source` text are already its numerals;
+    their header scale is applied to them the same way, as an addition (a number quoting a cell as written still
+    matches the numeral)."""
     src_text = source if isinstance(source, str) else ""
     nums = [n for n in numerals(source) if n.kind != "id"] if isinstance(source, str) else list(source)
     pool_num, pool_date = [], []
@@ -1748,11 +1779,15 @@ def check(text: str, source: str | list[Numeral] = "", results: Iterable = (), *
             pool_date.append(("input", k, n.date))
         else:
             pool_num.append(("input", k, n.number, n.value))
-    for t in _as_tables(tables):
+    # a source text's own tables: their cells are already its numerals; only their header scale adds readings
+    for t in _as_tables(tables) + ([t for t in parse_tables(src_text) if t.scale != 1] if src_text else []):
         for row in t.rows[1:]:
             for n in numerals(" ; ".join(row[1:] if t.row_labels else row)):
                 if n.kind == "date":
                     pool_date.append(("input", 0, n.date))
+                elif n.kind == "number" and t.scale != 1 and n.unit != "%":
+                    # the header's scale: 18,742 under "SEK million" is 18,742 million
+                    pool_num.append(("input", 0, n.number, n.number * n.scale * t.scale))
                 elif n.kind == "number":
                     pool_num.append(("input", 0, n.number, n.value))
     modes: dict[int, tuple[str, tuple]] = {}                 # call @k of a typed tool: its mode and cells
@@ -1898,11 +1933,11 @@ class NumberGuard:
     def run(self, text: str, source: str, results: Iterable = (), tables=None) -> Outcome:
         """Fill the text, check every number left in it, apply `on_fail`. `results`: values from tools run outside
         (a native tool call's output) that also count as sources. `tables`: tables given apart from `source` (None:
-        the pipe tables of `source`)."""
+        the pipe tables of `source`, their units header applied to the cells in the check)."""
         f = self.fill(text, source, tables)
         v = check(f.text, f.source_numerals, list(f.calls) + list(results), inserted=f.inserted,
                   constants=self.constants, signed=self.signed, rescale=self.rescale, rounding=self.rounding,
-                  ids=self.ids, errors=f.errors, tables=tables)
+                  ids=self.ids, errors=f.errors, tables=tables if tables is not None else source)
         if self.ids == "check":                                  # identifiers need the input text itself
             idv = check(f.text, source, (), constants=self.constants, ids="check")
             ids_by_span = {(c.start, c.end): c for c in idv.numbers if c.kind == "id"}
