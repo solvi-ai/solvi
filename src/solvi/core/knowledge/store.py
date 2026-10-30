@@ -39,7 +39,8 @@ different untils, the latest claim's until is the version's (a correction, as on
 then (45, None) reads open from 45 and the reverse order reads bounded at 55. The same since from two writers (two missing sinces too) is not an
 observation of a change — rank decides, equal ranks dispute; that holds while any other writer still asserts the old
 value, even when the new value's writer had asserted it too. A writer's later value at one since replaces its own
-earlier one there (it no longer asserts the old value), so two writers who both move from one value to the same other
+earlier one there (it no longer asserts the old value) — blindly: after an erratum withdraws one of its claims, the
+writer's next value at that since replaces every value it had there, including ones the erratum did not correct; two writers who both move from one value to the same other
 value leave that value holding. The winner takes only the overlap: a loser whose interval
 reaches beyond it is closed there and holds outside (refuted only when the winner covers it whole), and a dispute is
 contested only on the overlap — outside it each side holds; a person's answer (`resolve`) closes the loser the same
@@ -48,8 +49,9 @@ and `snapshot(valid_at=)` read the effective intervals (a snapshot row carries "
 own `valid`; `Knowledge.value(valid_at=)` reads them). An item derived from a premise disputed only on an overlap is a
 hypothesis as a whole, but at a time where every premise of one of its derivations holds it is usable and a fact. Keys whose assertions carry no `valid` resolve as described
 above.
-Known behaviour: a circular derivation (a ← p, b ← a, then a ← b) is accepted, and the items support each other —
-the status walk does not require a derivation to be well-founded.
+A circular derivation (a ← p, b ← a, then a ← b) is accepted (with a warning at the write), but a chain back
+through the item itself is no support: retracting the loop's outside premise taints every item in it, so such
+content cannot keep itself alive past a retraction.
 
 Statuses: "active" (a fact System 1 may answer on), "hypothesis" (a hint: a behaviour-changing item not yet promoted
 by the write gates, a derived item on a premise that is not active, an item under a pending flag, or one pending a
@@ -104,6 +106,7 @@ from __future__ import annotations
 import datetime as _dt
 import json
 import threading
+import warnings
 from bisect import bisect_left, insort
 from collections import defaultdict
 from contextlib import contextmanager
@@ -280,6 +283,16 @@ def _segments(ivs):
     return [(None, pts[0])] + list(zip(pts, pts[1:])) + [(pts[-1], None)]
 
 
+def _ivs_minus(xs, ys):
+    """The half-open intervals of `xs` minus those of `ys` (a later version closes an earlier one on its own span;
+    a bounded one gives the earlier value back after it)."""
+    out = []
+    for seg in _segments(xs + ys):
+        if any(_covers_seg(x, seg) for x in xs) and not any(_covers_seg(y, seg) for y in ys):
+            out.append(list(seg))
+    return out
+
+
 def _covers_seg(iv, seg):
     (a, b), (lo, hi) = iv, seg
     return (a is None or (lo is not None and not lo < a)) and (b is None or (hi is not None and not b < hi))
@@ -389,15 +402,20 @@ class KnowledgeStore:
     ConsistencyGate); the source check runs first whatever is given. defaults: reconfirm_after per (kind, source).
     writers: {writer: source (or sources), ...} — opt-in: a source (a rank) is then taken only from a writer (`by=`)
     registered with it; any other item is refused with the reason (gates.WriterGate, run right after the source
-    check). None (default): any writer may declare any source, as before."""
+    check). None (default): any writer may declare any source, as before. now: a world clock, opt-in — a callable
+    returning the current world time (no arguments), or a fixed time; with it `usable(id)` and `usable` on derived
+    items read the effective intervals at that time instead of status alone, so a version closed by a later one
+    (or an item derived from it) is not usable with no `valid_at` given. None (default): as before — `usable(id)`
+    with no `valid_at` reads status and staleness only."""
 
-    def __init__(self, storage=None, *, gates=None, defaults=None, writers=None, _replay=True):
+    def __init__(self, storage=None, *, gates=None, defaults=None, writers=None, now=None, _replay=True):
         from ..store import open_storage
         self.storage = open_storage(storage)
         self.gates = with_source_gate(gates if gates is not None else default_gates())
         if writers is not None:
             self.gates.insert(1, WriterGate(writers))       # right after the source check
         self.defaults = dict(RECONFIRM_DEFAULTS if defaults is None else defaults)
+        self.now = now                                   # a world clock for usable() with no valid_at (see usable)
         self._lock = threading.RLock()
         self._mem = _MemoryJournal() if self.storage is None else None
         self.journal = []                            # the entries in order, each with its position "n"
@@ -618,6 +636,11 @@ class KnowledgeStore:
         prop = self.proposal(kind, body, scope, source=source, by=by, evidence=evidence, derived_from=derived_from,
                              supersedes=supersedes, reconfirm_after=reconfirm_after, valid=valid, level=level, of=of,
                              inferred=inferred, consulted=consulted)
+        cyc = _premise_cycle(self.items, prop["id"], prop["derived_from"])
+        if cyc is not None:
+            warnings.warn(f"derived_from runs in a cycle through item {cyc}: support through a premise cycle is no "
+                          "support — retracting an outside premise of the loop taints every item in it",
+                          stacklevel=2)
         with self._lock:
             verdicts = []
             for g in self.gates:
@@ -1077,9 +1100,12 @@ class KnowledgeStore:
         item hold then: inside its effective intervals (`periods(id)`; an item without `valid` always is), and, for a
         derived item, where its premises hold. A disputed item is usable at a time outside the contested overlap; so
         is an item derived from it, where for one of its derivations every premise is usable then (a premise met again
-        on its own derivation chain is not)."""
+        on its own derivation chain is not). No valid_at and no world clock (`KnowledgeStore(now=)`): status and
+        staleness only — a version closed by a later since still reads usable."""
         if iid in _seen:
             return False
+        if valid_at is None and self.now is not None:
+            valid_at = self.now() if callable(self.now) else self.now
         if valid_at is None:
             return self.status(iid) == "active" and not self.stale(iid)
         st = self.status(iid)
@@ -1388,36 +1414,76 @@ def _decider(decide):
 
 
 # ---------------------------------------------------------------------------------------------------- the resolver
-def _taint(items, iid, memo):
+_IN_PROGRESS = object()                              # a _taint call still on the stack: a premise chain back
+
+
+def _premise_cycle(items, iid, premises, cap=64):
+    """The premise chain from `premises` back to `iid` — an item citing itself, directly or through the items its
+    premises derive from: the id the chain re-enters through, or None. Advisory only (the walk treats support through
+    a cycle as no support whatever the length): the search stops after `cap` hops, so a loop longer than that warns
+    nothing — the cost of a check on every write must not grow with the chain."""
+    seen, stack, hops = set(), list(set(premises)), 0
+    while stack and hops < cap:
+        p = stack.pop()
+        hops += 1
+        if p == iid:
+            return p
+        if p in seen:
+            continue
+        seen.add(p)
+        pit = items.get(p)
+        if pit is not None:
+            stack.extend(q for a in _live(pit) for q in a.get("just", ()))
+    return None
+
+
+def _taint(items, iid, memo, deferred=None):
     """The journal position the item's support was last cut at — its own retraction, or, when every assertion since
     then rests on a premise cut after it was written, that premise's cut — or None. An item retracted and then only
     re-inferred (`inferred` assertions: a rule recomputing it from premises) is not cut by its own retraction. Pure in the journal (`memo` keeps it
     between resolutions); an item with one uncut justification left is not cut (so a retraction stays exact: the store
-    after it is the store rebuilt without the retracted item)."""
+    after it is the store rebuilt without the retracted item). Support through a premise cycle back into the loop is
+    no support (S261): it neither keeps the item alive nor taints it by itself — an item whose only support is such a
+    loop stays undecided here (returned as the in-progress mark, collected in `deferred`) until the loop's root
+    resolves, or, with no outside support at all, is settled by the caller."""
     if iid in memo:
         return memo[iid]
-    memo[iid] = None                                    # a premise cycle reads as uncut
+    memo[iid] = _IN_PROGRESS                         # a chain back through this item reads as a cycle, not uncut
     it = items.get(iid)
     if it is None:
+        memo[iid] = None
         return None
     cut = _cut(it)
     cut = None if cut < 0 else cut
     live = _live(it)
-    via, whole, seen = [], bool(live), []
+    via, whole, seen, cyc = [], bool(live), [], False
     for a in live:                                      # an inferred assertion follows its premises: a premise's cut
-        ta = max((tp for p in a["just"] if (tp := _taint(items, p, memo)) is not None and tp > a["t"]   # that its own
-                  and not (a.get("inferred") and any(q > tp for q in items[p].promoted))), default=None)  # re-test cleared
-        #                                                                                          does not hold it back
-        if ta is None:
-            whole = False
-        else:
-            via.append(ta)
-        seen += [tp for p in a.get("consulted", ()) if (tp := _taint(items, p, memo)) is not None and tp > a["t"]]
+        tas, alive = [], not a["just"]                  # that its own re-test cleared does not hold it back
+        for p in a["just"]:
+            tp = _taint(items, p, memo, deferred)
+            if tp is _IN_PROGRESS:                      # the premise chain runs back through an open item
+                cyc = True
+                continue
+            if tp is None or tp <= a["t"] or (a.get("inferred") and any(q > tp for q in items[p].promoted)):
+                alive = True                            # this premise keeps the assertion's support
+            else:
+                tas.append(tp)
+        if alive:
+            whole = False                               # an uncut premise outside any cycle keeps the item alive
+        elif tas:
+            via.append(max(tas))
+        seen += [tp for p in a.get("consulted", ()) if (tp := _taint(items, p, memo, deferred))
+                 not in (None, _IN_PROGRESS) and tp > a["t"]]
     if cut is not None and live and all(a.get("inferred") for a in live):
         cut = None                                      # recomputed from premises: their own cuts decide (above)
     # a consulted item (an alternative's evidence) cut after the assertion: any one marks it for review
-    memo[iid] = max(([cut] if cut is not None else []) + (via if whole else []) + seen, default=None)
-    return memo[iid]
+    val = max(([cut] if cut is not None else []) + (via if whole else []) + seen, default=None)
+    if val is None and cyc and whole and deferred is not None:
+        memo.pop(iid, None)                             # undecided: rests on a loop whose root is still open
+        deferred.add(iid)
+        return _IN_PROGRESS
+    memo[iid] = val
+    return val
 
 
 def _guard(items, ids):
@@ -1425,10 +1491,11 @@ def _guard(items, ids):
     from a writer on an overlapping validity — by any retraction (plain, only_from, an assertion, retract_source, a
     failed re-test, a rollback), on any item — is a copy. A copy is pending a re-test unless writers the content was
     not withdrawn from still hold it, in their uncopied assertions, wherever the copy could hold (outside the spans
-    where a later version holds anyway); once they no longer do, it is pending then. A passed re-test of an item vouches
-    for its assertions written before it and clears the withdrawals of its content before it. Derived and inferred
-    assertions are not copies (they follow their premises). → ({(id, assertion position): why} pending,
-    {(id, assertion position)} copies admitted while held)."""
+    where a later version holds anyway); once they no longer do, it is pending then. A passed re-test of an item
+    vouches for its assertions written before it and clears the withdrawals of its content before it, on that
+    assertion's validity: a re-test passed on one version vouches for that version, not for the content on every
+    validity (S265). Derived and inferred assertions are not copies (they follow their premises). → ({(id, assertion
+    position): why} pending, {(id, assertion position)} copies admitted while held)."""
     wd = []
     vj = {i: json.dumps(items[i].value, sort_keys=True) for i in ids}
     for i in ids:
@@ -1447,9 +1514,12 @@ def _guard(items, ids):
                 wd.append((tc, i, a))
     if not wd:
         return {}, {}
-    clears = defaultdict(list)
+    clears = defaultdict(list)                        # (content, since) → the re-tests that vouched for it there
     for i in ids:
-        clears[vj[i]] += items[i].rechecked
+        for tp in items[i].rechecked:                 # a passed re-test vouches for the versions live at it, on their
+            for a in _live(items[i]):                 # own since — not for the content on every validity (S265)
+                if a["t"] < tp and a.get("valid") is not None and not a["just"]:
+                    clears[(vj[i], json.dumps(_interval(a["valid"])[0], sort_keys=True))].append(tp)
     clean, copies = [], []
     for i in ids:
         for a in _live(items[i]):
@@ -1457,8 +1527,9 @@ def _guard(items, ids):
                 continue
             iv = _interval(a["valid"])
             w = [(tc, b) for tc, j, b in wd if vj[j] == vj[i] and tc < a["t"] and _overlap(_interval(b["valid"]), iv)
-                 and not any(tc < tp <= a["t"] for tp in clears[vj[i]])]
-            if not w or any(tp > a["t"] for tp in items[i].rechecked):
+                 and not any(tc < tp <= a["t"]
+                             for tp in clears[(vj[i], json.dumps(_interval(b["valid"])[0], sort_keys=True))])]
+            if not w or any(tp > a["t"] for tp in clears[(vj[i], json.dumps(iv[0], sort_keys=True))]):
                 clean.append((i, a))
             else:
                 copies.append((i, a, w))
@@ -1478,11 +1549,24 @@ def _guard(items, ids):
 
 def _kept(items, ids, vj, i, a, tc):
     """Does a's writer still stand behind a's content on a's validity after a's own cut at `tc`: a live assertion of
-    the same content from the same writer, written before the cut, whose interval covers a's (a duplicate taken back)?"""
+    the same content from the same writer, written before the cut, covering a's interval — as far as the key's live
+    versions leave it (a later live version closes the keeper at its since, a bounded one gives it back after its
+    until, and the writer's own later value at that since replaces it), not by raw containment: a version the walk
+    already closed (periods) does not keep a withdrawn claim alive (S262)."""
     iv = _interval(a["valid"])
-    return any(b["by"] == a["by"] and b["t"] < tc and b.get("valid") is not None and not b["just"]
-               and _inside(iv, [_interval(b["valid"])])
-               for j in ids if vj[j] == vj[i] for b in _live(items[j]))
+    live = [(j, b) for j in ids for b in _live(items[j])]
+    keep = []
+    for j, b in live:
+        if vj[j] != vj[i] or b["by"] != a["by"] or not b["t"] < tc or b.get("valid") is None or b["just"]:
+            continue
+        biv = _interval(b["valid"])
+        if any(vj[k] != vj[i] and c["by"] == a["by"] and c.get("valid") is not None and not c["just"]
+               and _same_since(_interval(c["valid"])[0], biv[0]) for k, c in live):
+            continue                                # the writer's later value at that since: it replaced this version
+        keep += _ivs_minus([biv], [_interval(c["valid"]) for _, c in live
+                                   if c.get("valid") is not None
+                                   and _lo_lt(biv[0], _interval(c["valid"])[0])])
+    return _inside(iv, keep)
 
 
 def _held(iv, value, base, lost=None):
@@ -1541,11 +1625,21 @@ def _resolve(items, comp, by_key, resolves, clock, flagged, max_iter=200, taints
              if p not in comp and p in (state or {})}
     taints = {} if taints is None else taints
     retest, why = set(), {}
+    deferred = set()                                     # items whose only support is a premise cycle (S261)
     for i in order:
-        t = _taint(items, i, taints)
+        _taint(items, i, taints, deferred)               # _flush has popped the component: these recompute
+    deferred = {i for i in deferred if i not in taints}   # one resolved later in the same pass is not deferred
+    for i in sorted(deferred):                           # no outside support anywhere in the loop: nothing vouches
+        taints[i] = max((a["t"] for a in _live(items[i])), default=None)   # for the content — it waits for a re-test
+    for i in order:
+        t = taints.get(i)
         if t is not None and not any(p > t for p in items[i].promoted):
             retest.add(i)
-            why[i] = _retest_why(items, i, t, taints)
+            why[i] = (f"its only support runs through a premise cycle: nothing outside it vouches for the content"
+                      if i in deferred else _retest_why(items, i, t, taints))
+    if deferred and taints is not None:
+        taints.clear()                                   # a cycle's settlement shifts other items' taints too:
+        # recompute from scratch next time (rare: only with cycles)
     pclaims, hinfo = {}, {}                             # the revival guard: copies of withdrawn content
     for k in sorted({items[i].key for i in order if items[i].key is not None}):
         p, h = _guard(items, sorted(by_key[k]))

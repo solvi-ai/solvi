@@ -70,10 +70,12 @@ class Knowledge:
     spec > verified wins a contradiction), and with a registry it is taken only from a writer (`by=`) registered with
     it; an unregistered writer, or one declaring another source, is refused with the reason in the journal
     (KnowledgeStore(writers=)). What `observe` writes comes from the writer "environment" with source "outcome":
-    register it when an agent writes here. None (default): any writer may declare any source, as before."""
+    register it when an agent writes here. None (default): any writer may declare any source, as before. now: a world
+    clock for `usable` with no time — a callable returning the current world time, or a fixed time (KnowledgeStore
+    (now=)); None: `usable` reads status and staleness only."""
 
     def __init__(self, path=None, *, vocabulary=None, write_gate=None, actions=None, failures=None, severity=1.0,
-                 writers=None):
+                 writers=None, now=None):
         from ..core.knowledge import Agenda, ConservativeActionModel, FailureMemory, KnowledgeStore, Vocabulary
         from ..core.knowledge.gates import default_gates
         if vocabulary is not None and actions is not None:
@@ -83,7 +85,7 @@ class Knowledge:
         if write_gate is not None:
             extra = list(write_gate) if isinstance(write_gate, (list, tuple)) else [write_gate]
             gates = default_gates() + extra
-        self.store = KnowledgeStore(path, gates=gates, writers=writers)
+        self.store = KnowledgeStore(path, gates=gates, writers=writers, now=now)
         self.agenda = Agenda(self.store)
         if vocabulary is not None:
             if isinstance(vocabulary, dict):

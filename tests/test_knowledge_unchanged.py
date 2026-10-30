@@ -7,7 +7,9 @@ snapshots as the store before the change (with `valid`: disjoint intervals, one 
 wrote load, verify and replay.
 
 Regenerate the golden file only with the store from before the change on the path:
-    PYTHONPATH=<old src> python tests/test_knowledge_unchanged.py"""
+    PYTHONPATH=<old src> python tests/test_knowledge_unchanged.py
+S261 exception (regenerated on the new store, 2026-10-30): support through a premise cycle is no support — one
+cycle member in plain-0 changed status; everything else is byte-identical to the store before that change."""
 import json
 import random
 import shutil

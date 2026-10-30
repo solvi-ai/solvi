@@ -270,13 +270,14 @@
  "plain-0": {
   "counts": {
    "active": 4,
+   "hypothesis": 1,
    "refuted": 1,
-   "retracted": 6
+   "retracted": 5
   },
-  "fp": "d7cc3b6a3de449a8",
-  "journal": "4d6b904090fd8a34",
-  "report": "4d6882a895b9950f",
-  "snapshots": "c7f2b8798ef53253",
+  "fp": "5ed561ffc64e0821",
+  "journal": "691cca71deed5f8d",
+  "report": "abf38d34c8ffe038",
+  "snapshots": "85150eb749b274be",
   "statuses": {
    "18e2124dfa4e8e77": "active",
    "32847f4770d5ebbe": "active",
@@ -284,7 +285,7 @@
    "4e107d949946b5c4": "refuted",
    "6ae9b82db2872da8": "retracted",
    "6b32b6c85e78486f": "active",
-   "a53ef98e2318350e": "retracted",
+   "a53ef98e2318350e": "hypothesis",
    "a56ad7f3acf8a062": "retracted",
    "a6c04818c59dcb76": "retracted",
    "a92b7d655d3f7439": "retracted",

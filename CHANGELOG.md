@@ -1,5 +1,32 @@
 # Changelog
 
+## Unreleased
+
+### Fixed (knowledge store — the 2026-10-30 external handoff, S261/S262/S263/S265)
+- **An erratum of content the writer no longer stands behind now withdraws it (S262).** `_kept` read the writer's
+  older claim by raw interval containment, so a version the key's walk had already closed (a correction at a later
+  `since`) kept an erratum from landing as a withdrawal — a copy of the withdrawn content revived silently (the
+  living-knowledge stand read 12–13 harmful revivals of 540). The keeper is now read as far as the key's live
+  versions leave it: a live later version closes it at its since (a bounded one gives it back after its until), and
+  the writer's own later value at that since replaces it.
+- **A passed re-test vouches for its own validity only (S265).** The revival guard cleared withdrawals of the
+  content by the content alone, so a re-test passed on one version re-admitted copies of a version withdrawn on
+  another validity. Clears are keyed on (content, since) — a re-test vouches for the versions live at it.
+- **Support through a premise cycle is no support (S261).** A circular derivation (a ← p, b ← a, a ← b) used to
+  keep both items `active` past the retraction of p — content that cites itself was un-retractable. The taint walk
+  now treats a chain back through an open item as no support: retracting the loop's outside premise taints every
+  item in it (each waits for its own re-test), and a loop with no outside support anywhere waits too. `add` warns
+  about a cyclic `derived_from` (the check is advisory, 64 hops).
+- **`KnowledgeStore(now=)`: an opt-in world clock for `usable()` with no `valid_at`** (the old S25; their S263). A
+  callable returning the current world time, or a fixed time; with it `usable(id)` reads the effective intervals
+  (`periods`) instead of status alone, so a version closed by a later `since` — and an item derived from it — is not
+  usable. Default unchanged: status and staleness only. `Knowledge(now=)` passes it through.
+  Behaviour note for 1.4.0 readers: close-not-refute kept a closed version's status `active`, so `usable(id)`
+  without a `valid_at` changed from False (1.3's refuted) to True on such versions — give the store a clock if you
+  relied on the old reading.
+- Docs: the module docstring now says the same-since replacement is blind to which value an erratum corrected
+  (S264), and the guard's docstring states the re-test's validity scoping.
+
 ## 1.4.0 — released 2026-10-30
 
 ### Added
