@@ -81,8 +81,9 @@ stored_id, trace_hash, by, status, answers_hash, facts_in_hash, facts_out_hash, 
 loop}}], "outcome": {status, at, answer_hash}} — an index of hashes and ids; the decisions are in the node stores.
 The run ends "decided" at an end node that answered, or "abstain" where it stopped (`why`). A node that abstains, or
 whose decision goes to a person, with no edge for it: on_abstain / on_human = "abstain" stops the run there;
-"handoff" (the default) puts the node's question to a person. A node that merges "all" of several inputs raises
-NotImplementedError (this stage follows one path). Not yet: `retract`.
+"handoff" (the default) puts the node's question to a person. A node that merges "all" of several inputs is refused
+at spec() — waiting for several branches is not implemented at this stage (a recorded spec of an earlier release
+still loads, and refuses at run time). Not yet: `retract`.
 
 The channel to a person (stage 1b) is a queue: the process does not know when the person answers. `HumanChannel` is an
 abstract class — submit(HumanRequest) → ticket, poll(ticket) → HumanAnswer | None, cancel(ticket, why),
@@ -212,10 +213,24 @@ def canonical(spec):
     return json.dumps(spec, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
 
 
+def _hashable(spec):
+    """A process spec without the nodes' `store` paths: where a node keeps its records is not part of what it is —
+    the same process under another directory hashes the same (S271). A spec that is not one (no "nodes" of dicts)
+    is returned as it is."""
+    nodes = spec.get("nodes")
+    if not isinstance(nodes, dict) or not any(isinstance(v, dict) and "store" in v for v in nodes.values()):
+        return spec
+    return dict(spec, nodes={n: {k: v for k, v in ns.items() if k != "store"} if isinstance(ns, dict) else ns
+                             for n, ns in nodes.items()})
+
+
 def spec_hash(spec):
-    """SHA-256 (64 hex digits) of the canonical JSON of a spec without its "hash"."""
+    """SHA-256 (64 hex digits) of the canonical JSON of a spec without its "hash" — and, a process spec, without
+    the nodes' "store" paths (S271: moving a node's store to another directory does not change what the process
+    is, so it does not change the hash either; rewriting the path in a recorded spec keeps its hash valid).
+    Behaviour change over 1.4.0: hashes of specs whose nodes carry a store differ from the recorded ones."""
     body = {k: v for k, v in spec.items() if k != "hash"}
-    return hashlib.sha256(canonical(body).encode("utf-8")).hexdigest()
+    return hashlib.sha256(canonical(_hashable(body)).encode("utf-8")).hexdigest()
 
 
 # --- the predicate language
@@ -557,7 +572,10 @@ class ProcessResult:
     before an end node answered: `why` says where), "pending" (a question waits for a person: `ticket`; resume(run)
     goes on), "cancelled" (the question was withdrawn: cancel(run, why)); answer: the end node's answer (None unless decided); path: the steps as recorded
     ([{node, kind, store, stored_id, trace_hash, by, status, answers_hash, facts_in_hash, facts_out_hash, knowledge,
-    cost, edge}]; a person's answer is a step of kind "human" with its "ticket" and "handoff"); nodes: {node: NodeResult} (the last result of each node); facts: every fact at the end; provenance:
+    cost, edge}]; a person's answer is a step of kind "human" with its "ticket" and "handoff") — a resumed run's path
+    is its whole run, the steps of its earlier segments first (S268), so explain() and monitor(reference=) see every
+    node and edge it took, as the live path watch does; nodes: {node: NodeResult} (the last result of each node on the
+    last segment); facts: every fact at the end; provenance:
     {fact: {"from", "decision", "by", "confidence", "trace_hash"}} for the facts nodes wrote; run: the run id;
     stored_id: the "process" record (None without storage=); spec_hash; why: why it stopped (abstain);
     ticket: the question waiting for a person (status "pending"); continues: the pending segment this run goes on
@@ -825,6 +843,7 @@ class Process:
         self._store = None                            # the opened storage= (on the first run)
         self.path_watch = None                        # a PathWatch on the mix of paths (monitor())
         self._edges_of: dict[str, set] = {}           # run → the edges its pending segments took (for the watch)
+        self._pidx = None                             # the index over the store (see _index), built on first use
 
     # --- building
 
@@ -879,7 +898,9 @@ class Process:
         return self
 
     def merge(self, node, how):
-        """Say whether `node` waits for all its inputs ("all") or the first ("any"). → self."""
+        """Say whether `node` waits for all its inputs ("all") or the first ("any"). "all" of several inputs is
+        refused at spec() (S272: waiting for several branches is not implemented — a spec that can never run is
+        refused where it is written); on a node with one input it is the same as "any". → self."""
         if node not in self.nodes:
             raise ProcessSpecError(f"merge: no node {node!r}")
         if how not in MERGES:
@@ -947,6 +968,7 @@ class Process:
     def spec(self):
         """The process as data (see the module docs), validated, with its "hash". → a JSON-ready dict."""
         _check_graph(self.nodes, self.edges, self.merges, self._start)
+        _check_merges(self.nodes, self.edges, self.merges)          # S272: refused where it is written, not at run
         out = {"solvi_process": FORMAT, "name": self.name, "nodes": _plain(self.nodes), "edges": _plain(self.edges),
                "start": _start_of(self.nodes, self.edges, self._start),
                "end": sorted(n for n, s in self.nodes.items() if s.get("end")),
@@ -1163,8 +1185,9 @@ class Process:
             break
         with run_context(parent=parent):              # the record follows from the last node's decision
             rec_id = self._record(spec, w["input_hash"], path, status, answer, node, continues=w["continues"])
-        res = ProcessResult(status, answer, path, results, facts, prov, run_id, rec_id, spec["hash"], why,
-                            continues=w["continues"])
+        path = (w.get("prior") or []) + path          # S268: a resumed run's path is its whole run — the earlier
+        res = ProcessResult(status, answer, path, results, facts, prov, run_id, rec_id, spec["hash"], why,   # segments'
+                            continues=w["continues"])  # steps first, as the live watch's edge union already is
         return self._finish(spec, res)
 
     def _finish(self, spec, res):
@@ -1295,6 +1318,17 @@ class Process:
             hit = np.flatnonzero(good)
             pick = int(hit[-1]) if len(hit) else None
         t = _plain(grid[pick]) if pick is not None else None
+        if isinstance(t, dict):                        # S274: a threshold that holds no node back adds nothing
+            held = [n for n, v in t.items()
+                    if v is not None and signals.get(n) and float(v) > min(signals[n])]
+            if not held and any(v is not None for v in t.values()):
+                import warnings
+                open_nodes = ", ".join(n for n, v in t.items() if v is not None) or "no node"
+                warnings.warn(f"the chosen threshold holds no node back ({open_nodes} open to their smallest "
+                              "calibration signal): every answer that comes alone goes out, so the end_to_end "
+                              "promise adds nothing over the nodes answering alone — every node's answer reaches "
+                              "the end unchecked, and the promise is only the binomial test on the labels",
+                              stacklevel=2)
         th = {"t": t, "index": pick, "grid": len(grid), "procedure": procedure, "certified": int(good.sum()),
               "n": n, "automatic": int(a[pick]) if pick is not None else 0,
               "wrong": int(m[pick]) if pick is not None else 0}
@@ -1430,20 +1464,55 @@ class Process:
                                       extra={"ticket": ticket, "channel": _channel(ch), "asking": req.to_dict(),
                                              "resume": resume})
             self._edges_of.setdefault(run_id, set()).update(_taken(self.edges, path))
-            return ProcessResult("pending", None, path, {}, w["facts"], w["prov"], run_id, rec_id, spec["hash"],
-                                 f"{node}: waiting for a person (ticket {ticket})", ticket, continues=w["continues"],
-                                 node=node, question=question)
+            return ProcessResult("pending", None, (w.get("prior") or []) + path, {}, w["facts"], w["prov"], run_id,
+                                 rec_id, spec["hash"], f"{node}: waiting for a person (ticket {ticket})", ticket,
+                                 continues=w["continues"], node=node, question=question)
         return self._answered(ans, req, ticket, parent, ch)
 
     def _ticket_seen(self, ticket):
-        st = self._open()
-        return any(s.data.get("ticket") == ticket for k in ("process", "human") for s in st.iter(k))
+        return ticket in self._index()["tickets"]
 
     def _human_record(self, ticket):
-        for s in self._open().iter("human"):
-            if s.data.get("ticket") == ticket and s.data.get("process") == self.name:
-                return s
-        return None
+        recs = self._index()["human"].get(ticket) or []
+        return recs[0] if recs else None
+
+    def _index(self):
+        """The process's own index over its store (S267/S276/S277): the tickets seen (kinds "process" and "human"),
+        this process's "human" records by ticket and its "process" segments by run, in stored order. Each record is
+        read once: a call reads only what was appended since the last one (store.iter(after=the last seq read) —
+        O(new), not O(store)), so a run that asks a person, its answer and its resume no longer rescan the whole
+        store per step. Rebuilt from scratch when the store was rebuilt under us (its `gen` — a JSONL file replaced
+        or rewritten, a rotated segment) or its head went backwards (the seqs restarted). The index assumes an
+        append-only store, as replay does; verify() still checks every record."""
+        if self.storage is None:
+            return {"seq": -1, "gen": -1, "count": 0, "tickets": set(), "human": {}, "segs": {}, "order": []}
+        st = self._open()
+        if self._pidx is None:
+            self._pidx = {"seq": -1, "gen": -1, "count": 0, "tickets": set(), "human": {}, "segs": {}, "order": []}
+        for _ in range(2):        # a store rebuilt under the read (its file rewritten — gen bumped by iter itself)
+            ix = self._pidx      # is indexed again from the start; the second pass sees a stable store
+            if st.head()["count"] <= ix["seq"] or getattr(st, "gen", ix["gen"]) != ix["gen"]:
+                self._pidx = ix = {"seq": -1, "gen": getattr(st, "gen", -1), "count": 0, "tickets": set(),
+                                   "human": {}, "segs": {}, "order": []}
+            for s in st.iter(None, after=ix["seq"]):
+                d = s.data
+                if isinstance(s.seq, int) and s.seq > ix["seq"]:
+                    ix["seq"] = s.seq
+                t = d.get("ticket")
+                if t is not None and d.get("kind") in ("process", "human"):
+                    ix["tickets"].add(t)
+                if d.get("process") != self.name:
+                    continue
+                if d.get("kind") == "human":
+                    if t is not None:
+                        ix["human"].setdefault(t, []).append(s)
+                elif d.get("kind") == "process":
+                    ix["segs"].setdefault(s.run, []).append(s)
+                    ix["order"].append(s)
+            if getattr(st, "gen", ix["gen"]) == ix["gen"]:
+                break
+        self._pidx["count"] = st.head()["count"]
+        return self._pidx
 
     def _answered(self, ans, req, ticket, parent, ch):
         """A person's answer → the "human" record (once per ticket) and the NodeResult the node takes."""
@@ -1488,12 +1557,11 @@ class Process:
                           store=self._store)
 
     def _segments(self):
-        return [s for s in self._open().iter("process") if s.data.get("process") == self.name] \
-            if self.storage is not None else []
+        return list(self._index()["order"]) if self.storage is not None else []
 
     def _tip(self, run):
         rid = run.run if isinstance(run, ProcessResult) else run
-        segs = [s for s in self._segments() if s.run == rid]
+        segs = self._index()["segs"].get(rid) or []
         if not segs:
             raise ProcessRunError(f"no record of run {rid!r} in this process's store")
         return rid, segs[-1]
@@ -1532,10 +1600,13 @@ class Process:
         rid, tip, ch, spec = self._resumable(run)
         d = tip.data
         ticket, req = d["ticket"], HumanRequest.from_dict(d["asking"])
+        prior = [st for s in self._index()["segs"].get(rid, [])          # the run's earlier segments, their steps
+                 for st in s.data.get("path") or []]                     # (S268: the run, not the last segment)
         old = self._human_record(ticket)
         ans = None if old is not None else ch.poll(ticket)
         if old is None and ans is None:
-            return ProcessResult("pending", None, [], {}, dict(d["resume"]["facts"]), dict(d["resume"]["provenance"]),
+            return ProcessResult("pending", None, prior, {}, dict(d["resume"]["facts"]),
+                                 dict(d["resume"]["provenance"]),
                                  rid, tip.id, spec["hash"], f"{req.node}: waiting for a person (ticket {ticket})",
                                  ticket, continues=d.get("continues"), node=req.node, question=req.question)
         r = d["resume"]
@@ -1543,7 +1614,7 @@ class Process:
             res = self._answered(ans, req, ticket, tip.id, ch)
             w = {"node": r["node"], "facts": dict(r["facts"]), "prov": dict(r["provenance"]),
                  "taken": list(r["taken"]), "parent": res.stored_id, "input_hash": d["input_hash"],
-                 "continues": tip.id}
+                 "continues": tip.id, "prior": prior}
             return self._go(spec, rid, w, first=(res, dict(r["state"])))
 
     def cancel(self, run, why):
@@ -1726,13 +1797,11 @@ class Process:
         return self
 
     def records(self):
-        """The "process" records of this process's store → [Stored] (stage 1: the index of each run)."""
+        """The "process" records of this process's store → [Stored] (stage 1: the index of each run; read through
+        the process's index over the store — see _index — not a scan per call)."""
         if self.storage is None:
             return []
-        from ..core.store import open_storage
-        if self._store is None:
-            self._store = open_storage(self.storage)
-        return [s for s in self._store.iter("process") if s.data.get("process") == self.name]
+        return list(self._index()["order"])
 
     def explain(self, result):
         """A run in words: each node, who answered and how, the edge taken; then how the run ended."""
@@ -1790,7 +1859,7 @@ class Process:
         if self.storage is None:
             raise ProcessRunError("a process replays from its records: Process(storage=...)")
         rid = run.run if isinstance(run, ProcessResult) else run
-        segs = [s for s in self._open().iter("process") if s.data.get("process") == self.name and s.run == rid]
+        segs = self._index()["segs"].get(rid) or []
         if not segs:
             raise ProcessRunError(f"no record of run {rid!r} in this process's store")
         return _Replay(self, rid, trust_models).walk(segs)
@@ -1802,8 +1871,8 @@ class Process:
         head() elsewhere to catch a rewrite of the whole store: verify(anchor=))."""
         if self.storage is None:
             raise ProcessRunError("a process replays from its records: Process(storage=...)")
-        runs = list(dict.fromkeys(s.run for s in self.records()))
-        reports = [self.replay(r, trust_models=trust_models) for r in runs]
+        runs = list(dict.fromkeys(s.run for s in self.records()))   # one read of the store (the index, S277):
+        reports = [self.replay(r, trust_models=trust_models) for r in runs]   # each replay walks its own segments
         stores, seen = {"process": self._open()}, {id(self._open())}
         for n in self.nodes:
             st = getattr(self.systems.get(n), "storage", None)
@@ -1894,6 +1963,7 @@ class _Replay:
     def __init__(self, p, rid, trust):
         self.p, self.rid, self.trust = p, rid, trust
         self.spec = p.spec()
+        self._recorded = self._recorded_spec()
         self.pst = p._open()
         self.facts, self.prov, self.inputs, self.absent = {}, {}, {}, set()
         self.taken = [0] * len(p.edges)
@@ -1902,6 +1972,24 @@ class _Replay:
         self.steps, self.unchecked = [], []
         self.seg = self.pos = 0
         self.segs, self._ahead = [], None
+
+    def _recorded_spec(self):
+        """The spec the store's segments were run by, when the only difference from this process's spec is the
+        fingerprint of a node (or the channel) loaded against another one — strict=False, p.mismatched: the
+        current spec with the recorded fingerprints back (S269). Replay then walks by the spec that ran the
+        segments, and a run through the swapped node fails at that node's own "record"/"replay" step instead of
+        the blanket "spec" step (a run that never touched the node replays). None when nothing is mismatched;
+        a guess checked against each segment's recorded spec_hash before it is used."""
+        mm = {k: v for k, v in self.p.mismatched.items() if k in self.p.nodes}
+        if not mm and "human" not in self.p.mismatched:
+            return None
+        spec = _plain(self.spec)
+        for n, m in mm.items():
+            spec["nodes"][n]["fingerprint"] = m.get("recorded")
+        if "human" in self.p.mismatched and isinstance(self.p.mismatched["human"].get("recorded"), dict):
+            spec["human"] = self.p.mismatched["human"]["recorded"]
+        spec["hash"] = spec_hash(spec)
+        return spec
 
     def fail(self, node, step, kind, reason):
         raise _Diverged(node, step, kind, reason)
@@ -1947,8 +2035,14 @@ class _Replay:
         d, sp = s.data, self.spec
         node = first["node"] if first else sp["start"]
         if d.get("spec_hash") != sp["hash"]:
-            self.fail(None, "spec", "recompute", f"segment {s.id} was run by process spec {str(d.get('spec_hash'))[:12]}"
-                                                 f", this process is {sp['hash'][:12]}")
+            rec = self._recorded
+            if rec is None or d.get("spec_hash") != rec["hash"]:
+                self.fail(None, "spec", "recompute", f"segment {s.id} was run by process spec "
+                                                     f"{str(d.get('spec_hash'))[:12]}, this process is "
+                                                     f"{sp['hash'][:12]}")
+            self.spec = sp = rec                   # only the fingerprint of a mismatched node differs (S269): the
+            node = first["node"] if first else sp["start"]   # walk goes on by the spec that ran, and the swapped node
+            # fails at its own step, not here
         pr = sp.get("promise")
         if d.get("mode") != (pr["mode"] if pr else None) or _cj(d.get("promise")) != _cj(pr):
             self.fail(None, "spec", "integrity", f"segment {s.id} records another promise than the spec's")
@@ -2088,7 +2182,7 @@ class _Replay:
     def cancelled(self, s, prev, first, last):
         node = first["node"] if first else None
         d, t = s.data, prev.data.get("ticket")
-        hum = [x for x in self.pst.iter("human") if x.data.get("ticket") == t and x.data.get("process") == self.p.name]
+        hum = self.p._index()["human"].get(t) or []
         if len(hum) != 1 or not hum[0].data.get("cancelled"):
             self.fail(node, "human", "integrity", f"ticket {t}: a cancelled run with {len(hum)} records for it")
         h, why = _intact(self.pst, hum[0].id)
@@ -2284,7 +2378,7 @@ class _Replay:
             self.parent = pending.id                  # the answer follows from the pending segment
         self.check_run(node, rec, "human")
         t, q = rec.get("ticket"), ns.get("question") or node
-        n = sum(1 for x in self.pst.iter("human") if x.data.get("ticket") == t and x.data.get("process") == self.p.name)
+        n = len(self.p._index()["human"].get(t) or [])    # the index, not a scan of the store per answer (S277)
         if n != 1:
             self.fail(node, "human", "integrity", f"ticket {t} has {n} records: one ticket, one answer")
         if rec.get("question") != q or rec.get("reason") != reason:
@@ -2664,6 +2758,19 @@ def _topological(nodes, edges, keep):
         if n not in seen:
             visit(n)
     return [n for n in reversed(order) if n in keep]
+
+
+def _check_merges(nodes, edges, merges):
+    """merge="all" of several inputs is declarable in the format but not runnable at this stage: the walk follows
+    one path, so run() would raise NotImplementedError — a spec that could be written but never run. spec() refuses
+    it where it is written, naming the node (S272); a spec of an earlier release that records one still loads
+    (from_spec checks the format, not the runnability) and refuses at run time, as before."""
+    for n, how in merges.items():
+        if how == "all" and sum(1 for e in edges if e["to"] == n and not e.get("loop")) > 1:
+            raise ProcessSpecError(f"node {n!r} merges 'all' of several inputs: waiting for several branches is not "
+                                   "implemented at this stage (the walk follows one path, so run() would raise "
+                                   'NotImplementedError) — merge="any" takes the first input that arrives, or wait '
+                                   "for a later release")
 
 
 def _check_graph(nodes, edges, merges, start):

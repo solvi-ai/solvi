@@ -160,10 +160,11 @@ def test_a_human_node_is_pending_then_resumed_by_a_fresh_process(tmp_path):
     assert [x["ticket"] for x in fresh.pending()] == [t] and len(fresh._open()) == n
     r2 = fresh.resume(r.run)
     assert r2.status == "decided" and r2.answer == "pay" and r2.run == r.run and r2.continues == r.stored_id
-    assert [st["node"] for st in r2.path] == ["review", "payout"] and r2.path[0]["kind"] == "human"
-    assert r2.path[0]["ticket"] == t and r2.path[0]["handoff"] is False and r2.path[0]["by"] == "human"
+    assert [st["node"] for st in r2.path] == ["triage", "review", "payout"]      # S268: the whole run's path —
+    assert r2.path[1]["kind"] == "human"                                         # the earlier segment's steps first
+    assert r2.path[1]["ticket"] == t and r2.path[1]["handoff"] is False and r2.path[1]["by"] == "human"
     assert r2.facts["fraud_risk"] == "low" and fresh.pending() == []
-    hum = fresh._open().record(r2.path[0]["stored_id"])
+    hum = fresh._open().record(r2.path[1]["stored_id"])
     assert hum["kind"] == "human" and hum["ticket"] == t and hum["value"] == "low" and hum["reviewer"] == "anna"
     assert hum["note"] == "known customer" and hum["channel"] == {"channel": "MemoryQueue", "fingerprint": "MemoryQueue/1"}
     assert hum["run"] == {"id": r.run, "parent": r.stored_id}           # the answer follows from the pending segment
@@ -225,9 +226,10 @@ def test_a_node_without_an_edge_for_its_status_hands_its_decision_to_the_person(
     assert req.reason == status and req.node == "risk" and req.question == "risk" and req.facts == {"x": 1}
     q.answer(t, "low", reviewer="anna")
     r2 = p.resume(r)
-    assert r2.status == "decided" and r2.facts["risk"] == "low" and r2.path[0]["handoff"] is True
-    assert r2.path[0]["status"] == "ok" and r2.path[0]["edge"]["to"] == "end"   # answered: the edge for "ok" holds
+    assert r2.status == "decided" and r2.facts["risk"] == "low" and r2.path[1]["handoff"] is True
+    assert r2.path[1]["status"] == "ok" and r2.path[1]["edge"]["to"] == "end"   # answered: the edge for "ok" holds
     assert p.nodes["end"] and r2.provenance["risk"]["by"] == "human"
+    assert [st["node"] for st in r2.path] == ["risk", "risk", "end"]            # S268: its abstention, then the answer
 
 
 def test_a_declined_question_stops_the_run_and_a_cancelled_one_closes_it(tmp_path):

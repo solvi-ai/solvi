@@ -61,6 +61,7 @@ except ImportError:                           # Windows, the browser (Pyodide): 
     fcntl = None
 
 GENESIS = ""                                  # prev of the first record
+_CHUNK = 1 << 17                              # the parsed-lines cache's digest chunk (128 KiB, what _validate checks)
 _SAMPLE_LOCK = threading.Lock()
 FORMAT = 2                                    # the record format ("v"): 2 — dicts are written with their keys in their
                                               # own order (1, solvi ≤ 0.7.1: sorted, the order a decider read is lost)
@@ -1012,10 +1013,16 @@ class TraceStorage(abc.ABC):
             raise CompactRecord(f"record {id} cannot be re-derived: " + "; ".join(f"{m[1]}: {m[2]}" for m in bad))
         return resp
 
-    def iter(self, kind="ask", redacted=False):
+    def iter(self, kind="ask", redacted=False, after=None):
         """Stored records in order (kind "ask": responses; "teach": corrections; None: all) → iterator of Stored. A
-        redacted record (see redact) has no content left and is passed over; redacted=True: it is yielded too."""
+        redacted record (see redact) has no content left and is passed over; redacted=True: it is yielded too.
+        after: only the records stored after this sequence number (Stored.seq) — the cursor of a reader that keeps
+        its own index over the append-only store and reads only what was appended since (JSONLStorage serves it
+        from its parsed-lines cache without walking the whole store)."""
         for _, d in self._raw():
+            if after is not None and (not isinstance(d, dict) or not isinstance(d.get("seq"), int)
+                                      or d["seq"] <= after):
+                continue
             if chained(d) and (kind is None or d.get("kind", "ask") == kind) and (redacted or not d.get("redacted")):
                 yield _stored(d, self.catalog)
 
@@ -1602,6 +1609,7 @@ class JSONLStorage(TraceStorage):
         self.rotate_bytes, self.rotate_records = rotate_bytes, rotate_records
         self._lock = threading.RLock()
         self._batch = None                            # while batch() runs: {"tid", "fh", "stack"} of the writing thread
+        self.gen = 0                                  # bumped by every _reset(): a reader's own index notices a rebuild
         self._reset()
         with self._lock:
             if index or not self._open_from_head():
@@ -1614,7 +1622,9 @@ class JSONLStorage(TraceStorage):
                 head, last = self._read_head(), json.loads(_last_line(fh))
                 if last.get("hash") != head["hash"] or last.get("seq") != head["count"] - 1:
                     return False
-                self._count, self._last, self._size = head["count"], head["hash"], os.fstat(fh.fileno()).st_size
+                st = os.fstat(fh.fileno())
+                self._count, self._last, self._size = head["count"], head["hash"], st.st_size
+                self._ino, self._mtime = st.st_ino, st.st_mtime_ns
                 self._n_legacy = None                 # not counted yet (see _legacy)
                 return True
         except (OSError, ValueError, KeyError, TypeError, AttributeError):
@@ -1622,8 +1632,15 @@ class JSONLStorage(TraceStorage):
 
     def _reset(self):
         self._offsets = {}
+        self._cache = []                              # (start offset, line no, the parsed record or None) per
+        self._cache_seqs = []                         #   non-blank line, in file order — and each entry's seq,
+        self._cache_off = 0                           #   clamped to stay non-decreasing (iter(after=) bisects it)
+        self._nlines = 0
+        self._chunks = []                             # hash of every full 128 KiB of the covered prefix, and the
+        self._tailbuf = b""                           #   raw bytes of the rest — the cache's integrity check
         self._count, self._last, self._n_legacy, self._size = 0, GENESIS, 0, 0
-        self._ino = None
+        self._ino = self._mtime = None
+        self.gen += 1
 
     def _in_batch(self):
         b = self._batch
@@ -1641,32 +1658,101 @@ class JSONLStorage(TraceStorage):
             self._reset()
 
     def _sync(self, fh):
-        """Read the lines appended since this store last looked (all of them the first time; again from the start when
-        the file got shorter: it was replaced). Called under the thread lock and the file's lock."""
+        """Catch up the chain state with the file (called under the thread lock and the file's lock). An unchanged
+        mtime and size are only the fast path; a growth the object did not append itself is admitted when the
+        covered prefix still hashes as it did (a foreign append), and anything else — another inode, a shorter
+        file, a changed prefix — is read whole again, never resumed mid-line."""
         st = os.fstat(fh.fileno())
-        size = st.st_size
-        if self._ino is not None and st.st_ino != self._ino:
-            self._reset()                             # the file was rotated (or replaced): read the new one from the start
-        self._ino = st.st_ino
-        if size == self._size:
-            return
-        if size < self._size:
+        if st.st_ino != self._ino:
             self._reset()
             self._ino = st.st_ino
+        if st.st_size == self._size and (self._mtime is None or st.st_mtime_ns == self._mtime):
+            return
+        if self._cache_off == self._size and self._validate(fh):
+            if st.st_size > self._size:               # a foreign append onto an intact prefix: read just its tail
+                self._read_tail(fh)
+            return
+        self._reset()
+        self._ino = st.st_ino
+        if st.st_size != self._size:
+            self._read_tail(fh)
+
+    def _read_tail(self, fh):
+        """Read the lines from self._size to the file's end into the chain state and — when the parsed-lines cache
+        ends where the chain state does — into the cache and its chunk digests (called under the locks)."""
+        feed = self._cache_off == self._size
         fh.seek(self._size)
         off = self._size
         for line in fh:
-            try:
-                d = json.loads(line)
-            except ValueError:
-                d = None
-            if chained(d):
-                self._offsets[d.get("id")] = off
-                self._count, self._last = self._count + 1, d["hash"]
-            elif isinstance(d, dict) and self._count == 0 and self._n_legacy is not None:
-                self._n_legacy += 1
+            if feed:
+                self._fed(line)
+            n = self._nlines
+            self._nlines += 1
+            if line.strip():
+                try:
+                    d = json.loads(line)
+                except ValueError:
+                    d = None
+                d = d if isinstance(d, dict) else None
+                if feed:
+                    self._cache.append((off, n, d))
+                    seq = d.get("seq") if isinstance(d, dict) and isinstance(d.get("seq"), int) else -1
+                    self._cache_seqs.append(max(self._cache_seqs[-1] if self._cache_seqs else -1, seq))
+                if chained(d):
+                    self._offsets[d.get("id")] = off
+                    self._count, self._last = self._count + 1, d["hash"]
+                elif isinstance(d, dict) and self._count == 0 and self._n_legacy is not None:
+                    self._n_legacy += 1
             off += len(line)
         self._size = off
+        if feed:
+            self._cache_off = off
+        now = os.fstat(fh.fileno())
+        self._ino, self._mtime = now.st_ino, now.st_mtime_ns
+
+    def _fed(self, b):
+        """Feed bytes just read or written into the chunk digests (self._chunks / self._tailbuf — what _validate
+        compares the file against)."""
+        buf = self._tailbuf + b
+        while len(buf) >= _CHUNK:
+            self._chunks.append(hash(buf[:_CHUNK]))
+            buf = buf[_CHUNK:]
+        self._tailbuf = buf
+
+    def _validate(self, fh):
+        """Is the file's covered prefix still the bytes this object parsed — every full 128 KiB chunk hashed, the
+        rest compared as bytes? A file rewritten in place (the same size, the same coarse-grained mtime) is caught
+        here, so the parsed-lines cache and the offsets cannot serve a line another hand changed."""
+        fh.seek(0)
+        for want in self._chunks:
+            if hash(fh.read(_CHUNK)) != want:
+                fh.seek(0, os.SEEK_END)
+                return False
+        got = fh.read(self._size - len(self._chunks) * _CHUNK)
+        fh.seek(0, os.SEEK_END)
+        return got == self._tailbuf
+
+    def _catch_up(self):
+        """Bring the parsed-lines cache (S267/S277: every line parsed once, however often iter() asks) to the
+        file's end, under the thread lock and the file's shared lock. The covered prefix is validated against the
+        file's bytes first: a change made other than by appending — an edit, a rewrite, a shorter file — rebuilds
+        the cache and the chain state together, and so does a cache that does not line up with the chain state (a
+        store opened from its stored head)."""
+        if self._in_batch():
+            return                                    # this thread's batch appends feed the cache as they write
+        with self._lock:
+            if not os.path.exists(self.path):
+                self._reset()
+                return
+            with open(self.path, "rb") as fh, _flock(fh, shared=True):
+                st = os.fstat(fh.fileno())
+                if st.st_ino != self._ino or self._cache_off != self._size or not self._validate(fh):
+                    self._reset()
+                    self._ino = st.st_ino
+                if st.st_size != self._size:
+                    self._read_tail(fh)
+                else:
+                    self._mtime = st.st_mtime_ns
 
     @property
     def rotates(self):
@@ -1800,17 +1886,27 @@ class JSONLStorage(TraceStorage):
         rec["id"] = rec["hash"][:16]
         line = (_body(rec) + "\n").encode()
         off = fh.seek(0, os.SEEK_END)
+        pad = b""
         if off:                                   # a crash cut the last line short: end it, never glue onto it
             fh.seek(off - 1)
             if fh.read(1) != b"\n":
-                fh.write(b"\n")                    # the fragment stays a line of its own: verify reports it
+                pad = b"\n"                           # the fragment stays a line of its own: verify reports it
+                fh.write(pad)
                 off += 1
         fh.write(line)
         fh.flush()
         if self.fsync and head:
             os.fsync(fh.fileno())
         self._offsets[rec["id"]] = off
+        if self._cache_off == self._size:             # the cache ends where the chain state does: it takes the
+            self._fed(pad + line)                     # record without reading it back (S267/S277), and its bytes
+            self._cache.append((off, self._nlines, rec))   # feed the chunk digests _validate checks
+            self._cache_seqs.append(max(self._cache_seqs[-1] if self._cache_seqs else -1, rec["seq"]))
+            self._nlines += 1
+            self._cache_off = off + len(line)
         self._count, self._last, self._size = self._count + 1, rec["hash"], off + len(line)
+        now = os.fstat(fh.fileno())
+        self._ino, self._mtime = now.st_ino, now.st_mtime_ns
         if head:
             self._write_head()
         return rec
@@ -1882,22 +1978,29 @@ class JSONLStorage(TraceStorage):
 
     def _lines(self, limit=None):
         """(line number, record or None when unreadable) for every line — with `limit`, for the lines that start before
-        that many bytes (the file as it was at a snapshot)."""
-        if not os.path.exists(self.path):
+        that many bytes (the file as it was at a snapshot). The lines are parsed once and kept (S267/S277): a store
+        that is only appended to serves iter() from memory, and a change made other than by appending re-reads the
+        file (see _catch_up)."""
+        self._catch_up()
+        for off, i, d in self._cache:
+            if limit is not None and off >= limit:
+                return
+            yield i, d
+
+    def iter(self, kind="ask", redacted=False, after=None):
+        """As TraceStorage.iter, with `after` served from the parsed-lines cache: only the records past that sequence
+        number are walked to (a bisect on the cache's seq index), so a reader that keeps its own cursor — the
+        process store's index over tickets, answers and segments — costs O(new), not O(store) (S267/S277)."""
+        if after is None:
+            yield from super().iter(kind=kind, redacted=redacted)
             return
-        with open(self.path, "rb") as fh:
-            off = 0
-            for i, line in enumerate(fh):
-                if limit is not None and off >= limit:
-                    return
-                off += len(line)
-                if not line.strip():
-                    continue
-                try:
-                    d = json.loads(line)
-                except ValueError:
-                    d = None
-                yield i, d if isinstance(d, dict) else None
+        import bisect
+        self._catch_up()
+        for _, _, d in self._cache[bisect.bisect_right(self._cache_seqs, after):]:
+            if not isinstance(d, dict) or not isinstance(d.get("seq"), int) or d["seq"] <= after:
+                continue
+            if chained(d) and (kind is None or d.get("kind", "ask") == kind) and (redacted or not d.get("redacted")):
+                yield _stored(d, self.catalog)
 
     def _raw(self, snap=None):
         started = False
@@ -2157,12 +2260,18 @@ class _SQLStorage(TraceStorage):
             return d
         return None
 
-    def iter(self, kind="ask", redacted=False):
-        if kind is None:
-            rows = self._rows()
-        else:
-            rows = self._rows("SELECT seq, body FROM {p}records WHERE kind = ? ORDER BY seq", (kind,))
-        for _, d in rows:
+    def iter(self, kind="ask", redacted=False, after=None):
+        where, args = [], []
+        if kind is not None:
+            where.append("kind = ?")
+            args.append(kind)
+        if after is not None:
+            where.append("seq > ?")
+            args.append(after)
+        sql = "SELECT seq, body FROM {p}records"
+        if where:
+            sql += " WHERE " + " AND ".join(where)
+        for _, d in self._rows(sql + " ORDER BY seq", args):
             if chained(d) and (redacted or not d.get("redacted")):
                 yield _stored(d, self.catalog)
 
