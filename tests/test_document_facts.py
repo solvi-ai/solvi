@@ -4,17 +4,13 @@ the audit of a 12k-char document stays under 1 KB. Replay of a record stored wit
 (the 1.4 `<text, N chars>` marker; pre-1.4 whole inputs are the other accepted form). Fake server, no network."""
 import hashlib
 import inspect
-import json
 import os
 import sys
-import tempfile
 
 import pytest
 
-import solvi
 from solvi import Answer
-from solvi.core.catalog import Catalog, Part, Question
-from solvi.core.store import JSONLStorage
+from solvi.core.catalog import Catalog, Question
 from solvi.core.system import System, _rule_why
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))

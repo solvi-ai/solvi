@@ -105,7 +105,8 @@ def test_missing_state_key_is_a_clear_error():
 def test_fingerprint_boundary():
     """К2: without reads_with (or with None) the fingerprint is what it was; with reads_with it is another catalog,
     and a calibration made on one side does not attach to the other."""
-    import tempfile, os
+    import tempfile
+    import os
     s1 = plain_recipe_of(Server())
     s2 = plain_recipe_of(Server(), reads_with=None)
     s3 = recipe_of(Server())

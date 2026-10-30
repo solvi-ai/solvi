@@ -2684,7 +2684,7 @@ class AdapterLoop:
             items = self._items()
         stored_ev = [e for k, e in items if k == "stream"]
         fps = {e["version"]: e.get("fingerprint") for e in stored_ev if e.get("event") == "freeze"}
-        fresh = AdapterLoop(_Counting(), **{**self._kw, "secret": self._secret}, policy=pickle.loads(self._policy0),
+        fresh = AdapterLoop(_Counting(), **{**self._kw, "secret": self._secret}, policy=pickle.loads(self._policy0),   # noqa: S301 — the loop's own frozen policy bytes
                             detector=_fresh_detector(self.detector), monitor=copy.deepcopy(self._monitor0),
                             _detector_alone=True, _batch=self._batch)
         fresh._fps = fps
