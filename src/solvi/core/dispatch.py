@@ -757,7 +757,12 @@ class Dispatcher:
     the dispatcher's life. price: dollars per million (input, output) tokens, or a function (model, usage) → dollars —
     required for a budget in dollars. wake: the signals that wake the slow path (default: all of SIGNALS); an input
     whose signal is not among them goes to a person. agreement: {fact: minimum share} — an agreement fact of System 1
-    below its minimum wakes the slow path. monitor: a solvi.core.guarantees.drift.DriftMonitor fed every System 1 response. supervise:
+    below its minimum wakes the slow path. monitor: a solvi.core.guarantees.drift.DriftMonitor fed every System 1
+    response; with promise= its reference is re-taken (the monitor's `adapted()`) whenever the certificate's threshold
+    moves (certified, loosened, restarted) — the certificate's own loosening changes the alone flag, not the stream, and
+    a reference spanning a move flags the move itself as drift on an unchanged stream; the price is that while the
+    certificate loosens the monitor spends most of its time re-taking its reference (its reports' phase says
+    "reference") and its window tests see nothing. supervise:
     the share of System 1's answers given alone that the slow path checks (drawn by a hash of seed, the input and the
     decision's number). think: "s2" (default: the slow path's accepted answer is given) or "agree" (given only when it
     equals what System 1 would have answered; otherwise a person). on_disagree: what a check that disagrees does —
@@ -793,9 +798,15 @@ class Dispatcher:
     else min(1, max(floor, budget / the share answered alone over the last window)); sampling= {"floor", "budget",
     "window"}, defaults 0.05, 0.05, 500). A sampled decision System 1 would answer alone is checked by the slow path
     whatever `wake` says (one extra call); a sampled escalation is free; the slow path's accepted answer is the label,
-    none is a loss. detector= a RiskDetector fed each sample's deployed loss; on its alarm on_drift="recertify"
+    none is a loss. A promise with the default grid="auto" reads no label until its first grid_from (200) scores are
+    observed: with a slow path those first decisions are escalated — the first grid_from slow-path calls are paid for
+    labels the certificate drops (the Dispatcher warns; grid="fixed", or a smaller grid_from, for scores already on
+    [0, 1]). detector= a RiskDetector fed each sample's deployed loss; on its alarm on_drift="recertify"
     restarts the certificate and escalates every decision for probation= decisions (default 300) and until it is
-    certified again, "human" / "accept" latch the alarm as the drift flag. Each decision records `stream` (sample,
+    certified again, "human" / "accept" latch the alarm as the drift flag. The detector reads only the coin's samples,
+    so at the sampling rate ρ it sees a break about 1/ρ decisions after it happens (≈ 20× at the default floor 0.05,
+    next to a score monitor's ~10): a RiskDetector is never the only alarm — give monitor= too (an AdapterLoop refuses
+    the detector alone; the Dispatcher does not, it says it here). Each decision records `stream` (sample,
     certificate, detector) and each state change a record of kind "stream"; `replay_stream()` rebuilds them all.
     Without promise= nothing of this runs and the records are as before."""
 
@@ -900,6 +911,15 @@ class Dispatcher:
             self._stream = promise.stream_driver(detector, on_drift=on_drift,
                                                  probation=300 if probation is None else probation, **(sampling or {}))
             self._stream0 = copy.deepcopy(self._stream)          # what replay_stream rebuilds the states from
+            if self.slow is not None and getattr(promise, "grid_spec", None) == "auto" \
+                    and getattr(promise, "grid", None) is None:
+                warnings.warn("Dispatcher: the stream certificate's grid is \"auto\": until the first "
+                               f"{getattr(promise, 'grid_from', 200)} scores are observed (grid_from) no label is "
+                               "read — and with a slow path every one of those decisions is escalated, so the first "
+                               "grid_from slow-path calls are paid for labels the certificate drops (and every "
+                               "decision until then is answered by the slow path). For scores already on [0, 1] "
+                               "prefer grid=\"fixed\" (first certificate at the clean need, nothing dropped), or a "
+                               "smaller grid_from", stacklevel=2)
         self.loop = None
         self._learn_lock = threading.RLock()     # a loop's decisions one at a time (outermost: before part and loop)
         if loop is not None:
@@ -1218,6 +1238,14 @@ class Dispatcher:
             stream, events, why = self._stream.after(**self._stream_inputs(action, paid, r1, would1, th),
                                                      sampled=b.sampled, rho=b.rho, probation=b.probation, n=b.n)
             self._stream_told(events, why)
+            if self.monitor is not None and any(e["event"] in ("certified", "loosened", "recertify") for e in events):
+                # the certificate's own threshold moved: the alone flag changes with it, not the stream — a reference
+                # spanning the move (the threshold only loosens, so the share answered alone only climbs) flags the
+                # move itself as drift on an unchanged stream; the monitor re-takes its reference from the next
+                # decision, gated under the new threshold
+                adapted = getattr(self.monitor, "adapted", None)
+                if callable(adapted):
+                    adapted()
         learning = None if pre is None else self._learned(pre, x, action, paid, r1, would1, th)
         d = Dispatched(q, answer, by, action, reasons, res, th, cand, disagreement, cost, b.n, b.draw, b.spent, b.drift,
                        b.expected, over, self.config(), slice=b.slice,

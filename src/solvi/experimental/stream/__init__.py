@@ -13,13 +13,18 @@ An anytime-valid learn-then-test certificate on a threshold grid: one e-process 
 bets, or bets="agrapa" — `experimental._evalue.MeanBound` mirrored), fixed-sequence over the grid from strict to loose,
 δ spent over restarts by `DeltaBudget` (δ_v = `experimental.skills.Certificate.delta_at(v)`). See
 `stream.certificate` for the statement and what is recorded. Clean samples a fresh certificate needs at α = δ = 5 %:
-85 (v = 1), 116 (v = 2), 134 (v = 3); 74 for the mixture at the full δ, against 59 for a one-shot binomial test.
+85 (v = 1), 116 (v = 2), 134 (v = 3); 74 for the mixture at the full δ, against 59 for a one-shot binomial test —
+a floor on labels, not the useful cost metric: the first threshold in force is the strictest certified grid point
+(how strict is distribution-dependent), so price a coverage-vs-labels curve, not n to the first certification
+(`clean_need`).
 
 Stage 2: `RiskDetector` (a Shiryaev–Roberts e-detector on the deployed risk, `stream.detector`) and the calibration
 coin and rate (`stream.sampling`), run by `Dispatcher(audit="adaptive", promise=sp, detector=det,
 on_drift="recertify", probation=300, secret=key)`: the coin draws the samples, the slow path labels them, an alarm
 restarts the certificate and opens probation, every decision records its state and `Dispatcher.replay_stream()`
-rebuilds it. Standalone, the caller still draws the samples and calls `learn` and `restart`.
+rebuilds it. The default grid="auto" costs the first grid_from (200) labels — dropped, and under a Dispatcher each
+paid for as an escalated slow-path call; grid="fixed" for scores already on [0, 1]. Standalone, the caller still
+draws the samples and calls `learn` and `restart`.
 
 Stage 3a: `stream.tickets` — an agent outside the process as the oracle (`AgentOracle`, `TicketDesk`; `solvi serve
 --mcp --agent-oracle`): blind tickets, durable in the store, an expired ticket a recorded loss.

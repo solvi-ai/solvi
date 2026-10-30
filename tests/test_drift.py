@@ -147,7 +147,10 @@ def test_a_response_gives_the_act_probability_and_a_bare_result_says_that_it_doe
     two = DriftMonitor(window=20).set_reference([part("a billing question")] * 20)
     for _ in range(20):
         rep = two.observe(res, question="team")
-    assert "act" in rep["tests"] and not rep["not_tested"]
+    assert "act" in rep["tests"] and "act" not in rep["not_tested"]
+    assert rep["not_tested"]["answered"].startswith("the reference answered alone 100%")   # 20 identical model
+    # decisions, all alone: that share is degenerate (no spread) and not tested — only that signal
+    assert list(rep["not_tested"]) == ["answered"]
     for _ in range(20):
         rep = two.observe({"value": "billing", "confidence": 0.9})
     assert "act" not in rep["tests"] and "the window holds no act probability" in rep["not_tested"]["act"]

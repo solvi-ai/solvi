@@ -44,6 +44,15 @@ label-free test, because such a stream is distributed exactly like an unchanged 
 A decision marked by an identity canary (solvi.core.guarantees.canary: the remote model answering is not the one of the
 reference) is flagged "identity" at once, whatever min_signals says.
 
+A reference whose share answered alone is 0 or 1 has that signal not tested: its spread is zero and every window that
+moved at all is "significant" — a stream certificate's own first certification (which starts System 1 answering alone)
+looks exactly like that. Said once in a warning and in every report's "not_tested". And when what the monitor reads
+changes on its own — not the stream: a certificate's threshold moved (it only loosens, so the share answered alone only
+climbs and any reference taken before a move is stale for ever after), the system retrained — `adapted()` re-takes the
+reference: the next `window` decisions observed, as at construction; a Dispatcher with promise= calls it at every
+threshold change, so while its certificate loosens the monitor is mostly re-taking its reference (phase "reference")
+and tests nothing.
+
 It is a signal, not a verdict: what to do — recalibrate, escalate, ask for labels — is the caller's. Simulated on
 independent decisions (benchmarks/drift_simulation.py): 6 of 1,152 unchanged streams were flagged within 1,000
 decisions; a fall of the share answered alone from 73% to 13% was flagged 23–27 decisions later whatever the window; a
@@ -54,6 +63,7 @@ NumericDrift is the same sequential test on any numeric stream (forecast residua
 its level against a reference, h from Cusum.calibrate(ref_n=) with the reference's own sampling error simulated."""
 from __future__ import annotations
 
+import hashlib
 import math
 import warnings
 from collections import Counter, deque
@@ -286,6 +296,7 @@ class DriftMonitor:
         self.window, self.horizon = int(window), int(horizon)
         self._perm = None                        # (seen, p-values) of the last permutation tests
         self._warned = False                     # said once: a Result has no act probability
+        self._warned_ref = False                 # said once: the reference's share answered alone is 0 or 1
         self.alpha, self.min_signals = float(alpha), int(min_signals)
         self.min_n = int(min_n) if min_n is not None else max(20, self.window // 2)
         self.minimum = {"answered": min_share, "answers": min_tv, "confidence": min_shift, "act": min_shift,
@@ -293,6 +304,7 @@ class DriftMonitor:
         self.min_labelled, self.accuracy, self.seed = int(min_labelled), accuracy, seed
         self.sequential, self.allowance = bool(sequential), float(allowance)
         self.cusum, self._mu, self._sd = None, None, None
+        self._seq_cal = None                             # (key, (h, rate, sims, alpha, horizon)): the last calibration
         self._raw: deque = deque(maxlen=self.horizon)     # the scalar signals of the decisions since the reference
         self.reference: list[Observation] = []
         self.recent: deque[Observation] = deque(maxlen=self.window)
@@ -356,7 +368,24 @@ class DriftMonitor:
                 return inc
             return nxt
         names = [f"{SCALARS[j]}{'+' if d > 0 else '-'}" for j, d in chans]
-        self.cusum = Cusum.calibrate(names, make_null, self.alpha / 4, self.horizon, seed=self.seed)
+        self.cusum = self._calibrate_sequential(names, make_null, R)
+
+    def _calibrate_sequential(self, names, make_null, R):
+        """Cusum.calibrate for the sequential test, memoized on the reference's content and the monitor's configuration:
+        the null resamples the reference's own rows with a seeded rng (make_null), so the same reference and the same
+        configuration simulate exactly the same h — reset(), which keeps the reference, and a re-observation of the
+        same reference pay the simulation (sims × horizon steps) once, not per call. A new reference (set_reference,
+        the window refilled, adapted) has another content and recomputes."""
+        key = (self.alpha / 4, self.horizon, self.seed, self.allowance,
+               hashlib.sha256(np.ascontiguousarray(R, float).tobytes()).hexdigest())
+        if self._seq_cal is not None and self._seq_cal[0] == key:
+            h, rate, sims, level, hor = self._seq_cal[1]
+            c = Cusum(names, h)                           # a fresh state; the simulated threshold is the cached one
+            c.rate, c.sims, c.alpha, c.horizon = rate, sims, level, hor
+            return c
+        c = Cusum.calibrate(names, make_null, self.alpha / 4, self.horizon, seed=self.seed)
+        self._seq_cal = (key, (c.h, c.rate, c.sims, c.alpha, c.horizon))
+        return c
 
     def _sequential(self, o):
         """One decision into the CUSUMs → [(signal, why)] of the channels at or above h whose shift since their change
@@ -450,6 +479,20 @@ class DriftMonitor:
         else:
             self._start_sequential()
 
+    def adapted(self):
+        """What the monitor reads changed on its own — not the stream: a stream certificate's threshold moved (first
+        certification, a loosening, a restart after an alarm), the system was retrained or re-tuned. The next `window`
+        decisions observed become the new reference, as at construction: a reference that spans such a change compares
+        two regimes of the alone flag and flags the change itself as drift — a certificate's threshold only loosens,
+        so the share answered alone only climbs, and any reference taken before a move is stale for every window
+        after it (starting the monitor at the first certification does not cure this; the reference must not span a
+        threshold change, which is what this re-takes). The monitor tests nothing while the new reference fills (its
+        reports' phase says "reference")."""
+        self.reference, self._ref = [], None
+        self.recent.clear()
+        self._perm = None
+        self.cusum, self._raw = None, deque(maxlen=self.horizon)
+
     # --- the report
     def report(self):
         """The last window against the reference → {"phase": "monitor", "drift", "flags": [signal], "why": [text],
@@ -469,9 +512,26 @@ class DriftMonitor:
         found = []                                   # (signal, p, effect, why, looks per horizon)
 
         p1, p2 = ref["answered"], cur["answered"]                      # 1. the share answered alone
-        p = _p_shares(round(p1 * n1), n1, round(p2 * n2), n2)
-        rep["tests"]["answered"] = {"reference": p1, "window": p2, "p": p}
-        found.append(("answered", p, abs(p2 - p1), f"answered alone {p1:.0%} → {p2:.0%} (p = {p:.1e})", self.horizon))
+        if p1 in (0.0, 1.0):
+            # a degenerate reference (the sequential test skips it too — no spread): a share of 0 or 1 has nothing
+            # behind it, so every window that moved at all is "significant" — a stream certificate's own first
+            # certification, which starts System 1 answering alone, reads as drift on an unchanged stream
+            rep["not_tested"]["answered"] = (
+                f"the reference answered alone {p1:.0%} of the time ({round(p1 * n1)} of {n1}): a share of 0 or 1 has "
+                "no spread, so any window that moved at all is significant — the certificate's own certification reads "
+                "as drift; the signal is not tested (re-take the reference once the share has moved, adapted())")
+            if not self._warned_ref:
+                self._warned_ref = True
+                warnings.warn(f"DriftMonitor: the reference's share answered alone is {p1:.0%} ({round(p1 * n1)} of "
+                              f"{n1}): the signal is not tested against it — every window differs (a certificate "
+                              "that starts answering alone looks like drift); re-take the reference once the share "
+                              "has moved (adapted(); a Dispatcher with promise= does so at every threshold change)",
+                              UserWarning, stacklevel=2)
+        else:
+            p = _p_shares(round(p1 * n1), n1, round(p2 * n2), n2)
+            rep["tests"]["answered"] = {"reference": p1, "window": p2, "p": p}
+            found.append(("answered", p, abs(p2 - p1),
+                          f"answered alone {p1:.0%} → {p2:.0%} (p = {p:.1e})", self.horizon))
 
         keys = sorted(set(ref["answers"]) | set(cur["answers"]))        # 2. the distribution of the answers
         r = np.array([ref["answers"].get(k, 0) for k in keys], float)

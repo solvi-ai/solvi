@@ -16,7 +16,11 @@ calls per decision, window = 500.
 Who pays. An escalated decision that wins the coin is a free sample: the slow path answers it anyway and its accepted
 answer is the label. An alone decision that wins the coin is an audit: the slow path checks it (one extra call). A
 sample without an accepted slow-path answer (no slow path, no budget, a person decides, the slow path failed) has no
-label: a loss wherever it would have been answered alone (`StreamPromise.learn(label=None)`).
+label: a loss wherever it would have been answered alone (`StreamPromise.learn(label=None)`). For the detector an
+expired ticket is the sharpest case — a loss whatever System 1 would have done (`after(..., lost=True)`, design §5.4)
+— so the oracle's expiry rate adds to the rate the detector tests: a stream at risk r seen through an expiry rate e
+reads as e + (1 − e)·r, and e must sit well below α (at α = 5 %, an oracle that expires 10 % of its tickets alarms
+by construction on a perfectly clean stream; see `stream.tickets`).
 
 The step (`StreamDriver`). Per decision, after System 1 answered (the promise observed it through its guard):
 `before()` → (ρ_t, probation) from the past; the Dispatcher draws the coin and dispatches; `after(...)` → the record

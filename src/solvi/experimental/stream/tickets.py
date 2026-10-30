@@ -42,7 +42,12 @@ up (`expire(ticket, why)`) gets a record of kind "pending_expired" and is comple
 a person (by "human", whatever the action was — an audited answer System 1 gave does not stand unchecked) and, on a
 sampled decision, the label is missing: a loss at every grid point where System 1 would have answered alone, and a
 loss of 1 for the detector (design §5.4: both factors are ≤ 1 for the wealth and ≥ 1 for the detector, so the
-certificate and the detector keep their statements under any missingness, adversarial included). An unsampled
+certificate and the detector keep their statements under any missingness, adversarial included). That loss of 1
+whatever System 1 would have done makes the oracle's expiry rate part of the rate the detector tests — a stream at
+risk r with expiry rate e reads as e + (1 − e)·r — so the expiry rate must sit well below α: at α = 5 %, an oracle
+that expires 10 % of its tickets alarms by construction on a clean stream, and each alarm's restart opens probation
+(ρ = 1: every decision a ticket), which raises the expiry rate further until the loop exhausts the budget (the
+share-of-expired stop, `max_drop`, is deferred — see "Not here"). An unsampled
 expired ticket is not a sample (adding it would raise the wealth at the strict points); it is recorded the same way.
 A resolve after expiry is refused. Nothing is dropped.
 

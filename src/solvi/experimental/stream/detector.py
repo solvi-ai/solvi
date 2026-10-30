@@ -15,7 +15,11 @@ at α alarms about every A samples on average — by construction ("at the promi
 Arithmetic in a fixed order (one product per bet, `math.fsum` for the mean); the recorded R is rounded to 1e-9, so the
 same losses in the same order give the same record. The `Monitor` protocol (`observe`, `flagged`, `reset`) is there so
 `Dispatcher(monitor=det)` accepts it, but it reads only labelled samples: `observe(decision)` without a label is
-ignored. The Dispatcher feeds it with `detector=` (each sampled decision's deployed loss)."""
+ignored. The Dispatcher feeds it with `detector=` (each sampled decision's deployed loss) — only the coin's samples,
+so at the sampling rate ρ the detector sees a break about 1/ρ decisions after it happens (≈ 20× at the default
+floor 0.05, next to a full-stream CUSUM or score monitor's ~10 for a confidence-visible shift; its unique value is a
+label-only shift). A RiskDetector is never the only alarm: `AdapterLoop` refuses it without a score monitor
+(loop.py), and `Dispatcher(promise=, detector=)` should be given `monitor=` too — nothing there enforces it."""
 from __future__ import annotations
 
 import math

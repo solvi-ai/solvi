@@ -45,6 +45,11 @@ label is missing.
 The grid. "auto": `ltt_grid` over the scores of the first `grid_from` decisions observed (labels unread), at most
 `grid_size` points; until then nothing certifies and a labelled sample is not read (counted in `dropped`). "fixed":
 `fixed_grid()` (a fixed shape on [0, 1]). A sequence: those thresholds. +inf is always the "answer nothing" point.
+The auto grid's price: those first `grid_from` labels are dropped, and under a Dispatcher (audit="adaptive") every one
+of them was paid for — the threshold is +inf until the grid is fixed, so each decision is escalated and its slow-path
+label then dropped (the first `grid_from` slow-path calls, ~200 by default, buy nothing; the Dispatcher warns). For
+scores already on [0, 1] prefer grid="fixed": it certifies at the clean need (85 at α = δ = 5 %) with nothing dropped,
+or take a smaller grid_from.
 
 The data a decision records (`state()`): v_index, delta_v, threshold, n (samples read), seen (decisions observed),
 missing, dropped, certified (points), evidence_fp (SHA-256 of the log-wealth vectors rounded to 1e-9 and the certified
