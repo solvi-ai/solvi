@@ -21,9 +21,23 @@ def kinds(text):
 
 # ------------------------------------------------------------------------------------------------ numerals
 def test_negative_numbers_minus_unicode_minus_and_parentheses():
-    ns = [n for n in numerals("a loss of -5, then −7.5 and (12.3) in the table") if n.kind == "number"]
+    ns = [n for n in numerals("a loss of -5, then −7.5, and a reported (12.3) in the table") if n.kind == "number"]
     assert [n.number for n in ns] == [Decimal(-5), Decimal("-7.5"), Decimal("-12.3")]
     assert ns[2].plain() == "-12.3"
+
+
+def test_parentheses_after_another_number_are_a_comparative_not_a_negative():
+    # "16.6% (18.8%)": the same shape solvi.solutions.document abstains on — the sign is not read (S310)
+    ns = numerals("a margin of 16.6% (18.8%). Earnings per share SEK 2.84 (5.45).")
+    got = {n.surface: n.number for n in ns if n.kind == "number"}
+    assert got == {"16.6%": Decimal("16.6"), "(18.8%)": Decimal("18.8"), "2.84": Decimal("2.84"),
+                   "(5.45)": Decimal("5.45")}
+    assert ns[1].plain() == "(18.8%)"                       # the parentheses stay: as the input writes it
+    assert numerals("12.3 percent (11.8)")[1].number == Decimal("11.8")
+    assert numerals("SEK 1,234 m (1,100)")[1].number == Decimal("1100")
+    assert numerals("2.1x\n(2.5)")[1].number == Decimal("2.5")     # one new line: still its logical line
+    assert [n.number for n in numerals("(5.45) then (300) | (2)")] == \
+        [Decimal("-5.45"), Decimal(-300), Decimal(-2)]                     # alone: negative
 
 
 def test_a_hyphen_between_numbers_is_not_a_sign():
@@ -115,7 +129,7 @@ def test_malformed_date_raises(expr):
 def test_fill_writes_input_numerals_as_the_input_writes_them_and_calls_exactly():
     f = fill("Revenue grew by <calc>[1] - [3]</calc> million, to [1]; margin [7] (was [8]).", SOURCE)
     assert f.errors == []
-    assert f.text == "Revenue grew by 150 million, to $1,250 million; margin 12.5% (was -3.2%)."
+    assert f.text == "Revenue grew by 150 million, to $1,250 million; margin 12.5% (was (3.2)%)."
     assert [c.shown for c in f.calls] == ["150"]
 
 
@@ -143,7 +157,7 @@ def test_fill_formats_results_digits_places_and_grouping():
 
 
 def test_a_negative_input_goes_into_calc_in_parentheses():
-    assert fill("<calc>[7] - [8]</calc>", SOURCE).text == "15.7"
+    assert fill("<calc>[1] - [2]</calc>", "fell to 12.5% from -3.2% a year ago").text == "15.7"
 
 
 def test_pointer_out_of_range_is_an_error_and_stays_as_written():
@@ -202,8 +216,9 @@ def test_check_sources_a_typed_text():
 
 
 def test_signed_check_refuses_a_flipped_sign():
-    assert check("loss 3.2%", SOURCE, signed=True).ok is False
-    assert check("loss -3.2%", SOURCE, signed=True).ok
+    src = "Margin fell to 12.5% from -3.2% a year ago."
+    assert check("loss 3.2%", src, signed=True).ok is False
+    assert check("loss -3.2%", src, signed=True).ok
 
 
 def test_scale_words_normalised_and_rescale_is_an_option_and_reported():

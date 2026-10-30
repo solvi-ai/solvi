@@ -151,7 +151,7 @@ def _NUMBER_TYPES():
     return (int, float, Decimal)
 
 
-def span_value(vtype, text, strict=False):
+def span_value(vtype, text, strict=False, spec=None):
     """The value a typed span states (`Span[float]`, `Span[date]`, ...) → the value; ValueError when the text is not one.
     First the type's own reading of the text ("149.90", "2026-09-12") — except a number the guarded parser calls
     ambiguous ("2.500", "1.000": refused, as below). When that fails and the type is a date or a number
@@ -159,18 +159,22 @@ def span_value(vtype, text, strict=False):
     21, 2026", "18 октября 2026 г.", "21.07.2026"; "41,908.56 USD", "EUR 18,851.12", "1 500 000 руб", "1.5 million" —
     and refuse what would be a guess: a numeric date that reads both ways ("03/04/2026", "12.09.2026": day or month
     first?), a date without a year, two dates or two numbers, "1.000", a percentage. strict=True: the type's own
-    reading only."""
+    reading only. spec: reading rules passed to the number parser as its spec (e.g. {"decimal": ","}: the document
+    writes a dot where a comma is the decimal separator — a declaration, never a guess)."""
     t = text.strip()
     ta = adapter(vtype)
     if vtype in _NUMBER_TYPES() and re.search(r"\d\s+[.,]\s*\d|\d[.,]\s+\d", t):
         raise ValueError(f"{t!r}: a separator with a space beside it (\"1 ,234\") — one number or two?")
     if not strict and vtype in _NUMBER_TYPES():       # a number: what the guarded parser calls ambiguous ("2.500": two
         from .textin import ParseError, parse_number  # and a half, or two thousand five hundred?) is not read by the
-        try:                                          # type's own reading either
-            parse_number(t, {"integer": True} if vtype is int else None)
+        canon = None                                  # type's own reading either
+        try:
+            canon = parse_number(t, _number_spec(vtype, spec))
         except ParseError as why:
             if "ambiguous" in str(why):
                 raise ValueError(str(why)) from None
+        if canon is not None and spec:                # a declared reading ("30.000" with decimal=",") wins over the
+            return ta.validate_python(canon)          # type's own (the float's 30.000)
     try:
         return ta.validate_python(t)
     except ValueError as err:
@@ -194,12 +198,20 @@ def span_value(vtype, text, strict=False):
                     parse_date(t)                      # raises with the reason
                 canon = read.pop()
             elif vtype in (int, float, Decimal):
-                canon = parse_number(t, {"integer": True} if vtype is int else None)
+                canon = parse_number(t, _number_spec(vtype, spec))
             else:
                 raise err
         except ParseError as why:
             raise ValueError(f"{_msg(err)}; {why}") from None
         return ta.validate_python(canon)
+
+
+def _number_spec(vtype, spec=None):
+    """The number parser's spec for a value of `vtype`: the caller's reading rules, plus "integer" for an int."""
+    s = dict(spec or {})
+    if vtype is int:
+        s["integer"] = True
+    return s or None
 
 
 def spec(t, where=""):
