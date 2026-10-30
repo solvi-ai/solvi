@@ -928,7 +928,7 @@ class AdapterLoop:
             return f"attach refused: the deepest layer (version {d}) is not certified"
         return None
 
-    def _train_refusal(self, n) -> list:
+    def _train_refusal(self, n) -> tuple[bool, list[dict]]:
         """Additive mode, asked where the schedule would ask `want_train`: the loop refuses a training whose candidate
         could not attach — the chain at `max_layers` (decision D3: training stops at the cap) or the deepest layer not
         certified (nothing escalates below an uncertified layer; DefaultPolicy.why_not_train says so too, from

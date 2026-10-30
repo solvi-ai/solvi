@@ -39,6 +39,7 @@ from __future__ import annotations
 import calendar
 import datetime as dt
 import re
+import typing
 from dataclasses import dataclass, field
 from decimal import Decimal, InvalidOperation, localcontext
 from functools import lru_cache
@@ -1228,7 +1229,7 @@ def cmp_calc(expr: str) -> bool:
     """A `<cmp>` call on its own: numbers, ISO dates or "strings" compared with < <= > >= == != (strings only == and
     !=, case-insensitive), `x between a and b` (inclusive), `x [not] in (a, b, ...)`, joined by and / or / not.
     Raises `ProgramError` for a number against a date, two different units ("%" against "$") or scale words."""
-    return _typed("cmp", expr, _Env())[0]
+    return bool(_typed("cmp", expr, _Env())[0])
 
 
 def scale_calc(expr: str) -> Decimal:
@@ -1237,7 +1238,7 @@ def scale_calc(expr: str) -> Decimal:
     days, weeks; months, quarters, years; m/s, km/h (kmh, kph), km/s, mph. Seconds to weeks against months, quarters
     and years need a rule (360: a month is 30 days; 365 or 366: a year). Exact `Decimal`, one division at the end
     (1 m/s is 3.6 km/h exactly; 1 km/h to m/s is 1000/3600 to 50 digits); raises `ProgramError`."""
-    return _typed("scale", expr, _Env())[0]
+    return typing.cast("Decimal", _typed("scale", expr, _Env())[0])
 
 
 def count_calc(expr: str, tables=None):
