@@ -438,11 +438,15 @@ class SkillLearner:
         elif kind == "supervised":
             if not ok:
                 self._count("mismatch")              # the exact model said it works here; the world did not follow
+                if sk is not None:                   # — and the skill's certificate never saw the world's verdict
+                    sk.outcomes["mismatch"] += 1     # (S288: the discrepancy is visible on the skill itself)
         elif kind == "planned":
             if sk is not None:
                 sk.outcomes["source_ok" if ok else "source_fail"] += 1
             if not ok and self.verify_plans:
                 self._count("mismatch")
+                if sk is not None:
+                    sk.outcomes["mismatch"] += 1
 
     def _fallback(self, state):
         acts = list(self.env.actions(state))

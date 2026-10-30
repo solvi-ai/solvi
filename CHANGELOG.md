@@ -32,6 +32,10 @@
   (S264), and the guard's docstring states the re-test's validity scoping.
 
 ### Fixed (skills / check / report — the 2026-10-30 external handoff, S283/S285–S296)
+- **Skills: a world mismatch of a supervised or verified planned run is counted on the skill itself (S288).**
+  `skill.outcomes["mismatch"]` — the exact model said it works, the real world did not follow. The certificate
+  still never sees the world's verdict of a supervised use (its documented limit), but the discrepancy is now
+  visible where the skill is read, not only in the episode's global counter.
 - **The skills docstring named the wrong alarm (S283, docs).** The package docstring said of the certificate's
   e-detector "(at 5% one failure alone does)" — that is `alternatives=None`, the old burst alarm; the default CUSUM
   alarm (level 50, alternatives (1.5, 2)) first fires on the 7th consecutive alone-failure at 5%. The Certificate

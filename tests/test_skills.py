@@ -489,3 +489,48 @@ def test_a_goal_may_read_the_path_and_verify_takes_a_plain_action_list():
     assert not verify(m, s, ["left"], at_goal)
     with pytest.raises(TypeError):
         verify(m, s, "right", at_goal)
+
+
+# --- the world's verdict of a supervised run reaches the skill itself (S288)
+def test_a_world_mismatch_of_a_supervised_run_is_counted_on_the_skill():
+    import warnings
+    from solvi.core.environment import Outcome
+    from solvi.experimental.skills import Certificate, SkillLearner
+
+    class JammedCorridor:
+        """Right reaches pos 2, unless the door jams: the copy verified the plan on the unjammed world."""
+
+        def __init__(self):
+            self.jam = False
+
+        def reset(self, seed=None):
+            self.pos, self.jam = 0, False
+            return {"pos": 0}
+
+        def actions(self, state):
+            return ["left", "right"]
+
+        def step(self, action):
+            if action == "right" and self.jam:
+                return Outcome({"pos": self.pos}, accepted=False, effect=None, done=False)
+            self.pos = self.pos + 1 if action == "right" else max(0, self.pos - 1)
+            return Outcome({"pos": self.pos}, accepted=True, effect={"pos": self.pos}, done=self.pos == 2)
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        learner = SkillLearner(JammedCorridor(), None, {"door": lambda s: s["pos"] == 2}, horizon=4, budget=100,
+                               certificate=Certificate(0.05, 0.1))
+        learner.run(seed=1, steps=10)                     # compiles the case skill at {"pos": 0}
+        sk = learner.skills.skills[0]
+        assert sk.outcomes["mismatch"] == 0
+        learner.new_episode(seed=2)
+        state = learner.env.reset(2)
+        a = learner.act(state)                            # supervised: the copy said ok, the certificate is fed ok
+        assert a is not None
+        learner.env.jam = True                            # the world changes between the check and the step
+        out = learner.env.step(a)
+        learner.observe(out)
+        assert not out.accepted
+        assert learner._ep["mismatch"] >= 1               # the episode's global counter, as before
+        assert sk.outcomes["mismatch"] >= 1, "the skill itself carries the world's discrepancy (S288)"
+        assert sk.certificate.failures == 0, "the certificate still never saw it — that is the documented limit"

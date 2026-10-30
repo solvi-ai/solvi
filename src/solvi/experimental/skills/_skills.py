@@ -18,7 +18,8 @@ class Skill:
     "verified" (a plan the code verified) or "unverified" (a control); support: the verified plans it was compiled
     from; outcomes: counts of its uses — ok / fail (every use), alone_ok / alone_fail (System 1 alone), supervised_ok /
     supervised_fail (re-verified on the exact model before a use), source_ok / source_fail (the run of the plan it was
-    compiled from); certificate: its own EProcess (None without a certificate). status: "active" or "retired" (its
+    compiled from), mismatch (a supervised or verified planned run of it the real world did not follow — the
+    certificate never saw it); certificate: its own EProcess (None without a certificate). status: "active" or "retired" (its
     alarm fired: not used alone until its own process certifies again). start / simulation: the first plan's start key
     and simulation hash; starts: the start keys of every plan merged into it; counterexamples: the atoms of states
     where it failed (a generalization never covers one).
@@ -60,7 +61,7 @@ class Skill:
         self.condition = tuple(sorted(self.condition))
         self.actions = tuple(self.actions)
         for k in ("ok", "fail", "alone_ok", "alone_fail", "supervised_ok", "supervised_fail", "source_ok",
-                  "source_fail"):
+                  "source_fail", "mismatch"):
             self.outcomes.setdefault(k, 0)
 
     def to_dict(self) -> dict:
