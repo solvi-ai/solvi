@@ -211,10 +211,12 @@ class StreamPromise:
         self._peak = [[0.0, 0] for _ in self.grid]
         self._event("grid", why=f"{len(self.grid)} points")
 
-    def _event(self, event, why=None):
+    def _event(self, event, why=None, **fields):
+        """One state change on the event list; extra fields ride along (the detector's alarm adds its R and sample
+        count, S281)."""
         st = self.state()
         self.events.append({"event": event, "v_index": self.v, "delta_v": self.delta_v,
-                            "threshold": st["threshold"], "n": self.n, "state_fp": _sha(st), "why": why})
+                            "threshold": st["threshold"], "n": self.n, "state_fp": _sha(st), "why": why, **fields})
 
     # --- the Promise interface
     @property

@@ -111,10 +111,14 @@ def test_a_custom_threshold_family_is_recorded_by_fingerprint():
     assert canonical(Process.from_spec(p.spec()).spec()) == canonical(p.spec())
 
 
-def test_equal_split_is_r_over_the_automatic_nodes():
-    p, _ = claim()
+def test_equal_split_is_r_over_the_runs_the_nodes_can_make():
+    p, _ = claim()                                          # the loop fraud -> triage (max_iter 2): m = 3, 3, 1
     sp = p.spec()["promise"]["split"]
-    assert sp["kind"] == "equal" and sp["per_node"] == {"triage": 0.02, "fraud": 0.02, "payout": 0.02}
+    assert sp["kind"] == "equal" and sp["per_node"] == {"triage": 0.06 / 7, "fraud": 0.06 / 7, "payout": 0.06 / 7}
+    straight, _ = claim(promise=False)                      # the same process without its loop: the plain r / K_auto
+    straight.edges = [e for e in straight.edges if not e.get("loop")]
+    straight.promise(mode="union", risk=0.06)
+    assert straight.spec()["promise"]["split"]["per_node"] == {"triage": 0.02, "fraud": 0.02, "payout": 0.02}
     with pytest.raises(ProcessSpecError, match="over the process risk"):
         claim(promise=False)[0].promise(mode="union", risk=0.05, split={"triage": 0.04, "fraud": 0.02}).spec()
     with pytest.raises(ProcessSpecError, match="not automatic"):

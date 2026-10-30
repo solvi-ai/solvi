@@ -19,7 +19,7 @@ runs over a threshold family (stage 4). Retraction comes in a later stage.
     p.edge("fraud", "payout", when={"status": "ok"})
     p.edge("fraud", "review", when={"status": "abstain"}); p.edge("review", "payout")
     p.edge("fraud", "triage", when={"drift": True}, loop=True, max_iter=2)    # a cycle without max_iter: ValueError
-    p.promise(mode="union", risk=0.05)                                         # split="equal": r / K_auto per node
+    p.promise(mode="union", risk=0.05)                                         # split="equal": r / Σ m_i per node
 
     spec = p.spec()                     # a JSON-ready dict; spec["hash"]: SHA-256 of its canonical JSON without "hash"
     canonical(spec)                     # the canonical JSON text (sort_keys, compact separators, as docs/trace_spec.md §1)
@@ -28,7 +28,8 @@ runs over a threshold family (stage 4). Retraction comes in a later stage.
     p.render("mermaid")                 # or "text"
 
     r = p.run({"claim": claim})         # ProcessResult: status ("decided" | "abstain" | "pending" | "cancelled"),
-                                        #   answer, path, nodes, facts, provenance, run, stored_id, ticket (pending)
+                                        #   answer, path, nodes, facts, provenance, run, stored_id, ticket (pending),
+                                        #   node and question (the node that holds the waiting question)
     queue.answer(r.ticket, "low", reviewer="anna")      # the built-in queue; your channel answers its own way
     p.pending()                         # the waiting questions: [{run, node, ticket, question, asked_at, stored_id}]
     r2 = p.resume(r.run)                # polls the channel: an answer → the run goes on (a new segment), else pending
@@ -48,7 +49,8 @@ kept (it is the order in which they are tried) and is part of the hash.
 
 The predicate language is closed and is data, not Python: {"answer": fact, "eq" | "in" | "lt" | "gt": value} (a fact
 written upstream or given), {"status": "ok" | "abstain" | "forced" | "human"}, {"by": "s1" | "s2" | "human"},
-{"confidence_below": c}, {"budget_over": bool}, {"drift": bool}, {"and": [p, ...]}, {"or": [p, ...]}, {"not": p}.
+{"confidence_below": c} (holds for a decision that went to a person, which has no confidence to compare),
+{"budget_over": bool}, {"drift": bool}, {"and": [p, ...]}, {"or": [p, ...]}, {"not": p}.
 `check_predicate` validates one, `holds(when, outcome)` evaluates it on an outcome {"facts", "status", "by",
 "confidence", "budget_over", "drift"}, `describe` says it in words.
 
@@ -126,15 +128,18 @@ force, else None), and `explain` ends with the promise. A run ends automatically
 person answered on its path; E is "it ends automatically and its end answer is wrong". mode "union" (the default):
 P(E) ≤ Σ_i r_i·m_i ≤ risk, summed over every automatic node of the graph (not over the path a run took), m_i an upper
 bound on the times node i can run in one process run (1 plus the max_iter of each loop edge that can bring a run back
-to it). split="equal" gives r_i = risk / K_auto; {node: r_i} or callable(spec) → {node: r_i} gives your own (e.g. by
-the cost of a node's error), with Σ r_i ≤ risk checked when the spec is made. Why it holds: if the end is wrong, the
+to it). split="equal" gives r_i = risk / Σ_j m_j — the risk split equally over the runs the nodes can make, so
+Σ r_i·m_i = risk by construction and an equal split is in force on a process with a loop too; {node: r_i} or
+callable(spec) → {node: r_i} gives your own (e.g. by the cost of a node's error), with Σ r_i ≤ risk checked when the
+spec is made. Why it holds: if the end is wrong, the
 first wrong node of the path was given right inputs, so it is wrong on its own question, and it answered alone (else
 the end is not automatic); E lies in the union of "node i answered alone and was wrong", each of probability ≤ r_i·m_i.
 No independence between nodes is assumed (correlated errors make the bound looser, not wrong). It is in force when
 every automatic node keeps a promise at its share — its own CRC risk ≤ r_i (node(promise=), else the dispatcher's
 calibrated policy, else System 1's guarantee: build(max_risk=r_i)); an LTT node counts at its error level and the
-promise then holds with probability ≥ 1 − Σ δ_i (Bonferroni, a warning) —, Σ r_i·m_i ≤ risk (a loop can push an equal
-split over), no node was loaded against another fingerprint (strict=False), and the path watch has not flagged. It
+promise then holds with probability ≥ 1 − Σ δ_i (Bonferroni, a warning) —, Σ r_i·m_i ≤ risk (an equal split meets it
+exactly; a given split can be pushed over by a loop), no node was loaded against another fingerprint (strict=False),
+and the path watch has not flagged. It
 assumes (A2) that each node was calibrated on what reaches it in the process — in place, on upstream's answers with
 their errors and the routing of the edges; a node calibrated on clean inputs breaks it. mode "per_node": each node
 keeps its own promise, and the statement says the end error is not bounded.
@@ -272,7 +277,9 @@ def check_predicate(p, where="when"):
 
 def holds(p, outcome):
     """Whether predicate p holds for a node's outcome {"facts": {name: value}, "status", "by", "confidence",
-    "budget_over", "drift"} (missing keys: None / False). A fact that is absent satisfies no comparison."""
+    "budget_over", "drift"} (missing keys: None / False). A fact that is absent satisfies no comparison.
+    {"confidence_below": c} holds for an outcome whose decision went to a person (status "human", by "human"): a
+    hand-over has no confidence to compare, and the unsure answers are exactly what the predicate routes to one."""
     if p is None:
         return True
     if "answer" in p:
@@ -292,6 +299,8 @@ def holds(p, outcome):
     if k in ("status", "by"):
         return outcome.get(k) == v
     if k == "confidence_below":
+        if outcome.get("status") == "human" or outcome.get("by") == "human":   # S275: a hand-over holds
+            return True
         c = outcome.get("confidence")
         return c is not None and c < v
     if k in ("budget_over", "drift"):
@@ -362,6 +371,31 @@ def _channel(human):
         return None
     fp = getattr(human, "fingerprint", None)
     return {"channel": type(human).__name__, "fingerprint": str(fp()) if callable(fp) else None}
+
+
+def _warn_unread_head_facts(name, system, question, reads):
+    """A node whose fitted answer head reads facts the node is not given (and its catalog cannot compute from the
+    ones it is) abstains on every run — "cannot compute: <fact>" — so every decision of the node goes to a person,
+    and nothing at spec() or guarantee() says so (S270). Warn at build time, naming the facts. A head that reads
+    nothing, a question without a fitted head and a custom NodeRunner are left alone."""
+    import warnings
+    base = system                                          # a solvi.build result holds its System in .system
+    if not isinstance(getattr(base, "heads", None), dict):
+        inner = getattr(base, "system", None)
+        if not isinstance(getattr(inner, "heads", None), dict):
+            return
+        base = inner
+    feats = getattr(base.heads.get(question), "features", None)
+    if not isinstance(feats, (list, tuple)) or not all(isinstance(f, str) for f in feats):
+        return
+    computable = getattr(base, "_computable", None)        # the facts its catalog can compute from what it is given
+    have = computable(list(reads)) if callable(computable) else set(reads)
+    missing = [f for f in feats if f not in have]
+    if missing:
+        warnings.warn(f"node {name!r}: its fitted head reads {missing}, which the node is not given (reads="
+                      f"{list(reads)}) and its catalog cannot compute from them: System 1 abstains on every run "
+                      f"(cannot compute: {', '.join(missing)}) and the node hands every decision to a person — add "
+                      f"the facts to reads=, or fit the head on the ones it is given", stacklevel=3)
 
 
 def _plain(v):
@@ -530,7 +564,9 @@ class ProcessResult:
     from (a resumed run); automatic: decided with no person's answer on this segment's path (a resumed run starts
     with the person's answer, so it is never automatic), None while pending; risk: the process risk the promise puts
     on an automatic end when it is in force (Process.guarantee()), else None; path_drift: the path watch's report
-    (Process.monitor) when one watches the process."""
+    (Process.monitor) when one watches the process; node: the node that holds the question (status "pending" and
+    "cancelled": the run waits there for the person), question: the question it asks — the two fields p.pending()
+    lists, without its store scan."""
     status: str
     answer: Any
     path: list
@@ -546,6 +582,8 @@ class ProcessResult:
     automatic: bool | None = None
     risk: float | None = None
     path_drift: dict | None = None
+    node: str | None = None
+    question: str | None = None
 
 
 # --- the channel to a person (stage 1b): a queue — the process does not know when the person answers
@@ -831,6 +869,8 @@ class Process:
             spec["promise"] = promise
         spec = _plain(spec)
         _check_node(name, spec)
+        if system is not None:
+            _warn_unread_head_facts(name, system, spec.get("question"), spec["reads"])
         self.nodes[name] = spec
         if system is not None:
             self.systems[name] = system
@@ -866,7 +906,8 @@ class Process:
     def promise(self, mode="union", risk=None, split="equal", delta=None, examples=None, family=None):
         """Declare the process promise (its configuration is recorded and checked; end_to_end is then calibrated by
         calibrate()).
-        mode: "union" (risk r split over the automatic nodes: split="equal" — r / K_auto each —, {node: r_i} with
+        mode: "union" (risk r split over the automatic nodes: split="equal" — r / Σ m_i each, the risk shared equally
+        over the runs the nodes can make —, {node: r_i} with
         Σ r_i ≤ r, or callable(spec) → {node: r_i}), "end_to_end" (risk, delta, examples=[(input, end_label)],
         family="shared_rank" (the default) | "per_node_fixed" | {"kind": "per_node_fixed", "order": [...]} | a
         ThresholdFamily object of your own) or "per_node" (each node keeps its own promise). → self."""
@@ -926,7 +967,12 @@ class Process:
             per = sp(_plain({k: v for k, v in spec.items() if k != "promise"}))
             pr["split"] = {"kind": "callable", "fingerprint": code_fingerprint(sp), "per_node": _plain(per)}
         elif isinstance(sp, dict) and sp.get("kind") == "equal":
-            pr["split"] = {"kind": "equal", "per_node": {n: pr["risk"] / len(auto) for n in auto} if auto else {}}
+            # visit-weighted (S273): r_i = risk / Σ_j m_j over the automatic nodes, so Σ r_i·m_i = risk by
+            # construction — an equal split is in force on a process with a loop too (a loop-free process has every
+            # m_j = 1, the plain r / K_auto of the earlier releases)
+            m = _visits(spec["nodes"], spec["edges"]) if auto else {}
+            total = sum(m[n] for n in auto)
+            pr["split"] = {"kind": "equal", "per_node": {n: pr["risk"] / total for n in auto} if total else {}}
         if isinstance(pr["split"], dict) and pr["split"].get("kind") in ("given", "callable"):
             _check_split(pr["split"]["per_node"], pr["risk"], auto)
         fam = pr["family"]
@@ -975,6 +1021,7 @@ class Process:
                     p.mismatched[name] = {"recorded": rec, "actual": actual}
                     ns = dict(ns, fingerprint=actual)
                 p.systems[name] = sysm
+                _warn_unread_head_facts(name, sysm, ns.get("question"), ns.get("reads") or [])
             elif ns.get("kind") != "human":
                 p.unbound.append(name)
             ns = _plain(ns)
@@ -1384,7 +1431,8 @@ class Process:
                                              "resume": resume})
             self._edges_of.setdefault(run_id, set()).update(_taken(self.edges, path))
             return ProcessResult("pending", None, path, {}, w["facts"], w["prov"], run_id, rec_id, spec["hash"],
-                                 f"{node}: waiting for a person (ticket {ticket})", ticket, continues=w["continues"])
+                                 f"{node}: waiting for a person (ticket {ticket})", ticket, continues=w["continues"],
+                                 node=node, question=question)
         return self._answered(ans, req, ticket, parent, ch)
 
     def _ticket_seen(self, ticket):
@@ -1489,7 +1537,7 @@ class Process:
         if old is None and ans is None:
             return ProcessResult("pending", None, [], {}, dict(d["resume"]["facts"]), dict(d["resume"]["provenance"]),
                                  rid, tip.id, spec["hash"], f"{req.node}: waiting for a person (ticket {ticket})",
-                                 ticket, continues=d.get("continues"))
+                                 ticket, continues=d.get("continues"), node=req.node, question=req.question)
         r = d["resume"]
         with run_context(run=rid):
             res = self._answered(ans, req, ticket, tip.id, ch)
@@ -1517,7 +1565,8 @@ class Process:
             rec = self._record(spec, d["input_hash"], [], "cancelled", None, req.node, continues=tip.id)
         return self._finish(spec, ProcessResult("cancelled", None, [], {}, dict(d["resume"]["facts"]),
                                                 dict(d["resume"]["provenance"]), rid, rec, spec["hash"],
-                                                f"{req.node}: cancelled ({why})", ticket, continues=tip.id))
+                                                f"{req.node}: cancelled ({why})", ticket, continues=tip.id,
+                                                node=req.node, question=req.question))
 
     # --- the path promise (stage 3: union and per_node; stage 4: end_to_end)
 
@@ -1575,17 +1624,19 @@ class Process:
                 out["problems"].append(f"{n}: keeps no promise of its own (a union bound needs one at r_i = {r_i:g})")
                 continue
             method = npr.get("method")
-            level = npr.get("risk") if method == "crc" else npr.get("error")
+            kind = _level_kind(npr)                          # a stream certificate keeps its level under "risk" (S282)
+            level = npr.get(kind)
             if level is None:
                 v["ok"], v["why"] = False, f"its promise ({method}) has no risk or error level"
             elif method != "crc":
                 deltas.append(float(npr.get("delta") or 0.0))
-                out["warnings"].append(f"{n}: an {method} promise (error ≤ {level:g} among its own answers, with "
-                                       f"probability ≥ {1 - float(npr.get('delta') or 0.0):g}); it is counted at its "
-                                       "error level and the union holds with probability ≥ 1 − Σ δ_i (Bonferroni): "
-                                       "honest, and weak — calibrate it with max_risk= (CRC) instead")
+                out["warnings"].append(f"{n}: a {method} promise ({kind} ≤ {level:g}"
+                                       + (" among its own answers" if kind == "error" else " of the inputs it is asked")
+                                       + f", with probability ≥ {1 - float(npr.get('delta') or 0.0):g}); it is counted "
+                                       f"at its {kind} level and the union holds with probability ≥ 1 − Σ δ_i "
+                                       "(Bonferroni): honest, and weak — calibrate it with max_risk= (CRC) instead")
                 if float(level) > r_i * (1 + 1e-9):
-                    v["ok"], v["why"] = False, f"its error level {level:g} is over its share r_i = {r_i:g}"
+                    v["ok"], v["why"] = False, f"its {kind} level {level:g} is over its share r_i = {r_i:g}"
             elif float(level) > r_i * (1 + 1e-9):
                 v["ok"], v["why"] = False, (f"calibrated at risk {level:g}, over its share r_i = {r_i:g}: rebuild it "
                                             f"with max_risk={r_i:g}")
@@ -2811,12 +2862,23 @@ def _node_promise(ns, system):
     return dict(rec()) if callable(rec) else None
 
 
+def _level_kind(pr):
+    """Whether a node promise's level is a risk — CRC, or a stream certificate of kind "joint" (P(answered alone and
+    wrong): a share of the inputs) — or an error among the answers given alone (LTT; a "selective" stream certificate).
+    A joint stream record keeps its level under "risk", so a lookup that reads "error" for every non-CRC method finds
+    none (S282)."""
+    return "risk" if pr.get("method") == "crc" or pr.get("kind") == "joint" else "error"
+
+
 def _say_promise(pr):
     if pr is None:
         return "none"
     if pr.get("method") == "crc":
         return f"risk ≤ {pr.get('risk'):g}"
-    return f"{pr.get('method')} error ≤ {pr.get('error')}" + (f", δ {pr['delta']:g}" if pr.get("delta") else "")
+    kind = _level_kind(pr)
+    level = pr.get(kind)
+    shown = f"{level:g}" if isinstance(level, (int, float)) and not isinstance(level, bool) else str(level)
+    return f"{pr.get('method')} {kind} ≤ {shown}" + (f", δ {pr['delta']:g}" if pr.get("delta") else "")
 
 
 def _edge_names(edges):

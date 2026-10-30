@@ -21,7 +21,9 @@ label: a loss wherever it would have been answered alone (`StreamPromise.learn(l
 The step (`StreamDriver`). Per decision, after System 1 answered (the promise observed it through its guard):
 `before()` → (ρ_t, probation) from the past; the Dispatcher draws the coin and dispatches; `after(...)` → the record
 this decision carries and the `stream` events it caused: the sample goes to the promise (`learn`), its deployed loss to
-the detector (only while a threshold was in force and outside probation), an alarm restarts the promise (the next
+the detector (only while a threshold was in force and outside probation), an alarm is appended to the promise's own
+event list (with the detector's R and sample count — the detector resets right after, so the event is what a caller
+without storage reads), restarts the promise (the next
 (v, δ_v) from its budget at its first post-alarm sample — lazy charge —, threshold +inf) and opens probation
 (on_drift="recertify"), and the alone flag enters the
 rate's window. The same records in the same order rebuild the same state (`Dispatcher.replay_stream`).
@@ -175,7 +177,7 @@ class StreamDriver:
     def _read(self, score, would, alone, label, in_force, prob, lost) -> tuple:
         """One sample read: the promise learns it, the detector gets its deployed loss → (events, drift or None)."""
         p, det = self.promise, self.detector
-        alarm = None
+        alarm, why = None, None
         p.learn(score, would, label)
         if det is not None and in_force is not None and not prob:
             wrong = label is None or would != label
@@ -188,13 +190,13 @@ class StreamDriver:
                 loss, fed = (1.0 if wrong else 0.0), bool(alone)
             if fed and det.update(loss):
                 alarm = det.state()
+                why = det.report()["why"][0]
+                # the alarm on the promise's own event list (next to the restart's "recertify"): a caller without
+                # storage reads there when it fired and at what statistic — det.reset() wipes R and n right after
+                p._event("alarm", why=why, R=alarm["R"], detector_n=alarm["n"])
         events = self._events()
         if alarm is None:
             return events, None
-        why = det.report()["why"][0]
-        events.append({"event": "alarm", "v_index": p.v, "delta_v": p.delta_v,
-                       "threshold": None if math.isinf(p.threshold) else p.threshold, "n": p.n,
-                       "R": alarm["R"], "detector_n": alarm["n"], "why": why})
         det.reset()
         if self.on_drift == "recertify":
             p.restart("alarm")

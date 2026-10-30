@@ -521,6 +521,28 @@ def _calibration_rows(system, question, examples, guard, correct, folds=None, se
     return sig, ok, grp, lost
 
 
+def _probe_promise_signal(system, question, guard, examples):
+    """promise= installs without calibration, so the readability check the calibration path makes (it raises when the
+    signal cannot be read for most examples) never runs: a signal the question's answers cannot carry — signal="act"
+    on a question no model decision with an act head answers — installs a certificate that can neither let an answer
+    through nor observe one, silently (S279). Probe the signal the way calibration would read it: on the first
+    example given, or, without examples, structurally for the one signal whose carrier is known without asking
+    (act). → None, or ValueError naming the reason, as the calibration path raises."""
+    why = None
+    first = next(iter(examples), None) if examples else None
+    if first is not None:
+        st, y = first
+        why = _one_calibration_row(system, question, system.questions[question], guard, None, st, y)[3]
+    elif guard.signal == "act":
+        from ..deciders.gate import decision_of
+        d = decision_of(system.catalog, question)
+        if d is None or not bool(getattr(getattr(d, "model", None), "has_act", False)):
+            why = "no act probability: the question's answer is not a model decision with an act head"
+    if why:
+        raise ValueError(f"the signal could not be read ({why}) — a promise gated on it can never let an answer "
+                         "through nor observe one: check signal=")
+
+
 def _fold_heads(system, question, examples, folds, seed):
     """Cross-fitting for a question answered by a fast head fitted on these examples: each example gets a head fitted
     on the other folds (the same features and settings) → [head per example]."""
@@ -566,7 +588,9 @@ def guard_question(system, question, examples=None, *, max_error=None, max_risk=
     P(answer)) ≥ the threshold, whatever the most probable answer is, and abstains otherwise ("return the query when
     P(right) ≥ 0.43"). correct: a function (result, label) → bool for answers judged otherwise than by equality (a quote
     that overlaps the gold one). groups: a fact name, a hierarchy of fact names, a function of facts, or "answer".
-    promise: an already calibrated Promise to attach instead of calibrating here.
+    promise: an already calibrated Promise to attach instead of calibrating here; its signal is probed once — on the
+    first example given, or structurally for signal="act" (the question's answer has to be a model decision with an
+    act head) — and one that cannot be read refuses the install, as a calibration on an unreadable signal does.
     corrections: a TraceStorage (True: the system's storage) whose stored corrections of this question are added to
     `examples` — those from `sources` (default TRUSTED_SOURCES: "human", "outcome", "rule"); sources may add "verified",
     System 2 answers that passed the checks and a guarantee (TraceStorage.save_correction checks that when it stores
@@ -717,6 +741,8 @@ def _guard_question(system, question, examples, *, max_error, max_risk, method, 
             promise.report["warnings"].append(f"cross-fitted ({folds} folds): the thresholds were set on heads fitted "
                                               "without each example; the head that answers saw them all, so the promise "
                                               "is approximate")
+    else:
+        _probe_promise_signal(system, question, guard, examples)    # S279: an unreadable signal is a dead install
     if labels is not None:
         promise.report["labels"] = labels
     guard.promise = promise

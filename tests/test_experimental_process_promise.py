@@ -72,10 +72,14 @@ def test_a_loop_counts_a_node_once_per_run_it_can_make(ps):
     assert _visits(nodes, edges) == {"a": 2, "b": 4, "c": 4, "d": 4}          # an upper bound (d runs twice at most)
     p = claim_process(ps)
     p.edge("fraud", "triage", when={"drift": True}, loop=True, max_iter=2)
-    g = p.promise(mode="union", risk=0.2).guarantee()                         # equal: 0.05 each, but triage, fraud ×3
+    g = p.promise(mode="union", risk=0.2).guarantee()     # equal, visit-weighted: r_i = 0.2 / 8 = 0.025 each node
     assert g["nodes"]["triage"]["visits"] == 3 and g["nodes"]["glass"]["visits"] == 1
-    assert not g["in_force"] and g["bound"] == pytest.approx(0.05 * (3 + 3 + 1 + 1))
-    assert any("m_i times" in x and "triage ×3" in x for x in g["problems"])
+    assert g["bound"] == pytest.approx(0.2)               # Σ r_i·m_i = risk by construction: a loop puts nothing over
+    assert {n: v["r_i"] for n, v in g["nodes"].items()} == pytest.approx({n: 0.025 for n in g["nodes"]})
+    assert not any("m_i times" in x for x in g["problems"])   # only a given split can be pushed over now (S273)
+    assert not g["in_force"] and all("over its share" in (v["why"] or "") for v in g["nodes"].values())
+    assert claim_process(ps).edge("fraud", "triage", when={"drift": True}, loop=True, max_iter=2).promise(
+        mode="union", risk=0.4).guarantee()["in_force"]   # r_i = 0.05 = each node's own risk, loop and all
     roomy = {"triage": 0.05, "fraud": 0.05, "payout": 0.05, "glass": 0.05}
     assert claim_process(ps).edge("fraud", "triage", when={"drift": True}, loop=True, max_iter=2).promise(
         mode="union", risk=0.4, split=roomy).guarantee()["in_force"]
