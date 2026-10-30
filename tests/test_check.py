@@ -99,6 +99,35 @@ def test_then_mistakes_and_soft_checks():
     assert rep.codes("warning") == ["then_on_soft_check"]
 
 
+def test_a_named_abstention_in_then_is_valid():
+    """then={"q": None} / {"q": "abstain"} is the taught idiom (a failed check abstains the question on purpose), not
+    then_bad_answer: the lint errored on it (exit 1 under --strict) while the run time abstained exactly as intended."""
+    for value in (None, "abstain"):
+        cat = Catalog()
+
+        @cat.check(hard=True, then={"refund": value})
+        def known(customer) -> bool:
+            return customer != "blocked"
+
+        @cat.rule("refund")
+        def refund(days: int) -> bool:
+            return days <= 30
+        s = System(cat, [Question("refund", "Refund?")])
+        assert lint(s).findings == [] and lint(s, strict=True).ok, value
+        r = s.ask({"customer": "blocked", "days": 5})["refund"]
+        assert (r.status, r.answer) == ("abstain", None) and "abstain" in r.why, value
+    cat = Catalog()
+
+    @cat.check(hard=True, then={"refund": "abstain", "ghost": "abstain"})
+    def ok(customer) -> bool:
+        return customer != "x"
+
+    @cat.rule("refund")
+    def refund(days: int) -> bool:
+        return True
+    assert lint(System(cat, [Question("refund", "Refund?")])).codes() == ["then_unknown"]   # the question still must exist
+
+
 def test_cycles_unused_parts_and_unanswerable_questions():
     cat = Catalog()
 
@@ -279,6 +308,22 @@ def test_silent_defaults_in_functions_that_read_the_input():
     assert all(f.where.startswith("tests/") or "test_check.py" in f.where for f in rep.findings
                if f.code == "silent_default")
     assert silent_defaults(len) == []
+
+
+def test_the_librarys_own_parts_are_not_silent_defaults():
+    """A Guard with a once=True tool lints its not_made_before check (`set(calls_made or ())`, inside the solvi
+    package) — the user can neither edit that line nor put `# solvi: ok` on it (1.4 flagged it: every such Guard was
+    dirty out of the box)."""
+    from solvi import Guard
+    g = Guard()
+
+    @g.tool(once=True)
+    def ping(host: str) -> str:
+        """ping"""
+        return "ok"
+    findings = [f for f in lint(g).findings if f.code == "silent_default"]
+    assert findings == []
+    assert all("solutions/guard" not in (f.where or "") for f in lint(g).findings)
 
 
 def test_a_catalog_alone_is_linted_without_question_checks():

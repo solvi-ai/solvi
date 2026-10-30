@@ -27,6 +27,51 @@
 - Docs: the module docstring now says the same-since replacement is blind to which value an erratum corrected
   (S264), and the guard's docstring states the re-test's validity scoping.
 
+### Fixed (skills / check / report — the 2026-10-30 external handoff, S283/S285–S296)
+- **The skills docstring named the wrong alarm (S283, docs).** The package docstring said of the certificate's
+  e-detector "(at 5% one failure alone does)" — that is `alternatives=None`, the old burst alarm; the default CUSUM
+  alarm (level 50, alternatives (1.5, 2)) first fires on the 7th consecutive alone-failure at 5%. The Certificate
+  class docstring was already right; the parenthetical now states both.
+- **ExactModel's docs now say a clone must carry the world's randomness (S285, docs).** A clone that re-seeds the
+  world gives every fork a future different from the fork that planned, and verify then rejects every plan of two
+  steps or more (each step is compared with the predicted state) — verify is behaving correctly; the model is not
+  exact. The docstring points at `solvi.testing.conformance.check_environment(make, clone=)` to check one.
+- **A condition that narrows to no atoms warns (S286).** Verified starts of one goal that share no atom merged
+  into a skill with condition () — "always", a candidate in every state — with no word. The widening now warns
+  (the lattice's own empty conditions are routine and do not).
+- **`SkillLearner.close_run(ok)`: an outcome for an interrupted run (S287).** A run dropped by `new_episode()` (or
+  paused by a reflex and never resumed — the 57 outcome-less alone runs of docs/best_practices.md) kept its
+  decisions' `run_ok` None and never fed the certificate. `close_run(ok)` closes the open run like any other: the
+  decisions get their `run_ok`, an alone run's outcome feeds its skill's certificate; it refuses while an action's
+  outcome is still pending.
+- **`no_other_option` is a warning (S289).** It was documented under the module docstring's warnings but emitted as
+  a note since 1.1.1, so `solvi check --strict` could not fail on a model-answered closed choice. Now it can.
+- **The catch-all words of real label sets (S290).** `oos` (CLINC), `out of scope`, `abstain`, `unclassified`,
+  `no_match` and `misc` are a catch-all by meaning; `no_other_option` fired on all of them.
+- **`numeric_levels` fires on levels, not numbers (S291).** A choice of bare numbers is judged only when its
+  options read as a small integer scale (consecutive from 0 or 1, at most 20): "2023".."2025" (years) no longer
+  fires, "3+" / "3 or more" (an open top, silent before) now does, descriptions still silence it, and an ordinal's
+  numbers are always levels.
+- **A "?" inside quotes or parentheses is not a second question (S292).** `'why?'?` and "(equal to the sum of the
+  lines?)" fired `compound_question`; quoted and parenthesised spans are stripped before the count and only a
+  sentence-final "?" counts ("filed and paid?" keeps its one).
+- **The library's own parts are not the user's silent defaults (S293).** A Guard with a `once=True` tool linted
+  `silent_default` on `solvi/.../solutions/guard/__init__.py` (`set(calls_made or ())`) — a line the user can
+  neither edit nor `# solvi: ok`. Parts whose source file lies inside the solvi package are skipped.
+- **`then={"q": None}` and `then={"q": "abstain"}` are a named abstention (S294).** The run time abstained exactly
+  as intended while the lint raised `then_bad_answer` (exit 1 under --strict) and System() warned at build — the
+  idiom is taught in the 1.1.1 notes. Lint, the build warning and the forced-answer path accept it now; a value
+  that is an option of the question (one literally named "abstain") still forces that option.
+- **A second reviewer no longer erases the first's judgement (S295).** `corrections["people"]` attributed a
+  decision's pair to whoever labelled last (`person[-1]`): when rev_b re-labelled two of rev_a's four decisions,
+  rev_a's count fell to 2. Per person (`by`) each person is judged on her own last label before the outcome (one
+  row per (person, decision); rev_a 4, rev_b 2); the overall pair stays one judgement per decision; the rule string
+  says so.
+- **A human teach record writes its "source" (S296).** The docstring promised label_source is "stored as the
+  record's 'source'", but only non-human sources were written — an external journal reader could not tell a human
+  label from a record with a missing field. Every record writes one now; readers of `d.get("source", "human")` and
+  records of 0.6 are unaffected.
+
 ## 1.4.0 — released 2026-10-30
 
 ### Added

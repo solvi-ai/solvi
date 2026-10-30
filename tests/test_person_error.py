@@ -82,3 +82,22 @@ def test_a_person_label_after_the_outcome_is_not_judged(tmp_path):
     assert (P["paired"], P["wrong"], P["after_outcome"]) == (3, 0, 3) and "bob" not in P["by"]
     assert "before its first outcome" in P["rule"]
     assert P["by_question"] == s.report(question="label").corrections["people"]["by_question"]
+
+
+def test_a_second_reviewers_label_keeps_the_first_reviewers_judgement(tmp_path):
+    """Per person each person is judged on her own last label before the outcome: rev_a labels four decisions (all
+    wrong), rev_b re-labels two of them (right) — rev_a keeps four in her count (1.4's person[-1] rule left her two,
+    attributing the re-labelled pair to rev_b alone). The overall pair stays one judgement per decision."""
+    s = _system(tmp_path)
+    res = [s.ask({"x": i / 20}) for i in range(4)]
+    truth = [i / 20 > 0.5 for i in range(4)]
+    for i in range(4):
+        s.teach("label", {"x": i / 20}, not truth[i], of=res[i].stored_id, by="rev_a")   # rev_a: wrong everywhere
+        if i < 2:
+            s.teach("label", {"x": i / 20}, truth[i], of=res[i].stored_id, by="rev_b")   # rev_b corrects two
+        s.outcome(res[i], truth[i], by="carrier")
+    P = s.report().corrections["people"]
+    assert (P["paired"], P["wrong"]) == (4, 2)                       # the decision's last person label (rev_b on 0–1)
+    assert P["by"]["rev_a"]["paired"] == 4 and P["by"]["rev_a"]["wrong"] == 4
+    assert P["by"]["rev_b"]["paired"] == 2 and P["by"]["rev_b"]["wrong"] == 0
+    assert P["by_question"]["label"]["paired"] == 4 and "own last such label" in P["rule"]

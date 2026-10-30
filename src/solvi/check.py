@@ -18,7 +18,8 @@ Errors (a decision is, or can be, wrong or impossible):
                         System() refuses a strategist of your own that leaves it out — so this fires only for a system
                         built around that (when the check failed, the question would be answered as if it had passed)
   then_unknown / then_bad_answer   `then=` names no question / an answer that is not one of the question's options
-                        (for a `then` function: a literal it plainly returns)
+                        (for a `then` function: a literal it plainly returns; None and "abstain" are a named
+                        abstention, not an error)
   cycle                 facts that need each other: none of them can be computed unless one is given (facts derived
                         from each other, each with a producer outside the loop, are a cycle for the deterministic
                         strategist only; with System(strategist=...) they are the note `mutual_producers`)
@@ -68,20 +69,24 @@ Warnings:
                         default on a computed value), which turns a missing, empty or null input into a value nobody
                         gave — say so explicitly (check
                         for None and abstain, or declare the default in System(input_model=...)); `# solvi: ok` on the line
-                        accepts it
+                        accepts it (parts of the solvi package itself are skipped: the user can neither edit them nor
+                        mark them)
   check_shares_call     a check declared with Catalog.check(shares_call_with=X): it re-reads X's model call, so it agrees
                         with X's answer whatever that answer is — not an independent check (also when X names no part or
                         question)
   checks_one_family     the checks in a question's flow that declare family= are all of one family (two or more): they
                         err together, so agreeing does not make the answer surer — add a check of another family or code
  The wording of a question a model answers (no rule, or a rule with model=) — what the model reads:
-  no_other_option       a choice with no catch-all option ("other", "none of these", "unknown", ..., or one described as
-                        "anything else"), no decider other= and no "not stated" (Answer.maybe): when no option fits, the
-                        model still picks one, often confidently
+  no_other_option       a choice with no catch-all option ("other", "none of these", "unknown", "oos", "abstain",
+                        "misc", ..., or one described as "anything else"), no decider other= and no "not stated"
+                        (Answer.maybe): when no option fits, the model still picks one, often confidently
   numeric_levels        a choice or ordinal whose options are bare numbers ("1".."5") without a description of each: say
-                        what each level means (a dict {level: description})
+                        what each level means (a dict {level: description}). A choice is judged only when its options
+                        read as a small integer scale (consecutive from 0 or 1, the top open: "3+", "3 or more"):
+                        years and other numbers that are not levels do not fire it; an ordinal's numbers always do
  Of every question:
-  compound_question     a question text that asks two things (two question marks, or "and whether" / "or whether"): one
+  compound_question     a question text that asks two things (two question marks, or "and whether" / "or whether"; a
+                        "?" inside quotes or parentheses is not a question of its own): one
                         answer cannot say yes to one half and no to the other — split it
   unused_given          with System(input_model=Model): a field of the model that no part, rule, check, constraint, `uses`
                         hint or span reads (checked only when every question has a rule or a `uses` hint: a learned
@@ -452,12 +457,16 @@ def _hard_checks(cat, questions, flows, rep):
             if callable(ans):                         # a `then` function: the literals it plainly returns must be answers
                 for line, vals in _returns(ans) or ():
                     for v in vals:
+                        if v is None or v == "abstain":
+                            continue                  # a named abstention: the question abstains on purpose
                         try:
                             q.answer.normalize(v)
                         except (ValueError, TypeError) as e:
                             rep.add("error", "then_bad_answer", _where(ans, line),
                                     f"the `then` function of {name} returns {v!r} for {qn!r}: {e}")
             else:
+                if ans is None or ans == "abstain":
+                    continue                          # a named abstention: the check fails and the question abstains
                 try:
                     q.answer.normalize(ans)
                 except (ValueError, TypeError) as e:
@@ -586,9 +595,11 @@ def _names(cat, system, questions, rep):
 # --- the wording of questions
 CATCH_ALL = ("other", "others", "none", "none of the above", "none of these", "other / none", "nothing", "unknown",
              "not stated", "not sure", "unsure", "unclear", "n/a", "na", "not applicable", "neither", "something else",
-             "other / unknown")
+             "other / unknown", "oos", "out of scope", "abstain", "unclassified", "no match", "misc")
 _COMPOUND = re.compile(r"\b(and|or) whether\b", re.I)
 _CATCH_ALL_TEXT = re.compile(r"\b(anything|everything|something) else\b|\bnone of\b|\bnot listed\b", re.I)
+_ASKED_SPANS = re.compile(r"'[^']*'|\"[^\"]*\"|‘[^’]*’|“[^”]*”|\([^()]*\)|\[[^][]*\]")
+_ASKED_MARK = re.compile(r"\?(?=\s|$)")
 
 
 def _catch_all(option, description=None):
@@ -597,16 +608,37 @@ def _catch_all(option, description=None):
         or bool(description and _CATCH_ALL_TEXT.search(str(description)))
 
 
-def _numeric(option):
+_OPEN_TOP = re.compile(r"^(\d+(?:\.\d+)?)\s*(?:\+|or\s+more)$", re.I)
+
+
+def _level(option):
+    """A level option's number: a bare number, or an open top of a scale ("3+", "3 or more") → the number, or None."""
     if isinstance(option, bool):
-        return False
+        return None
     if isinstance(option, (int, float)):
-        return True
+        return float(option)
+    o = str(option).strip()
+    m = _OPEN_TOP.match(o)
+    if m is not None:
+        return float(m.group(1))
     try:
-        float(str(option).strip())
-        return True
+        return float(o)
     except ValueError:
-        return False
+        return None
+
+
+def _a_scale(vals):
+    """Do the numbers read as a level scale: small consecutive integers from 0 or 1, in any order ("0".."4", "1".."5",
+    "0".."3+")?"""
+    s = sorted(vals)
+    return all(v == int(v) for v in s) and s[0] in (0.0, 1.0) and s[-1] <= 20 \
+        and all(b - a == 1 for a, b in zip(s, s[1:]))
+
+
+def _asked(text):
+    """The question marks that ask: sentence-final, outside quotes and parentheses (a quoted or parenthesised "?" is
+    part of the thing asked about, not a second question)."""
+    return len(_ASKED_MARK.findall(_ASKED_SPANS.sub(" ", text)))
 
 
 def _wording(cat, system, questions, rep):
@@ -622,16 +654,19 @@ def _wording(cat, system, questions, rep):
             desc = at.descriptions or {}
             if at.kind == "choice" and not at.unknown and len(opts) > 1 and getattr(spec, "other", None) is None \
                     and not any(_catch_all(o, desc.get(o)) for o in opts):
-                rep.add("note", "no_other_option", qn,         # a note: a closed label set is often right
+                rep.add("warning", "no_other_option", qn,
                         f"the choice {opts} has no catch-all: if an input can fit none of them, add an option \"other\" "
                         "(or \"none of these\", \"unknown\"), or Answer.maybe(...) for \"not stated\"")
-            if at.kind in ("choice", "ordinal") and len(opts) > 1 and all(_numeric(o) for o in opts) \
-                    and any(not (at.descriptions or {}).get(o) for o in opts):
+            levels = [_level(o) for o in opts]
+            if at.kind in ("choice", "ordinal") and len(opts) > 1 and all(v is not None for v in levels) \
+                    and any(not (at.descriptions or {}).get(o) for o in opts) \
+                    and (at.kind == "ordinal" or _a_scale(levels)):
                 rep.add("warning", "numeric_levels", qn,
                         f"the levels {opts} are bare numbers: say what each means — a dict {{level: description}}, "
                         f"e.g. {{{opts[0]!r}: \"...\", {opts[-1]!r}: \"...\"}}")
         text = str(q.text or "")
-        why = "two question marks" if text.count("?") >= 2 else \
+        marks = _asked(text)
+        why = "two question marks" if marks >= 2 else \
             (f"\"{_COMPOUND.search(text).group(0)}\"" if _COMPOUND.search(text) else None)
         if why:
             rep.add("warning", "compound_question", qn,
@@ -859,6 +894,24 @@ def silent_defaults(func, names=None):
     return sorted(set(out))
 
 
+def _library_file(path):
+    """Is `path` a source file of the solvi package itself? The library's own parts are marked here, not by the user
+    (she can neither edit them nor put `# solvi: ok` on their lines)."""
+    import os
+    if not path or path == "?":
+        return False
+    global _PKG_DIR
+    if _PKG_DIR is None:
+        _PKG_DIR = os.path.dirname(os.path.abspath(__file__))
+    try:
+        return os.path.commonpath([os.path.abspath(path), _PKG_DIR]) == _PKG_DIR
+    except ValueError:                                  # another drive (Windows)
+        return False
+
+
+_PKG_DIR = None
+
+
 def _silent_defaults(cat, given, rep):
     seen = set()
     parts = list(cat.parts.values()) + list(cat.rules.values())
@@ -868,7 +921,10 @@ def _silent_defaults(cat, given, rep):
                 continue
             seen.add(id(a.func))
             f = inspect.unwrap(a.func)
-            path = _short_path(getattr(getattr(f, "__code__", None), "co_filename", "?"))
+            co = getattr(f, "__code__", None)
+            if _library_file(getattr(co, "co_filename", "?")):
+                continue                                # the library's own part: not the user's to silence
+            path = _short_path(getattr(co, "co_filename", "?"))
             for line, _, why in silent_defaults(a.func, set(a.inputs) & given):
                 rep.add("warning", "silent_default", f"{path}:{line} ({getattr(f, '__name__', a.name)})",
                         why + ": say what a missing input means (check for None and abstain, or declare the default in "

@@ -1132,7 +1132,8 @@ class Catalog:
         function of facts instead of a constant — `then={"step": free_side}` with `def free_side(position, walls) ->
         str` — whose argument names are the facts it reads (typed like any part's); it runs only when the check is
         False, its value must be one of the question's answers (else the question abstains), and it is recorded in the
-        trace (record kind "then") and re-checked by replay. When several hard checks governing a question are False,
+        trace (record kind "then") and re-checked by replay. `then={"q": None}` (or "abstain") names that abstention
+        itself: the check fails and the question abstains on purpose. When several hard checks governing a question are False,
         the strictest answer by the question's option order decides (since 1.2; Catalog(combine="first"): the first
         declared).
         `cite`, `clause`: as for extract. family: where the check's evidence comes from (a model family such as

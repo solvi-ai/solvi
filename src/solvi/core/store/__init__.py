@@ -931,7 +931,8 @@ class TraceStorage(abc.ABC):
         anything else raises UntrustedLabel, and the label is not stored. Anything else is refused (UntrustedLabel):
         the system's own unverified answers are never labels. by: who (a user, a reviewer, a process); of: the stored id
         of the decision it corrects (for "verified", the one it is); note: a line of text kept with it (what happened —
-        System.outcome writes it). Records of 0.6 have no source: they are human corrections. Storing a verified label
+        System.outcome writes it). Every record writes its "source" (since 2026-10-30 the default too); records of 0.6
+        have no source: they are human corrections. Storing a verified label
         teaches nothing by itself: which channel may read it, see check_source."""
         source = label_source
         check_source(source, accept=(VERIFIED,))
@@ -940,8 +941,7 @@ class TraceStorage(abc.ABC):
         if source == AUDIT:
             self._check_audited(question, of)
         body = {"v": FORMAT, "kind": "teach", "teach": question, "init": plain(dict(init_state)), "answer": plain(answer)}
-        if source != "human":
-            body["source"] = source
+        body["source"] = source
         if by is not None:
             body["by"] = str(by)
         if of is not None:

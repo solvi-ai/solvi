@@ -146,7 +146,7 @@ def test_corrections_carry_their_source_and_untrusted_sources_are_refused(filled
     s.teach("approve", STATES[2], True, by="ann")
     c = store.corrections()
     assert [(x["source"], x["by"], x["of"]) for x in c] == [("outcome", "ledger", rid), ("human", "ann", None)]
-    assert "source" not in store.record(c[1]["id"])                  # a human correction is stored as in 0.6
+    assert store.record(c[1]["id"])["source"] == "human"    # written since 2026-10-30 (0.6 records have none)
     for bad in ("model", "system", "self", None):
         with pytest.raises(UntrustedLabel):
             s.teach("approve", STATES[0], True, label_source=bad)

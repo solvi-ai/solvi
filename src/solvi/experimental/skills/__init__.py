@@ -42,7 +42,9 @@ hash and the outcomes as evidence; retired skills retired in the store; unverifi
 The certificate. `Certificate(promise=0.05, delta=0.1, bet=0.9, scope="skill")`: an anytime-valid e-process per skill
 (or pooled per goal / over the set) on its outcomes — certified once its wealth reaches 1/delta_v, which takes `need`
 clean outcomes (61 at 5%, 30 at 10%, 14 at 20%) and then stays certified; an e-detector on the outcomes of alone
-decisions restarts it (at 5% one failure alone does). Since 1.4 delta is spent over the restarts: the v-th
+decisions restarts it (the default detector is a CUSUM on a run of failures: at 5% the alarm first fires on the 7th
+consecutive alone-failure; `alternatives=None` is the old burst alarm, under which one failure alone does). Since 1.4
+delta is spent over the restarts: the v-th
 certification bets against delta_v = 6·delta/(π²·v²), so every certificate a process ever issues holds together with
 probability ≥ 1 − delta (61 / 91 / 108 clean outcomes for v = 1 / 2 / 3 at 5%); `delta_split=False` is the old full
 delta at every restart (50, 25, 12), under which each certificate holds alone, not together. Every use of a skill

@@ -308,6 +308,8 @@ class System:
                     try:
                         self.questions[qn].answer.normalize(ans)
                     except ValueError as e:
+                        if ans is None or ans == "abstain":
+                            continue                              # a named abstention: the question abstains on purpose
                         import warnings
                         warnings.warn(f"hard check {part.name}: `then` answers {qn!r} with {ans!r}: {e} — when the check "
                                       f"fails, {qn!r} will abstain", stacklevel=2)
@@ -911,8 +913,11 @@ class System:
                 try:
                     forced = q.answer.normalize(part.then[q.name])
                 except ValueError as e:           # a `then` answer that is not an answer of this question: the check
-                    return Result(None, 0.0, f"hard check {f} is false and its `then` answer is not usable: {e}",   # still
-                                  "abstain", source=f, guard="hard_check")                                         # decides
+                    if part.then[q.name] is None or part.then[q.name] == "abstain":                            # still
+                        return Result(None, 0.0, f"{said} and its `then` answer is abstain",                    # decides
+                                      "abstain", source=f, guard="hard_check")
+                    return Result(None, 0.0, f"hard check {f} is false and its `then` answer is not usable: {e}",
+                                  "abstain", source=f, guard="hard_check")
                 return Result(forced, 1.0, said, "forced", provenance=r.origin, source=f, guard="hard_check")
             text = (f"{said} and no answer is set for it" if because   # the reason kept
                     else f"hard check {f} is false and no answer is set for it")
@@ -1679,7 +1684,7 @@ def _combine_failed(catalog, q, failed):
             try:
                 a = q.answer.normalize(a)
             except ValueError:
-                a = _BAD
+                a = _ABSTAIN if (a is None or a == "abstain") else _BAD      # a named abstention: strictest of all
         keys.append(a)
     if all(not callable(a) and srepr(a) == srepr(keys[0]) for a in keys):
         return failed
