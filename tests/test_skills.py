@@ -19,7 +19,7 @@ with warnings.catch_warnings():
     warnings.simplefilter("ignore")
     from solvi.experimental.laws import Atom, Grammar
     from solvi.experimental.skills import (Certificate, Check, EProcess, ExactModel, Plan, Skill, SkillLearner,
-                                           SkillSet, as_s2, plan, verify)
+                                           SkillSet, as_s2, plan, state_key, verify)
 
 
 class Corridor:
@@ -226,6 +226,26 @@ def test_a_recorded_failure_blocks_a_generalization_that_would_cover_it():
     assert c is not d and len(flat.skills) == 2
 
 
+def test_a_condition_that_narrows_to_no_atoms_warns():
+    """Three ['do'] plans of one goal whose starts share no atom merge into a skill that matches every state
+    ("always") — silently in 1.4. The narrowing warns; the lattice's own empty conditions (a footprint needs no
+    context) do not."""
+    places = Grammar([Atom(f"at_{p}", (lambda s, p=p: s["place"] == p), feature="place")
+                      for p in ("tree", "stone", "water")])
+    ks = SkillSet(places, certificate=Certificate(0.05, 0.1))
+    mk = lambda place: Plan(("do",), start=state_key({"place": place}))            # noqa: E731
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        for place in ("tree", "stone", "water"):
+            ks.compile("task", mk(place), {"place": place, "task": "collect"}, verified=True)
+    assert [w.category for w in caught] == [UserWarning]                           # once: at the narrowing to ()
+    assert "matches every state" in str(caught[0].message)
+    a = ks.skills[0]
+    assert a.condition == () and a.support == 3
+    assert ks.candidates({"place": "lava", "task": "collect"}, "task") == [a]       # the "always" the warning names
+    assert ks.candidates({"place": "lava"}, "other") == []
+
+
 def test_match_is_the_most_specific_certified_skill_and_retirement_and_recertification():
     env = Corridor()
     ks = SkillSet(grammar(), certificate=Certificate(0.5, 0.5, delta_split=False))  # 2 clean outcomes per restart
@@ -352,6 +372,41 @@ def test_the_learner_never_steps_the_real_environment_while_deciding():
     a = L.act(s)
     assert a == "right" and L.model.fingerprint() == before
     L.observe(env.step(a))
+
+
+def test_close_run_gives_an_interrupted_run_its_outcome():
+    """A run dropped by new_episode() (or paused by a reflex and never resumed — the 57 outcome-less alone runs of
+    docs/best_practices.md) kept run_ok None and never fed the certificate; close_run(ok) closes it like any other."""
+    env = Corridor()
+    L = SkillLearner(env, grammar(), {"door": at_goal}, horizon=6, budget=1000,
+                     certificate=Certificate(0.5, 0.5, delta_split=False))   # 2 clean outcomes per certification
+    for seed in (0, 3, 3):                        # compiled once, supervised twice: the skill may act alone
+        L.run(seed=seed, steps=10)
+    assert L.skills.usable(L.skills.skills[0])
+    L.new_episode(seed=3)                         # an alone run, interrupted after its first action
+    s = L.env.reset(3)
+    L.observe(L.env.step(L.act(s)))
+    run = L._run
+    assert run is not None and run["kind"] == "alone"
+    assert [r["run_ok"] for r in L.decisions if r["episode"] == 4] == [None]
+    before = (L.skills.skills[0].outcomes["alone_fail"], L.skills.skills[0].certificate.failures)
+    nxt = L.act(L.env._state())                   # the run's second action is pending
+    with pytest.raises(ValueError, match="pending"):
+        L.close_run(False)                        # its outcome must be observed first
+    L.observe(L.env.step(nxt))
+    assert L.close_run(False) is run              # → the run's record
+    assert [r["run_ok"] for r in L.decisions if r["episode"] == 4] == [False, False]
+    assert L.close_run(False) is None             # nothing is open any more
+    ep = L._ep
+    assert (ep["alone_runs"], ep["alone_failures"], ep["s1_failed"]) == (1, 1, 2)
+    sk = L.skills.skills[0]
+    assert (sk.outcomes["alone_fail"], sk.certificate.failures) == (before[0] + 1, before[1] + 1)  # the world heard
+    L.new_episode(seed=3)                         # dropped without close_run: run_ok stays None (the old wart)
+    s = L.env.reset(3)
+    L.observe(L.env.step(L.act(s)))
+    assert L._run is not None
+    L.new_episode(seed=4)
+    assert [r["run_ok"] for r in L.decisions if r["episode"] == 5] == [None]
 
 
 def test_fallback_when_no_plan_is_found_and_plan_always_learns_nothing():

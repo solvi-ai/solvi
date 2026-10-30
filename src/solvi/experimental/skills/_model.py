@@ -37,8 +37,13 @@ class ExactModel:
     """A world model that is the environment's own code. `fork(state)` → an independent copy to step: by default
     `copy.deepcopy` of the environment as it is now (the state argument is then only a label); `clone(env, state)` → an
     independent environment at `state`, for environments with their own snapshot / restore (it is also used to copy a
-    fork during a search). The real environment is only read (copied), never stepped: `fingerprint()` hashes it, so a
-    caller can check that a plan call left it as it was.
+    fork during a search). A clone must be a faithful copy of the world as it is: the same future from the same state,
+    its randomness carried with it (an RNG, a clock, a tick — anything the state alone does not hold). A clone with
+    fresh randomness of its own gives every fork a different future from the fork that planned, and verify then
+    rejects every plan of two steps or more (each step is compared with the predicted state) — verify is right, the
+    model is not exact; check a clone of yours with `solvi.testing.conformance.check_environment(make, clone=)`. The
+    real environment is only read (copied), never stepped: `fingerprint()` hashes it, so a caller can check that a
+    plan call left it as it was.
 
     Counters: `forks`, `steps` (simulated steps, every search and every verify); `last`: what the last search did.
 

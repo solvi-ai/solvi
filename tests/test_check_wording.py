@@ -1,5 +1,5 @@
 """`solvi check`: the wording of questions — no catch-all option, bare-number levels, two questions in one, given facts
-nobody reads. Warnings or notes (no_other_option: a closed label set is often right), never errors."""
+nobody reads. Warnings (no_other_option became one on 2026-10-30: it was a note since 1.1.1), never errors."""
 from pydantic import BaseModel
 
 from solvi import Answer, Catalog, Question, System
@@ -30,12 +30,12 @@ def noted(sys, code):
 
 
 # --- (a) no_other_option
-def test_a_model_choice_without_a_catch_all_is_a_note_once_with_the_fix():
+def test_a_model_choice_without_a_catch_all_warns():
     s = system([Question("team", "Which team handles it?", Answer.choice(["billing", "tech"]), uses=["text_len"])])
-    got = noted(s, "no_other_option")
+    got = warned(s, "no_other_option")
     assert list(got) == ["team"] and '"other"' in got["team"] and "Answer.maybe" in got["team"]
-    assert warned(s, "no_other_option") == {}
-    assert lint(s).ok and lint(s, strict=True).ok                       # a note: closed label sets pass --strict
+    assert noted(s, "no_other_option") == {}
+    assert lint(s).ok and not lint(s, strict=True).ok             # a warning since 2026-10-30 (a note in 1.1.1–1.4)
 
 
 def test_a_catch_all_option_or_not_stated_or_a_rule_silences_it():
@@ -46,7 +46,16 @@ def test_a_catch_all_option_or_not_stated_or_a_rule_silences_it():
           Question("e", "Which team?", Answer.choice({"billing": "charges", "general": "anything else"}),
                    uses=["text_len"]),
           Question("f", "Which team?", Answer.choice(["a", "b"]))]           # answered by a rule: code decides
-    assert noted(system(ok, rules=["f"]), "no_other_option") == {}
+    assert warned(system(ok, rules=["f"]), "no_other_option") == {}
+
+
+def test_the_catch_all_words_of_real_label_sets():
+    """oos (CLINC), abstain, unclassified, no_match, misc, "out of scope": a catch-all by any other name."""
+    opts = [["translate", "weather", "oos"], ["0", "1", "abstain"], ["phone", "laptop", "unclassified"],
+            ["a", "b", "no_match"], ["a", "b", "misc"], ["a", "b", "out of scope"], ["a", "b", "Out of Scope"]]
+    for o in opts:
+        assert warned(system([Question("q", "Which?", Answer.choice(o), uses=["text_len"])]),
+                      "no_other_option") == {}, o
 
 
 # --- (b) numeric_levels
@@ -58,6 +67,19 @@ def test_bare_number_levels_warn_and_described_levels_do_not():
     assert list(got) == ["risk"] and "say what each means" in got["risk"]
 
 
+def test_numbers_that_are_not_levels_do_not_warn_but_an_open_top_scale_does():
+    """A choice of bare numbers is judged only when the options read as a small integer scale: years are not levels
+    ("2023".."2025" fired in 1.4), while a count scale with an open top ("3+", "3 or more") is one (and was silent).
+    An ordinal's numbers are always levels."""
+    scale = Question("count", "How many?", Answer.choice(["0", "1", "2", "3+"]), uses=["text_len"])
+    more = Question("count2", "How many?", Answer.choice(["0", "1", "2", "3 or more"]), uses=["text_len"])
+    years = Question("year", "Which year is the report for?", Answer.choice(["2023", "2024", "2025"]), uses=["text_len"])
+    plain = Question("band", "Which?", Answer.choice(["1", "2", "3"]), uses=["text_len"])
+    eras = Question("era", "Which era?", Answer.ordinal(["2023", "2024"]), uses=["text_len"])
+    got = warned(system([scale, more, years, plain, eras]), "numeric_levels")
+    assert set(got) == {"count", "count2", "band", "era"} and "say what each means" in got["count"]
+
+
 # --- (c) compound_question
 def test_a_question_that_asks_two_things_warns():
     qs = [Question("q1", "Is the invoice paid? Is it late?", Answer.yes_no()),
@@ -65,6 +87,20 @@ def test_a_question_that_asks_two_things_warns():
           Question("q3", "Say if the refund is due or whether a person decides", Answer.yes_no())]
     got = warned(system(qs, rules=["q1", "q2", "q3"]), "compound_question")
     assert set(got) == {"q1", "q2", "q3"} and "split it into two questions" in got["q1"]
+
+
+def test_a_question_mark_inside_quotes_or_parentheses_is_not_a_second_question():
+    """'why?'? and "(equal to the lines?)" fired in 1.4: the quoted or parenthesised '?' is part of the thing asked
+    about. The sentence-final '?' of a real question still counts ("filed and paid?" keeps its one)."""
+    texts = ["Does the text contain the phrase 'why?'?",
+             'Is the text a plain "is it late?" question?',
+             "Is the total correct? (i.e. equal to the sum of the lines?)",
+             "Was the claim filed and paid?",
+             "What is the total (in EUR)?"]
+    qs = [Question(f"q{i}", t, Answer.yes_no()) for i, t in enumerate(texts)]
+    assert warned(system(qs, rules=[q.name for q in qs]), "compound_question") == {}
+    two = Question("real", "Is it paid? Is it stamped?", Answer.yes_no())
+    assert list(warned(system([two], rules=["real"]), "compound_question")) == ["real"]
 
 
 def test_ordinary_questions_do_not_warn_as_compound():

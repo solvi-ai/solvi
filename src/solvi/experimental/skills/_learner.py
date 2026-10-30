@@ -74,8 +74,10 @@ class SkillLearner:
 
     Records. `decisions`: one per step — episode, step, by ("s1" / "s2" / "fallback"), kind ("alone" / "supervised" /
     "planned" / "fallback"), skill id, goal, action, certified (System 1 acted under a holding certificate), accepted,
-    run_ok (did the run this step belonged to reach its goal). `episodes`: one per episode — steps, decisions by
-    System 1 / System 2 / fallback, s1_share, goals (reached, in order), goals_reached, all_goals, planner_calls,
+    run_ok (did the run this step belonged to reach its goal; None while it is open — a run dropped by new_episode()
+    never gets one; close_run(ok) closes an interrupted run with an outcome). `episodes`: one per episode — steps,
+    decisions by System 1 / System 2 / fallback, s1_share, goals (reached, in order), goals_reached, all_goals,
+    planner_calls,
     plans_found / plans_rejected, simulated (steps on the exact model), compiled, supervised (failed), alone_runs,
     alone_failures, s1_failed (System 1 decisions in failed runs), mismatch (a verified plan the real world did not
     follow), guard_violations, skills / usable / retired at the end; searched (simulated steps the planner's searches
@@ -132,7 +134,8 @@ class SkillLearner:
 
     # --- episodes
     def new_episode(self, seed=None):
-        """Start an episode by hand (run() does it): no goal reached yet."""
+        """Start an episode by hand (run() does it): no goal reached yet. A run still in progress is dropped without
+        an outcome — close it first with close_run(ok) if the world showed one."""
         self._close()
         self._ep = {"n": len(self.episodes) + 1, "seed": seed, **{k: 0 for k in _EPISODE}, "goals": [],
                     "done": False, "stopped": None}
@@ -405,6 +408,20 @@ class SkillLearner:
         if out.done:
             self._ep["done"] = True
         return {"accepted": bool(out.accepted), "goals": list(self._reached)}
+
+    def close_run(self, ok: bool):
+        """Close the run in progress with an outcome. A run interrupted mid-way — paused by a reflex and never
+        resumed, or dropped by new_episode() — otherwise carries none: its decisions keep run_ok None and an alone
+        run's skill never hears the world's verdict. ok: did the run reach its goal as far as the world showed; a run
+        paused and not resumed is the caller's call (the Crafter run of docs/best_practices.md counted its 57 such
+        runs as failures). → the run's record, or None when no run is open."""
+        run = self._run
+        if run is None:
+            return None
+        if self._pending is not None:
+            raise ValueError("close_run() with an action pending: observe() its outcome first")
+        self._end_run(bool(ok))
+        return run
 
     def _end_run(self, ok):
         run, self._run = self._run, None

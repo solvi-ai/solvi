@@ -1,6 +1,7 @@
 """Skills compiled from verified plans and the skill set (see the package docstring)."""
 from __future__ import annotations
 
+import warnings
 from dataclasses import dataclass, field
 
 from ._certificate import Certificate, EProcess
@@ -90,8 +91,9 @@ class SkillSet:
     A later verified plan of the same goal with the same actions from another start widens it to the atoms both
     starts share (anti-unification over atoms: an atom that differed between two verified starts was shown not to be
     needed for this sequence) — unless the widened condition would hold on a state where the skill is recorded to
-    have failed; then the plan becomes a skill of its own. Widening by this rule restarts the skill's own certificate
-    (its evidence was gathered on a narrower condition). The learner's lattice generalization (a footprint and
+    have failed; then the plan becomes a skill of its own. A widening that leaves no atom at all (the starts shared
+    nothing) makes the skill match every state of its goal and warns. Widening by this rule restarts the skill's own
+    certificate (its evidence was gathered on a narrower condition). The learner's lattice generalization (a footprint and
     template; the condition becomes () when no context is needed) also widens a skill, without a restart: its
     certificate keeps its wealth and its v.
 
@@ -236,6 +238,11 @@ class SkillSet:
                     continue                          # it would cover a state where this skill failed
                 if new != s.condition:
                     s.condition = new
+                    if not new:
+                        warnings.warn(f"the condition of skill {s.id!r} narrowed to no atoms — it now matches every "
+                                      f"state for goal {goal!r} (\"always\"): the two verified starts shared no atom; "
+                                      "give the grammar an atom for what the tasks share, or use one goal per task",
+                                      UserWarning, stacklevel=2)
                     if s.certificate is not None and self.certificate is not None and self.certificate.scope == "skill":
                         s.certificate.restart()
                 s.support += 1

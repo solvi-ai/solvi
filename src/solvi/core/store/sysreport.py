@@ -31,7 +31,8 @@ What it shows, per question, from the records the library already writes:
   "risk_wilson95"): Wilson 95 % on the random-audit sample is a reading at one time, not a running bound;
 - how often a person was wrong: a decision with a person's label ("human" or "audit") given before its first outcome
   label ("outcome") gives a pair; `corrections["people"]` counts the pairs where they differ, with a two-sided
-  Clopper–Pearson interval, per person (`by`) and per question; a person label given only after the outcome is
+  Clopper–Pearson interval, per person (`by`: each person's own last label before the outcome — a re-label by someone
+  else does not remove hers) and per question; a person label given only after the outcome is
   counted apart (`after_outcome`), not judged;
 - drift: the flags the decisions recorded (an open-set gate's change point, the dispatcher's drift flag) and a
   `DriftMonitor` run over the period's decisions in order (`drift_window=`; None: not run), with the first decision at
@@ -280,7 +281,9 @@ def _rate(rows, confidence):
 
 def _people(pairs, confidence=0.95):
     """How often a person was wrong: every decision (and question) with a person's label ("human" or "audit") given
-    before its first outcome label ("outcome") — the person's last answer before that outcome against the last outcome.
+    before its first outcome label ("outcome") — the decision's last person answer before that outcome against the last
+    outcome. Per person (`by`) each person is judged on her own last label before the outcome: a second reviewer's
+    label no longer removes the first's judgement from her count (one row per (person, decision)).
     A person label given after the outcome was known is not a judgement (a correction made knowing the answer): a
     decision with only such labels is counted in "after_outcome", not paired. → {"paired", "wrong", "error", "interval"
     (two-sided Clopper–Pearson at `confidence`), "confidence", "after_outcome", "by" ({who: the same}), "by_question",
@@ -291,20 +294,25 @@ def _people(pairs, confidence=0.95):
         if not truth:
             continue
         first = min(x[3] for x in truth)
-        person = [x for x in labs if x[0] in PERSON and x[3] < first]
+        person = sorted((x for x in labs if x[0] in PERSON and x[3] < first), key=lambda x: x[3])
         if not person:
             after += any(x[0] in PERSON for x in labs)
             continue
         wrong = person[-1][1] != truth[-1][1]
         rows.append(wrong)
-        by.setdefault(person[-1][2] or "unnamed", []).append(wrong)
+        own = {}
+        for x in person:                           # every reviewer keeps her own judgement: her last label before the outcome
+            own[x[2] or "unnamed"] = x
+        for w, x in own.items():
+            by.setdefault(w, []).append(x[1] != truth[-1][1])
         by_q.setdefault(q, []).append(wrong)
     out = {**_rate(rows, confidence), "confidence": confidence, "after_outcome": after,
            "by": {w: _rate(r, confidence) for w, r in sorted(by.items())},
            "by_question": {q: _rate(r, confidence) for q, r in sorted(by_q.items())},
            "rule": "a decision's last person label (source human or audit) given before its first outcome label (source "
                    "outcome) against its last outcome label, both naming it (of=) or on its input; wrong when they "
-                   "differ; person labels given only after the outcome are counted in after_outcome, not judged"}
+                   "differ; per person each person's own last such label (a re-label by someone else does not remove "
+                   "hers); person labels given only after the outcome are counted in after_outcome, not judged"}
     return out
 
 

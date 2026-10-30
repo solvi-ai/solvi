@@ -71,8 +71,9 @@ the others compact.
 
 ### kind `teach`
 
-`teach` (the question), `init` (the input), `answer`, and when given `source` (`outcome`, `rule`, `verified`; none
-means a human), `by`, `of` (the stored id it corrects), `happened` (a note).
+`teach` (the question), `init` (the input), `answer`, `source` (`human`, `outcome`, `rule`, `audit`, `verified`;
+written since 2026-10-30 — a record of 0.6 or 1.x without one is a human correction), `by`, `of` (the stored id it
+corrects), `happened` (a note).
 
 ### kind `redaction`, kind `segment`
 
