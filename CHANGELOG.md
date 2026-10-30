@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.4.1 — unreleased
 
 ### Fixed (knowledge store — the 2026-10-30 external handoff, S261/S262/S263/S265)
 - **An erratum of content the writer no longer stands behind now withdraws it (S262).** `_kept` read the writer's
@@ -70,7 +70,10 @@
 - **A human teach record writes its "source" (S296).** The docstring promised label_source is "stored as the
   record's 'source'", but only non-human sources were written — an external journal reader could not tell a human
   label from a record with a missing field. Every record writes one now; readers of `d.get("source", "human")` and
-  records of 0.6 are unaffected.
+  records of 0.6 are unaffected. The record schema's teach `source` widens to what the code writes — "human" and
+  "audit" join "outcome", "rule", "verified" (schema 2.3.0, docs/trace_spec.md §teach); the CHANGELOG heading names
+  the unreleased tree again (1.4.1 — unreleased, `solvi.__version__` 1.4.1.dev0), which the 1.1 version test keeps
+  in step and the 30-10 knowledge commit had dropped.
 
 ## 1.4.0 — released 2026-10-30
 
