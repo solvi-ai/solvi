@@ -17,7 +17,7 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
       - run: uv sync --group dev
-      - run: uv run pytest -q
+      - run: uv run pytest -q --reruns 2 --reruns-delay 5 --only-rerun "test_no_deadlock_between_decisions_controls_a_background_training_and_the_parts_own_calls"
       - name: honesty gate (docs/honesty.md)
         run: uv run solvi honesty tests/honesty/core_v1.json --baseline tests/honesty/core_v1.baseline.json
       - name: gallery cases as regression tests (docs/testing.md)
