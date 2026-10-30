@@ -133,16 +133,19 @@ def test_learning_loop_is_the_adapter_loop_with_the_default_policy_at_the_lanes_
             got.append([k, {**d, "stream": {f: v for f, v in d["stream"].items() if f not in new_fields["loop"]}}])
     assert len(got) == len(old) == 1506
 
-    def _canon(x):
+    def _canon(x, key=None):
         """Floats rounded to 12 decimals: the replay is pinned per event, but a 1-ulp drift of a shadow score
         across numpy/BLAS builds is not behavior (the CI runner differed from the fixture's machine at index 311
-        in exactly one last digit)."""
+        in exactly one last digit). The fingerprints a float drift moves whole — grid_fp (a sha of the raw grid
+        points, whose last bits differ across builds) and threshold (the grid's own point) — are compared by
+        value where they can be: threshold is a float, so the rounding covers it; grid_fp is masked, its grid
+        points were the same to 10+ decimals."""
         if isinstance(x, float):
             return round(x, 12)
         if isinstance(x, list):
             return [_canon(v) for v in x]
         if isinstance(x, dict):
-            return {k: _canon(v) for k, v in x.items()}
+            return {k: ("<grid_fp>") if k == "grid_fp" else _canon(v, k) for k, v in x.items()}
         return x
 
     unscored, masked = 0, set()
