@@ -93,8 +93,11 @@ class Grammar:
     "refine" (the documented mode): at most one negated literal per condition, and only where the atom varies —
     `Enumerate` adds `P ∧ not:a` to a positive condition P that holds in the mismatched state only when `a` took both
     values on the held-out rows P matches (an exception to cut out), and the lone `not:a` when `a` took both values on
-    the held-out rows of the action (one extra candidate per atom: "transform unless R" is the law `not:R`);
-    `refinements` gives both; min_k counts positive atoms, so min_k ≥ 1 keeps lone negations out. "all": every
+    the held-out rows of the action (one extra candidate per atom: "transform unless R" is the law `not:R`). The
+    rows are the buffer the mismatch is proposed on: `step` passes its own, and a direct `mismatch` call must be
+    given it (`mismatch(…, buffer=…)` — `admit_by_probes(buffer=…)` does not reach the refinements, its candidates
+    are computed before it sees the buffer); `refinements` gives both; min_k counts positive atoms, so min_k ≥ 1
+    keeps lone negations out. "all": every
     literal is an atom like any other (the full literal grammar: 1 + n + C(n, 2) conditions per state at k = 2, n
     atoms) — for small grammars and for measurement. The
     sized bound is unchanged in form: every literal candidate scored is counted in N (`Buffer.tested`) and tested at
@@ -809,8 +812,9 @@ class Proposer(Protocol):
 class Enumerate:
     """The default: every condition the grammar builds from the atoms true in the mismatched state, with every effect
     variant of the observation (lawset.effects). Under Grammar(negations="refine") also the grammar's `refinements`
-    on the buffer `LawSet.step` tests on (without the mismatch's group); a direct `mismatch` call has no buffer and
-    proposes the positive conditions only."""
+    on the buffer the call gives `mismatch(…, buffer=…, exclude=…)` — `step` passes its own (without the mismatch's
+    group); a direct `mismatch` call without a buffer proposes the positive conditions only, and `admit_by_probes(…,
+    buffer=…)` cannot add them later: its candidates are computed before it sees the buffer."""
     name = "enumerate"
 
     def propose(self, lawset, state, action, observed):
@@ -1260,6 +1264,9 @@ class LawSet:
         self._cmp = None if self.same is None else (("same", id(same)) if same is not None else ("tol", tol, rtol))
         self.refused_readmit = 0           # candidates refused because they were retired on a buffer of this size
         self._retired_at: dict = {}        # (action, condition, effect) → buffer size at retirement (None: not seen)
+        self.refused_falsified = 0         # candidates refused because a leftover probe falsified them (falsify memory)
+        self._falsified_at: dict = {}      # (action, condition, effect) → the buffer clock it was falsified at
+                                           # (−1: falsified with no buffer; not there: never falsified)
         self.abstained = 0                 # predictions that abstained (disagree="abstain")
         self.cost = {"candidates": 0, "tests": 0, "accepted": 0, "probes": 0, "simulated": 0}
         self.laws: list[Law] = []          # active, priority order
@@ -1267,6 +1274,7 @@ class LawSet:
         self.capped = 0                    # tests refused because the cap was reached
         self.last_retired: list[Law] = []  # the laws the check after the last test's acceptances retired
         self.transition: Transition | None = None   # the transition `step` is proposing for (a proposer may read it)
+        self._proposing: tuple | None = None        # (buffer, exclude) `mismatch` proposes on (refinements need it)
         self._seq = 0
         self._last_tested = 0
         self._base_key = ("base", id(base)) if self._cmp is None else ("base", id(base), self._cmp)
@@ -1494,16 +1502,38 @@ class LawSet:
         return out
 
     # ----------------------------------------------------------------------------------- mismatch → candidates
-    def mismatch(self, state, action, observed) -> list[Candidate]:
+    def mismatch(self, state, action, observed, buffer: "Buffer | None" = None, exclude=None) -> list[Candidate]:
         """No mismatch (the prediction is the observation) → []; else the proposer's candidates, without the laws
-        already active."""
+        already active. buffer (with its group `exclude` left out, as `step` leaves the transition's group): the rows
+        the proposer may need — under Grammar(negations="refine") the refinements are computed from it, and without a
+        buffer they are not proposed at all. `admit_by_probes(buffer=…)` does not reach them: its candidates are
+        computed here, before it sees the buffer, so pass the same buffer to this call. A candidate a leftover probe
+        falsified on a buffer that has not grown since is not re-proposed (see `admit_by_probes`, falsify="leftover";
+        the refusals are counted in `refused_falsified`)."""
         if self.agrees(self.predict(state, action, disagree="first"), observed):
             return []
         active = {(_key(law.action), law.condition, _key(law.effect)) for law in self.laws}
-        proposed = list(self.proposer.propose(self, state, action, observed))
+        old = self._proposing
+        self._proposing = (buffer, exclude)
+        try:
+            proposed = list(self.proposer.propose(self, state, action, observed))
+        finally:
+            self._proposing = old
         self.cost["candidates"] += len(proposed)
-        return self._merge([c for c in proposed if (_key(c.action), tuple(c.condition), _key(c.effect)) not in active
-                            and self.grammar.allows(c.condition)])
+        out = self._merge([c for c in proposed if (_key(c.action), tuple(c.condition), _key(c.effect)) not in active
+                           and self.grammar.allows(c.condition)])
+        if buffer is not None and self._falsified_at:
+            kept = [c for c in out if not self._falsified_on(c, buffer)]
+            self.refused_falsified += len(out) - len(kept)
+            out = kept
+        return out
+
+    def _falsified_on(self, c, buffer) -> bool:
+        """falsify="leftover" memory: the candidate was refuted where it applies by a leftover probe and the buffer
+        has not grown since (readmit="grown" semantics; no buffer now: nothing has changed — it was falsified with
+        none)."""
+        at = self._falsified_at.get(self._ck(c))
+        return at is not None and (buffer is None or (at >= 0 and self._blocked(at, buffer)))
 
     # ----------------------------------------------------------------------------------- the held-out test
     def _effect_mask(self, buffer, action, effect):
@@ -1773,19 +1803,21 @@ class LawSet:
         elsewhere what the set predicts now. It is refuted by a row (a logged one from `buffer` — every group but
         `exclude`, its own actions only — or an asked probe) where it is the applied law and its effect is wrong, or
         where its condition does not hold, the set is wrong and its effect is what was observed (it is too narrow).
-        The set without a new law ("null") is a hypothesis too, refuted where the set is wrong. Loop: group the
-        surviving hypotheses by their predictions on every probe of the pool; while more than one group is left and
-        the budget lasts, ask the safe probe that splits the groups most (`split`: read-only first, the larger split,
-        the lower cost), drop the refuted. Accept the shortest candidate (fewest atoms, then the order given) only when
-        one group of candidates is left and the null is not in it or alive (identifiability); otherwise
-        "undetermined" with the surviving groups — never a guess. order="random", unique=False: the control — `budget`
-        random safe probes, the shortest survivor accepted (a held-out sample of that size). tol / same: predictions
-        and observations compared within an absolute tolerance (numbers; tuples element by element) or by `same(a, b)`,
-        for refutation, for the classes and for the probe choice (`split`) — with exact equality a measurement noise of
-        1e-6 refuted every candidate of y = c·x; with tol=1e-4 the right c is admitted. rtol: a relative tolerance
-        (|a − b| ≤ tol + rtol·max(|a|, |b|)) — over x from 1 to 1e5 with a relative noise of 1e-6, tol=1e-4 refutes
-        every candidate (undetermined) and rtol=1e-4 admits the right c. None of the three: the set's own comparison
-        (its tol / rtol / same; exact by default).
+        Under Grammar(negations="refine") the negated candidates reach this path only when the buffer was given to the
+        `mismatch` that computed them (`mismatch(…, buffer=…)`): this method's own `buffer=` cannot add them, the
+        candidates exist before it runs. The set without a new law ("null") is a hypothesis too, refuted where the
+        set is wrong. Loop: group the surviving hypotheses by their predictions on every probe of the pool; while
+        more than one group is left and the budget lasts, ask the safe probe that splits the groups most (`split`:
+        read-only first, the larger split, the lower cost), drop the refuted. Accept the shortest candidate (fewest
+        atoms, then the order given) only when one group of candidates is left and the null is not in it or alive
+        (identifiability); otherwise "undetermined" with the surviving groups — never a guess. order="random",
+        unique=False: the control — `budget` random safe probes, the shortest survivor accepted (a held-out sample of
+        that size). tol / same: predictions and observations compared within an absolute tolerance (numbers; tuples
+        element by element) or by `same(a, b)`, for refutation, for the classes and for the probe choice (`split`) —
+        with exact equality a measurement noise of 1e-6 refuted every candidate of y = c·x; with tol=1e-4 the right c
+        is admitted. rtol: a relative tolerance (|a − b| ≤ tol + rtol·max(|a|, |b|)) — over x from 1 to 1e5 with a
+        relative noise of 1e-6, tol=1e-4 refutes every candidate (undetermined) and rtol=1e-4 admits the right c.
+        None of the three: the set's own comparison (its tol / rtol / same; exact by default).
 
         The "too narrow" refutation is sound only when exactly one law is missing. Where two are (the world x0 ∨ x1,
         a base that says False, 10 binary atoms, k = 2, a pool of 200 random states, 8 checks), each right law is too
@@ -1892,6 +1924,16 @@ class LawSet:
         measured too costly at a small budget). noise= and max_new=2 raise ValueError with it (under noise one answer
         refutes nothing).
 
+        The falsified law is remembered in the set: a candidate refuted where it applies by a leftover probe is not
+        re-proposed (`mismatch(…, buffer=…)` drops it) and not offered here again until the buffer grows past the size
+        it was falsified at — the readmit="grown" rule — or, when it was falsified with no buffer, while the call
+        gives none (a probe answer does not un-happen; without a row store nothing can change it). The refusals are
+        counted in `refused_falsified`, `why_not` names one ("falsified"), and when every candidate of a call was
+        dropped this way the admission is "undetermined" saying so, at no probe. Before this change the same mismatch
+        asked its probes again on every call — refuted 3× by the same probe in the handoff's repro; passing the asked
+        rows back as `buffer=` was the workaround and still is (it also refutes the candidates the split phase
+        refuted, which this memory does not).
+
         Measured on a synthetic boolean world (8 bits and a counter, 2,560 states, six rules, two grammars — a
         benchmark re-created from a published description —, a pool of 200 states, 20 seeds, budgets 8 and 20, exact
         answers; a wrong law is one false on some state where it applies). On the cells whose law needs a negation the
@@ -1962,6 +2004,23 @@ class LawSet:
                 seen.add(k)
                 cands.append(c)
         cands = self._merge(cands)
+        dropped = 0                       # candidates a leftover probe falsified on evidence not grown since
+        if self._falsified_at:
+            keep = []
+            for c in cands:
+                if self._falsified_on(c, buffer):
+                    dropped += 1
+                else:
+                    keep.append(c)
+            cands = keep
+        if dropped:
+            self.refused_falsified += dropped
+            if not cands:
+                return Admission("undetermined", None, [], [], 0, True,
+                                 "every candidate was falsified by a leftover probe and nothing has changed since "
+                                 "(no buffer was given)" if buffer is None else
+                                 f"every candidate was falsified by a leftover probe and the buffer has not grown "
+                                 f"since ({len(buffer)} rows)", [], [], [])
         pool = list(probes)
         rng = random.Random(seed)
         if noise is not None:
@@ -2275,6 +2334,7 @@ class LawSet:
                     break
             self.cost["probes"] += n_fals
             if hit is not None:
+                self._falsified_at[self._ck(c)] = self._clock(buffer) if buffer is not None else -1
                 return undetermined(f"falsified by probe {hit[0]} ({hit[1]!r}): the accepted law {c.condition} is "
                                     f"refuted where it applies ({n_fals} of {len(elig)} eligible pool probes asked)")
             why = (f"{why or 'one class left'}; falsify: {n_fals} of {len(elig)} eligible pool probes asked "
@@ -2505,12 +2565,10 @@ class LawSet:
         st = Step(t, predicted, law, miss, retired=retired)
         if miss:
             self.transition = t
-            self._proposing = (buffer, t.group)
             try:
-                cands = self.mismatch(t.state, t.action, t.observed)
+                cands = self.mismatch(t.state, t.action, t.observed, buffer=buffer, exclude=t.group)
             finally:
                 self.transition = None
-                self._proposing = None
             st.candidates = len(cands)
             self._last_tested = 0
             st.accepted = self.test(cands, buffer, exclude=t.group) if cands else []
@@ -2555,7 +2613,9 @@ class LawSet:
         "net", "precision", "null", "tested", "need", "short"}.
 
         failed: None (it would pass; `confirm`, when the set has one, is still asked), "active" (already an active
-        law), "readmit" (retired on a buffer this size, readmit="grown"), "cap" (the set holds `cap` laws), "net"
+        law), "readmit" (retired on a buffer this size, readmit="grown"), "falsified" (refuted where it applies by a
+        leftover probe on a buffer this size, admit_by_probes(falsify='leftover'), and not re-proposed since), "cap"
+        (the set holds `cap` laws), "net"
         (it removes no more errors than it adds where it would be the applied law), "min_support", "min_precision",
         "exact" (acceptance="exact": wrong on some row it applies to), "sized_need" (fewer rows than the sized rule
         needs at this N), "sized_bound" (enough rows, but the binomial tail against the null is above δ_N), "rival"
@@ -2584,6 +2644,10 @@ class LawSet:
         if at is not None and self._blocked(at, buffer):
             return fail("readmit", f"it was retired on a buffer of {at} rows and the buffer has not grown since "
                                    f"({len(buffer)} rows)")
+        at = self._falsified_at.get(k)
+        if at is not None and at >= 0 and self._blocked(at, buffer):
+            return fail("falsified", f"it was falsified by a leftover probe (admit_by_probes(falsify='leftover')) on a "
+                                     f"buffer of {at} rows and the buffer has not grown since ({len(buffer)} rows)")
         if len(self.laws) >= self.cap:
             return fail("cap", f"the set already holds cap={self.cap} active laws")
         if net <= 0:

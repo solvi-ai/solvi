@@ -27,6 +27,33 @@
 - Docs: the module docstring now says the same-since replacement is blind to which value an erratum corrected
   (S264), and the guard's docstring states the re-test's validity scoping.
 
+### Fixed (laws — the 2026-10-30 external handoff, S303/S305–S307)
+- **A law falsified by a leftover probe is now remembered in the set (S303).** `admit_by_probes(falsify="leftover")`
+  committed nothing when its falsification probe refuted the accepted candidate, so the same mismatch re-proposed it
+  and re-probed it on every call — in the handoff's repro refuted 3× by the same probe, probes 6→12→18. The set now
+  keeps the falsified (action, condition, effect) with the buffer size it fell at: `mismatch(…, buffer=…)` drops it
+  and `admit_by_probes` does not offer it again until the buffer grows past that size (the readmit="grown" rule; with
+  no buffer, while the call gives none — a probe answer does not un-happen). The refusals are counted in
+  `refused_falsified`, `why_not` names one ("falsified"), and when every candidate of a call was dropped the
+  admission is "undetermined" saying so, at no probe. Passing the asked rows back as `buffer=` remains the wider
+  workaround (it also remembers the split phase's refutations, which this memory does not).
+- **`mismatch(…, buffer=, exclude=)` carries `negations="refine"` into `admit_by_probes` (S305).** The negated
+  candidates were computed where the buffer never reached: only `step` set what the proposer reads, so on the whole
+  `mismatch → admit_by_probes` path "refine" was dead (their repro: 0 of 120 rounds; `admit_by_probes(buffer=…)`
+  could not help, its candidates are computed before it sees the buffer). `mismatch` now takes the buffer (and its
+  `exclude` group) the way `step` passes its own; the docstrings of `Grammar(negations=)`, `Enumerate`,
+  `mismatch` and `admit_by_probes` say where the buffer must be given.
+- **`residual_check(…, dof_sigma=ν)` tests an estimated σ̂ (S306).** The check was a plain χ² quantile, which assumes
+  σ is known: with residuals in units of an estimated σ̂ it refused the true law far above the nominal level
+  (measured here: refusal 0.2315 against a nominal 0.005, σ̂ from 15 repetitions of 3). With `dof_sigma=` the ν
+  degrees of freedom of σ̂² are tested at the F quantile, Σ r² ≤ (n − k) · F_level(n − k, ν) — the known-σ rule is
+  its ν → ∞ limit and stays the default (`dof_sigma=None` changes nothing; measured: 0.0055 refusals at ν = 10).
+  The docstring now also says the measured 0.60 → 0.14 used a known σ.
+- **Docs: the refit χ² does not refuse a wrong formula that fits within the noise (S307).** At 10 % noise, with the
+  truth y = x(1 + 0.05x), the wrong law y = c·x — the right structure, the constant refitted every trial — passed
+  0.961 of 1,000 trials (σ known). The number is now in the cautions next to the flexible-model one, so the check
+  is not read as "never a guess".
+
 ## 1.4.0 — released 2026-10-30
 
 ### Added
