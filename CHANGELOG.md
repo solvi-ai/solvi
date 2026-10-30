@@ -31,6 +31,26 @@
 - Docs: the module docstring now says the same-since replacement is blind to which value an erratum corrected
   (S264), and the guard's docstring states the re-test's validity scoping.
 
+### Fixed (knowledge store — S266)
+- **A guard-active write no longer re-reads the key's whole history (S266).** Every `tell` outside a batch
+  re-resolved the downstream component and ran the revival guard for each of its keys, and each pass re-scanned
+  every assertion of every item on the key, matching each live assertion against every withdrawal again — so on a
+  corpus with errata and copies (the living-knowledge pattern: one id per (s, r), validity per assertion) a write
+  cost more than the whole version walk under it and grew with the corpus: 6.4 → 27.7 ms per write, 0.96 → 8.3 s
+  total as the corpus doubled (6.8× the plain versioned pattern's 3.6 ms — plain writes were never slower). The
+  guard now keeps per key what each item contributes — its withdrawals (an assertion's entry is its first takedown
+  and never moves: journal positions only grow, and a withdrawal matches only assertions written after it, so a
+  live assertion's matches are computed once, at its first classification), the re-tests that vouch for its
+  content, and the last pass's result for a key nothing touched. Only the items whose raw entries moved are
+  re-read; the `_kept` re-admissions (an assertion-level erratum whose writer may still stand behind the content)
+  and the matches a re-test stopped vouching for are resolved on every pass of a touched key. A write also re-ran
+  `_live`/`_cut` over the item's whole assertion history whenever cuts existed — exactly the guard-active pattern —
+  so those are kept on the item too and moved forward by the takedown events. Measured on the same bench: 0.5 →
+  0.6 ms per write, 0.07 → 0.17 s for the doubled corpus — under the plain pattern, whose live set no erratum ever
+  prunes. Exactness unchanged: random retraction, revival and rebuild histories read the same as the cold rebuild
+  (a new random-history test compares the fingerprint, the pending items and the full item records, and the bench
+  asserts `verify()`).
+
 ## 1.4.0 — released 2026-10-30
 
 ### Added

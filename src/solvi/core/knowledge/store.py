@@ -137,7 +137,7 @@ _KNOWLEDGE = "knowledge"                              # the record kind of journ
 
 class _Item:
     __slots__ = ("id", "kind", "body", "scope", "key", "value", "asserts", "promoted", "retracted", "retired",
-                 "reconfirm_after", "uses", "cuts", "acuts", "rechecked")
+                 "reconfirm_after", "uses", "cuts", "acuts", "rechecked", "lc", "lv", "cutv")
 
     def __init__(self, iid, kind, body, scope, key, value, reconfirm_after):
         self.id, self.kind, self.body, self.scope, self.key, self.value = iid, kind, body, scope, key, value
@@ -151,6 +151,9 @@ class _Item:
         self.retired = []           # [t]
         self.reconfirm_after = reconfirm_after
         self.uses = [0, 0]          # [used, used and wrong]
+        self.lc = None              # the raw-entry lengths `lv`/`cutv` were computed at (S266: a read of a key with
+        self.lv = []                # cuts used to rescan the item's whole history on every write)
+        self.cutv = -1
 
 
 def _acut(it, a):
@@ -160,32 +163,43 @@ def _acut(it, a):
 
 
 def _cut(it):
-    """The last journal position the item's whole support was taken back at (a retraction, or a writer's or an
-    assertion's retraction that left no other assertion standing), or -1."""
-    cut = max(it.retracted, default=-1)
-    if it.acuts:
-        for tc in sorted({tc for tc, _ in it.cuts} | {tc for tc, _ in it.acuts}):
-            if tc > cut and all((x := _acut(it, a)) is not None and x <= tc for a in it.asserts if cut < a["t"] < tc):
-                cut = tc
-        return cut
-    for tc, _ in sorted(it.cuts):
-        if tc > cut and not any(cut < a["t"] < tc and not any(a["t"] < t2 <= tc and w2 == a["by"] for t2, w2 in it.cuts)
-                                for a in it.asserts):
-            cut = tc
-    return cut
+    """The last journal position this item's whole support was taken back at (a retraction, or a writer's or an
+    assertion's retraction that left no other assertion standing), or -1. With `_live`, kept on the item and moved
+    forward by the takedown events (S266)."""
+    _refresh_live(it)
+    return it.cutv
 
 
 def _live(it):
     """The item's assertions still standing: after its last retraction, and not taken back with their writer's or on
-    their own."""
-    if it.acuts:
-        cut = _cut(it)
-        return [a for a in it.asserts if a["t"] > cut and _acut(it, a) is None]
-    if not it.cuts:
-        cut = max(it.retracted, default=-1)
-        return [a for a in it.asserts if a["t"] > cut]
-    cut = _cut(it)
-    return [a for a in it.asserts if a["t"] > cut and not any(tc > a["t"] and w == a["by"] for tc, w in it.cuts)]
+    their own. Kept on the item and moved forward by the takedown events (S266): an assertion stands while no
+    retraction, no cut of its writer and no cut of its own was written after it — the filters read only raw
+    positions, so the events apply in any order and once each."""
+    _refresh_live(it)
+    return it.lv
+
+
+def _refresh_live(it):
+    """Move the item's cached `_live` list and `_cut` position up to its raw entries: the takedown events are
+    replayed in journal order, each dropping the assertions it reaches, and an event before which nothing stands
+    any more is a position the whole support was taken back at (a retraction always is: it reaches every assertion
+    written before it)."""
+    counts = (len(it.asserts), len(it.retracted), len(it.cuts), len(it.acuts))
+    if it.lc == counts:
+        return
+    na, nr, nc, nx = (0, 0, 0, 0) if it.lc is None else it.lc
+    live = list(it.asserts) if it.lc is None else it.lv + list(it.asserts[na:])
+    cut = -1 if it.lc is None else it.cutv
+    events = ([("retract", t, None) for t in it.retracted[nr:]]
+              + [("cut", t, w) for t, w in it.cuts[nc:]]
+              + [("acut", t, n) for t, n in it.acuts[nx:]])
+    events.sort(key=lambda e: e[1])
+    for kind, t, x in events:
+        live = [a for a in live if (a["t"] >= t if kind == "retract" else
+                                    a["t"] >= t or a["by"] != x if kind == "cut" else a["t"] != x)]
+        if not any(a["t"] < t for a in live):
+            cut = t
+    it.lv, it.cutv, it.lc = live, cut, counts
 
 
 def plain_json(x):
@@ -433,6 +447,7 @@ class KnowledgeStore:
         self._resolved_clock = 0                     # the clock the state was last resolved at
         self._fp = None
         self._taints = {}                            # id → the journal position its support was last cut at (memo)
+        self._guards = {}                            # key → _GuardKey: the revival guard's per-key cache (S266)
         if self.storage is not None and _replay:
             with self.batch():
                 for s in self.storage.iter(_KNOWLEDGE):
@@ -1072,13 +1087,20 @@ class KnowledgeStore:
         if not self._touched:
             return
         comp = self.downstream(self._touched)           # upstream items keep their state: nothing here changes it
+        for i in self._touched:                         # the guard cache mirrors the taint memo: a touched item's
+            it = self.items.get(i)                      # raw entries may have moved, so its key re-reads it
+            if it is not None and it.key is not None:
+                g = self._guards.get(it.key)
+                if g is None:
+                    g = self._guards[it.key] = _GuardKey()
+                g.stale.add(i)
         self._touched = set()
         for i in comp:
             self._taints.pop(i, None)
         pending = self._pending_flags()
         flagged = {i for i in comp if any(self._flag_covers(t, i) for t in pending)}
         new = _resolve(self.items, comp, self.by_key, self.resolves, self.clock, flagged, taints=self._taints,
-                       state=self.state)
+                       state=self.state, guards=self._guards)
         for i in comp:
             if i in new:
                 self.state[i] = new[i]
@@ -1514,7 +1536,93 @@ def _taint(items, iid, memo, deferred=None):
     return val
 
 
-def _guard(items, ids):
+class _GuardItem:
+    """One item's cached contribution to its key's revival guard: its withdrawals, the re-tests that vouch for its
+    content and its live assertions' matches against the withdrawals — kept between resolutions (S266: every write
+    used to re-read every assertion of every item on the key)."""
+    __slots__ = ("vj", "counts", "pending", "fixed", "adj", "clears", "live_w")
+
+    def __init__(self, vj):
+        self.vj = vj            # the item's value as JSON text (what competes on the key)
+        self.counts = None      # the raw-entry lengths the contribution was computed at: equal → nothing moved
+        self.pending = []       # [assertion]: standing (no withdrawal yet); an event reaching it is its first
+        self.fixed = []         # [(tc, since, (since, until), by)]: withdrawals with a journal-frozen position
+        self.adj = []           # [[a, own, xw, tcr]]: an own assertion cut, in only while the writer no longer
+        #                           stands behind the content (the _kept read): tc = min(tcr, xw or own)
+        self.clears = []        # [(since, tp)]: re-tests vouching for (the value, since) at tp, over the live
+        #                           claims — they shrink when those die, growing only by new re-tests
+        self.live_w = {}        # {t: (w, deps)}: a live assertion's matches among the fixed withdrawals, frozen at
+        #                           its first classification, and the re-tests suppressing the rest (a re-test that
+        #                           stops vouching re-freezes it)
+
+
+class _GuardKey:
+    """A key's guard cache: what each of its items contributes and the last pass's result, reusable while no
+    item's raw entries have moved."""
+    __slots__ = ("items", "stale", "result")
+
+    def __init__(self):
+        self.items = {}         # {id: _GuardItem}
+        self.stale = set()      # the ids whose raw entries changed since the last pass
+        self.result = None      # the last (pending, held)
+
+
+def _guard_since(a):
+    return json.dumps(_interval(a["valid"])[0], sort_keys=True)
+
+
+def _guard_refresh(items, i, gi, shrunk):
+    """(Re)compute one item's cached contribution to its key's guard. The raw entries are replayed as journal
+    events — a retraction, a writer's cut, an assertion's cut each take back what is still standing before it, so
+    an assertion's withdrawal entry is its first takedown and never moves again (journal positions only grow, and a
+    withdrawal matches only assertions written after it). An assertion cut of the assertion's own is the exception:
+    whether it is a withdrawal reads the key's live versions (the `_kept` re-admission), so it is resolved per pass
+    instead of frozen. `shrunk` collects the re-tests that stopped vouching (the claims they vouched for died):
+    frozen matches they suppressed are taken again in the pass that collects them."""
+    it = items[i]
+    counts = (len(it.asserts), len(it.retracted), len(it.cuts), len(it.acuts), len(it.rechecked))
+    if gi is not None and gi.counts == counts:
+        return gi
+    if gi is None:
+        gi = _GuardItem(json.dumps(it.value, sort_keys=True))
+    na, nr, nc, nx, _ = (0, 0, 0, 0, 0) if gi.counts is None else gi.counts
+    events = ([("retract", t, None) for t in it.retracted[nr:]]
+              + [("cut", t, w) for t, w in it.cuts[nc:]]
+              + [("acut", t, n) for t, n in it.acuts[nx:]])
+    events.sort(key=lambda e: e[1])
+    gi.pending.extend(a for a in it.asserts[na:] if a.get("valid") is not None and not a["just"])
+    for kind, t, x in events:
+        keep = []
+        for a in gi.pending:
+            if kind == "acut":
+                if a["t"] == x:
+                    gi.adj.append([a, t, None, None])
+                    continue
+            elif a["t"] < t and (kind == "retract" or a["by"] == x):
+                gi.fixed.append((t, _guard_since(a), _interval(a["valid"]), str(a["by"])))
+                continue
+            keep.append(a)
+        gi.pending = keep
+        if kind == "retract":                          # the whole-support positions an _kept re-admission falls
+            for e in gi.adj:                           # back to: min(own cut, the writer's next cut, these)
+                if e[0]["t"] < t and (e[3] is None or t < e[3]):
+                    e[3] = t
+        elif kind == "cut":
+            for e in gi.adj:
+                if e[0]["t"] < t and e[0]["by"] == x and (e[2] is None or t < e[2]):
+                    e[2] = t
+    old = set(gi.clears)
+    gi.clears = sorted({(_guard_since(a), tp) for tp in it.rechecked for a in _live(it)
+                        if a["t"] < tp and a.get("valid") is not None and not a["just"]})
+    shrunk |= {(gi.vj, since, tp) for since, tp in old - set(gi.clears)}
+    if gi.live_w:                                      # assertions that died are never classified again
+        keep = {a["t"] for a in _live(it)}
+        gi.live_w = {t: w for t, w in gi.live_w.items() if t in keep}
+    gi.counts = counts
+    return gi
+
+
+def _guard(items, ids, cache=None):
     """The revival guard on one key: a later assertion with `valid` of content (the key's value) that was withdrawn
     from a writer on an overlapping validity — by any retraction (plain, only_from, an assertion, retract_source, a
     failed re-test, a rollback), on any item — is a copy. A copy is pending a re-test unless writers the content was
@@ -1523,55 +1631,90 @@ def _guard(items, ids):
     vouches for its assertions written before it and clears the withdrawals of its content before it, on that
     assertion's validity: a re-test passed on one version vouches for that version, not for the content on every
     validity (S265). Derived and inferred assertions are not copies (they follow their premises). → ({(id, assertion
-    position): why} pending, {(id, assertion position)} copies admitted while held)."""
-    wd = []
-    vj = {i: json.dumps(items[i].value, sort_keys=True) for i in ids}
+    position): why} pending, {(id, assertion position)} copies admitted while held).
+
+    `cache` (the store's, one per key) makes the pass incremental (S266): each item's withdrawals, re-test clears
+    and live assertions' matches against the withdrawals are kept between resolutions — a withdrawal matches only
+    assertions written after it, so an assertion's matches among the frozen withdrawals are computed once, at its
+    first classification — and only the items whose raw entries moved are re-read. The `_kept` re-admissions and
+    the matches a re-test stopped vouching for are resolved on every pass of a touched key; an untouched key
+    reuses its last result whole. Without a cache the pass is computed from scratch, as a rebuilt store does."""
+    if cache is not None and not cache.stale and cache.result is not None:
+        return cache.result
+    shrunk = set()                                    # the re-tests that stopped vouching, this pass
+    gis = []
     for i in ids:
-        it = items[i]
-        for a in it.asserts:
-            if a.get("valid") is None or a["just"]:
-                continue
-            tc = min([x for x in it.retracted if x > a["t"]], default=None)
-            x = _acut(it, a)
-            own = min([tx for tx, n in it.acuts if n == a["t"] and tx > a["t"]], default=None)
-            if x is not None and x == own and _kept(items, ids, vj, i, a, x):
-                x = min([tw for tw, w in it.cuts if tw > a["t"] and w == a["by"]], default=None)  # a duplicate taken
-            if x is not None and (tc is None or x < tc):                       # back: its writer still stands behind
-                tc = x                                                         # the content (not a withdrawal)
+        gi = None if cache is None else cache.items.get(i)
+        if cache is None or gi is None or i in cache.stale:
+            gi = _guard_refresh(items, i, gi, shrunk)
+            if cache is not None:
+                cache.items[i] = gi
+        gis.append(gi)
+    if cache is not None:
+        cache.stale = set()
+    vj = {i: gi.vj for i, gi in zip(ids, gis)}
+    fixed = [(gi.vj, tc, since, iv, by) for gi in gis for (tc, since, iv, by) in gi.fixed]
+    dyn = []                                          # the _kept-dependent withdrawals, resolved this pass
+    for i, gi in zip(ids, gis):
+        for a, own, xw, tcr in gi.adj:
+            x = own
+            if _kept(items, ids, vj, i, a, x):        # its writer still stands behind the content there: the cut
+                x = xw                                # took a duplicate back, not the content
+            tc = tcr
+            if x is not None and (tc is None or x < tc):
+                tc = x
             if tc is not None:
-                wd.append((tc, i, a))
-    if not wd:
+                dyn.append((gi.vj, tc, _guard_since(a), _interval(a["valid"]), str(a["by"])))
+    if not fixed and not dyn:
+        if cache is not None:
+            cache.result = ({}, {})
         return {}, {}
     clears = defaultdict(list)                        # (content, since) → the re-tests that vouched for it there
-    for i in ids:
-        for tp in items[i].rechecked:                 # a passed re-test vouches for the versions live at it, on their
-            for a in _live(items[i]):                 # own since — not for the content on every validity (S265)
-                if a["t"] < tp and a.get("valid") is not None and not a["just"]:
-                    clears[(vj[i], json.dumps(_interval(a["valid"])[0], sort_keys=True))].append(tp)
+    for gi in gis:
+        for since, tp in gi.clears:                   # a passed re-test vouches for the versions live at it, on
+            clears[(gi.vj, since)].append(tp)         # their own since — not for the content on every validity (S265)
     clean, copies = [], []
-    for i in ids:
+    for i, gi in zip(ids, gis):
         for a in _live(items[i]):
             if a.get("valid") is None or a["just"]:
                 continue
             iv = _interval(a["valid"])
-            w = [(tc, b) for tc, j, b in wd if vj[j] == vj[i] and tc < a["t"] and _overlap(_interval(b["valid"]), iv)
-                 and not any(tc < tp <= a["t"]
-                             for tp in clears[(vj[i], json.dumps(_interval(b["valid"])[0], sort_keys=True))])]
-            if not w or any(tp > a["t"] for tp in clears[(vj[i], json.dumps(iv[0], sort_keys=True))]):
+            sk = json.dumps(iv[0], sort_keys=True)
+            fw = gi.live_w.get(a["t"])
+            if fw is None or not shrunk.isdisjoint(fw[1]):
+                w, deps = [], set()
+                for vj_j, tc, since, ivb, by in fixed:
+                    if vj_j != gi.vj or not tc < a["t"] or not _overlap(ivb, iv):
+                        continue
+                    hit = [tp for tp in clears.get((vj_j, since), ()) if tc < tp <= a["t"]]
+                    if hit:                           # a re-test between the withdrawal and this assertion
+                        deps.update((vj_j, since, tp) for tp in hit)
+                    else:
+                        w.append((tc, by))
+                fw = (w, deps)
+                gi.live_w[a["t"]] = fw
+            w = list(fw[0])
+            for vj_j, tc, since, ivb, by in dyn:
+                if vj_j == gi.vj and tc < a["t"] and _overlap(ivb, iv) \
+                        and not any(tc < tp <= a["t"] for tp in clears.get((vj_j, since), ())):
+                    w.append((tc, by))
+            if not w or any(tp > a["t"] for tp in clears.get((gi.vj, sk), ())):
                 clean.append((i, a))
             else:
                 copies.append((i, a, w))
     pending, held = {}, {}
+    cinfo = [(i, a, vj[i], _interval(a["valid"]), _guard_since(a), str(a["by"])) for i, a in clean]
     for i, a, w in copies:
-        ws = sorted({str(b["by"]) for _, b in w})
-        base = [(vj[j], _interval(b["valid"]), (j, json.dumps(_interval(b["valid"])[0], sort_keys=True)))
-                for j, b in clean if not (vj[j] == vj[i] and str(b["by"]) in ws)]
+        ws = sorted({by for _, by in w})
+        base = [(vj_j, ivb, (j, sk_j)) for j, _, vj_j, ivb, sk_j, by in cinfo if not (vj_j == vj[i] and by in ws)]
         why = (f"re-published content withdrawn from {', '.join(ws)} (journal entry {max(tc for tc, _ in w)}) and "
                f"held by no other writer")
         if _held(_interval(a["valid"]), vj[i], base):
             held[(i, a["t"])] = (_interval(a["valid"]), vj[i], base, why)
         else:
             pending[(i, a["t"])] = why
+    if cache is not None:
+        cache.result = (pending, held)
     return pending, held
 
 
@@ -1644,10 +1787,11 @@ def _retest_why(items, iid, t, memo):
     return f"its support was cut at journal entry {t}"
 
 
-def _resolve(items, comp, by_key, resolves, clock, flagged, max_iter=200, taints=None, state=None):
+def _resolve(items, comp, by_key, resolves, clock, flagged, max_iter=200, taints=None, state=None, guards=None):
     """The state of the items in `comp` (closed under dependents and shared keys) from their raw entries → {id:
     record} for present items. Fixed point of: liveness of justifications ↔ per-key walk. Deterministic; premises
-    outside `comp` are read from `state` (their resolved records), which nothing in `comp` can change."""
+    outside `comp` are read from `state` (their resolved records), which nothing in `comp` can change. `guards`: the
+    store's per-key guard caches (S266) — an untouched key reuses its last guard result untouched."""
     order = sorted(comp, key=lambda i: (min((a["t"] for a in items[i].asserts), default=0), i))
     fixed = {p: state[p] for i in order for a in items[i].asserts for p in a["just"]
              if p not in comp and p in (state or {})}
@@ -1670,7 +1814,7 @@ def _resolve(items, comp, by_key, resolves, clock, flagged, max_iter=200, taints
         # recompute from scratch next time (rare: only with cycles)
     pclaims, hinfo = {}, {}                             # the revival guard: copies of withdrawn content
     for k in sorted({items[i].key for i in order if items[i].key is not None}):
-        p, h = _guard(items, sorted(by_key[k]))
+        p, h = _guard(items, sorted(by_key[k]), guards.get(k) if guards is not None else None)
         pclaims.update(p)
         hinfo.update(h)
     retest0 = set(retest)

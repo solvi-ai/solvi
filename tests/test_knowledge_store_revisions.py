@@ -241,3 +241,76 @@ def test_incremental_resolution_equals_the_rebuilt_store():
         if step % 50 == 0:
             assert ks.fingerprint() == ks.rebuild().fingerprint()
     assert ks.verify()
+
+
+# --- the cost of the revival guard (S266)
+def test_a_guard_active_write_does_not_rescan_the_whole_key():
+    """A corpus with withdrawals and copies (every 5th write: an only_from erratum, then the withdrawn content
+    re-told by the other writer — a copy) used to re-read the key's every assertion on every write: 27.7 ms/write
+    at 300 writes, 6.8× the plain versioned pattern and doubling with the corpus, because each withdrawal was
+    matched against each live assertion again and the walk re-ran per bad copy. The guard now keeps each item's
+    withdrawals, re-test clears and the live assertions' matches against them between resolutions, so a write
+    re-reads only what moved (0.6 ms/write, cheaper than the plain pattern, whose live set nothing prunes)."""
+    import time
+
+    def run(m, guard):
+        ks, t0, last = KnowledgeStore(), time.perf_counter(), None
+        for n in range(m):
+            v = 8 if n % 3 else 5
+            w = "a" if n % 2 else "b"
+            last = ks.add("fact", fact("K", v), source="outcome", by=w, valid=(n, None))
+            if guard and n % 5 == 4:
+                ks.retract(last, only_from=w, by="x", why="erratum")
+                ks.add("fact", fact("K", v), source="outcome", by="b" if w == "a" else "a", valid=(n, None))
+        assert ks.verify()                                # the incrementally kept state is the journal's, exactly
+        return time.perf_counter() - t0
+
+    t150 = run(150, guard=True)
+    t300, p300 = run(300, guard=True), run(300, guard=False)
+    assert t300 < 5.0                                     # was 8.3 s before the guard kept its per-key state
+    assert t300 < 2.5 * p300                              # the guard must not cost multiples of the plain pattern
+    assert t300 < 4.5 * t150                              # and its per-write cost stays ~flat as the corpus doubles
+
+
+def test_guard_histories_read_incrementally_match_the_rebuild():
+    """The guard's per-key cache must read exactly what a from-scratch resolution reads: random histories over
+    withdrawals (plain, only_from, one assertion), copies of withdrawn content re-told by another writer and
+    re-tests — resolved write by write, each write its own flush — are compared with their cold rebuild on the
+    fingerprint, the pending items and the full item records (the claims' pending/unchecked markers the guard
+    decides)."""
+    import random
+    rng = random.Random(11)
+    ks, ids = KnowledgeStore(), []
+    for step in range(600):
+        op = rng.random()
+        if op < 0.55 or not ids:
+            i = ks.add("fact", fact(f"e{rng.randrange(5)}", rng.randrange(3)), source=rng.choice(["person", "outcome"]),
+                       by=rng.choice("ab"), valid=(rng.randrange(4), None) if rng.random() < 0.85 else None)
+            if i:
+                ids.append(i)
+        elif op < 0.68:
+            try:
+                ks.retract(rng.choice(ids), only_from=rng.choice("ab"), by="x", why="erratum")
+            except ValueError:
+                pass                                       # that writer has no standing assertion left there
+        elif op < 0.78:
+            x = rng.choice(ids)
+            claims = [c["at"] for c in (ks.item(x)["valid"].get("claims") or ())]
+            if claims:
+                ks.retract(x, assertion=rng.choice(claims), by="x", why="erratum")
+        elif op < 0.86:
+            ks.retest(rng.choice(ids), ok=rng.random() < 0.6, by="qa")
+        elif op < 0.92:
+            ks.retract(rng.choice(ids), by="x", why="wrong")
+        elif op < 0.96:                                    # a copy: withdrawn content re-told by another writer
+            x = rng.choice(ids)
+            it = ks.items[x]
+            if it.key is not None and it.value is not None:
+                ks.add("fact", {"s": it.key[1], "r": it.key[2], "o": it.value}, source="person", by="c",
+                       valid=(rng.randrange(4), None))
+        if step % 60 == 59:
+            r = ks.rebuild()
+            assert ks.fingerprint() == r.fingerprint()
+            assert ks.pending() == r.pending()
+            assert {i: ks.item(i) for i in sorted(ks.items)} == {i: r.item(i) for i in sorted(r.items)}
+    assert ks.verify()
