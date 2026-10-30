@@ -329,8 +329,21 @@ def test_a_merge_of_all_inputs_and_an_unbound_node_are_refused(tmp_path):
     for n in ("a", "b", "c"):
         p.node(n, Echo(), kind="system", writes={n: "answer"}, end=n == "c")
     p.edge("a", "b").edge("a", "c").edge("b", "c").merge("c", "all")
-    with pytest.raises(NotImplementedError, match="merges 'all'"):
-        p.run({})
+    with pytest.raises(ProcessSpecError, match="node 'c' merges 'all' of several inputs.*run\\(\\) would raise"):
+        p.run({})                                     # S272: refused at spec(), where it is written
+    with pytest.raises(ProcessSpecError, match="merges 'all'"):
+        p.spec()
+    old = Process("m")                                # a spec of an earlier release that records merge "all" still
+    for n in ("a", "b", "c"):                         # loads (from_spec checks the format, not the runnability)
+        old.node(n, Echo(), kind="system", writes={n: "answer"}, end=n == "c")
+    old.edge("a", "b").edge("a", "c").edge("b", "c")
+    spec = old.spec()
+    spec["merge"] = {"c": "all"}                      # as 1.4 wrote it
+    spec.pop("hash")
+    loaded = Process.from_spec(spec)
+    assert loaded.merges == {"c": "all"}
+    with pytest.raises(ProcessSpecError, match="merges 'all'"):
+        loaded.run({})                                # and cannot be run: spec() refuses it there too
     spec = Process("u").node("a", Echo(), kind="system", end=True).spec()
     with pytest.raises(ProcessRunError, match="without a system"):
         Process.from_spec(spec).run({})

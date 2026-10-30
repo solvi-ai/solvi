@@ -368,11 +368,14 @@ A node is a `solvi.build` result, a System, a Guard or a question to a person; a
 data (`{"answer": "kind", "in": ["auto", "property"]}`, `{"status": "abstain"}`, `{"by": "s2"}`,
 `{"confidence_below": 0.5}` (a decision the dispatcher sent to a person satisfies it: a hand-over has no confidence
 to compare), `{"drift": true}`, `and` / `or` / `not`), never a Python function; a node with several
-inputs merges `all` or `any`; an edge that goes back is `loop=True` with `max_iter`, and a cycle without one is a
+inputs merges `all` or `any` ("all" of several inputs is refused at `p.spec()`: waiting for several branches is not
+implemented at this stage); an edge that goes back is `loop=True` with `max_iter`, and a cycle without one is a
 `ValueError`. `p.promise(mode="union" | "end_to_end" | "per_node", ...)` records the declared promise (risk, split,
 threshold family, delta); `union` and `per_node` are computed by `p.guarantee()` (below), `end_to_end` after
 `p.calibrate(...)` on end-labelled runs (below). `p.spec()` is JSON with a SHA-256 `hash` of its canonical form
-(stable to the order of keys; the order of edges counts), `Process.from_spec(spec, systems=...)` reads it back byte
+(stable to the order of keys; the order of edges counts; the nodes' `store` paths are not hashed — where a node keeps
+its records is not what it is, so the same process under another directory has the same hash),
+`Process.from_spec(spec, systems=...)` reads it back byte
 for byte and refuses a system whose fingerprint is not the recorded one (`strict=False` loads it and lists it in
 `mismatched`), `p.diff(other)` names every change by node and edge (down to the part whose fingerprint changed), and
 `p.render("mermaid")` draws it.
@@ -401,7 +404,9 @@ polls once: an answer is recorded and the run goes on; none, and `p.run` returns
 again — with no answer the run stays
 pending and nothing is written; with one, a record of kind `"human"` (ticket, value, reviewer, note, the channel's
 fingerprint; its parent is the pending segment) goes into the process store and the run goes on from the node that
-asked as a new `"process"` record with `continues` = the pending one. A process loaded afresh with
+asked as a new `"process"` record with `continues` = the pending one; the resumed run's `path` (what `p.explain(r)`
+walks and a `PathWatch` reference is set on) is the whole run — the earlier segments' steps first. A process loaded
+afresh with
 `Process.from_spec(spec, systems=, human=, storage=)` resumes it. The answer is the node's answer: its writes take
 the value, its outcome is status `"ok"` by `"human"`, and the facts it writes carry the label
 `{"by": "human", "decision": <human record>, "reviewer"}`. One ticket, one answer (a recorded answer stands);

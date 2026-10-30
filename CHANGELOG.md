@@ -31,6 +31,51 @@
 - Docs: the module docstring now says the same-since replacement is blind to which value an erratum corrected
   (S264), and the guard's docstring states the re-test's validity scoping.
 
+### Fixed (process store — the 2026-10-30 external handoff, S267/S268/S269/S271/S272/S274/S277)
+- **A question to a person no longer rescans the whole process store five times per run (S267, and S276 with
+  it).** Every cycle (run → pending → answer → resume) made five full `iter()` passes (`_ticket_seen` ×2,
+  `_tip`→`_segments`, `_human_record` ×2), and `JSONLStorage.iter` re-read and re-parsed every line of the file
+  on each of them — per-run time grew linearly with the store (~52 ms per run per MB; the reporters' 0.3 s/run
+  /MB on heavier records), quadratic over a stream. The JSON-lines store now keeps a parsed-lines cache — every
+  line parsed once, however often `iter()` asks, its covered prefix validated against the file's bytes (a
+  rewrite in place, even of the same length in the same clock tick, is read whole again), and `iter(after=seq)`
+  serves an incremental reader from a bisect on it — and the process keeps its own index over the store
+  (tickets, "human" records by ticket, segments by run), so each cycle reads only what was appended since.
+  Bench: 400 question cycles over a store grown to 1.3 MB — 111 → 5 ms per run at the end (22 → 2.8 at the
+  start); replay of every run 21.4 → 1.9 s.
+- **`replay()` rides the index, not one store scan per run (S277).** `p.replay(run)` iterated the whole process
+  store once per call (`replay_all`: once per run per run), and the human-step check scanned it once per
+  recorded answer — replaying every run was quadratic in the store (×4 store → ×8.4 total time). The segments,
+  and the human records by ticket, come from the index now: replaying every run of a grown store re-parses
+  nothing, and the answers are unchanged (replay and the tamper admission pass as before).
+- **A replay under a swapped node names the node (S269).** Loading a process with strict=False and another
+  system at a node carried the actual fingerprint, so the spec hash differed and every replayed run died at the
+  blanket `{"node": None, "step": "spec"}` — including runs that never touched the node. When the only
+  difference is a mismatched node's fingerprint, replay now walks by the recorded spec: the run through the
+  swapped node fails at that node's own "record"/"replay" step, the run that bypassed it replays, and a strict
+  load still refuses.
+- **A resumed run's `path` is its whole run (S268).** The resumed `ProcessResult.path` (and so `explain()` and
+  `monitor(reference=ProcessResults)`) covered the last segment only — the nodes before the question and their
+  edges were gone, and a watch set on such runs was set on a sample biased toward runs that never waited. The
+  path is now the run's: the earlier segments' steps first, as the live path watch's edge union always was
+  (`nodes` still holds the last segment's results). A pending-again resume carries it too.
+- **The spec hash no longer depends on where the nodes keep their records (S271).** Only `nodes.n.store` — an
+  absolute path — differed between the same process under two directories, so a process was not portable:
+  rewriting the path in a recorded spec broke its hash and a strict `from_spec` refused. The store paths are
+  now outside the hashed body: the same systems hash the same wherever they live, and a moved spec loads.
+  Behaviour change: hashes of specs whose nodes carry a store differ from the ones 1.4.0 recorded (re-hash or
+  re-spec recorded processes).
+- **`merge="all"` of several inputs is refused at spec() time (S272).** It validated and recorded, and `run()`
+  raised NotImplementedError — a spec that could be written but never run. `spec()` (and so every run, resume
+  and calibrate through it) refuses it now, naming the node and saying why; a recorded spec of an earlier
+  release still loads (`from_spec` checks the format, not the runnability) and cannot be run, as before. On a
+  node with one input "all" is the same as "any" and stays allowed.
+- **A threshold that holds no node back says so (S274).** `per_node_fixed`'s last grid step opens the last node
+  to its smallest calibration signal; on clean labels every step certifies and the chosen threshold holds
+  nothing back — the end_to_end promise then adds nothing over the nodes answering alone, and nothing said so.
+  `calibrate()` warns when the chosen threshold leaves every node open to its smallest calibration signal,
+  naming the nodes.
+
 ### Fixed (knowledge store — S266)
 - **A guard-active write no longer re-reads the key's whole history (S266).** Every `tell` outside a batch
   re-resolved the downstream component and ran the revival guard for each of its keys, and each pass re-scanned
