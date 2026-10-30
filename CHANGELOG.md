@@ -92,6 +92,22 @@
   across a new line: "£1,000\nmillion" was one numeral with the newline inside its surface. The whitespace
   before a scale word is same-line only; the one-line form still reads "£1,000 million" (a billion pounds).
 
+### Fixed (document — S309 label-aware grounding)
+- **A labelled number field grounds on its label's line, not on the digits' first occurrence (S309).** An LLM's
+  span answer is located at the first occurrence of its digits in the text (solvi.core.deciders.llm.locate, its
+  documented rule), so a read of TOTAL over "SUB TOTAL 28,000\nTOTAL 28,000" grounded to the SUB TOTAL line —
+  the value right, the fact's offsets the wrong line (their CORD number, 14/34, is consistent with the
+  mechanism). A number field whose name is a label the text carries ("total", "sub_total" — every word of two
+  letters or more, normalized as the readers normalize text; a one-letter name is no label) now grounds on the
+  one occurrence of the quoted digits on a line that starts with the label ("TOTAL 28,000", "Total: 28,000",
+  "Net sales 1,234" for "net_sales"; "SUB TOTAL 28,000" does not start with "total" — but it is what
+  "sub_total" starts with): the fact's quote and its offsets, the evidence and the recorded quote note name the
+  label's line. When the label cannot say which occurrence — no label, no line that starts with it, several of
+  them, or the value written under its label on the next line (the rule reads the label's own line only, the
+  documented residual gap) — the first occurrence stands as before: grounding never guesses. `locate`'s
+  first-occurrence rule itself is unchanged (plain strings and every other user keep it); the wrapper lives in
+  the recipe (solvi.solutions.document._LabelGrounded), and only labelled number fields are wrapped.
+
 ### Fixed (process and the stream certificate — the 2026-10-30 external handoff, S270/S273/S275/S279/S280/S281/S282)
 - **A stream-certified node's promise is read at its risk level (S282).** `StreamPromise.record()` keeps its level
   under "risk" (kind "joint"), while `Process.guarantee()` read "error" for every non-CRC method: the per_node

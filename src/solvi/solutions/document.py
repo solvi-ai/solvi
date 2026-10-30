@@ -27,7 +27,12 @@ The scheme it sets up (all of it existing low-level blocks, wired):
   the descriptions in the question's text (a model that echoes "option: description" back is spared the chance).
 - grounding: a `Span[...]` field must be found in the text (normalized view; a number as a number of its own, not
   inside a longer one — solvi.core.catalog.locate, cuts_number); not found, the field escalates and the answer
-  abstains with the reason. The kept value is the text's own substring.
+  abstains with the reason. The kept value is the text's own substring. A number field grounds on its label when
+  the text carries it: the field's name ("total", "sub_total" — every word of two letters or more) starting the
+  line of exactly one occurrence of the quoted digits ("TOTAL 28,000" under a "SUB TOTAL 28,000" line: the TOTAL
+  read grounds to the TOTAL line, not to the digits' first occurrence); without a label, with no such line or
+  several, or with the value written under its label on the next line, the first occurrence stands (grounding
+  never guesses — the label rule reads the label's own line only).
 - numbers: a `Span[float]` (int, Decimal) is read from what was quoted, as the document writes it, into a fact
   `<field>_value` (the rule's `why` shows it next to the quote). One scale rule — a scale is never multiplied, the
   number is kept in the document's own unit ("1,250 million", "$1.2bn", "1.2M", "3k" → 1250, 1.2, 1.2, 3); the
@@ -393,6 +398,129 @@ def _ground(raw, doc):
 def _left_out(raw, doc):
     """_ground's reason alone (None: the quote reads as the text writes it)."""
     return _ground(raw, doc)[0]
+
+
+_LABEL_EDGE = " \t.,:;()'\"’‘“”-"
+
+
+def _label_word(w):
+    """A word as a label word: NFKC, the dash / full-width table, case folded, its edge punctuation off ("Total:"
+    → "total") — the way the readers normalize text (llm.locate's literal-then-case ladder is the same family)."""
+    import unicodedata
+    return unicodedata.normalize("NFKC", w).translate(_DASHES).casefold().strip(_LABEL_EDGE)
+
+
+def _label_words(name):
+    """A number field's name → the label its document writes next to its value ("total", "sub_total" → ("total",),
+    ("sub", "total")), every word two letters or more; None when the name is no label (a one-letter word: "a",
+    "x_1" — one letter before a number is noise, not a label)."""
+    words = [w for w in re.split(r"[\s_]+", name.strip()) if w]
+    if not words or any(len(w) < 2 for w in words):
+        return None
+    return tuple(_label_word(w) for w in words)
+
+
+def _label_end(doc, ls, le, words):
+    """Where the label's words end on the line doc[ls:le), or -1: the line's first words (skipping indentation),
+    read as label words, must be the label's — "TOTAL 28,000", "Total: 28,000", "Net sales 1,234" carry the labels
+    ("total",) and ("net", "sales"); "SUB TOTAL 28,000" does not carry ("total",): its first word is another
+    label's ("sub_total" carries it)."""
+    i = ls
+    for w in words:
+        while i < le and doc[i] in " \t":
+            i += 1
+        j = i
+        while j < le and not doc[j].isspace():
+            j += 1
+        if j == i or _label_word(doc[i:j]) != w:
+            return -1
+        i = j
+    return i
+
+
+def _label_ground(value, doc, words):
+    """The one place `value` stands in `doc` on a line that starts with the label (`words`) → its offset, or None:
+    no such place, or several (which one the field means, the text does not say). Literal places only, each a
+    number of its own (cuts_number) — the quote's value is the text's own substring, so the place it already has
+    is always among them."""
+    from ..core.catalog import cuts_number
+    hit = None
+    k = doc.find(value)
+    while k >= 0:
+        e = k + len(value)
+        ls = doc.rfind("\n", 0, k) + 1
+        le = doc.find("\n", k)
+        if not cuts_number(doc, k, e) and 0 <= _label_end(doc, ls, len(doc) if le < 0 else le, words) <= k:
+            if hit is not None:
+                return None
+            hit = k
+        k = doc.find(value, k + 1)
+    return hit
+
+
+class _LabelGrounded:
+    """A number field's decision part that grounds its span on the field's label (S309). An LLM's span answer is
+    located at the first occurrence of its digits in the text (solvi.core.deciders.llm.locate) — the wrong line
+    when the same digits stand under several labels: "SUB TOTAL 28,000" above "TOTAL 28,000", the model's TOTAL
+    read grounded to the SUB TOTAL line (the value right, the provenance the wrong line). After the read, the
+    quote (and its evidence, and the recorded quote note extra["llm"]["quote"]) is moved to the one occurrence of
+    the quoted digits on a line that starts with the field's label — the field's name, its words of two letters or
+    more (_label_words: "total" matches "TOTAL 28,000" and "Total: 28,000", not "SUB TOTAL 28,000"; "sub_total"
+    matches the SUB TOTAL line). No label, no such line, several of them, or the value written under its label on
+    the next line (the rule reads the label's own line only): the first occurrence stands — grounding never
+    guesses. Everything else is the decision it wraps (model, thresholds, options, shared passes), which this
+    object stands in for attribute by attribute."""
+
+    def __init__(self, part, words):
+        self._part, self._words = part, words
+
+    def __call__(self, *args, **kw):
+        vals = dict(zip(self.__signature__.parameters, args))
+        vals.update(kw)
+        return self._grounded(self._part(*args, **kw), vals.get(self._part.facts[0]))
+
+    def in_pass(self, siblings, args, names=None):
+        """A shared pass (defensive: a span question's pointer takes a pass of its own, DecisionPart._batch_group,
+        so this is not reached today): the pass scores the decisions it wraps; the wrapper adds its grounding."""
+        inner = [s._part if isinstance(s, _LabelGrounded) else s for s in siblings]
+        f = self._part.facts[0]
+        return self._grounded(self._part.in_pass(inner, args, names),
+                              args.get(f) if hasattr(args, "get") else None)
+
+    def _grounded(self, d, text):
+        """The decision with its span quote and evidence grounded on the label's line (_label_ground) when the
+        label says which occurrence; the recorded quote note moves with them, so the record names one line."""
+        import dataclasses
+
+        from ..core.catalog import Decision, Quote
+        if not isinstance(d, Decision) or not isinstance(text, str):
+            return d
+        moved = {}
+
+        def fix(q):
+            if not (isinstance(q, Quote) and isinstance(q.value, str) and q.value and q.source == self._part.facts[0]
+                    and 0 <= q.start <= q.end <= len(text)):
+                return q
+            k = _label_ground(q.value, text, self._words)
+            if k is None or k == q.start:
+                return q
+            moved[(q.start, q.end)] = (k, k + len(q.value))
+            return dataclasses.replace(q, start=k, end=k + len(q.value))
+
+        if isinstance(d.value, Quote):
+            d.value = fix(d.value)
+        d.evidence = [fix(e) for e in d.evidence or []]
+        note = (d.extra or {}).get("llm")
+        q = note.get("quote") if isinstance(note, dict) else None
+        if isinstance(q, list) and len(q) == 3 and (q[1], q[2]) in moved:
+            a, b = moved[(q[1], q[2])]
+            note["quote"] = [text[a:b], a, b]
+        return d
+
+    def __getattr__(self, k):
+        if "_part" not in self.__dict__:
+            raise AttributeError(k)
+        return getattr(self.__dict__["_part"], k)
 
 
 def _plain(v, where="state"):
@@ -763,7 +891,9 @@ def document(schema, model, *, task=None, text="doc", compute=None, answer=None,
         args = {k: extra[k] for k in ("min_confidence", "min_act", "use_act", "max_error", "other", "score_value",
                                       "kind", "evidence", "coverage", "unit") if k in extra}
         q = f"{task.rstrip()} {desc}" if task else desc
-        cat.fn(model.decision(name, q, text, options=opts, type=t, state_keys=reads_with, **args))
+        part = model.decision(name, q, text, options=opts, type=t, state_keys=reads_with, **args)
+        words = _label_words(name) if _is_number(fi) and getattr(part, "facts", None) else None
+        cat.fn(_LabelGrounded(part, words) if words else part)   # S309: a labelled number grounds on its label's line
         readers[name] = _value_reader(fi)
 
     from decimal import Decimal as _Dec
