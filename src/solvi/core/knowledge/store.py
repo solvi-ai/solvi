@@ -1807,7 +1807,7 @@ def _resolve(items, comp, by_key, resolves, clock, flagged, max_iter=200, taints
         t = taints.get(i)
         if t is not None and not any(p > t for p in items[i].promoted):
             retest.add(i)
-            why[i] = (f"its only support runs through a premise cycle: nothing outside it vouches for the content"
+            why[i] = ("its only support runs through a premise cycle: nothing outside it vouches for the content"
                       if i in deferred else _retest_why(items, i, t, taints))
     if deferred and taints is not None:
         taints.clear()                                   # a cycle's settlement shifts other items' taints too:

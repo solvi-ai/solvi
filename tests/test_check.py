@@ -123,7 +123,7 @@ def test_a_named_abstention_in_then_is_valid():
         return customer != "x"
 
     @cat.rule("refund")
-    def refund(days: int) -> bool:
+    def always_refund(days: int) -> bool:
         return True
     assert lint(System(cat, [Question("refund", "Refund?")])).codes() == ["then_unknown"]   # the question still must exist
 

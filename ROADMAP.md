@@ -6,6 +6,11 @@ in [Discussions → Ideas](https://github.com/solvi-ai/solvi/discussions/categor
 
 Status: `planned` · `in progress` · `research` (may not ship) · `done (version)`.
 
+Current development: **1.4.1.dev0** (2026-11-02), stabilizing the 1.4.0 release of 2026-10-30.
+The historical tables below include release-time snapshots; “on dev” in a 1.4.0 row does not mean
+that the feature is absent from the released 1.4.0. The current changelog is authoritative for fixes.
+The next proposed application and its evaluation gates are in [the development plan](docs/development-1.4.1.md).
+
 ## Toward 1.0: what solvi is for, and everything that exists landed
 
 First the goal and an honest account of what is there; the module cleanup and the split into two levels come after,
@@ -173,7 +178,7 @@ atoms: 0.188). For noisy behavioural logs a calibrated scorer is the tool; the f
 Today a promise is calibrated once on a labelled set and then watched for drift. These items earn and keep the promise on
 the live stream instead, and let a model learn from the labels the stream produces without losing the promise. The
 streaming design adapts ideas from an Apache-2.0 project. The first six items are on `dev` as experimental
-(`solvi.experimental.stream`, 1.4.0, unreleased) and were measured once; their limits are in
+(`solvi.experimental.stream`, released in 1.4.0) and were measured once; their limits are in
 [docs/experimental.md](docs/experimental.md#stream), and no gain is claimed beyond that measurement. The identity
 canary, the label check before calibration, a person's error rate and the known-answer tests for the guarantee
 arithmetic are on `dev` too; their rows, with what was measured, are in the 1.2 table above.
