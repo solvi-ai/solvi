@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 import argparse
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from decimal import Decimal
 import hashlib
 import fcntl
@@ -25,9 +25,10 @@ from solvi.models import llm  # noqa: E402
 
 REV = "f0699d8c94468fb2fefaa22f669684b22e68c3d3"
 SOURCE = f"https://huggingface.co/datasets/jngb-labs/InvoiceBenchmark/resolve/{REV}"
-MODEL = "google/gemini-2.5-flash-lite"
-PROVIDER = {"only": ["Google AI Studio"], "allow_fallbacks": False, "max_price": {"prompt": 0.2, "completion": 0.8}}
+MODEL = "qwen/qwen3-235b-a22b-2507"
+PROVIDER = {"only": ["DeepInfra"], "allow_fallbacks": False, "max_price": {"prompt": 0.2, "completion": 0.8}}
 ARMS = ("direct", "plain", "solvi")
+WORKERS = 4
 EXCLUDED_VENDOR = "Praxis Consulting Group AG"  # development-seen; frozen before pilot
 
 
@@ -371,6 +372,7 @@ def protocol_manifest(out):
         "provider": PROVIDER,
         "max_tokens": 512,
         "temperature": 0,
+        "workers": WORKERS,
         "excluded_vendor": EXCLUDED_VENDOR,
     }
     path = out / "protocol.json"
@@ -408,7 +410,8 @@ def run(out, smoke=False, limit=None, transport=None, key=None):
         raise ValueError("--limit is allowed only with --smoke")
     protocol_manifest(out)
     # One ledger for both modes, including resumed invocations.
-    transport = transport or Transport(out / "requests.sqlite3")
+    if transport is None:
+        Transport(out / "requests.sqlite3").db.close()
     key = key or api_key()
     all_cases = smoke_cases()[:limit] if smoke else cases(out)
     mode = "smoke" if smoke else "corpus"
@@ -426,24 +429,47 @@ def run(out, smoke=False, limit=None, transport=None, key=None):
 
     thread = threading.Thread(target=heartbeat, daemon=True)
     thread.start()
-    try:
-        for n, case in enumerate(all_cases, 1):
+
+    def run_case(case, supplied=None):
+        own = supplied is None
+        client = Transport(out / "requests.sqlite3") if own else supplied
+        try:
             path = state_dir / (case["id"] + ".json")
             row = json.loads(path.read_text()) if path.exists() else row_metadata(case) | {"arms": {}}
             for name in ARMS:
                 if name not in row["arms"]:
-                    row["arms"][name] = run_arm(name, case, transport, key, out / mode)
+                    row["arms"][name] = run_arm(name, case, client, key, out / mode)
                     atomic(path, jsonbytes(row))
-            completed = []
-            for c in all_cases:
-                p = state_dir / (c["id"] + ".json")
-                if p.exists():
-                    saved = json.loads(p.read_text())
-                    if set(saved["arms"]) == set(ARMS):
-                        completed.append(jsonbytes(saved))
-            atomic(out / mode / "predictions.jsonl", b"".join(completed))
-            print(f"{mode}: {n}/{len(all_cases)} {case['id']}", flush=True)
+            return case
+        finally:
+            if own:
+                client.db.close()
+
+    def save_results():
+        completed = []
+        for case in all_cases:
+            path = state_dir / (case["id"] + ".json")
+            if path.exists():
+                saved = json.loads(path.read_text())
+                if set(saved["arms"]) == set(ARMS):
+                    completed.append(jsonbytes(saved))
+        atomic(out / mode / "predictions.jsonl", b"".join(completed))
+
+    try:
+        if transport is not None:
+            for n, case in enumerate(all_cases, 1):
+                run_case(case, transport)
+                save_results()
+                print(f"{mode}: {n}/{len(all_cases)} {case['id']}", flush=True)
+        else:
+            with ThreadPoolExecutor(max_workers=WORKERS) as pool:
+                futures = [pool.submit(run_case, case) for case in all_cases]
+                for n, future in enumerate(as_completed(futures), 1):
+                    case = future.result()
+                    save_results()
+                    print(f"{mode}: {n}/{len(all_cases)} {case['id']}", flush=True)
     finally:
+        save_results()
         stop.set()
         thread.join()
 

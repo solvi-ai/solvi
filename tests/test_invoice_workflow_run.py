@@ -86,6 +86,21 @@ def test_resume_smoke_and_evaluator_contract(tmp_path, monkeypatch):
         runner.run(tmp_path, limit=1, transport=tr, key="x")
 
 
+def test_parallel_documents_resume_without_repeating_saved_arms(tmp_path, monkeypatch):
+    calls = []
+
+    def fake(name, case, transport, key, out):
+        calls.append((case["id"], name))
+        return {"answer": case["gold"], "confidence": 1., "cost_usd": 0., "latency_s": 0.}
+
+    monkeypatch.setattr(runner, "run_arm", fake)
+    runner.run(tmp_path, smoke=True, key="offline")
+    runner.run(tmp_path, smoke=True, key="offline")
+    assert len(calls) == len(set(calls)) == 6
+    rows = [json.loads(line) for line in (tmp_path / "smoke/predictions.jsonl").read_text().splitlines()]
+    assert [r["id"] for r in rows] == [c["id"] for c in runner.smoke_cases()]
+
+
 def test_solvi_transport_smoke(tmp_path):
     case = runner.smoke_cases()[0]
 
