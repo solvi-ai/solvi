@@ -46,6 +46,7 @@ nav:
   - Using solvi:
       - using.md
       - Documents: recipes/document.md
+      - Invoice workflow: recipes/invoice-workflow.md
       - Agents and knowledge: agent.md
       - Best practices: best_practices.md
       - Forgetting a source: forgetting_a_source.md
@@ -182,6 +183,9 @@ nav:
   - Changelog: changelog.md
   - Roadmap: roadmap.md
   - Development plan: development-1.4.1.md
+  - Invoice pilot protocol: invoice-pilot.md
+  - Invoice workflow status: invoice-result.md
+  - Experimental next steps: experimental-next.md
 
 markdown_extensions:
   - toc:
