@@ -166,7 +166,7 @@ class RecordedFailure(Exception):
 def api_key():
     if os.environ.get("OPENROUTER_API_KEY"):
         return os.environ["OPENROUTER_API_KEY"]
-    path = Path("/home/exactor/Projects/Prototypes/new_kelly/.env")
+    path = Path(os.environ.get("OPENROUTER_ENV_FILE", ".env"))
     if path.exists():
         for line in path.read_text().splitlines():
             key, sep, value = line.partition("=")
