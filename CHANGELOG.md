@@ -8,8 +8,9 @@
   version checks and an operator snapshot. Uses the experimental process API; the offline demo makes no
   statistical accuracy claim and performs no payment.
 - An invoice pilot runner and offline scorer: immutable source/data manifests, cached requests, a persistent
-  spending ledger, calibration-only thresholds and descriptive slices. The attempted model smoke was blocked
-  by HTTP 403; no corpus evaluation or claim of measured benefit is included (see `docs/invoice-result.md`).
+  spending ledger, calibration-only thresholds and descriptive slices. After the initial Google route's HTTP 403,
+  a Qwen pilot completed on 190 synthetic invoices; the primary acceptance criteria were not met and no measured
+  benefit over the plain extraction pipeline is claimed (see `docs/invoice-result.md`).
 
 ### Fixed (knowledge store — the 2026-10-30 external handoff, S261/S262/S263/S265)
 - **An erratum of content the writer no longer stands behind now withdraws it (S262).** `_kept` read the writer's
