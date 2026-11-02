@@ -276,24 +276,37 @@ def find_whole(text, t):
             t[i - 1].isalnum() or (text[0].isdigit() and t[i - 1] in ".," and i > 1 and t[i - 2].isdigit()))
         right = not text[-1].isalnum() or j == len(t) or not (
             t[j].isalnum() or (text[-1].isdigit() and t[j] in ".," and j + 1 < len(t) and t[j + 1].isdigit()))
-        if left and right:
+        if left and right and not cuts_number(t, i, j):
             return i
         i = t.find(text, i + 1)
     return -1
 
 
+def _number_separator(t, k):
+    """A numeric connector: even an unsupported/malformed full token must not supply a truncated number."""
+    if not 0 < k < len(t) - 1:
+        return False
+    if t[k] in ".,'’_":
+        return t[k - 1].isdigit() and t[k + 1].isdigit()
+    if t[k] in "eE" and t[k - 1].isdigit():
+        after = k + 2 if t[k + 1] in "+-" else k + 1
+        return after < len(t) and t[after].isdigit()
+    return t[k] in "+-" and k >= 2 and t[k - 1] in "eE" and t[k - 2].isdigit() and t[k + 1].isdigit()
+
+
 def cuts_number(t, i, j):
     """Does t[i:j] begin or end inside a longer number written in t? A quote [26:27] of "30" is the "3" of "30", one of
     "3.5" or "1,300" is part of that number, and so is "7." of "7.5" (a separator at its edge, between two digits).
+    Apostrophe groups and unsupported numeric tokens ("1_000", "1e-3") cannot supply a truncated number either.
     (Words are not held to this: a quote with offsets may end inside a word.)"""
     if not 0 <= i < j <= len(t):
         return False
-    left = t[i].isdigit() and i > 0 and (t[i - 1].isdigit() or (t[i - 1] in ".," and i > 1 and t[i - 2].isdigit()))
+    left = t[i].isdigit() and i > 0 and (t[i - 1].isdigit() or _number_separator(t, i - 1))
     right = t[j - 1].isdigit() and j < len(t) and (
-        t[j].isdigit() or (t[j] in ".," and j + 1 < len(t) and t[j + 1].isdigit()))
+        t[j].isdigit() or _number_separator(t, j))
     # a separator at the edge between two digits: "7." of "7.5", ".5" of "7.5", "1," of "1,300"
-    left = left or (t[i] in ".," and 0 < i and i + 1 < len(t) and t[i - 1].isdigit() and t[i + 1].isdigit())
-    right = right or (t[j - 1] in ".," and j >= 2 and j < len(t) and t[j - 2].isdigit() and t[j].isdigit())
+    left = left or _number_separator(t, i)
+    right = right or _number_separator(t, j - 1)
     return left or right
 
 

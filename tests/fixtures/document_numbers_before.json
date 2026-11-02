@@ -1,0 +1,54 @@
+{
+ "format": "solvi guarantee v1",
+ "question": "answer",
+ "answer_type": {
+  "kind": "estimate",
+  "options": [],
+  "descriptions": {},
+  "coverage": 0.8
+ },
+ "catalog": "a74b985d21275c5f",
+ "models": {
+  "a": "a53af986468b0342",
+  "b": "e14d8f31dfefb1c8"
+ },
+ "guard": "a96d84371a046d8e",
+ "signal": "confidence",
+ "signal_function": false,
+ "answer": null,
+ "groups": null,
+ "groups_function": false,
+ "promise": {
+  "method": "crc",
+  "level": 0.1,
+  "delta": 0.1,
+  "threshold": 0.9,
+  "nodes": null,
+  "by": null,
+  "report": {
+   "threshold": 0.9,
+   "n": 100,
+   "answered": 1.0,
+   "error": 0.0,
+   "risk": 0.0,
+   "support": 100,
+   "method": "crc",
+   "separation": {
+    "n_right": 100,
+    "n_wrong": 0,
+    "auroc": null,
+    "p": null,
+    "tested": false
+   },
+   "base_error": 0.0,
+   "warnings": [],
+   "promise": "P(answered alone and wrong) ≤ 0.1 — a share of all inputs — for inputs like the calibration examples",
+   "must_escalate_at_least": 0.0
+  },
+  "why": null,
+  "min_group": 100,
+  "signal": "confidence",
+  "procedure": "bonferroni"
+ },
+ "solvi": "1.4.1.dev0"
+}

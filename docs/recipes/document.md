@@ -49,6 +49,22 @@ One model call per field; a field's value must stand in the text at its offsets 
 doc[start:end]`), else the read is rejected. A field whose quote left out the currency or scale takes it from
 the text into its unit; a sign the text does not write there abstains.
 
+Numeric spans also read complete apostrophe thousands groups (`1'234.50 CHF`, `1’234’567.89`), including
+accounting negatives. Every group after the first has exactly three digits. Mixed or incomplete groups refuse;
+a decimal mark conflicting with the document's `decimal=` declaration refuses too. Decimal values and their
+sign are kept exactly; a fractional amount cannot become an integer through rounding.
+
+If the model includes the field's own label in the span, it may be read with the number: field `total` reads
+`TOTAL: 1'234.50 EUR`, and `sub_total` reads `SUB TOTAL: 1'234.50 EUR`. The label must match exactly on one line,
+followed by `:` or `=`; its words contain no digits, recognized currency/scale/percent or CR/DR marker.
+Arbitrary prose, another field's label, multiple numbers and an ambiguous `2.500` are still refused.
+The complete original quote and its offsets remain in the record; no source text is rewritten.
+
+A quote cannot take a prefix or suffix from a larger apostrophe-joined number, including a malformed group.
+For example, `345.67` is not accepted as the amount of `-12'345.67`. Cuts inside underscore/exponent tokens
+are refused as well; this does not add support for reading those complete formats. The numeric recipe's
+fingerprint changes with these rules: old calibrations must be recalibrated rather than silently reused.
+
 ## compute, checks, calibrate
 
 `compute=(facts, state)` is the question's rule — plain code over the read fields (the answer is a number by

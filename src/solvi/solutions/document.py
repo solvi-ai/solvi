@@ -125,7 +125,7 @@ DECIMAL_MODES = {"dot": ",", "comma": "."}   # the separator the document groups
 # the minus of Japanese and Chinese financial tables, stay themselves (never a separator) and read as a minus
 _DASHES = str.maketrans({**{c: "-" for c in "−–—―‑‐‒﹣－⁻˗"},     # ... and full-width digits and marks
                          **{chr(0xFF10 + i): str(i) for i in range(10)}, "（": "(", "）": ")", "，": ",", "．": ".",
-                         "［": "[", "］": "]", "＄": "$", "％": "%"})
+                         "［": "[", "］": "]", "＄": "$", "％": "%", "’": "'"})
 _ISO = ("USD EUR GBP JPY CNY RMB RUB CHF CAD AUD NZD HKD SGD TWD INR BRL MXN ZAR SEK NOK DKK PLN CZK HUF KRW TRY ILS "
         "AED SAR").split()
 _CUR_SYMBOL = {"U.S.$": "USD", "US$": "USD", "A$": "AUD", "AU$": "AUD", "C$": "CAD", "CA$": "CAD", "HK$": "HKD",
@@ -141,7 +141,8 @@ _SCALES = {"thousand": "thousand", "thousands": "thousand", "k": "thousand", "mi
            "bn": "billion", "b": "billion", "trillion": "trillion", "trillions": "trillion", "tn": "trillion"}
 _SCALE_WORD = re.compile(r"\s*\b(thousands?|millions?|billions?|trillions?|mn|bn|tn)\b\.?", re.IGNORECASE)
 _SCALE_SUFFIX = re.compile(r"(?<=\d)\s?(bn|mn|tn|k|m|b)\b", re.IGNORECASE)
-_CORE = re.compile(r"[0-9][0-9,. ]*|\.[0-9]+")
+_SWISS = r"[0-9]{1,3}(?:'[0-9]{3})+(?:[.,][0-9]+)?"
+_CORE = re.compile(_SWISS + r"|[0-9][0-9,. ]*|\.[0-9]+")
 _SP = "[    ]"                      # one space of a line (not a tab, not a new line)
 _HS = r"[^\S\n]"                                   # any horizontal white space (tab, U+2007, U+3000 ...)
 
@@ -164,22 +165,37 @@ def _same_currency(x, y):
     return x == y or (x == "$" and y in _DOLLARS) or (y == "$" and x in _DOLLARS)
 
 
-def _read_quote(vtype, text, decimal=None):
+def _read_quote(vtype, text, decimal=None, label=None):
     """A quoted number → (the value as vtype, its Unit). See the module docs, "numbers": the scale never multiplied,
     the currency dropped (an ISO code or a sign), a percentage as its number, a sign in any dash before or after the
     currency or trailing, parentheses as a negative around a number with a separator, decimals, a currency or a
     percent; the digits and separators as solvi.core.types.span_value reads them — digits grouped by spaces read when
     the quote writes their currency ("€1 234" → 1234; bare "1 234" abstains: it may be two numbers), and a single
     ".ddd" group ("30.000") reads only when decimal declares the decimal mark ("," for a document that groups
-    thousands with a dot — what document(..., decimal="dot") passes; a declaration, never a guess). ValueError when
+    thousands with a dot — what document(..., decimal="dot") passes; a declaration, never a guess). Apostrophe
+    thousands groups must be complete triples; their decimal mark must agree with a declaration if given.
+    label: the field's name, whose exact same-line prefix and delimiter may be read with the number; no numeric
+    or recognized unit/marker words in that prefix. The original quote remains the provenance. ValueError when
     it is not one number."""
     import unicodedata
+    from decimal import Decimal
 
     from ..core.types import span_value
     if not isinstance(text, str):
         raise ValueError(f"not a quoted number: {text!r}")
     t = unicodedata.normalize("NFKC", text.replace("&minus;", "-")).translate(_DASHES).replace("△", "-") \
         .replace("▲", "-").strip()
+    quoted = t
+    words = _label_words(label) if isinstance(label, str) else None
+    # Only the declared field's literal label, with a delimiter and no numeric/unit-bearing words.
+    # The original quote is kept for provenance and for _ground; arbitrary prose is never discarded.
+    if words and all(w.isalpha() and w not in _SCALES and w not in ("percent", "cr", "dr")
+                     and not re.fullmatch(_CUR_RX, w, re.IGNORECASE) for w in words) \
+            and not _R_PCT.search(" ".join(words)) \
+            and not any(c.isspace() and c != " " for c in t):
+        prefix = re.match(r"[ _]+".join(re.escape(w) for w in words) + r" *[:=] *", t, re.IGNORECASE)
+        if prefix:
+            t = t[prefix.end():]
     if re.search(r"\b(?:CR|Cr|cr|DR|Dr|dr)\b|\[|\]", t):
         raise ValueError("a CR / DR marker or brackets: the sign depends on the account, the quote does not say")
     if re.search(r"[0-9][eE][+-]?[0-9]|_", t):
@@ -205,7 +221,7 @@ def _read_quote(vtype, text, decimal=None):
     neg = False
     if t.startswith("(") and t.endswith(")"):
         neg, t = True, t[1:-1].strip()
-        if not curs and not pct and not re.search(r"[.,]", t):
+        if not curs and not pct and not re.search(r"[.,']", t):
             raise ValueError("a bare number in parentheses (a year, a footnote?) is not read as a negative")
     elif t.startswith("-"):
         neg, t = True, t[1:].strip()
@@ -215,20 +231,36 @@ def _read_quote(vtype, text, decimal=None):
         t = t[1:].strip()
     if not _CORE.fullmatch(t or "-"):
         raise ValueError("not one number")
-    span_t = t
-    if cur_surf and re.search(r"\d \d", t):
-        span_t = f"{cur_surf} {t}"            # space-grouped digits: the currency the quote writes is what makes
-    try:                                      # them one number ("€1 234") — keep it in the span the reader sees
-        v = span_value(vtype, span_t, spec={"decimal": decimal} if decimal else None)
-    except ValueError as e:
-        if decimal is None and "TextIn(decimal=" in str(e):
-            raise ValueError(re.sub(r"\(TextIn\(decimal=\.\.\.\) says which\)",
-                                    '(declare it: document(..., decimal="dot") — a dot that groups thousands, the '
-                                    'comma reads decimals)', str(e))) from None
-        raise
+    swiss = re.fullmatch(_SWISS, t) is not None
+    if swiss:
+        mark = "." if "." in t else "," if "," in t else None
+        if decimal is not None and mark is not None and decimal != mark:
+            raise ValueError("the quoted decimal mark disagrees with the document's declaration")
+        # Grouping was validated, so only punctuation is removed. Strict typed reading avoids Decimal-context
+        # rounding in a normalizing parser, including accidental rounding of a fractional int to an integer.
+        v = span_value(vtype, t.replace("'", "").replace(",", "."), strict=True)
+    else:
+        span_t = t
+        if cur_surf and re.search(r"\d \d", t):
+            span_t = f"{cur_surf} {t}"        # the quote's own currency disambiguates space-grouped digits
+        try:
+            v = span_value(vtype, span_t, spec={"decimal": decimal} if decimal else None)
+        except ValueError as e:
+            if decimal is None and "TextIn(decimal=" in str(e):
+                raise ValueError(re.sub(r"\(TextIn\(decimal=\.\.\.\) says which\)",
+                                        '(declare it: document(..., decimal="dot") — a dot that groups thousands, the '
+                                        'comma reads decimals)', str(e))) from None
+            raise
     if isinstance(v, float) and not math.isfinite(v):
         raise ValueError("not a finite number")
-    return (-v if neg else v), Unit(next(iter(scales), None), next(iter(curs), None), pct)
+    if neg and "'" in quoted:
+        core = _NUM_CORE.search(quoted)
+        token = _token(quoted, *core.span(), quote=True)[0] if core else {}
+        if not any(kind in token for kind in ("sign", "paren")):
+            raise ValueError("the negative sign is not bound to the quoted number")
+    if neg:
+        v = v.copy_negate() if isinstance(v, Decimal) else -v   # unary Decimal minus can round to the active context
+    return v, Unit(next(iter(scales), None), next(iter(curs), None), pct)
 
 
 def _read_number(vtype, text):
@@ -249,7 +281,7 @@ _L_OPEN_SQ = re.compile(r"\[\s*\Z")
 # a parenthesised number after another number on its logical line (one new line, a tab or a comma between allowed;
 # a table's "|" or ";" is a separator): "SEK 1,234 m (1,100)", "12.3 percent (11.8)", "2.1x\n(2.5)"
 _AFTER_NUMBER = re.compile(r"[0-9][^\n|;()\[\]0-9]{0,10}(?:\n[^\S\n]*)?\Z")
-_NUM_CORE = re.compile(r"[0-9](?:[0-9,.]*[0-9])?(?:[ \u00a0\u2009\u202f][0-9]{3}(?![0-9]))*")
+_NUM_CORE = re.compile(_SWISS + r"|[0-9](?:[0-9,.]*[0-9])?(?:[ \u00a0\u2009\u202f][0-9]{3}(?![0-9]))*")
 _GROUP_LEFT = re.compile(r"[0-9][ \u00a0\u2009\u202f]\Z")
 _GROUP_RIGHT = re.compile(r"[ \u00a0\u2009\u202f][0-9]{3}(?![0-9])")
 _WINDOW = 64
@@ -906,7 +938,7 @@ def document(schema, model, *, task=None, text="doc", compute=None, answer=None,
             if not isinstance(raw, str):
                 return raw
             try:
-                v = _read_quote(vt, raw, decimal=dec)[0]
+                v = _read_quote(vt, raw, decimal=dec, label=name)[0]
             except ValueError as e:
                 raise ValueError(f"{name}: {raw!r} does not read as {vt.__name__}: {e}") from None
             why = _left_out(raw, kw[text])
@@ -933,7 +965,7 @@ def document(schema, model, *, task=None, text="doc", compute=None, answer=None,
         for x in numbers:
             raw = kw[x]
             try:
-                u = _read_quote(schema.model_fields[x].annotation, raw, decimal=dec)[1]
+                u = _read_quote(schema.model_fields[x].annotation, raw, decimal=dec, label=x)[1]
             except (ValueError, TypeError):            # unreadable: its value part says why
                 u = Unit()
             why, got = _ground(raw, kw[text])

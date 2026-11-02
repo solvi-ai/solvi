@@ -2,6 +2,16 @@
 
 ## 1.4.1 — unreleased
 
+### Fixed (numeric document spans)
+
+- Numeric document reads accept complete ASCII/curly-apostrophe thousands groups and a field's exact own
+  label prefix, retaining the original quote, offsets, sign and units. Recognized currency/scale/percent and
+  CR/DR words cannot be discarded as labels; incomplete/mixed groups and conflicting decimal declarations refuse.
+- Whole-number boundaries reject truncated values from apostrophe groups, malformed joined numbers,
+  underscore and exponent tokens. Decimal negation preserves precision and signed zero. Old numeric recipe
+  calibrations fail the changed catalog fingerprint and require recalibration. These are regression fixes;
+  the already viewed invoice pilot was not rerun or claimed as a new independent measurement.
+
 ### Examples and evaluation tools
 
 - `examples/invoice_workflow.py`: a document decision with a durable local human inbox, restart/resume,
