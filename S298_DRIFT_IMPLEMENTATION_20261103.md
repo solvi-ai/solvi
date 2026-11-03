@@ -1,0 +1,13 @@
+# S298: безопасный режим композиции
+
+База: 11131e4524c33d0bc5dfa457b1eec3ced3a31b2b. Ветка codex/growth-drift-guard.
+
+Исходный отчёт: stuff/handoffs/solvi_handoff_2026-11-02_src/solvi_handoff_2026-11-02_defects_ratchet/bag_reports/solvi_1.4.0.md:808. SHA256 fcb85f2c2789c69cb87e7280a9bc20c56628bbb41a6e9df177ca890829161bf2. В исходном кейсе сертификация и loosening меняют alone-share, вызывая ложные тревоги на неизменном CLINC. Текущая база вызывает monitor.adapted() после certified/loosened/recertify, собирая новую reference; одновременный shift может стать этой reference. RiskDetector питается отдельно в sampling.py и не сбрасывается самим threshold move, но только собственной тревогой.
+
+Реализован узкий guarded mode: Dispatcher с promise и monitor.adapted без detector отвергается ValueError при создании, до первого решения. Явный allow_reference_retake=True допускает прежнюю композицию с документированной слепой зоной. Это не новая статистическая гарантия. При detector поведение мониторинга и confidence bars неизменно; раздельный reset confidence/alone каналов не реализован, поскольку текущая совместная калибровка CUSUM требует отдельного проекта.
+
+Проверка реальным runtime: tests/test_stream_reference_guard.py использует настоящий Dispatcher, StreamPromise, RiskDetector, DriftMonitor и rule-based системы с искусственными labels. Одинаковый тест на базовом source даёт 1 failed / 1 passed: отсутствовал требуемый отказ. После изменения 2 passed. Label-регрессия сертифицирует clean stream, проверяет отсутствие тревоги, вызывает ровно действие monitor.adapted(), которое dispatcher делает при threshold move, и проверяет сохранение detector.n и тревогу после смены gold. Важно: одновременный естественный loosening+shift не воспроизведён, вызов adapted здесь явный.
+
+Фокусные проверки после изменения: 4 passed, 2 warnings in 3.30s, включая существующий unchanged-stream certification+loosening контроль и существующий реальный score shift. Все Python-запуски через stuff/audit/run.sh, 4 CPU/BLAS threads. Логи вне clone: research_growth/growth_2026_11/s298_drift_{baseline,focused,controls}_20261103.log. Никаких fullsuite, quality eval, Colab и push.
+
+Остатки: исторический CLINC 20-seed false-alarm rate не повторялся; label-only detector не гарантирует обнаружение без роста sampled deployed risk, sampling увеличивает задержку; ARL не является horizon false-alarm probability. Потребители legacy promise+monitor без detector теперь должны явно включить opt-out либо добавить detector. Внешние API guides и все call sites не мигрированы. S298 целиком не объявляется закрытым.

@@ -808,13 +808,16 @@ class Dispatcher:
     next to a score monitor's ~10): a RiskDetector is never the only alarm — give monitor= too (an AdapterLoop refuses
     the detector alone; the Dispatcher does not, it says it here). Each decision records `stream` (sample,
     certificate, detector) and each state change a record of kind "stream"; `replay_stream()` rebuilds them all.
+    A promise with a monitor that re-takes its reference requires detector=: a simultaneous shift could otherwise
+    enter the new reference silently. allow_reference_retake=True explicitly accepts that blind spot for legacy
+    applications. A label detector covers sampled deployed risk, not every confidence shift or every decision.
     Without promise= nothing of this runs and the records are as before."""
 
     def __init__(self, system, slow=None, *, question=None, budget=None, total=None, price=None, wake=SIGNALS,
                  agreement=None, monitor=None, supervise=0.0, seed=0, think="s2", on_disagree="record", storage=None,
                  store_responses=True, asked=None, same=None, unknown="answer", on_drift="human", audit=0.0,
                  secret: bytes | str | None = None, promise=None, detector=None, probation=None, sampling=None,
-                 loop=None):
+                 loop=None, allow_reference_retake=False):
         if question is None:
             if len(system.questions) != 1:
                 raise ValueError(f"the System asks {sorted(system.questions)}: say which with question=")
@@ -911,6 +914,10 @@ class Dispatcher:
             self._stream = promise.stream_driver(detector, on_drift=on_drift,
                                                  probation=300 if probation is None else probation, **(sampling or {}))
             self._stream0 = copy.deepcopy(self._stream)          # what replay_stream rebuilds the states from
+            if detector is None and callable(getattr(monitor, "adapted", None)) and not allow_reference_retake:
+                raise ValueError("certificate threshold changes re-take the monitor reference: a concurrent shift "
+                                 "can escape detection. Give detector= a RiskDetector, or explicitly accept this "
+                                 "blind spot with allow_reference_retake=True")
             if self.slow is not None and getattr(promise, "grid_spec", None) == "auto" \
                     and getattr(promise, "grid", None) is None:
                 warnings.warn("Dispatcher: the stream certificate's grid is \"auto\": until the first "
