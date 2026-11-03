@@ -109,3 +109,25 @@ is a floating-point introspection snapshot and extremely small probabilities may
 underflow to zero there. Prediction uses internal log likelihoods, so such zeros
 do not invalidate a fitted model. Editing `lik` does not edit the fitted model;
 call `fit` to update it. Public smoothing configuration is revalidated before fit.
+
+`CorrelationAwareCombiner(..., rho_by_domain={domain: pair_mapping}, domain_counts=None,
+domain_shrinkage=0)` optionally selects a supplied domain-specific correlation using
+`weights(subset, domain=...)`, `n_effective(subset, domain=...)`, `log_lr(obs, domain=...)`
+and `posterior(prior, obs, domain=...)`. The same outcomes can receive different weights in
+known contexts; an unknown domain raises rather than borrowing a different domain's evidence.
+Domain names must be nonempty strings, and the supplied pair mappings are copied and validated.
+With finite positive `domain_shrinkage=kappa`, every domain needs a nonnegative integer count n;
+its pair correlations become `n/(n+kappa) * local + kappa/(n+kappa) * global` before the existing
+observed-subset positive-definite regularization. Counts below two refuse a conditioned query.
+`domain_shrinkage=0` uses the supplied matrix without shrinkage and needs no counts: the caller
+is responsible for its provenance. Counts are supplied descriptive support, not a confidence bar.
+
+`domain=None` preserves the global rho and pooled-likelihood default; if domain matrices are
+configured, this choice warns that domain context was omitted (including explicit None).
+For an unestimated/undersampled context, choose this global fallback explicitly or handle the
+refusal. Domain must be observable before the decision, never chosen from current truth or the
+label being predicted. Training `fit(obs, y)` still pools its likelihoods across domains; this API
+only conditions correlation weights and does not fit domain calibrations or infer domain labels.
+It makes no independence, calibrated posterior or cross-domain quality guarantee. Existing
+CheckRegistry same-call/ancestor warnings remain applicable. No new public symbols are added;
+CorrelationAwareCombiner keeps its existing `solvi.stat` export and `__all__` membership.

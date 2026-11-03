@@ -316,32 +316,85 @@ class CorrelationAwareCombiner(NaiveCombiner):
 
     rho: {(a, b): ρ} (e.g. error_correlation(...)["rho"]) or a callable (a, b) → ρ (e.g. Registry.prior_rho)."""
 
-    def __init__(self, sources, rho, outcomes=("agree", "disagree", "fail"), pool: float = 2.0, alpha: float = 0.5):
+    def __init__(self, sources, rho, outcomes=("agree", "disagree", "fail"), pool: float = 2.0, alpha: float = 0.5,
+                 *, rho_by_domain=None, domain_counts=None, domain_shrinkage=0.0):
         super().__init__(sources, outcomes, pool, alpha)
         self.rho = rho
+        if rho_by_domain is not None and not isinstance(rho_by_domain, dict):
+            raise ValueError("rho_by_domain must map nonempty domain names to correlation mappings")
+        self.rho_by_domain = {}
+        for domain, matrix in (rho_by_domain or {}).items():
+            if not isinstance(domain, str) or not domain or not isinstance(matrix, dict):
+                raise ValueError("rho_by_domain must map nonempty domain names to correlation mappings")
+            _matrix(self.sources, matrix)
+            self.rho_by_domain[domain] = dict(matrix)
+        self.domain_shrinkage = _number(domain_shrinkage, "domain_shrinkage", low=0)
+        if domain_counts is not None and not isinstance(domain_counts, dict):
+            raise ValueError("domain_counts must map configured domains to nonnegative integer counts")
+        self.domain_counts = dict(domain_counts or {})
+        if any(k not in self.rho_by_domain or type(n) is not int or n < 0
+               for k, n in self.domain_counts.items()):
+            raise ValueError("domain_counts must map configured domains to nonnegative integer counts")
+        if self.domain_shrinkage and set(self.domain_counts) != set(self.rho_by_domain):
+            raise ValueError("positive domain_shrinkage requires a count for every configured domain")
 
-    def weights(self, subset) -> dict:
+    def _domain_rho(self, domain):
+        if domain is None:
+            if self.rho_by_domain:
+                import warnings
+                warnings.warn("no correlation domain selected: using global rho, not domain-conditioned evidence",
+                              UserWarning, stacklevel=3)
+            return self.rho
+        if not isinstance(domain, str) or domain not in self.rho_by_domain:
+            raise ValueError("unknown correlation domain; pass domain=None explicitly to use global rho")
+        matrix = self.rho_by_domain[domain]
+        if not self.domain_shrinkage:
+            return matrix
+        n = self.domain_counts[domain]
+        if n < 2:
+            raise ValueError("domain correlation needs at least two supplied observations; use global domain=None")
+        # Stable convex weight, including extremely strong but finite shrinkage.
+        log_ratio = math.log(n) - math.log(self.domain_shrinkage)
+        ratio = math.exp(-abs(log_ratio))
+        weight = 1.0 / (1.0 + ratio) if log_ratio >= 0 else ratio / (1.0 + ratio)
+
+        def shrunk(a, b):
+            if a == b:
+                return 1.0
+            local = matrix.get((a, b), matrix.get((b, a), 0.0))
+            global_rho = self.rho(a, b) if callable(self.rho) else self.rho.get((a, b), self.rho.get((b, a), 0.0))
+            return weight * local + (1.0 - weight) * global_rho
+
+        return shrunk
+
+    def weights(self, subset, *, domain=None) -> dict:
         import numpy as np
         key = sorted(_names(subset))
         if any(k not in self.sources for k in key):
             raise ValueError("unknown source")
+        rho = self._domain_rho(domain)
         if not key:
             return {}
-        R = _matrix(key, self.rho)
+        R = _matrix(key, rho)
         w = np.clip(np.linalg.solve(R, np.ones(len(key))), 0.0, 1.0)
         return dict(zip(key, w.tolist()))
 
-    def n_effective(self, subset) -> float:
+    def n_effective(self, subset, *, domain=None) -> float:
         import numpy as np
         subset = sorted(_names(subset))
         if any(k not in self.sources for k in subset):
             raise ValueError("unknown source")
+        rho = self._domain_rho(domain)
         if not subset:
             return 0.0
-        R = _matrix(subset, self.rho)
+        R = _matrix(subset, rho)
         return float(np.ones(len(subset)) @ np.linalg.solve(R, np.ones(len(subset))))
 
-    def log_lr(self, o) -> float:
+    def log_lr(self, o, *, domain=None) -> float:
         obs = self.observed(o)
-        w = self.weights(obs)
+        w = self.weights(obs, domain=domain)
         return sum(w[s] * self.llr(s, o[s]) for s in obs)
+
+    def posterior(self, prior, o, *, domain=None) -> float:
+        _number(prior, "prior", low=0, high=1)
+        return _sig(_logit(prior) + self.log_lr(o, domain=domain))
