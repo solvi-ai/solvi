@@ -608,7 +608,8 @@ class DefaultPolicy(LoopPolicy):
             return None
         used = self._acquisition_reserved
         return {**cfg, "reserved": used, "remaining": cfg["max_extra"] - used,
-                "ready": self._acquisition_done}
+                "ready": self._acquisition_done,
+                "stop_reason": getattr(self, "_acquisition_stop_reason", None)}
 
     def sampling_rate(self, st, base_rate) -> float:
         cfg = getattr(self, "acquisition", None)

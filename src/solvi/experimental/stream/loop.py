@@ -815,6 +815,33 @@ class AdapterLoop:
 
     # --- the per-decision step
     def step(self, x, oracle=None, *, source=None, key=None) -> dict:
+        """One synchronous decision; an aborted attempt permanently stops optional acquisition."""
+        if not self._bounded_acquisition():
+            return self._step(x, oracle, source=source, key=key)
+        with self._locked():
+            try:
+                return self._step(x, oracle, source=source, key=key)
+            except Exception as exc:
+                if not getattr(self.policy, "_acquisition_stop_reason", None):
+                    self._acquisition_stop(str(exc), self.policy._acquisition_reserved)
+                raise
+
+    def _acquisition_stop(self, reason, reserved):
+        self.policy._acquisition_done = True
+        self.policy._acquisition_boost = False
+        self.policy._acquisition_n = None
+        self.policy._acquisition_reserved = reserved
+        self.policy._acquisition_stop_reason = reason
+        try:
+            return self._control("acquisition_stop", reason=reason, reserved=reserved)
+        except Exception as exc:
+            self.error = {"n": self.n, "where": "acquisition_stop", "why": str(exc)}
+            raise
+
+    def _bounded_acquisition(self):
+        return isinstance(self.policy, DefaultPolicy) and getattr(self.policy, "acquisition", None) is not None
+
+    def _step(self, x, oracle=None, *, source=None, key=None) -> dict:
         """One input → {"n", "answer", "by", "served", "candidate", "sampled", "label", "label_source", "events"}.
         oracle: () → the label (None: missing), called only when the decision needs one (not answered alone, or
         drawn by the coin); source: its source (default the loop's); key: the input's content key (None: the loop's
@@ -1283,6 +1310,8 @@ class AdapterLoop:
         grid is fixed, then on coin-sampled decisions only) — read under the Dispatcher's lock, the part's, then the
         loop's, nothing changed."""
         with self._locked():
+            if self._bounded_acquisition():
+                raise ValueError("bounded acquisition supports synchronous step only, not Dispatcher previews")
             self._refuse_if_stopped()
             if self.mode != "stream":
                 raise ValueError("a label-mode loop takes no decisions")
@@ -1386,6 +1415,8 @@ class AdapterLoop:
         also refused: a loop already attached, closed or stopped, a host that has a loop (or, a System, an update
         target), a loop that serves on another System. `Dispatcher(..., loop=)` calls it."""
         from ...core.dispatch import Dispatcher
+        if self._bounded_acquisition():
+            raise ValueError("bounded acquisition supports synchronous step only; attachment is unsupported")
         system = _host_system(host)
         with self._locked():
             self._refuse_if_stopped()
@@ -1534,6 +1565,10 @@ class AdapterLoop:
                     self._release(srv)
 
     def _sampling_rate(self, base_rate):
+        hook = type(self.policy).sampling_rate
+        if hook is LoopPolicy.sampling_rate or (hook is DefaultPolicy.sampling_rate
+                                                and not self._bounded_acquisition()):
+            return base_rate
         rho = self.policy.sampling_rate(self._state(), base_rate)
         if isinstance(rho, bool) or not isinstance(rho, (int, float)) or not base_rate <= rho <= 1:
             raise ValueError("policy.sampling_rate must return a finite rate in [base_rate, 1]")
@@ -2778,7 +2813,8 @@ class AdapterLoop:
                 pass
             finally:
                 fresh._inject = None
-        controls = {"rollback": lambda d: fresh.rollback(d["to"], by=d.get("by"), why=d.get("why")),
+        controls = {"acquisition_stop": lambda d: fresh._acquisition_stop(d["reason"], d["reserved"]),
+                    "rollback": lambda d: fresh.rollback(d["to"], by=d.get("by"), why=d.get("why")),
                     "pause": lambda d: fresh.pause(by=d.get("by"), why=d.get("why")),
                     "resume": lambda d: fresh.resume(by=d.get("by"), why=d.get("why")),
                     "promote": lambda d: fresh.promote(d["version"], force=d.get("forced", False), by=d.get("by"),

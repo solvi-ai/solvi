@@ -229,3 +229,13 @@ These are conservative potential extras, not actual paid calls. Configuration an
 reservations survive checkpoint pickle; replay starts from the frozen initial
 policy. Extra acquisition spends additional oracle budget and does not establish
 that the original S315 500-label quality/cost requirement has been fixed.
+
+This initial controller supports synchronous `step` only. Attachment and Dispatcher
+previews are rejected before issuing queries: multiple pending tickets do not have
+a supported reservation protocol yet. With acquisition enabled, an aborted step
+(including an oracle exception or a refused label source) permanently stops the
+acquisition feature, retains its potential-call reservations and journals an
+`acquisition_stop` control. Ordinary base auditing, valid labels and training can
+continue. The stop and reservation count survive save/load and replay. Missing
+labels (`None`) are ordinary completed decisions. Legacy policies keep existing
+error behavior and avoid extra sampling-state snapshots.

@@ -844,8 +844,12 @@ def test_acquisition_additive_resume_missing_duplicate_refused_and_current_input
     before = a._state().keys
     reserved = a.policy.acquisition_status()["reserved"]
     assert reserved > 0  # exercised boosted additive base/owner paths, not just full-rate startup
+    refused = make()
     with pytest.raises(UntrustedLabel):
-        a.step(("a", .1), lambda: "a", source="model", key="refused")
+        refused.step(("a", .1), lambda: "a", source="model", key="refused")
+    assert sum(refused._state().keys.values()) == 0
+    assert not refused.closed
+    assert refused.policy.acquisition_status()["stop_reason"]
     assert a._state().keys == before
     # Refused attempts do not advance n; repeated preview uses the same reservation.
     a._draw(a.n + 1, .95, .95)
@@ -870,3 +874,76 @@ def test_acquisition_additive_resume_missing_duplicate_refused_and_current_input
     assert a._state().keys == before == b._state().keys
     assert not a.policy._acquisition_done
     assert a.replay()["ok"] and b.replay()["ok"]
+
+
+def test_acquisition_rejects_previews_and_stops_feature_after_paid_oracle_error(tmp_path):
+    policy = DefaultPolicy(acquisition=dict(floor=1, max_extra=3, until_decision=100))
+    loop = AdapterLoop(_Hand([]), question="q", policy=policy, max_risk=.05, additive=False, secret=KEY)
+    with pytest.raises(ValueError, match="synchronous step"):
+        loop._pre(("a", .1))
+    with pytest.raises(ValueError, match="synchronous step"):
+        loop.attach_to(object())
+    calls = []
+
+    def paid_failure():
+        calls.append(1)
+        raise RuntimeError("paid oracle failed")
+
+    with pytest.raises(RuntimeError, match="paid oracle failed"):
+        loop.step(("a", .1), paid_failure)
+    assert not loop.closed
+    assert loop.policy.acquisition_status()["stop_reason"] == "paid oracle failed"
+    loop.step(("a", .1), lambda: "a")
+    assert loop.n == 1 and len(calls) == 1
+    loop.save(tmp_path / "stopped")
+    restored = AdapterLoop.load(tmp_path / "stopped", _Hand([]), secret=KEY)
+    assert not restored.closed
+    assert restored.policy.acquisition_status() == loop.policy.acquisition_status()
+    restored.step(("a", .1), lambda: "a")
+    assert restored.n == 2 and len(calls) == 1
+    assert loop.replay()["ok"] and restored.replay()["ok"]
+
+
+def test_acquisition_legacy_sampling_skips_state_snapshot():
+    loop = AdapterLoop(_Hand([]), question="q", policy=DefaultPolicy(), max_risk=.05, additive=False)
+    def forbidden():
+        raise AssertionError("legacy sampling constructed LoopState")
+    loop._state = forbidden
+    assert loop._sampling_rate(.2) == .2
+
+
+def test_acquisition_invalid_teacher_target_stops_boost_and_valid_labels_continue(tmp_path):
+    learner = _Hand([])
+    learner.options = ("a",)
+    loop = AdapterLoop(learner, question="q", max_risk=.05, secret=KEY,
+                       initial=_Model("initial", 1), additive=True, probation=0, monitor=None,
+                       promise_options={"grid": [.95]}, clock=lambda: 0.,
+                       policy=DefaultPolicy(first=10 ** 6, mature_patience=None,
+                           acquisition=dict(floor=1, max_extra=500, until_decision=1000)))
+    for _ in range(200):
+        loop.step(("a", .1), lambda: "a", key="same")
+    previous = loop.policy.acquisition_status()["reserved"]
+    assert previous > 0
+    calls = []
+
+    def invalid_teacher():
+        calls.append(1)
+        return "invalid"
+
+    with pytest.raises(ValueError, match="not one of"):
+        loop.step(("a", .1), invalid_teacher)
+    stopped = loop.policy.acquisition_status()
+    assert stopped["reserved"] <= previous + 1
+    assert stopped["stop_reason"] and not loop.closed
+    assert loop._sampling_rate(.2) == .2
+    loop.step(("a", .1), lambda: "a", key="valid")
+    assert loop.n == 201 and len(calls) == 1
+    loop.save(tmp_path / "invalid")
+    restored_learner = _Hand([])
+    restored_learner.options = ("a",)
+    restored = AdapterLoop.load(tmp_path / "invalid", restored_learner, secret=KEY,
+                                initial=_Model("initial", 1), clock=lambda: 0.)
+    assert restored.policy.acquisition_status() == stopped
+    restored.step(("a", .1), lambda: "a", key="another")
+    assert restored.n == 202
+    assert loop.replay()["ok"] and restored.replay()["ok"]
