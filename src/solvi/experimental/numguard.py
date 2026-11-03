@@ -31,12 +31,14 @@ your model once more with the list of what failed (any callable: no LLM client h
 What it gives is provenance, not correctness: a pointer at the wrong input numeral is filled and passes. Numbers
 written as words ("three") and numbers inside identifiers ("A-10457", "COVID-19", "v2") are not checked (identifiers
 can be checked against the input verbatim with `ids="check"`). Only integers 0–12 and 100 pass as constants by
-default (`SMALL`); `MEASURED_CONSTANTS` is the wider set the measurements used (integers 0–100 and a few common
+default (`SMALL`), as written counts without decimals, currency, percent or scale; `MEASURED_CONSTANTS` is the wider set the measurements used (integers 0–100 and a few common
 factors), opt-in, and `years()` or your own set or predicate extend either. `pi` (`PI`, 28 digits, an
 approximation) is opt-in the same way: `constants=SMALL | {PI}`."""
 from __future__ import annotations
 
 import calendar
+from bisect import bisect_left
+import heapq
 import datetime as dt
 import re
 import typing
@@ -101,12 +103,15 @@ _DATE_RE = re.compile(
 
 _NUM_RE = re.compile(
     r"(?P<par>\(\s*(?P<pcur>" + _CUR + r")?\s*(?P<pcore>" + _CORE + r")\s*(?P<ppct>%)?\s*\)(?P<ppct2>\s?%)?)"
-    r"|(?P<plain>(?P<sign>(?<![\w.,\d])[-−])?(?P<cur>" + _CUR + r")?\s?(?<![\w.])(?P<core>" + _CORE + r")"
+    r"|(?P<plain>(?P<sign>(?<![\w.,\d])[-−–])?(?P<cur>" + _CUR + r")?\s?(?<![\w.])(?P<core>" + _CORE + r")"
     r"(?:(?P<pct>\s?%|\s?percent\b|\s?per\s+cent\b)"
     r"|(?P<ord>st|nd|rd|th)\b"
     rf"|(?P<sg>{_SG})\b"
     rf"|[^\S\n](?P<sw>{_SW})\b)?)", re.I)
 _TOKEN_RE = re.compile(r"(?<![\w\-/.])\w(?:[\w\-/.]*\w)?")
+_COMMA_NUMBER_RE = re.compile(r"\d+(?:,\d+)+(?:\.\d+)?")
+_UNSUPPORTED_SCALE_RE = re.compile(
+    r"[^\S\n]*(?P<scale>[a-z]*illion(?:s)?|тыс(?:яча|ячи|яч)?|млн|млрд|трлн)\b", re.I)
 # a parenthesised number right after another number on its logical line (up to ten characters between, one new
 # line, a tab or a comma allowed; a table's "|" or ";" is a separator) — the same shape solvi.solutions.document
 # abstains on: "16.6% (18.8%)", "SEK 2.84 (5.45)" — a comparative or an accounting negative, the text does not say
@@ -146,19 +151,67 @@ class Numeral:
         return self.surface
 
 
+_RU_MONTH_NAMES = ('января', 'февраля', 'марта', 'апреля', 'мая', 'июня',
+                   'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря')
+_RU_MONTHS = {name: i for i, name in enumerate(_RU_MONTH_NAMES, 1)}
+_RU_SCALES = {'тыс': 10**3, 'тысяча': 10**3, 'тысячи': 10**3, 'тысяч': 10**3,
+              'млн': 10**6, 'миллион': 10**6, 'миллиона': 10**6, 'миллионов': 10**6,
+              'млрд': 10**9, 'миллиард': 10**9, 'миллиарда': 10**9, 'миллиардов': 10**9,
+              'трлн': 10**12, 'триллион': 10**12, 'триллиона': 10**12, 'триллионов': 10**12}
+_RU_CURRENCY = {'долл': '$', 'доллар': '$', 'доллара': '$', 'долларов': '$',
+                'руб': '₽', 'рубль': '₽', 'рубля': '₽', 'рублей': '₽',
+                'евро': '€', 'фунтов': '£', 'иен': '¥'}
+_RU_SUFFIX_CHAIN_RE = re.compile(r'[^\S\n]+(?:' + '|'.join(sorted({**_RU_CURRENCY, **_RU_SCALES, **_SCALE_WORDS}, key=len, reverse=True)) + r')\b\.?', re.I)
+_RU_CURRENCY_RE = re.compile(r'[^\S\n]+(' + '|'.join(sorted(_RU_CURRENCY, key=len, reverse=True)) + r')\b\.?', re.I)
+
+
+def _output_locale(locale):
+    if locale not in (None, 'en', 'ru'):
+        raise ValueError("locale must be None, 'en' or 'ru'")
+
+
+def _ru_date(value):
+    if isinstance(value, dt.date):
+        return f'{value.day} {_RU_MONTH_NAMES[value.month - 1]} {value.year} г.'
+    month, day = value
+    return f'{day} {_RU_MONTH_NAMES[month - 1]}'
+
+
+def _ru_number(value, digits=10, places=None, grouping=False):
+    return _fmt(value, digits, places, grouping).replace(',', '\u00a0').replace('.', ',')
+
+
+def _ru_input(n, digits, places, grouping):
+    if n.kind == 'date':
+        return _ru_date(n.date)
+    if n.kind != 'number':
+        return n.plain()
+    scale = {10**3: 'тыс.', 10**6: 'млн', 10**9: 'млрд', 10**12: 'трлн'}.get(n.scale)
+    # Unknown scales are written in full so the matching reader sees their value.
+    text = _ru_number(n.number if scale else n.value, None, None, grouping)
+    if scale:
+        text += ' ' + scale
+    currency = {'$': 'долл.', '€': 'евро', '₽': 'руб.', '£': 'фунтов', '¥': 'иен'}
+    if n.unit == '%':
+        text += '%'
+    elif n.unit in currency:
+        text += ' ' + currency[n.unit]
+    return text
+
+
 def _dec(s: str) -> Decimal:
     s = s.replace(",", "")
     return Decimal("0" + s if s.startswith(".") else s)
 
 
-def _date_of(m) -> object:
+def _date_of(m, months=_MONTHS) -> object:
     g = m.groupdict()
     try:
         if g["iso"]:
             return dt.date(int(g["iy"]), int(g["im"]), int(g["id"]))
         if g["dmy"]:
             return dt.date(int(g["y1"]), int(g["m1"]), int(g["d1"]))
-        mon = _MONTHS[(g["mn2"] or g["mn3"]).lower().rstrip(".")]
+        mon = months[(g["mn2"] or g["mn3"]).lower().rstrip(".")]
         day, year = int(g["d2"] or g["d3"]), g["y2"] or g["y3"]
         if year:
             return dt.date(int(year), mon, day)
@@ -168,7 +221,7 @@ def _date_of(m) -> object:
         return None
 
 
-def numerals(text: str) -> list[Numeral]:
+def numerals(text: str, *, decimal: str = ".", locale: str | None = None) -> list[Numeral]:
     """Every number, date and identifier with digits in `text`, in order. Dates: ISO "2024-03-15", "15.03.2024" /
     "15/03/2024" (day first), "March 15, 2024", "15 March 2024", "March 15" (no year). Numbers: a sign or a negative
     in parentheses, a currency sign, comma thousands, a decimal point, then "%" / "percent", an ordinal suffix
@@ -176,19 +229,55 @@ def numerals(text: str) -> list[Numeral]:
     "£1,000\\nmillion" is the number £1,000 and the word on the next line). A number in parentheses right after
     another number on its line ("16.6% (18.8%)" — a comparative or a negative, the text does not say) keeps its
     parentheses and reads unsigned. A token where digits follow letters
-    ("A10", "v2.1", "COVID-19", "1Z999AA1") is an identifier; a number followed by a unit ("5km") is a number."""
+    ("A10", "v2.1", "COVID-19", "1Z999AA1") is an identifier; a number followed by a unit ("5km") is a number.
+    Unsupported scale words (English -illion words and Russian scale abbreviations) and comma groups that are
+    not comma thousands raise `ValueError`; no decimal-comma interpretation is guessed. Explicit `decimal=","` instead reads decimal commas
+    and space-grouped thousands; dot decimals and mixed punctuation then raise `ValueError`. Surfaces and spans
+    remain those of the original text. Call expressions retain their Python-style decimal point syntax."""
+    _output_locale(locale)
+    if locale == 'ru':
+        decimal = ','
+    if decimal not in (".", ","):
+        raise ValueError("decimal must be '.' or ','")
+    number_re = _NUM_RE if decimal == "." else re.compile(
+        _NUM_RE.pattern.replace(_CORE, r"\d{1,3}(?:[ \u00a0\u202f]\d{3})+(?:,\d+)?|\d+(?:,\d+)?|,\d+"), re.I)
+    scale_words = _SCALE_WORDS
+    date_re, months = _DATE_RE, _MONTHS
+    if locale == 'ru':
+        scale_words = {**_SCALE_WORDS, **_RU_SCALES}
+        sw = '|'.join(sorted(scale_words, key=len, reverse=True))
+        number_re = re.compile(number_re.pattern.replace(_SW, sw).replace(r'(?P<sw>' + sw + r')\b', r'(?P<sw>' + sw + r')\b\.?'), re.I)
+        months = {**_MONTHS, **_RU_MONTHS}
+        date_re = re.compile(_DATE_RE.pattern.replace(_MON, '|'.join(sorted(months, key=len, reverse=True))), re.I)
+    def read_number(core):
+        return _dec(core) if decimal == "." else Decimal(core.replace(" ", "").replace("\u00a0", "").replace("\u202f", "").replace(",", "."))
     out: list[Numeral] = []
     taken: list[tuple[int, int]] = []
 
-    def free(a, b):
-        return all(b <= x or a >= y for x, y in taken)
+    starts, ends = [], []
 
-    for m in _DATE_RE.finditer(text):
-        d = _date_of(m)
+    def index_taken():
+        # Regex matches within each pass never overlap. Rebuild only between
+        # passes, rather than inserting each new span into a sorted list.
+        spans = sorted(taken)
+        starts[:] = [a for a, _ in spans]
+        ends[:] = [b for _, b in spans]
+
+    def free(a, b):
+        previous = bisect_left(starts, b) - 1
+        return previous < 0 or ends[previous] <= a
+
+    for m in date_re.finditer(text):
+        d = _date_of(m, months)
         if d is None:
             continue
-        out.append(Numeral(m.start(), m.end(), m.group(), "date", date=d))
-        taken.append((m.start(), m.end()))
+        end = m.end()
+        year_suffix = re.match(r'\s*г\.', text[end:]) if locale == 'ru' and isinstance(d, dt.date) else None
+        if year_suffix:
+            end += year_suffix.end()
+        out.append(Numeral(m.start(), end, text[m.start():end], "date", date=d))
+        taken.append((m.start(), end))
+    index_taken()
     for m in _TOKEN_RE.finditer(text):
         tok = m.group()
         letter = re.search(r"[^\W\d_]", tok)
@@ -198,19 +287,34 @@ def numerals(text: str) -> list[Numeral]:
             continue                                             # "5km", "3rd", "12k", "1.2bn": a number with a unit
         out.append(Numeral(m.start(), m.end(), tok, "id"))
         taken.append((m.start(), m.end()))
-    for m in _NUM_RE.finditer(text):
+    index_taken()
+    if decimal == ",":
+        for m in re.finditer(r"(?:\d+[.,]|(?<!\w)[.,])\d+(?:[.,]\d+)*", text):
+            if free(m.start(), m.end()) and not re.fullmatch(r"\d*,\d+", m.group()):
+                raise ValueError(f"unsupported decimal-comma number: {m.group()!r}")
+        for m in re.finditer(r"\d+(?:[ \u00a0\u202f]\d+)+(?:,\d+)?", text):
+            if free(m.start(), m.end()) and not re.fullmatch(r"\d{1,3}(?:[ \u00a0\u202f]\d{3})+(?:,\d+)?", m.group()):
+                raise ValueError(f"unsupported or ambiguous space grouping: {m.group()!r}")
+    for m in _COMMA_NUMBER_RE.finditer(text) if decimal == "." else ():
+        if free(m.start(), m.end()) and not re.fullmatch(r"\d{1,3}(?:,\d{3})+(?:\.\d+)?", m.group()):
+            raise ValueError(f"unsupported or ambiguous comma number: {m.group()!r}")
+    for m in number_re.finditer(text):
         if not free(m.start(), m.end()):
             continue
         g = m.groupdict()
+        core_end = m.end("pcore") if g["par"] else m.end("core")
+        suffix = _UNSUPPORTED_SCALE_RE.match(text, core_end)
+        if suffix and suffix.group("scale").lower() not in scale_words:
+            raise ValueError(f"unsupported scale word: {suffix.group('scale')!r}")
         if g["par"]:
             unit = "%" if g["ppct"] or g["ppct2"] else (g["pcur"] or "")
             before = text[max(0, m.start() - 64):m.start()].replace("\t", " ").replace(",", " ")
-            n = _dec(g["pcore"])
+            n = read_number(g["pcore"])
             if not _AFTER_NUMBER.search(before):                     # "16.6% (18.8%)": a comparative or a negative,
                 n = -n                                               # the text does not say — the parentheses stay and
             out.append(Numeral(m.start(), m.end(), m.group(), "number", n, 1, unit))  # the sign is not read
         else:
-            n = _dec(g["core"])
+            n = read_number(g["core"])
             if g["sign"]:
                 n = -n
             scale = 1
@@ -222,18 +326,27 @@ def numerals(text: str) -> list[Numeral]:
             elif g["sg"]:
                 scale = _SCALE_GLUED.get(g["sg"], _SCALE_GLUED.get(g["sg"].lower(), 1))
             elif g["sw"]:
-                scale = _SCALE_WORDS[g["sw"].lower()]
+                scale = scale_words[g["sw"].lower()]
             start = m.start("sign") if g["sign"] else (m.start("cur") if g["cur"] else m.start("core"))
-            out.append(Numeral(start, m.end(), text[start:m.end()], "number", n, scale, unit))
-        taken.append((m.start(), m.end()))
+            end = m.end()
+            currency = _RU_CURRENCY_RE.match(text, end) if locale == 'ru' else None
+            if currency:
+                if unit and unit != _RU_CURRENCY[currency.group(1).lower()]:
+                    raise ValueError('conflicting currency units')
+                unit, end = _RU_CURRENCY[currency.group(1).lower()], currency.end()
+            if locale == 'ru' and _RU_SUFFIX_CHAIN_RE.match(text, end):
+                raise ValueError('malformed adjacent currency/scale suffix chain')
+            out.append(Numeral(start, end, text[start:end], "number", n, scale, unit))
+        # The number regex's matches are disjoint; this pass need only avoid
+        # dates/identifiers, not re-check preceding number matches.
     out.sort(key=lambda x: x.start)
     return out
 
 
-def annotate(text: str) -> tuple[str, list[Numeral]]:
+def annotate(text: str, *, decimal: str = ".") -> tuple[str, list[Numeral]]:
     """The text with `[k]` before each numeral (numbers and dates, not identifiers), for the model's prompt, and the
     numerals in that order: `[1]` is `numerals[0]`."""
-    nums = [n for n in numerals(text) if n.kind != "id"]
+    nums = [n for n in numerals(text, decimal=decimal) if n.kind != "id"]
     parts, pos = [], 0
     for k, n in enumerate(nums, 1):
         parts.append(text[pos:n.start] + f"[{k}]" + n.surface)
@@ -608,14 +721,14 @@ class _V:
         return self.label or (repr(self.value) if self.kind == "str" else str(self.value))
 
 
-def _cell_value(t: Table, ti: int, r: int, c: int) -> _V | None:
+def _cell_value(t: Table, ti: int, r: int, c: int, decimal: str = ".") -> _V | None:
     """A cell as an operand: None when blank."""
     s = t.text(r, c)
     cell = Cell(ti, r, c, t.labels[r - 1] if t.row_labels else "", t.columns[c - 1] if c else t.rows[0][0], s)
     lab = f"table {ti} {cell.row_label or f'row {r}'!r}/{cell.col_label or f'column {c}'!r} ({s!r})"
     if s.casefold() in _BLANK:
         return None
-    ns = [n for n in numerals(s) if n.kind != "id"]
+    ns = [n for n in numerals(s, decimal=decimal) if n.kind != "id"]
     if len(ns) == 1 and _CELL_REST.fullmatch(s[:ns[0].start] + s[ns[0].end:]):
         n = ns[0]
         if n.kind == "date" and isinstance(n.date, dt.date):
@@ -626,9 +739,9 @@ def _cell_value(t: Table, ti: int, r: int, c: int) -> _V | None:
     return _V("str", s, cells=(cell,), label=lab)
 
 
-def _at(t: Table, ti: int, axis: str, idx: int, other: int) -> _V | None:
+def _at(t: Table, ti: int, axis: str, idx: int, other: int, decimal: str = ".") -> _V | None:
     """The cell of column `idx` in row `other` (axis "column") or of row `idx` in column `other` (axis "row")."""
-    return _cell_value(t, ti, idx, other) if axis == "row" else _cell_value(t, ti, other, idx)
+    return _cell_value(t, ti, idx, other, decimal) if axis == "row" else _cell_value(t, ti, other, idx, decimal)
 
 
 def _need_number(v: _V, what: str) -> _V:
@@ -698,6 +811,7 @@ class _Env:
     k: int = 0
     lit_ok: Callable = lambda d: True
     date_ok: Callable = lambda d: True
+    decimal: str = "."
 
 
 def _ptokens(expr: str, mode: str) -> list[tuple[str, str]]:
@@ -916,7 +1030,7 @@ class _Parser:
         if not self.accept_word("column", "row"):
             raise ProgramError(f"{self.mode}: expected column(...) or row(...) after table{ti}:")
         axis, idx, others, cond, _ = self.selection(t, ti, allow_norm=False, axis=w.lower())
-        return [v for o in others if (v := _at(t, ti, axis, idx, o)) is not None and cond(o)]
+        return [v for o in others if (v := _at(t, ti, axis, idx, o, self.env.decimal)) is not None and cond(o)]
 
     def selection(self, t: Table, ti: int, allow_norm: bool = True, axis: str | None = None):
         """`([column] col | row r[, a..b][, where cond][, norm])` → the axis ("column" or "row"), its index, the
@@ -993,7 +1107,7 @@ class _Parser:
             p = self.pred()
 
             def f(o, line=line, p=p):
-                v = _at(t, ti, by, line, o)
+                v = _at(t, ti, by, line, o, self.env.decimal)
                 return v is not None and p(v)                     # a blank cell matches no condition
             return f
         return or_()
@@ -1058,7 +1172,7 @@ def _table_run(p: _Parser) -> tuple[object, tuple]:
             norm = True
         p.expect_op(")")
         p.done()
-        v = _cell_value(t, ti, r, c)
+        v = _cell_value(t, ti, r, c, p.env.decimal)
         if v is None:
             raise ProgramError(f"table {ti} row {r} column {c} is blank ({t.text(r, c)!r})")
         if v.kind == "number":
@@ -1070,7 +1184,7 @@ def _table_run(p: _Parser) -> tuple[object, tuple]:
         raise ProgramError(f"table allows cell, {', '.join(_AGG)}; found {op!r}")
     axis, idx, others, cond, norm = p.selection(t, ti)
     p.done()
-    picked = [(o, _at(t, ti, axis, idx, o)) for o in others if cond(o)]
+    picked = [(o, _at(t, ti, axis, idx, o, p.env.decimal)) for o in others if cond(o)]
     if axis == "column":
         name = (t.columns[idx - 1] if idx else t.rows[0][0]) or idx
     else:
@@ -1427,8 +1541,14 @@ def fill(text: str, source: str | list[Numeral], *, answer_marker: str | None = 
          literals: Literal["constants", "input", "any"] = "constants", constants=SMALL,
          digits: int = 10, places: int | None = None, grouping: bool | None = None,
          date_format: str | None = None, show_calls: bool = True, tables=None,
-         booleans: tuple[str, str] = ("yes", "no")) -> Filled:
+         booleans: tuple[str, str] = ("yes", "no"), decimal: str = ".", locale: str | None = None) -> Filled:
     """Run the calls of a model's text and write in the exact values.
+
+    `locale="ru"` renders Russian decimal commas, scale/currency abbreviations and month names.
+    `decimal` always selects the SOURCE reader (default English decimal point); output locale never
+    reinterprets source punctuation. Use matching `check(..., locale="ru", decimal=".")` to read the
+    Russian output against English input without trusting inserted spans. None/"en" retains prior output;
+    unsupported locale names raise ValueError. No process-wide locale is changed.
 
     `source` is the input text (or its `numerals`). Each `<calc>` / `<date>` call is computed in order (`[k]` is the
     k-th input numeral's written number — "4.2 million" gives 4.2, "12.5%" gives 12.5 — or its date; `@k` an earlier
@@ -1448,11 +1568,12 @@ def fill(text: str, source: str | list[Numeral], *, answer_marker: str | None = 
     `literals` (a literal date needs `literals="any"`, or `"input"` and an input date). `tables`: the tables they
     read (a `Table`, a list of them or of rows; None: the pipe tables of `source`, `table1` first). A bool is shown as
     `booleans` ("yes" / "no")."""
-    nums = [n for n in numerals(source) if n.kind != "id"] if isinstance(source, str) else list(source)
+    _output_locale(locale)
+    nums = [n for n in numerals(source, decimal=decimal) if n.kind != "id"] if isinstance(source, str) else list(source)
     tbls = _as_tables(source if tables is None and isinstance(source, str) else tables)
     in_dates = {n.date for n in nums if isinstance(n.date, dt.date)}
     if grouping is None:
-        grouping = isinstance(source, str) and re.search(r"\d,\d{3}(?!\d)", source) is not None
+        grouping = decimal == "." and isinstance(source, str) and re.search(r"\d,\d{3}(?!\d)", source) is not None
     errors: list[str] = []
     calls: list[CallResult] = []
 
@@ -1460,8 +1581,12 @@ def fill(text: str, source: str | list[Numeral], *, answer_marker: str | None = 
         if isinstance(v, bool):
             return booleans[0] if v else booleans[1]
         if isinstance(v, Decimal):
-            return _fmt(v, digits, places, grouping)
+            if locale == 'ru':
+                return _ru_number(v, digits, places, grouping)
+            return _fmt(v, digits, places, grouping) if decimal == "." else _fmt(v, digits, places, grouping).replace(",", " ").replace(".", ",")
         if isinstance(v, dt.date):
+            if locale == 'ru' and date_format is None:
+                return _ru_date(v)
             return v.strftime(date_format) if date_format else v.isoformat()
         return str(v)
 
@@ -1479,7 +1604,7 @@ def fill(text: str, source: str | list[Numeral], *, answer_marker: str | None = 
         where = f"call @{k} <{kind}>{m.group(2).strip()}</{kind}>"
         if kind in _TOOLS:
             env = _Env(nums, calls, tbls, k, lambda d: _literal_ok(str(d), literals, constants, nums),
-                       lambda d: literals == "any" or (literals == "input" and d in in_dates))
+                       lambda d: literals == "any" or (literals == "input" and d in in_dates), decimal=decimal)
             try:
                 v, cs = _typed(kind, expr, env)
                 calls.append(CallResult(k, kind, expr, v, show(v), cells=cs))
@@ -1595,8 +1720,10 @@ def fill(text: str, source: str | list[Numeral], *, answer_marker: str | None = 
                     p = b
                     continue
                 n = nums[k - 1]
-                s = n.plain()
+                s = _ru_input(n, digits, places, grouping) if locale == 'ru' else n.plain()
                 after = seg[b:b + 1]
+                if locale == 'ru' and s.endswith('.') and after == '.':
+                    b += 1  # one abbreviation/sentence period, kept inside the inserted span
                 lead = re.match(_CUR, s)
                 if lead and before.rstrip().endswith(lead.group()):     # "$[3]" with "$1,234" → "$1,234"
                     s = s[1:].lstrip()
@@ -1714,12 +1841,43 @@ _SCALES = (10 ** 3, 10 ** 6, 10 ** 9)
 
 
 def _decimals(n: Numeral) -> int:
-    m = re.search(r"\.(\d+)", n.surface)
-    return len(m.group(1)) if m else 0
+    return max(0, -n.number.as_tuple().exponent)
+
+
+class _NumberPool(list):
+    """First pool occurrence per exact reading, preserving provenance tie breaks."""
+
+    def __init__(self, entries):
+        super().__init__(entries)
+        self.pairs, self.values = {}, {}
+        for position, entry in enumerate(self):
+            src, idx, written, value = entry
+            self.pairs.setdefault((value, written), position)
+            self.values.setdefault(value, position)
+
+    def direct(self, n, signed):
+        value, written = n.value, n.number
+        position = self.pairs.get((value, written))
+        if position is not None:
+            return (*self[position][:2], "exact")
+        if not signed:
+            position = self.pairs.get((-value, -written))
+            if position is not None:
+                return (*self[position][:2], "sign")
+        positions = [self.values.get(value)]
+        if not signed:
+            positions.append(self.values.get(-value))
+        position = min((p for p in positions if p is not None), default=None)
+        return None if position is None else (*self[position][:2], "scale_word")
 
 
 def _match_number(n: Numeral, pool, signed: bool, rescale: bool, rounding: bool):
     """(source, index, how) of the best pool entry for the number n; pool: [(source, index, written, value)]."""
+    if isinstance(pool, _NumberPool):
+        direct = pool.direct(n, signed)
+        if direct is not None or not (rescale or rounding):
+            return direct
+    # Opt-in approximate/rescaled matching retains the original full ranking.
     order = ("exact", "sign", "scale_word", "rescaled", "rounded")
     best = None
     for src, idx, written, value in pool:
@@ -1755,8 +1913,12 @@ def _sig_digits(d: Decimal) -> int:
 
 def check(text: str, source: str | list[Numeral] = "", results: Iterable = (), *, inserted: Iterable[Inserted] = (),
           constants=SMALL, signed: bool = False, rescale: bool = False, rounding: bool = False,
-          ids: Literal["skip", "check"] = "skip", errors: Iterable[str] = (), tables=None) -> Verdict:
+          ids: Literal["skip", "check"] = "skip", errors: Iterable[str] = (), tables=None, decimal: str = ".", locale: str | None = None) -> Verdict:
     """Name the source of every number in `text`.
+
+    `locale="ru"` selects a Russian OUTPUT reader (decimal comma, space/NBSP grouping,
+    Russian scales, currency and months). `decimal` independently selects source/results/table
+    punctuation. Localized inserted spans are re-read and matched against values, never trusted.
 
     A number is sourced when code wrote it (`inserted`, from `fill`), when it equals an input numeral (sign ignored
     unless `signed`; a scale word applied: "4.2 million" equals "4,200,000"), a result in `results` (`CallResult`s, or
@@ -1772,7 +1934,8 @@ def check(text: str, source: str | list[Numeral] = "", results: Iterable = (), *
     their header scale is applied to them the same way, as an addition (a number quoting a cell as written still
     matches the numeral)."""
     src_text = source if isinstance(source, str) else ""
-    nums = [n for n in numerals(source) if n.kind != "id"] if isinstance(source, str) else list(source)
+    _output_locale(locale)
+    nums = [n for n in numerals(source, decimal=decimal) if n.kind != "id"] if isinstance(source, str) else list(source)
     pool_num, pool_date = [], []
     for k, n in enumerate(nums, 1):
         if n.kind == "date":
@@ -1782,7 +1945,7 @@ def check(text: str, source: str | list[Numeral] = "", results: Iterable = (), *
     # a source text's own tables: their cells are already its numerals; only their header scale adds readings
     for t in _as_tables(tables) + ([t for t in parse_tables(src_text) if t.scale != 1] if src_text else []):
         for row in t.rows[1:]:
-            for n in numerals(" ; ".join(row[1:] if t.row_labels else row)):
+            for n in numerals(" ; ".join(row[1:] if t.row_labels else row), decimal=decimal):
                 if n.kind == "date":
                     pool_date.append(("input", 0, n.date))
                 elif n.kind == "number" and t.scale != 1 and n.unit != "%":
@@ -1810,24 +1973,52 @@ def check(text: str, source: str | list[Numeral] = "", results: Iterable = (), *
         if isinstance(r, CallResult) and r.shown:
             v = r.shown
         if isinstance(v, str):
-            for n in numerals(v):
+            for n in numerals(v, decimal=decimal, locale=locale if isinstance(r, CallResult) and r.shown else None):
                 if n.kind == "date":
                     pool_date.append(("tool", idx, n.date))
                 elif n.kind == "number":
                     pool_num.append(("tool", idx, n.number, n.value))
         for d in vals:
             pool_num.append(("tool", idx, d, d))
-    inserted = list(inserted)
+    pool_num = _NumberPool(pool_num)
+    # Sweep by start, but choose the first caller-provided span among overlaps
+    # (the public inserted iterable need not be sorted or disjoint).
+    inserted = sorted(enumerate(inserted), key=lambda pair: pair[1].start)
+    insertion_pos, overlaps = 0, []
     checks = []
-    for n in numerals(text):
+    for n in numerals(text, decimal=decimal, locale=locale):
         if n.kind == "id":
             if ids == "check":
                 ok = re.search(rf"(?<![\w]){re.escape(n.surface)}(?![\w])", src_text) is not None
                 checks.append(NumberCheck(n.surface, n.start, n.end, "id", "input" if ok else "unsourced", 0,
                                           "verbatim" if ok else ""))
             continue
-        by_code = next((i for i in inserted if i.start < n.end and n.start < i.end), None)
-        if by_code is not None:
+        while insertion_pos < len(inserted) and inserted[insertion_pos][1].start < n.end:
+            position, span = inserted[insertion_pos]
+            heapq.heappush(overlaps, (position, span))
+            insertion_pos += 1
+        while overlaps and overlaps[0][1].end <= n.start:
+            heapq.heappop(overlaps)
+        by_code = overlaps[0][1] if overlaps else None
+        if by_code is not None and locale == 'ru':
+            # Localized code spans keep their designated provenance only after
+            # the reader verifies the actual value against that source/index.
+            # A different equal-valued source cannot rescue a modified pointer.
+            target = (by_code.source, by_code.index)
+            contained = by_code.start <= n.start and n.end <= by_code.end
+            if n.kind == 'date':
+                valid = contained and any((src, idx) == target and
+                    (d == n.date or (isinstance(n.date, tuple) and isinstance(d, dt.date)
+                                     and (d.month, d.day) == n.date)) for src, idx, d in pool_date)
+            else:
+                designated = [entry for entry in pool_num if entry[:2] == target]
+                valid = contained and _match_number(n, designated, signed, rescale, rounding) is not None
+            mode, cells = modes.get(by_code.index, ("pointer", ())) if by_code.source == 'tool' else ("pointer", ())
+            checks.append(NumberCheck(n.surface, n.start, n.end, n.kind,
+                                      by_code.source if valid else 'unsourced', by_code.index if valid else 0,
+                                      mode if valid else '', cells if valid else ()))
+            continue
+        if by_code is not None and locale != 'ru':
             mode, cells = modes.get(by_code.index, ("pointer", ())) if by_code.source == "tool" else ("pointer", ())
             checks.append(NumberCheck(n.surface, n.start, n.end, n.kind, by_code.source, by_code.index, mode, cells))
             continue
@@ -1844,7 +2035,11 @@ def check(text: str, source: str | list[Numeral] = "", results: Iterable = (), *
         if hit is None and n.scale == 1 and n.number == n.number.to_integral_value():
             hit = next(((src, idx, "date_year") for src, idx, d in pool_date
                         if isinstance(d, dt.date) and d.year == abs(n.number)), None)
-        if hit is None and (_is_const(n.number, constants) if n.scale == 1 else _is_const(n.value, constants)):
+        # SMALL admits written counts, not measurements that merely compare equal to an integer.
+        # Explicit custom constant policies retain their opt-in semantics.
+        small_count = (not n.unit and n.scale == 1 and (',' if locale == 'ru' else decimal) not in n.surface)
+        if hit is None and (constants is not SMALL or small_count) and (
+                _is_const(n.number, constants) if n.scale == 1 else _is_const(n.value, constants)):
             hit = ("constant", 0, "exact")
         checks.append(_with_mode(NumberCheck(n.surface, n.start, n.end, "number", *(hit or ("unsourced", 0, ""))),
                                  modes))
@@ -1919,16 +2114,18 @@ class NumberGuard:
     date_format: str | None = None
     show_calls: bool = True
     booleans: tuple = ("yes", "no")
+    decimal: str = "."
+    locale: str | None = None
 
     def fill(self, text: str, source: str, tables=None) -> Filled:
         return fill(text, source, answer_marker=self.answer_marker, literals=self.literals, constants=self.constants,
                     digits=self.digits, places=self.places, grouping=self.grouping, date_format=self.date_format,
-                    show_calls=self.show_calls, tables=tables, booleans=self.booleans)
+                    show_calls=self.show_calls, tables=tables, booleans=self.booleans, decimal=self.decimal, locale=self.locale)
 
     def check(self, text: str, source: str, results: Iterable = (), **kw) -> Verdict:
         """Check a text that was not filled (a model typing its numbers, a native tool caller's answer)."""
         return check(text, source, results, constants=self.constants, signed=self.signed, rescale=self.rescale,
-                     rounding=self.rounding, ids=self.ids, **kw)
+                     rounding=self.rounding, ids=self.ids, decimal=self.decimal, locale=self.locale, **kw)
 
     def run(self, text: str, source: str, results: Iterable = (), tables=None) -> Outcome:
         """Fill the text, check every number left in it, apply `on_fail`. `results`: values from tools run outside
@@ -1937,9 +2134,9 @@ class NumberGuard:
         f = self.fill(text, source, tables)
         v = check(f.text, f.source_numerals, list(f.calls) + list(results), inserted=f.inserted,
                   constants=self.constants, signed=self.signed, rescale=self.rescale, rounding=self.rounding,
-                  ids=self.ids, errors=f.errors, tables=tables if tables is not None else source)
+                  ids=self.ids, decimal=self.decimal, locale=self.locale, errors=f.errors, tables=tables if tables is not None else source)
         if self.ids == "check":                                  # identifiers need the input text itself
-            idv = check(f.text, source, (), constants=self.constants, ids="check")
+            idv = check(f.text, source, (), constants=self.constants, ids="check", decimal=self.decimal, locale=self.locale)
             ids_by_span = {(c.start, c.end): c for c in idv.numbers if c.kind == "id"}
             v = Verdict([c for c in v.numbers if c.kind != "id"] + list(ids_by_span.values()), v.errors)
             v.numbers.sort(key=lambda c: c.start)

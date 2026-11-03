@@ -5,7 +5,7 @@ taken from the browser in app/api, reversible migrations, no eval / shell string
 session: three edits — a clean one, one that breaks a rule, and one whose comment tries to talk past the rules — and two
 prompts for the skill picker. Each payload goes to the command install wrote, through `sh -c` with the JSON on stdin, as
 Claude Code runs it. At the end: the stored decisions verified as a hash chain, and the audit of one, replayed against
-the rules.
+the rules. This demo opts into --record-content: full edited files and prompts are kept in the local store.
 
 Deterministic: no model, nothing downloaded. Run: uv run python examples/22_coding_agent_hooks.py"""
 import json
@@ -67,8 +67,8 @@ def main(where=None, show=print):
     for line in hooks.install(str(root), command=f"{sys.executable} -m solvi"):
         show("  " + line.replace(sys.executable, "python"))
     settings = json.loads((root / ".claude" / "settings.json").read_text())["hooks"]
-    pre = settings["PreToolUse"][0]["hooks"][0]["command"]
-    pick = settings["UserPromptSubmit"][0]["hooks"][0]["command"]
+    pre = settings["PreToolUse"][0]["hooks"][0]["command"] + " --record-content"
+    pick = settings["UserPromptSubmit"][0]["hooks"][0]["command"] + " --record-content"
     base = {"session_id": "demo", "transcript_path": str(root / "transcript.jsonl"), "cwd": str(root),
             "permission_mode": "default"}
 

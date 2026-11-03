@@ -15,6 +15,9 @@ from ...core.textin import NUMBER_WORDS as _NUM_WORDS
 MAX_SLICES = 8
 
 _CURRENCIES = {"$": "USD", "usd": "USD", "us$": "USD", "dollar": "USD", "dollars": "USD",
+               "долл": "USD", "долл.": "USD", "долл. сша": "USD", "долл сша": "USD",
+               "доллар": "USD", "доллара": "USD", "долларов": "USD",
+               "евро": "EUR", "фунт": "GBP", "фунта": "GBP", "фунтов": "GBP",
                "€": "EUR", "eur": "EUR", "euro": "EUR", "euros": "EUR",
                "£": "GBP", "gbp": "GBP", "pound": "GBP", "pounds": "GBP",
                "₽": "RUB", "rub": "RUB", "р.": "RUB", "ruble": "RUB", "rubles": "RUB", "rouble": "RUB", "roubles": "RUB",
@@ -67,8 +70,8 @@ class Reading:
     ambiguous: str = ""   # why the number cannot be read without a guess
 
 
-_NEXT_NUMBER = re.compile(r"\s?[-−]?\d")
-_SIGNED_CUR = re.compile(r"(?<![\w.,/])[-−]\s?(?P<cur>[$€£₽¥])\s?$")
+_NEXT_NUMBER = re.compile(r"\s?[-−–]?\d")
+_SIGNED_CUR = re.compile(r"(?<![\w.,/])[-−–]\s?(?P<cur>[$€£₽¥])\s?$")
 
 
 def _cur_after(source, e):
@@ -83,7 +86,7 @@ def _read(source, m, decimal=None):
     cur = m.group("cur")
     unit, amb = "", ""
     neg = None if cur else _SIGNED_CUR.search(source, max(0, s - 4), s)     # "-$45 million": a negative amount
-    if neg is not None and m.group("d") is not None and m.group("d")[:1] not in "-−+":
+    if neg is not None and m.group("d") is not None and m.group("d")[:1] not in "-−–+":
         cur, s = neg.group("cur"), neg.start()
     else:
         neg = None
@@ -94,7 +97,7 @@ def _read(source, m, decimal=None):
             v = _digits(d, decimal)
         except ParseError as err:
             v, amb = None, str(err)
-        if " " in d.replace(" ", " ").replace(" ", " ") and not cur and not m.group("s1") and not after_cur:
+        if " " in d.replace(" ", " ").replace(" ", " ") and decimal != "," and not cur and not m.group("s1") and not after_cur:
             amb = f"{d!r}: digits grouped by spaces without a currency may be two numbers"
         sc = m.group("s1")
         if sc and len(sc) == 1 and m.group("sp") and not cur:
@@ -104,7 +107,9 @@ def _read(source, m, decimal=None):
         after_cur = _cur_after(source, e)
     if v is not None and sc:
         v = v * _SCALES[sc.lower()]
-    if v is not None and neg is not None:
+    if m.group("csign") and m.group("d") and m.group("d")[:1] in "-−–+":
+        v, amb = None, "multiple signs around a currency"
+    if v is not None and (neg is not None or m.group("csign")):
         v = -v
     if m.group("pct"):
         unit = "%"
@@ -152,11 +157,11 @@ class SourceIndex:
         return self.source[a:m.end() if m else len(self.source)]
 
 
-_POWERS = {Decimal(10) ** k for k in (-9, -6, -3, 3, 6, 9)}
+_POWERS = {Decimal(10) ** k for k in (-12, -9, -6, -3, 3, 6, 9, 12)}
 
 
 def spec_scale_name(mult):
-    return {10 ** 3: "thousand", 10 ** 6: "million", 10 ** 9: "billion"}.get(int(mult), "as is")
+    return {10 ** 3: "thousand", 10 ** 6: "million", 10 ** 9: "billion", 10 ** 12: "trillion"}.get(int(mult), "as is")
 
 
 def _plain_digits(s):
@@ -421,7 +426,7 @@ def _unit_problem(r, u):
 
 
 def _unit_suffix(u, scale):
-    sc = {"thousand": " thousand", "million": " million", "billion": " billion"}.get(scale, "")
+    sc = {"thousand": " thousand", "million": " million", "billion": " billion", "trillion": " trillion"}.get(scale, "")
     if u == "%":
         return "%"
     return f"{sc} {u}".rstrip() if u else sc

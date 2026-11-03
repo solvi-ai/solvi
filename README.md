@@ -32,7 +32,53 @@ pip install "solvi[smt]"       # + z3-solver: narrows / widens of a rule change 
 
 Requires Python 3.11+ (tested on 3.11–3.14). Coming from 0.9: see [below](#coming-from-09).
 
-## Start
+Intel macOS with Python 3.12 can resolve an older torch whose Dynamo reports
+`Dynamo is not supported on Python 3.12+` while ModernBERT loads. The torch decider retries that specific load error
+with compilation disabled and restores `torch.compile` afterwards. Set `SOLVI_NO_COMPILE=1` before loading to disable
+compilation explicitly. This fallback is tested with a simulated encoder loader; this Intel Mac configuration has
+not been tested on actual hardware.
+
+## Quickstart (offline)
+
+No model, API key or download is needed after installing the core package. A hard check overrides the rule:
+
+```python
+from solvi import Answer, Catalog, Question, System
+cat = Catalog()
+
+@cat.check(hard=True, then={"refund": "reject"})
+def within_window(days_since_purchase):
+    return days_since_purchase <= 30
+
+@cat.rule("refund")
+def refund(amount):
+    return "approve" if amount <= 200 else "review"
+q = Question("refund", "Refund?", Answer.choice(["approve", "review", "reject"]))
+system = System(cat, [q])
+for days in (7, 45):
+    res = system.ask({"days_since_purchase": days, "amount": 50})
+    print(res["refund"].answer, res["refund"].status, res.trace.replay(system)["ok"])
+```
+
+Output:
+
+```
+approve ok True
+reject forced True
+```
+
+For a project with passing cases and its own CI workflow:
+
+```bash
+solvi init refunds-demo --template refunds
+solvi test refunds-demo
+solvi ask refunds-demo/catalog.py:system refunds-demo/example.json --json
+```
+
+`solvi --help` shows six entry commands; `solvi --all-help` lists every command. Secondary commands remain available
+by name, with their own `--help`.
+
+## Ready systems
 
 ### Documents: `solvi.document`
 
@@ -400,7 +446,7 @@ CORD and loads with `LongSpanExtractor.load("solvi-ai/extract-receipts")` (its c
 ### Experimental (`solvi.experimental`)
 
 Pieces that work and are tested but have not yet shown a measured gain. Importing one warns (`ExperimentalWarning`),
-a decision that used one records it, and each one graduates or is removed by 1.2; `solvi.experimental.STATUS` and
+a decision that used one records it, and each one may graduate or be removed in a future release; `solvi.experimental.STATUS` and
 [docs/experimental.md](https://github.com/solvi-ai/solvi/blob/main/docs/experimental.md) say what each is missing.
 
 - **A policy text compiled into the catalog** (`solvi.experimental.compile`). An LLM writes plain functions, hard checks

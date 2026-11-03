@@ -29,7 +29,7 @@ def hills():
 
 def test_a_default_is_judged_on_the_rows_its_exceptions_leave_it():
     g, b = hills()
-    ls = LawSet(g, base=lambda s, a: 0, sized=False)
+    ls = LawSet(g, base=lambda s, a: 0, sized=False, support_on="applied")
     ls.add(Candidate("food", ("center", "hills"), 2))                 # the exception, already known
     c = Candidate("food", ("hills",), 1)                               # the default
     assert ls.score(c, b, exclude="A") == (45, 45, 45)                 # was (55, 45, 45): precision 0.818
@@ -47,7 +47,7 @@ def test_a_default_is_judged_on_the_rows_its_exceptions_leave_it():
 
 def test_acceptance_precision_is_the_first_checks_precision():
     g, b = hills()
-    ls = LawSet(g, base=lambda s, a: 0, sized=False)
+    ls = LawSet(g, base=lambda s, a: 0, sized=False, support_on="applied")
     ls.add(Candidate("food", ("center", "hills"), 2))
     law = ls.test([Candidate("food", ("hills",), 1)], b, exclude="A")[0]
     ls.check(b, "food")
@@ -211,7 +211,7 @@ def test_ties_newer_scores_a_candidate_on_the_rows_it_would_take_from_an_equal_l
         b.add(Transition({"wood": w, "i": i}, "table", "table" if w >= 3 else "none", group=i % 3))
     c = Candidate("table", ("w3",), "table")
     for ties, expect in (("earlier", (0, 0, 0)), ("newer", (15, 15, 15))):
-        ls = LawSet(g, base=lambda s, a: None, ties=ties, sized=False)
+        ls = LawSet(g, base=lambda s, a: None, ties=ties, sized=False, support_on="applied")
         ls.add(Candidate("table", ("w2",), "none"))
         assert ls.score(c, b) == expect
     ls = LawSet(g, base=lambda s, a: None, ties="newer")
@@ -282,8 +282,9 @@ def or_world_trials(**kw):
 
 
 def test_with_two_laws_missing_the_witnesses_stop_most_wrong_admissions():
-    assert or_world_trials(assume_one_law=True) == (100, 29)            # the old rule: 29 of 100 wrong
-    acc, wrong = or_world_trials()
+    # Preserve the measured witness-only comparison; leftover falsification is a separate gate.
+    assert or_world_trials(assume_one_law=True, falsify=None) == (100, 29)            # the old rule: 29 of 100 wrong
+    acc, wrong = or_world_trials(falsify=None)
     assert wrong <= 6 and acc >= 70                                      # measured: 77 accepted, 6 wrong
 
 

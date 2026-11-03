@@ -11,7 +11,9 @@ so it ever reaches S/alpha (S declared slices, Bonferroni) with probability at m
 watch, a change that keeps every slice's promise is reverted with probability at most alpha — at any stopping time, no
 fixed sample size, outcomes read after every use. When a slice's K_s reaches S/alpha, the watched version — and only it
 — is undone through Pipeline.revert (rollback(v) undoes every later version too) and the event is journaled
-with Pipeline.observe. After `horizon` alone outcomes without that, the watch ends ("graduated").
+with Pipeline.observe. Only an effective active item or the latest snapshot can be watched. If it is superseded,
+the next observe ends the watch without reading that outcome or reverting a successor. After `horizon` alone
+outcomes without that, the watch ends ("graduated").
 
 Outcomes taken under supervision (alone=False: a person or another check decided) are counted, not bet on. A slice
 that was not declared raises: alpha was split over the declared ones. Limits: one version per watch (a watch per
@@ -36,7 +38,10 @@ class ShipWatch:
     outcome="loss": observe(x, ...) takes a numeric loss x in [0, 1] and each slice runs a bounded betting e-process
     (experimental._evalue.MeanBound) against "the slice's mean loss is at most its promise" ("failures" then
     counts losses above the promise).
-    `observe(ok, slice=None, *, alone=True)` → None | {"event": "reverted" | "graduated" | "ended", ...};
+    `observe(ok, slice=None, *, alone=True)` → None | {"event": "reverted" | "graduated" | "ended" | "superseded", ...};
+    Only an effective active item or the latest snapshot of an artifact can be watched. A newer snapshot or
+    an inactive item ends the watch as "superseded" before its next outcome is counted; external rollback ends it
+    as "ended". Neither path rolls back another version. The terminal event is journaled on the next observe call.
     `status()` → per slice {promise, outcomes, failures, supervised, evidence (log K), threshold (log S/alpha)}."""
 
     def __init__(self, pipe, version: int, promise, *, slices=None, alpha: float = 0.05, horizon: int | None = None,
@@ -59,9 +64,10 @@ class ShipWatch:
             raise ValueError("alpha is a probability strictly between 0 and 1")
         if horizon is not None and (isinstance(horizon, bool) or not isinstance(horizon, int) or horizon < 1):
             raise ValueError("horizon is a whole number of alone outcomes >= 1, or None")
-        rec = next((v for v in pipe.versions() if v["version"] == version), None)
-        if rec is None or not rec["in_force"]:
-            raise KeyError(f"version {version} is not a version in force")
+        unavailable = pipe._watch_unavailable(version)
+        if unavailable:
+            raise KeyError(f"version {version} is not watchable: {unavailable[1]}")
+        rec = next(v for v in pipe.versions() if v["version"] == version)
         self.pipe, self.version, self.change = pipe, version, rec["change"]
         self.promise, self.alpha, self.horizon, self.by, self.act = proms, float(alpha), horizon, by, bool(act)
         self.threshold = math.log(len(proms) / self.alpha)
@@ -82,6 +88,9 @@ class ShipWatch:
         """One outcome of the watched change in `slice` → None, or the event that ended the watch."""
         if not self.active:
             return None
+        unavailable = self.pipe._watch_unavailable(self.version)
+        if unavailable:
+            return self._end(*unavailable)
         if slice not in self.state:
             raise KeyError(f"slice {slice!r} was not declared (declared: {sorted(map(str, self.state))})")
         st = self.state[slice]
@@ -112,6 +121,9 @@ class ShipWatch:
                     "threshold": round(self.threshold, 6)} for s, st in self.state.items()}
 
     def _revert(self, slice_, why):
+        unavailable = self.pipe._watch_unavailable(self.version)
+        if unavailable:
+            return self._end(unavailable[0], f"{unavailable[1]}; {why}", slice=slice_)
         if not self.act:
             return self._end("reverted", why, slice=slice_, undone=None)
         in_force = {v["version"] for v in self.pipe.versions() if v["in_force"]}

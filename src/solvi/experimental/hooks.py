@@ -3,10 +3,10 @@
     solvi hook install   [--project DIR] [--agent claude|codex|both] [--rules PATH] [--skills-dir DIR] [--no-skills]
                          [--no-edits] [--decider MODEL] [--approve] [--command CMD] [--dry-run]
     solvi hook uninstall [--project DIR] [--agent claude|codex|both] [--dry-run]
-    solvi hook pre-edit  --rules rules.toml [--decider MODEL] [--store PATH | --no-store] [--approve] [--agent claude|codex]
+    solvi hook pre-edit  --rules rules.toml [--decider MODEL] [--record-content] [--store PATH] [--no-store] [--approve] [--agent claude|codex]
                          [--no-instruction-check] [--project DIR]                       (PreToolUse: Edit|Write|MultiEdit)
-    solvi hook pick-skill --skills-dir .claude/skills [--decider MODEL] [--min-score 1.5] [--margin 0.25] [--store PATH |
-                         --no-store] [--project DIR]                                    (UserPromptSubmit)
+    solvi hook pick-skill --skills-dir .claude/skills [--decider MODEL] [--min-score 1.5] [--margin 0.25] [--min-shared 2]
+                         [--record-content] [--store PATH] [--no-store] [--project DIR]                                    (UserPromptSubmit)
     solvi hook audit [ID] [--rules rules.toml] [--store PATH]        (a stored decision: its audit; its replay on the rules)
     solvi hook sample-rules                                                             (print the sample rules file)
 
@@ -33,17 +33,22 @@ read comments as instructions, this only tells a person that someone tried.
 The answer goes back in the documented form: `permissionDecision` "deny" with the rule, the lines and the reason (Claude
 sees it and can fix the change), "ask" (the user confirms; Codex cannot ask, so there it is a deny that says a person must
 confirm), and for "allow" nothing — Claude Code's own permission rules still apply — or, with --approve, an explicit
-"allow" that skips the permission prompt. A crash of the hook asks rather than allows.
+"allow" for checked project edits outside .claude/.codex/.git that skips the permission prompt. Other paths and
+non-edit tools retain the client permission flow. A crash of the hook asks rather than allows.
 
 `pick-skill` reads the skills (`<dir>/<skill>/SKILL.md`: `name` and `description` in the front matter) and the prompt, and
 picks one skill or none: deterministically by the words the prompt shares with each skill's name and description (weighted
-by how rare they are among the skills), or with --decider by a decider's choice over the skills and "none". When it picks one
+by how rare they are among the skills), requiring at least two independent shared stems by default. One shared word
+does not auto-route; --min-shared=1 opts into the older heuristic. With --decider by a decider's choice over the skills and "none". When it picks one
 it adds a short context line naming the skill (`additionalContext`); on "none", a near tie or a slash command it stays
 silent.
 
-Every decision is stored with its trace in a TraceStorage — by default `.solvi/traces/hooks.jsonl` in the project — so
-`solvi verify`, `solvi report` and `TraceStorage.query` work on it. The store keeps the proposed change and the prompt
-(the decision rests on them): keep `.solvi/` out of version control.
+CLI content storage is off by default, including installed hooks. Explicit --record-content enables TraceStorage
+(default path `.solvi/traces/hooks.jsonl`); --no-store takes precedence. --store only chooses the path and does not
+opt in. Recording enables replay, `solvi verify`, `solvi report` and `TraceStorage.query`, but copies the full file
+after the edit and prompt, including existing secrets even on allowed edits. Without recording there is no stored
+trace to replay or audit. Keep recorded content out of version control; rule-triggered redaction is not a general
+secret scrubber. Direct Python callers explicitly opt in by passing store= to decide_change/pick_skill.
 
 --decider (0.7: --model, removed in 0.9) takes what `solvi models` does: a local checkpoint folder or a cached Hugging Face id (never downloaded), an
 OpenAI-compatible endpoint `llm:URL#model` (key in $SOLVI_LLM_API_KEY), a System One service `systemone:URL#model` (key in
@@ -59,6 +64,8 @@ Exit status: 0 — the decision is on stdout (or nothing to say); install / unin
 from __future__ import annotations
 
 import json
+import base64
+import hashlib
 import os
 import re
 import sys
@@ -70,7 +77,7 @@ warn_on_import(__name__)
 HOOK_STORE = os.path.join(".solvi", "traces", "hooks.jsonl")
 DEFAULT_RULES = os.path.join(".claude", "solvi-rules.toml")
 DEFAULT_SKILLS = os.path.join(".claude", "skills")
-EDIT_TOOLS = ("Edit", "Write", "MultiEdit", "apply_patch")
+EDIT_TOOLS = ("Edit", "Write", "MultiEdit", "NotebookEdit", "apply_patch")
 OUTCOMES = ("allow", "deny", "ask")
 RULE_KEYS = {"id", "paths", "why", "forbid", "require", "forbid_calls", "require_def", "question", "when", "on_fail",
              "calibration", "redact"}
@@ -173,12 +180,38 @@ def project_root(payload=None, explicit=None):
         d = up
 
 
+class _RulePath(str):
+    """A path carrying the case semantics of its nearest existing ancestor."""
+
+
+def _case_insensitive(path):
+    # Read-only probe: a differently spelled, unlisted name resolving to the same
+    # inode proves case-insensitive lookup. Distinct Linux names stay distinct.
+    current = os.path.abspath(path)
+    while current != os.path.dirname(current):
+        parent, name = os.path.split(current)
+        alternate = name.swapcase()
+        try:
+            if alternate != name and alternate not in os.listdir(parent):
+                if os.path.samefile(current, os.path.join(parent, alternate)):
+                    return True
+        except OSError:
+            pass
+        current = parent
+    return False
+
+
 def relpath(path, root):
-    """A file path → project-relative with "/" (an absolute path outside the project stays absolute). Symbolic links
-    are resolved, so a file reached through a linked folder is matched by the rules of where it really is."""
+    """Resolve links and retain the actual filesystem's case matching semantics."""
     p = os.path.realpath(os.path.join(root, path.replace("\\", "/")))
-    r = os.path.relpath(p, os.path.realpath(root))
-    return p.replace(os.sep, "/") if r.startswith("..") else r.replace(os.sep, "/")
+    base = os.path.realpath(root)
+    insensitive = _case_insensitive(p)
+    # relpath itself is lexical on POSIX, including case-insensitive macOS volumes.
+    r = os.path.relpath(p.casefold() if insensitive else p, base.casefold() if insensitive else base)
+    outside = r == os.pardir or r.startswith(os.pardir + os.sep)
+    result = _RulePath((p if outside else r).replace(os.sep, "/"))
+    result.case_insensitive = insensitive
+    return result
 
 
 # --------------------------------------------------------------------------------------------------- rules
@@ -211,7 +244,12 @@ class Rule:
     def applies(self, path):
         inc = [p for p in self.paths if not p.startswith("!")]
         exc = [p[1:] for p in self.paths if p.startswith("!")]
-        return any(glob_regex(p).match(path) for p in inc) and not any(glob_regex(p).match(path) for p in exc)
+        def matches(pattern):
+            regex = glob_regex(pattern)
+            if getattr(path, "case_insensitive", False):
+                regex = re.compile(regex.pattern, re.IGNORECASE)
+            return regex.match(path)
+        return any(matches(p) for p in inc) and not any(matches(p) for p in exc)
 
     def triggered(self, added):
         """Added lines matching `when` (all non-blank added lines without it): where the question is asked."""
@@ -337,10 +375,21 @@ def added_lines(before, after):
     """Lines of `after` that are not in `before` (a line diff) → [[line number in after, text]]."""
     import difflib
     a, b = before.splitlines(), after.splitlines()
+    start = 0
+    while start < min(len(a), len(b)) and a[start] == b[start]:
+        start += 1
+    ae, be = len(a), len(b)
+    while ae > start and be > start and a[ae - 1] == b[be - 1]:
+        ae -= 1
+        be -= 1
+    # Bound SequenceMatcher's quadratic worst case. Conservatively treating the
+    # entire unmatched middle as added may yield false positives, never omissions.
+    if (ae - start) * (be - start) > 250_000:
+        return [[j + 1, b[j]] for j in range(start, be)]
     out = []
-    for op, _, _, j1, j2 in difflib.SequenceMatcher(None, a, b, autojunk=False).get_opcodes():
+    for op, _, _, j1, j2 in difflib.SequenceMatcher(None, a[start:ae], b[start:be], autojunk=False).get_opcodes():
         if op in ("replace", "insert"):
-            out += [[j + 1, b[j]] for j in range(j1, j2)]
+            out += [[j + start + 1, b[j + start]] for j in range(j1, j2)]
     return out
 
 
@@ -424,6 +473,29 @@ def changes_of(payload, root):
     ti = payload.get("tool_input") or {}
     if not isinstance(ti, dict):
         raise ValueError("tool_input is not an object")
+    if tool == "NotebookEdit":
+        # Official NotebookEdit fields; do not infer cell indices or reconstruct
+        # notebook JSON/output metadata from a source-only preview.
+        known = {"notebook_path", "new_source", "cell_id", "cell_type", "edit_mode"}
+        if set(ti) - known:
+            raise ValueError("NotebookEdit: unknown fields; incomplete preview")
+        fp, source = ti.get("notebook_path"), ti.get("new_source")
+        mode = ti.get("edit_mode", "replace")
+        if not isinstance(fp, str) or not os.path.isabs(fp):
+            raise ValueError("NotebookEdit: notebook_path must be absolute")
+        if not isinstance(source, str):
+            raise ValueError("NotebookEdit: new_source must be a string")
+        if mode not in ("replace", "insert", "delete"):
+            raise ValueError("NotebookEdit: unknown edit_mode")
+        if "cell_id" in ti and (not isinstance(ti["cell_id"], str) or not ti["cell_id"]):
+            raise ValueError("NotebookEdit: cell_id must be a nonempty string")
+        if mode != "insert" and "cell_id" not in ti:
+            raise ValueError("NotebookEdit: cell_id required for replace/delete")
+        if ("cell_type" in ti or mode == "insert") and ti.get("cell_type") not in ("code", "markdown"):
+            raise ValueError("NotebookEdit: cell_type must be code or markdown")
+        if os.path.isdir(fp):
+            raise ValueError("NotebookEdit: notebook_path is a directory")
+        return [Change(tool, relpath(fp, root), added_lines("", source), None, lines="new text")]
     patch = next((v for v in ti.values() if isinstance(v, str) and "*** Begin Patch" in v), None)
     if patch is not None:
         return _patch_changes(tool or "apply_patch", patch, root)
@@ -431,8 +503,16 @@ def changes_of(payload, root):
     if not isinstance(fp, str) or not fp:
         raise ValueError(f"{tool or 'the tool'}: no file_path in tool_input")
     abs_path = os.path.abspath(os.path.join(root, fp))
+    if os.path.isdir(abs_path):
+        raise ValueError(f"{tool}: file_path is a directory")
     rel = relpath(fp, root)
     cur = _read(abs_path)
+    for fields in [ti] + (ti["edits"] if isinstance(ti.get("edits"), list) else []):
+        if not isinstance(fields, dict):
+            raise ValueError(f"{tool}: each edit must be an object")
+        for key in ("old_string", "new_string", "content"):
+            if key in fields and not isinstance(fields[key], str):
+                raise ValueError(f"{tool}: {key} must be a string")
     if tool == "Write" or ("content" in ti and "old_string" not in ti and "edits" not in ti):
         content = ti.get("content") if isinstance(ti.get("content"), str) else ""
         return [Change(tool or "Write", rel, added_lines(cur or "", content), content)]
@@ -443,7 +523,6 @@ def changes_of(payload, root):
         edits = [(ti.get("old_string", ""), ti.get("new_string", ""), bool(ti.get("replace_all")))]
     else:
         raise ValueError(f"{tool}: no content, new_string or edits in tool_input")
-    edits = [(o if isinstance(o, str) else "", n if isinstance(n, str) else "", r) for o, n, r in edits]
     result = _apply(cur, edits) if cur is not None else (_apply("", edits) if all(o == "" for o, _, _ in edits) else None)
     if result is None:
         return [Change(tool, rel, _loose(edits), None, lines="new text")]
@@ -461,13 +540,16 @@ def _patch_changes(tool, patch, root):
             content = "\n".join(ln[1:] if ln.startswith("+") else ln for ln in lines) + "\n"
             out.append(Change(tool, rel, added_lines("", content), content))
         else:
+            if move_to:
+                out.append(Change(tool, relpath(path, root), [], None, deleted=True))
             cur = _read(os.path.abspath(os.path.join(root, path)))
             result = _apply_hunks(cur, lines) if cur is not None else None
             if result is None:
                 plus = [ln[1:] for ln in lines if ln.startswith("+")]
                 out.append(Change(tool, rel, [[i + 1, t] for i, t in enumerate(plus)], None, lines="new text"))
             else:
-                out.append(Change(tool, rel, added_lines(cur, result), result))
+                # A move writes the whole file at its destination, including unchanged source lines.
+                out.append(Change(tool, rel, added_lines("" if move_to else cur, result), result))
     if not out:
         raise ValueError("apply_patch: no file sections in the patch")
     return out
@@ -878,6 +960,8 @@ def pre_edit(payload, rules, root, model=None, store=None, instructions=True):
     results = []
     for ch in changes_of(payload, root):
         o, why, _, sid = decide_change(rules, ch, model, instructions, store, meta)
+        if tool == "NotebookEdit" and o == "allow":
+            o, why = "ask", ["NotebookEdit: only cell source is previewed; full notebook result is not known; a person confirms"]
         results.append((ch, o, why, sid))
     return _summary(results)
 
@@ -899,7 +983,7 @@ def cmd_pre_edit(a):
     try:
         root = project_root(payload, a.project)
         rules = load_rules(a.rules if os.path.isabs(a.rules) else os.path.join(root, a.rules))
-        store = None if a.no_store else open_store(a.store, root)
+        store = open_store(a.store, root) if a.record_content and not a.no_store else None
         outcome, text, results = pre_edit(payload, rules, root, _model(a.model), store, not a.no_instruction_check)
         ids = [sid for *_, sid in results if sid]
         if ids and outcome != "allow":
@@ -908,7 +992,13 @@ def cmd_pre_edit(a):
     except (Exception, SystemExit) as e:  # noqa: BLE001 — a policy hook that crashes (or a model file that exits) must
         # not let the edit through silently
         outcome, text = "ask", f"solvi hook pre-edit could not check this edit ({type(e).__name__}: {e}); a person decides"
-    out = _decision_json(outcome, text if outcome != "allow" else "solvi: no rule objects", a.agent, a.approve)
+    # Approval is limited to checked project edits. Outside paths and control
+    # directories retain the client's permission flow, including explicit rules.
+    approve = a.approve and outcome == "allow" and bool(results) and all(
+        not os.path.isabs(ch.path) and ch.path.split("/", 1)[0].casefold() not in {".claude", ".codex", ".git"}
+        for ch, *_ in results
+    )
+    out = _decision_json(outcome, text if outcome != "allow" else "solvi: no rule objects", a.agent, approve)
     if out is not None:
         print(json.dumps(out, ensure_ascii=False))
     return 0
@@ -1001,28 +1091,31 @@ def _skill_scores(spec):
             hit = sorted(p & (nt | dt))
             s = sum(math.log(1 + len(toks) / df[w]) * (2 if w in nt else 1) for w in hit)
             out[n] = [round(s, 4), [said.get(w, w) for w in hit]]
-        return {"scores": out, "min_score": cfg["min_score"], "margin": cfg["margin"]}
+        return {"scores": out, "min_score": cfg["min_score"], "margin": cfg["margin"], "min_shared": cfg.get("min_shared", 2)}
     return skill_scores
 
 
 def skill_rule(skill_scores):
-    """The best skill when it reaches min_score and leads the next by more than margin; "none" below min_score; a near
-    tie abstains (nothing is said)."""
+    """The best skill needs min_score and min_shared independent stems. A near tie
+    abstains; one shared stem is insufficient by default, even with high rarity."""
     ranked = sorted(skill_scores["scores"].items(), key=lambda kv: -kv[1][0])
-    if not ranked or ranked[0][1][0] < skill_scores["min_score"]:
+    if (not ranked or ranked[0][1][0] < skill_scores["min_score"]
+            or len(ranked[0][1][1]) < skill_scores.get("min_shared", 2)):
         return "none"
     if len(ranked) > 1 and ranked[1][1][0] >= ranked[0][1][0] * (1 - skill_scores["margin"]):
         return None
     return ranked[0][0]
 
 
-def skill_system(skills, model=None, min_score=1.5, margin=0.25, calibration=None):
+def skill_system(skills, model=None, min_score=1.5, margin=0.25, calibration=None, min_shared=2):
     from ..core.catalog import Answer, Catalog, Question
     from ..core.system import System
+    if isinstance(min_shared, bool) or not isinstance(min_shared, int) or min_shared < 1:
+        raise ValueError("min_shared must be a positive integer")
     cat = Catalog()
     names = [n for n, _ in skills]
     if model is None:
-        f = _skill_scores(json.dumps({"min_score": min_score, "margin": margin}, sort_keys=True))
+        f = _skill_scores(json.dumps({"min_score": min_score, "margin": margin, "min_shared": min_shared}, sort_keys=True))
         cat.fn(f)
         cat.rule("skill")(skill_rule)
     else:
@@ -1037,9 +1130,9 @@ def skill_system(skills, model=None, min_score=1.5, margin=0.25, calibration=Non
                 "hooks")
 
 
-def pick_skill(prompt, skills, model=None, min_score=1.5, margin=0.25, calibration=None, store=None, meta=None):
+def pick_skill(prompt, skills, model=None, min_score=1.5, margin=0.25, calibration=None, store=None, meta=None, min_shared=2):
     """→ (the skill's name or None, the response, stored id)."""
-    system = skill_system(skills, model, min_score, margin, calibration)
+    system = skill_system(skills, model, min_score, margin, calibration, min_shared)
     res = system.ask({"prompt": prompt, "skills": skills})
     r = res["skill"]
     pick = r.answer if r.status in ("ok", "forced") and r.answer != "none" else None
@@ -1060,16 +1153,18 @@ def cmd_pick_skill(a):
     payload = _payload()
     try:
         prompt = payload.get("prompt") or ""
-        if not isinstance(prompt, str) or not prompt.strip() or prompt.lstrip().startswith("/"):
+        if not isinstance(prompt, str) or not prompt.strip():
+            return 0
+        if re.fullmatch(r"/[A-Za-z][\w:-]*", prompt.split()[0]):
             return 0
         root = project_root(payload, a.project)
         dirs = [d if os.path.isabs(d) else os.path.join(root, d) for d in (a.skills_dir or [DEFAULT_SKILLS])]
         skills = read_skills(dirs)
         if not skills:
             return 0
-        store = None if a.no_store else open_store(a.store, root)
+        store = open_store(a.store, root) if a.record_content and not a.no_store else None
         meta = {k: payload[k] for k in ("session_id", "prompt_id") if payload.get(k)}
-        pick, res, _ = pick_skill(prompt, skills, _model(a.model), a.min_score, a.margin, a.calibration, store, meta)
+        pick, res, _ = pick_skill(prompt, skills, _model(a.model), a.min_score, a.margin, a.calibration, store, meta, min_shared=a.min_shared)
         if pick is None:
             return 0
         print(json.dumps({"hookSpecificOutput": {"hookEventName": "UserPromptSubmit",
@@ -1163,11 +1258,15 @@ MARK = re.compile(r"(^|[\s/\\'\"])(solvi|-m\s+solvi)['\"]?\s+hook\s+(pre-edit|pi
 _PRINTS = {"echo", "printf", "grep", "cat", "true", "false", "test", ":"}   # commands that only mention solvi's words
 
 
-def _ours(handler):
+def _ours(handler, commands=None):
     """Is a hook handler one that solvi installed? Its command runs `solvi hook pre-edit | pick-skill` — as words of
     the command line (`solvi`, a path to it, `python -m solvi`, behind a launcher such as `uv run`), not inside a
     quoted argument, and not as the arguments of a command that only prints or searches ("echo solvi hook pre-edit")."""
     cmd = handler.get("command") if isinstance(handler, dict) else None
+    # New installs keep exact command identity in the sidecar, outside client
+    # schemas. An edited command belongs to the user, even if MARK matches it.
+    if commands is not None:
+        return isinstance(cmd, str) and cmd in commands
     if not isinstance(cmd, str) or not MARK.search(cmd):
         return False
     import shlex
@@ -1195,10 +1294,16 @@ def _load_json(path):
         raise SettingsError(f"{path} is not JSON ({e}); fix it or move it away, nothing was changed") from None
     if not isinstance(d, dict):
         raise SettingsError(f"{path} is not a JSON object; nothing was changed")
+    if "hooks" in d:
+        if not isinstance(d["hooks"], dict):
+            raise SettingsError(f"{path}: hooks must be an object; nothing was changed")
+        for event, groups in d["hooks"].items():
+            if not isinstance(groups, list):
+                raise SettingsError(f"{path}: hooks.{event} must be a list; nothing was changed")
     return d
 
 
-def _strip(settings):
+def _strip(settings, commands=None):
     """Remove solvi's handlers → (settings, [(event, matcher, command)] removed); empty groups and events go too."""
     hooks = settings.get("hooks")
     removed = []
@@ -1213,11 +1318,11 @@ def _strip(settings):
             if not isinstance(g, dict) or not isinstance(g.get("hooks"), list):
                 keep.append(g)
                 continue
-            hs = [h for h in g["hooks"] if not _ours(h)]
-            removed += [(ev, g.get("matcher", ""), h["command"]) for h in g["hooks"] if _ours(h)]
+            hs = [h for h in g["hooks"] if not _ours(h, commands)]
+            removed += [(ev, g.get("matcher", ""), h["command"]) for h in g["hooks"] if _ours(h, commands)]
             if hs:
                 keep.append(dict(g, hooks=hs))
-            elif not any(_ours(h) for h in g["hooks"]):
+            elif not any(_ours(h, commands) for h in g["hooks"]):
                 keep.append(g)
         if keep:
             hooks[ev] = keep
@@ -1233,22 +1338,90 @@ def _count(settings):
     return sum(len(g.get("hooks", [])) for gs in hooks.values() if isinstance(gs, list) for g in gs if isinstance(g, dict))
 
 
+
+def _ownership(root):
+    path = os.path.join(root, ".solvi-hook-install.json")
+    if not os.path.exists(path):
+        return path, {"files": {}, "dirs": []}
+    try:
+        with open(path, encoding="utf-8") as fh:
+            data = json.load(fh)
+        if not isinstance(data.get("files"), dict) or not isinstance(data.get("dirs"), list):
+            raise ValueError("invalid ownership journal")
+    except (ValueError, AttributeError):
+        raise SettingsError(f"{path}: invalid ownership journal; nothing was changed") from None
+    return path, data
+
+
+def _bytes(path):
+    try:
+        with open(path, "rb") as fh:
+            return fh.read()
+    except FileNotFoundError:
+        return None
+
+
+def _digest(data):
+    return hashlib.sha256(data).hexdigest() if data is not None else None
+
+
+def _own(data, path, agent, original):
+    entry = data["files"].get(path)
+    if entry is None:
+        entry = data["files"][path] = {
+            "original": base64.b64encode(original).decode("ascii") if original is not None else None,
+            "owners": []}
+    if agent not in entry["owners"]:
+        entry["owners"].append(agent)
+    entry["digest"] = _digest(_bytes(path))
+
+
+def _owned_mkdir(data, directory):
+    missing = []
+    while not os.path.exists(directory):
+        missing.append(directory)
+        directory = os.path.dirname(directory)
+    for directory in reversed(missing):
+        os.mkdir(directory)
+        data["dirs"].append(directory)
+
+
+def _save_ownership(path, data):
+    if data["files"]:
+        with open(path + ".tmp", "w", encoding="utf-8") as fh:
+            json.dump(data, fh)
+        os.replace(path + ".tmp", path)
+    elif os.path.exists(path):
+        os.unlink(path)
+
+
 def install(root, agent="claude", rules=DEFAULT_RULES, skills_dirs=None, edits=True, skills=True, model=None,
             approve=False, command=None, dry_run=False):
     """Write solvi's hook entries into the project's settings (.claude/settings.json; Codex: .codex/hooks.json), merged
     with what is there: other hooks and settings are kept, solvi's own entries are replaced. Writes the sample rules
-    file when the rules file does not exist. → the lines it prints."""
+    file when the rules file does not exist. Refuses the home directory (including aliases)
+    before changing anything: only project-local installs are supported. → the lines it prints."""
+    if os.path.realpath(root) == os.path.realpath(os.path.expanduser("~")):
+        raise SettingsError("refusing project hook install in the home directory; choose --project DIR")
     path = _settings_path(root, agent)
     settings = _load_json(path)
+    journal, ownership = _ownership(root)
+    original = _bytes(path)
+    prior = ownership["files"].get(path)
     before = _count(settings)
-    settings, removed = _strip(settings)
+    settings, removed = _strip(settings, prior.get("commands") if prior is not None else None)
+    if prior is not None and _digest(original) != prior["digest"]:
+        # Rebase user edits without making the previous installation part of
+        # the baseline: restoring it on uninstall would resurrect our hooks.
+        baseline = (json.dumps(settings, indent=2, ensure_ascii=False) + "\n").encode("utf-8") if removed else original
+        prior["original"] = base64.b64encode(baseline).decode("ascii") if baseline is not None else None
     exe = command or _solvi_command()
     extra = (f" --decider {_q(model)}" if model else "") + (" --agent codex" if agent == "codex" else "")
     added = []
     hooks = settings.setdefault("hooks", {})
     if edits:
         cmd = f"{exe} hook pre-edit --rules {_q(rules)}{extra}" + (" --approve" if approve else "")
-        matcher = "Edit|Write|MultiEdit" if agent == "claude" else "apply_patch|Edit|Write"
+        matcher = "Edit|Write|MultiEdit|NotebookEdit" if agent == "claude" else "apply_patch|Edit|Write|NotebookEdit"
         hooks.setdefault("PreToolUse", []).append(
             {"matcher": matcher, "hooks": [{"type": "command", "command": cmd, "timeout": 120 if model else 30,
                                             "statusMessage": "solvi: checking the edit against the rules"}]})
@@ -1268,19 +1441,27 @@ def install(root, agent="claude", rules=DEFAULT_RULES, skills_dirs=None, edits=T
     if kept:
         lines.append(f"{rel}: kept {kept} other hook handler(s)")
     rules_abs = rules if os.path.isabs(rules) else os.path.join(root, rules)
+    rules_abs = os.path.abspath(rules_abs)
     if edits and not os.path.exists(rules_abs):
         lines.append(f"{os.path.relpath(rules_abs, root)}: written — the sample rules; edit them for your project")
         if not dry_run:
-            os.makedirs(os.path.dirname(rules_abs), exist_ok=True)
+            _owned_mkdir(ownership, os.path.dirname(rules_abs))
             with open(rules_abs, "w", encoding="utf-8") as fh:
                 fh.write(SAMPLE_RULES)
+            _own(ownership, rules_abs, agent, None)
+    elif edits and rules_abs in ownership["files"]:
+        if agent not in ownership["files"][rules_abs]["owners"] and not dry_run:
+            ownership["files"][rules_abs]["owners"].append(agent)
     if not dry_run:
-        os.makedirs(os.path.dirname(path), exist_ok=True)
+        _owned_mkdir(ownership, os.path.dirname(path))
         tmp = path + ".tmp"
         with open(tmp, "w", encoding="utf-8") as fh:
             json.dump(settings, fh, indent=2, ensure_ascii=False)
             fh.write("\n")
         os.replace(tmp, path)
+        _own(ownership, path, agent, original)
+        ownership["files"][path]["commands"] = [cmd for _, _, cmd in added]
+        _save_ownership(journal, ownership)
     if not _gitignored(root):
         lines.append("note: decisions are stored in .solvi/traces/ with the changes and prompts they rest on — add "
                      ".solvi/ to .gitignore")
@@ -1296,18 +1477,47 @@ def uninstall(root, agent="claude", dry_run=False):
     """Remove solvi's hook entries from the project's settings; everything else stays. → the lines it prints."""
     path = _settings_path(root, agent)
     rel = os.path.relpath(path, root)
-    if not os.path.exists(path):
-        return [f"{rel}: not there, nothing to remove"]
-    settings, removed = _strip(_load_json(path))
-    if not removed:
-        return [f"{rel}: no solvi hooks"]
-    if not dry_run:
-        tmp = path + ".tmp"
-        with open(tmp, "w", encoding="utf-8") as fh:
-            json.dump(settings, fh, indent=2, ensure_ascii=False)
-            fh.write("\n")
-        os.replace(tmp, path)
-    return [f"{rel}: removed {ev}{f' ({m})' if m else ''} → {c}" for ev, m, c in removed]
+    # Validate settings before touching any installer artifact, including malformed event lists.
+    settings = _load_json(path)
+    journal, ownership = _ownership(root)
+    entry = ownership["files"].get(path)
+    if entry is None:
+        return [f"{rel}: no solvi hooks owned by this install; nothing changed"]
+    _, removed = _strip(settings, entry.get("commands"))
+    lines = [f"{rel}: removed {ev}{f' ({m})' if m else ''} → {c}" for ev, m, c in removed]
+    if dry_run:
+        return lines
+    for artifact, record in list(ownership["files"].items()):
+        if agent not in record["owners"]:
+            continue
+        record["owners"].remove(agent)
+        if record["owners"]:
+            continue
+        current = _bytes(artifact)
+        if _digest(current) == record["digest"]:
+            if record["original"] is None:
+                if current is not None:
+                    os.unlink(artifact)
+            else:
+                with open(artifact, "wb") as fh:
+                    fh.write(base64.b64decode(record["original"]))
+        elif artifact == path and current is not None:
+            # The file changed: remove only still recognisable installer handlers.
+            with open(artifact, "w", encoding="utf-8") as fh:
+                json.dump(settings, fh, indent=2, ensure_ascii=False)
+                fh.write("\n")
+        else:
+            lines.append(f"{artifact}: kept user changes")
+        del ownership["files"][artifact]
+    remaining_dirs = []
+    for directory in reversed(ownership["dirs"]):
+        try:
+            os.rmdir(directory)
+        except OSError:
+            remaining_dirs.append(directory)
+    ownership["dirs"] = list(reversed(remaining_dirs))
+    _save_ownership(journal, ownership)
+    return lines
 
 
 def _agents(a):
@@ -1348,20 +1558,24 @@ def parser():
                             "systemone:URL#model or module:attr (keys from $SOLVI_LLM_API_KEY / "
                             "$SOLVI_SYSTEMONE_API_KEY); default: deterministic only")
         s.add_argument("--model", dest="old_model", help=argparse.SUPPRESS)   # 0.7 name: refused with what to do
-        s.add_argument("--store", default=HOOK_STORE, help=f"the TraceStorage for the decisions (default {HOOK_STORE}, "
+        s.add_argument("--store", default=HOOK_STORE, help=f"recording path only; requires --record-content (default {HOOK_STORE}, "
                                                             "relative to the project)")
-        s.add_argument("--no-store", action="store_true", help="do not store the decisions")
+        s.add_argument("--record-content", action="store_true",
+                       help="opt into replay/audit traces containing full edited files and prompts, including existing secrets")
+        s.add_argument("--no-store", action="store_true", help="disable storage, overriding --record-content (default: off)")
     e = sub.add_parser("pre-edit", help="PreToolUse on Edit|Write|MultiEdit: check the change against the rules")
     e.add_argument("--rules", default=DEFAULT_RULES, help=f"the rules file (TOML or JSON; default {DEFAULT_RULES})")
     common(e)
     e.add_argument("--agent", choices=["claude", "codex"], default="claude", help="the answer's dialect (Codex cannot ask)")
-    e.add_argument("--approve", action="store_true", help="answer an explicit allow when no rule objects (skips the "
+    e.add_argument("--approve", action="store_true", help="explicitly allow checked edits inside the project, except .claude/.codex/.git (skips the "
                                                           "permission prompt); default: say nothing")
     e.add_argument("--no-instruction-check", action="store_true",
                    help="do not ask about instruction-like text addressed to a reviewer in the change")
     k = sub.add_parser("pick-skill", help="UserPromptSubmit: name the one skill the prompt needs, or say nothing")
     k.add_argument("--skills-dir", action="append", help=f"a folder of skills (repeat; default {DEFAULT_SKILLS})")
     common(k)
+    k.add_argument("--min-shared", type=int, default=2,
+                   help="deterministic: independent shared stems required (default 2; 1 opts into the older heuristic)")
     k.add_argument("--min-score", type=float, default=1.5, help="deterministic: the least score to pick a skill")
     k.add_argument("--margin", type=float, default=0.25,
                    help="a near tie says nothing: the second within this share of the best (with --decider: the decider's "
@@ -1407,9 +1621,14 @@ def main(argv=None):
     if a.cmd == "sample-rules":
         print(SAMPLE_RULES, end="")
         return 0
-    if getattr(a, "old_model", None) is not None:      # status 1, not 2: an old installed hook must not block every call
-        print("solvi hook: --model was renamed in 0.8 and removed in 0.9: use --decider (reinstall the hooks with "
-              "`solvi hook install --decider ...`)", file=sys.stderr)
+    if getattr(a, "old_model", None) is not None:
+        message = ("solvi hook: --model was renamed in 0.8 and removed in 0.9: use --decider "
+                   "(reinstall the hooks with `solvi hook install --decider ...`)")
+        if a.cmd == "pre-edit":
+            print(json.dumps(_decision_json("ask", message, a.agent, False), ensure_ascii=False))
+            return 0
+        # An optional context picker must remain nonblocking on obsolete configuration.
+        print(message, file=sys.stderr)
         return 1
     try:
         return {"pre-edit": cmd_pre_edit, "pick-skill": cmd_pick_skill, "install": cmd_install,

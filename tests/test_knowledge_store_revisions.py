@@ -3,6 +3,8 @@ waiting for a re-test, retraction of one writer's support, re-deciding on the co
 load."""
 import time
 
+import pytest
+
 from solvi.core.knowledge import KnowledgeStore
 
 
@@ -167,7 +169,8 @@ def test_knowledge_value_reads_the_fact_valid_at_a_world_time():
     km.tell(("drugX", "max_dose", "20mg"), source="spec", by="label-2024", valid=("2024-06-01", None))
     km.tell(("drugX", "form", "tablet"), source="spec", by="label")                # no valid: holds at any time
     snap = km.snapshot(about="drugX")                  # both intervals are facts in a snapshot without valid_at
-    assert solvi.Knowledge.value(snap, "drugX", "max_dose") in ("10mg", "20mg")   # unchanged: whichever row is first
+    with pytest.raises(ValueError, match="Ambiguous"):
+        solvi.Knowledge.value(snap, "drugX", "max_dose")
     assert solvi.Knowledge.value(snap, "drugX", "max_dose", valid_at="2023-05-01") == "10mg"
     assert solvi.Knowledge.value(snap, "drugX", "max_dose", valid_at="2025-01-01") == "20mg"
     assert solvi.Knowledge.value(snap, "drugX", "max_dose", "none", valid_at="2020-01-01") == "none"
@@ -253,6 +256,7 @@ def test_a_guard_active_write_does_not_rescan_the_whole_key():
     re-reads only what moved (0.6 ms/write, cheaper than the plain pattern, whose live set nothing prunes)."""
     import time
 
+
     def run(m, guard):
         ks, t0, last = KnowledgeStore(), time.perf_counter(), None
         for n in range(m):
@@ -314,3 +318,38 @@ def test_guard_histories_read_incrementally_match_the_rebuild():
             assert ks.pending() == r.pending()
             assert {i: ks.item(i) for i in sorted(ks.items)} == {i: r.item(i) for i in sorted(r.items)}
     assert ks.verify()
+
+
+@pytest.mark.parametrize("order", [("Zanotti", "Terenzi"), ("Terenzi", "Zanotti")])
+def test_knowledge_reader_requires_explicit_disambiguation_across_scopes(order):
+    import solvi
+    km = solvi.Knowledge(writers={"wikidata": "outcome"})
+    for value in order:
+        km.tell(("SM", "P35", value), source="outcome", by="wikidata",
+                valid=("2014-10-01", "2015-04-01"), scope={"holder": value, "realm": "SM"})
+    snap = km.snapshot(about="SM", relation="P35", valid_at="2015-01-01")
+    for rows in (snap["facts"], list(reversed(snap["facts"]))):
+        snapshot = {"facts": rows}
+        with pytest.raises(ValueError, match="Ambiguous"):
+            solvi.Knowledge.value(snapshot, "SM", "P35", "missing", valid_at="2015-01-01")
+        assert set(solvi.Knowledge.values(snapshot, "SM", "P35")) == set(order)
+        assert solvi.Knowledge.value(snapshot, "SM", "P35", scope={"holder": order[0]}) == order[0]
+        assert solvi.Knowledge.values(snapshot, "SM", "P35", scope={"holder": "absent"}) == []
+
+
+def test_knowledge_reader_manual_snapshot_preserves_periods_and_equal_values():
+    import solvi
+    rows = [
+        {"body": fact("s", {"v": [1]}), "scope": {"map": "a"}, "valid": [0, 10]},
+        {"body": fact("s", {"v": [1]}), "scope": {"map": "b"}, "periods": [[0, 5], [8, 10]]},
+        {"body": fact("s", "other"), "valid": [0, 10], "periods": [[5, 8]]},
+    ]
+    for order in (rows, list(reversed(rows))):
+        snap = {"facts": order}
+        assert solvi.Knowledge.value(snap, "s", "r", valid_at=2) == {"v": [1]}
+        assert solvi.Knowledge.values(snap, "s", "r", valid_at=2) == [{"v": [1]}]
+        with pytest.raises(ValueError, match="Ambiguous"):
+            solvi.Knowledge.value(snap, "s", "r", valid_at=6)
+        assert solvi.Knowledge.value(snap, "s", "r", valid_at=6, scope={"map": "b"}) is None
+        assert solvi.Knowledge.value(snap, "missing", "r", "absent") == "absent"
+    assert solvi.Knowledge.values(None, "s", "r") == []

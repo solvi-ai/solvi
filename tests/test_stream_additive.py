@@ -386,3 +386,16 @@ def test_a_restart_between_pre_and_post_records_the_threshold_in_force_at_the_dr
     assert out["same"] is True
     rec = _recs(loop)[-1]
     assert rec["owner"] == 1 and rec["path"][-1][2] is None and rec["alone"] is False
+
+
+def test_resident_versions_report_layer_and_candidate_separately_from_versions_kept():
+    loop = _attached()
+    assert loop.candidate == 1
+    assert loop.status()['versions_kept'] == 1
+    assert loop.status()['resident_versions'] == [
+        {'version': 0, 'state': 'served'}, {'version': 1, 'state': 'candidate'}]
+    loop.promote(force=True)
+    assert loop.status()['versions_kept'] == 1
+    assert loop.status()['resident_versions'] == [
+        {'version': 0, 'state': 'served'}, {'version': 1, 'state': 'layer'}]
+    loop.close()

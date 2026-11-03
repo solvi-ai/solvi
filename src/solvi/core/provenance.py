@@ -581,6 +581,8 @@ def part_fingerprint(part, _code=None):
          "returns": None if part.returns is None else type_fingerprint(part.returns)}
     if getattr(part, "quotes", "normalized") != "normalized":   # only when set otherwise: 0.9's fingerprints stay as
         d["quotes"] = part.quotes                                # they were
+    if part.text is not None:
+        d["text"] = part.text
     if part.alternatives is not None:
         d["alternatives"] = [part_fingerprint(a, _code) for a in part.alternatives]
         d["features"] = code_fingerprint_(part.features)
@@ -598,7 +600,8 @@ def catalog_fingerprint(catalog):
     items = [(n, p) for n, p in catalog.parts.items()] + [(p.name, p) for p in catalog.rules.values()] + \
             [("constraint:" + n, p) for n, p in catalog.constraints.items()]
     combine = getattr(catalog, "combine", "strictest")
-    key = tuple((n, id(p), id(p.func), id(p.model), len(p.alternatives or ()), len(p.inputs)) for n, p in items) + (combine,)
+    boundary_given = tuple(sorted(getattr(catalog, '_boundary_given_aliases', ())))
+    key = tuple((n, id(p), id(p.func), id(p.model), len(p.alternatives or ()), len(p.inputs)) for n, p in items) + (combine, boundary_given)
     cached = getattr(catalog, "_fp_cache", None)
     if cached is not None and cached[0] == key:
         return cached[1]
@@ -614,6 +617,8 @@ def catalog_fingerprint(catalog):
     # included, is marked: a decision stored under 1.1 replays against the 1.2 default as made by another catalog
     out = {"fp": digest(sorted(parts.items())) if combine == "first" else digest(sorted(parts.items()), ("combine", combine)),
            "parts": parts, "calls": calls}
+    if boundary_given:
+        out['fp'] = digest(out['fp'], ('boundary_given_aliases', boundary_given))
     catalog._fp_cache = (key, out)
     return out
 

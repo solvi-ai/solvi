@@ -6,7 +6,7 @@ import dataclasses
 import hashlib
 import math
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from .. import _deprecate
 from .catalog import Catalog, gone_in_1_0
@@ -45,6 +45,26 @@ def _given_read(system, q, flow, init):
         p = cat.parts.get(f)
         if p is not None:
             read.update(p.inputs)
+    refs = system._answer_refs()
+    pending = [refs[f] for f in flow.per_question.get(q.name, ()) if f in refs] if flow is not None else []
+    visited = {q.name}
+    while pending:
+        source = pending.pop()
+        if source in visited:
+            continue
+        visited.add(source)
+        for fact in flow.per_question.get(source, ()):
+            part = cat.parts.get(fact)
+            if part is not None:
+                read.update(part.inputs)
+            if fact in refs:
+                pending.append(refs[fact])
+        source_rule = cat.rules.get(source)
+        if source_rule is not None:
+            read.update(source_rule.inputs)
+        source_head = system.heads.get(source)
+        if source_head is not None:
+            read.update(source_head.features)
     rule = cat.rules.get(q.name)
     if rule is not None:
         read.update(rule.inputs)
@@ -143,6 +163,8 @@ def _rule_why(rule, r, vals, by, legacy=False):
     from .catalog import because_text
     quote = None if legacy is True else _model_quote(r, rule, vals)
     parts = [quote] if quote else []
+    if getattr(rule, 'text', None) is not None:
+        parts.append(f"condition: {rule.text}")
     for x in rule.inputs:
         said = because_text(by[x].extra) if x in by else None
         v = vals.get(x)
@@ -174,6 +196,38 @@ def _why_before(res, why, *olds):
     if got:
         res._why_before = got if len(got) > 1 else got[0]
     return res
+
+
+@dataclass(frozen=True)
+class UnrecordedResponse:
+    """Answers from System.decide; deliberately has no audit trace or replay capability."""
+    results: dict
+    values: dict
+    ms: float
+    feasible: bool = True
+    violations: list | None = None
+    recorded = False
+    replayable = False
+
+    def __getitem__(self, question):
+        return self.results[question]
+
+    @property
+    def trace(self):
+        raise ValueError("unrecorded decision: use System.ask for an audit trace or storage")
+
+    def replay(self, *args, **kwargs):
+        raise ValueError("unrecorded decision: use System.ask for a replayable record")
+
+    def to_dict(self):
+        return {"execution": "unrecorded", "recorded": False, "replayable": False,
+                "answers": {n: r.model_dump(mode="json") for n, r in self.results.items()},
+                "values": plain_json(self.values), "ms": self.ms, "feasible": self.feasible,
+                "violations": self.violations}
+
+    def to_json(self):
+        import json
+        return json.dumps(self.to_dict(), ensure_ascii=False, allow_nan=False)
 
 
 class System:
@@ -413,10 +467,26 @@ class System:
             if hit is not None:
                 return self._serve(hit, t0, store)
         p = self._prepare(init_state, questions, order)
+        if p.flow.answer_stages:
+            return self._keep(key, self._ask_answers(p, t0, store, workers=workers or self.workers,
+                                                   early_exit=early_exit))
         trace, vals = execute(self.catalog, p.flow, p.state, workers=workers or self.workers, order=p.order,
                               costs=self.cost_book, policy=p.policy, known=p.known, early_exit=self._early(early_exit),
                               memo=memo)
         return self._keep(key, self._respond(p, trace, vals, t0, store))
+
+    def probe(self, question, facts, *, override=False):
+        """Hypothetical evaluation of one question at explicit fact values.
+
+        override=True permits supplied values of computed facts; checks and
+        answer rules cannot be replaced. Evaluation is serial so model canaries
+        remain disabled in the diagnostic context. Uses this catalog's actual parts and the
+        usual answer normalization/why, without storing, caching, learning,
+        observing costs or applying calibrated guarantees. Input-model validation
+        is bypassed so direct intermediate facts can be supplied; consumers still
+        validate their inputs. The result is durably marked hypothetical.
+        """
+        return _probe(self, question, facts, override=override)
 
     def _keep(self, key, resp):
         """A decision made on a cache miss, kept for the next ask of the same key (System(cache=)). A decision where a
@@ -476,6 +546,72 @@ class System:
                 self.storage.save(resp, meta={"cache_of": ref_id}, record="compact")
         return resp
 
+    def decide(self, init_state, questions=None, *, early_exit=None):
+        """Evaluate a serial, unmodeled catalog without recording or observing it.
+
+        Returns UnrecordedResponse, never an audit/replay record. Every call rejects
+        configured guards, storage, models, learning, watches, caches, custom
+        strategies, confidence calibration, asynchronous parts and parallel workers BEFORE validating inputs
+        or running callbacks. Use ask for any such configuration. Ordinary checks,
+        types, contracts, constraints, aliases and accepted answer-fact stages are
+        evaluated by the same execution path. Contract applicability must be an ordinary
+        synchronous Python function (no partial or callable object). User functions retain their own effects.
+        """
+        import inspect
+        from .costs import CostBook
+        reasons = []
+        for name in ("guards", "heads", "storage", "shift_watch", "learned_rules", "adapter_loop", "_cache", "calib"):
+            if getattr(self, name, None):
+                reasons.append(name)
+        if self.storage is not None and "storage" not in reasons:
+            reasons.append("storage")
+        if self.learn or self.order != "default" or self.producers != "declared":
+            reasons.append("learning/order/producer policy")
+        if self.workers != 1 or isinstance(self.workers, bool):
+            reasons.append("parallel workers")
+        if self.strategist is not None:
+            reasons.append("custom strategist")
+        if type(self.cost_book) is not CostBook:
+            reasons.append("cost adaptation")
+        if experimental_of(self):
+            reasons.append("experimental parts")
+        if getattr(self.catalog, "decisions", 0):
+            reasons.append("deciders/canaries")
+        pending = list(self.catalog.parts.values()) + list(self.catalog.rules.values()) + list(self.catalog.constraints.values())
+        while pending:
+            part = pending.pop()
+            pending.extend(part.alternatives or ())
+            if part.model is not None or part.blocking or part.kind not in ("fn", "rule", "check", "constraint"):
+                reasons.append("unsupported part " + part.name)
+            if part.provenance not in (None, "computed"):
+                reasons.append("modeled provenance " + part.name)
+            callbacks = [part.func, part.validate, part.features, *(v for v in part.then.values() if callable(v))]
+            for fn in callbacks:
+                if fn is None:
+                    continue
+                if (inspect.iscoroutinefunction(fn) or inspect.isasyncgenfunction(fn)
+                        or not (inspect.isfunction(fn) or inspect.isbuiltin(fn))
+                        or getattr(fn, "__solvi_decision__", None) is not None
+                        or getattr(fn, "__solvi_model__", None) is not None
+                        or getattr(fn, "__module__", "").startswith("solvi.experimental.")):
+                    reasons.append("unsupported callback " + part.name)
+        # Contracts are evaluated by _prepare, before any part is run; inspect
+        # them here as well so unsupported callables never reach input validation.
+        # The initial public slice accepts ordinary synchronous Python functions,
+        # not opaque callable objects or functools.partial wrappers.
+        for name, contract in self.catalog.contracts.items():
+            fn = contract.applicable
+            if fn is not None and (not inspect.isfunction(fn) or inspect.iscoroutinefunction(fn)
+                                   or inspect.isasyncgenfunction(fn)
+                                   or getattr(fn, "__solvi_model__", None) is not None
+                                   or getattr(fn, "__solvi_decision__", None) is not None
+                                   or getattr(fn, "__module__", "").startswith("solvi.experimental.")):
+                reasons.append("unsupported contract callback " + name)
+        if reasons:
+            raise ValueError("System.decide does not support " + ", ".join(sorted(set(reasons))) + "; use System.ask")
+        response = self._decide(init_state, questions, early_exit=early_exit)
+        return UnrecordedResponse(response.results, response.values, response.ms, response.feasible, response.violations)
+
     def _decide(self, init_state, questions=None, early_exit=None):
         """The answers of `ask` without its record keeping — for answers that are never stored (the candidates of
         solvi.core.slow.search). The flow is planned and run as `ask` runs it, and the answers, hard checks, constraints, the
@@ -486,6 +622,8 @@ class System:
         the input again with `ask` for a decision to keep."""
         t0 = now_ms()
         p = self._prepare(init_state, questions, None)
+        if p.flow.answer_stages:
+            return self._ask_answers(p, t0, False, workers=self.workers, early_exit=early_exit, lightweight=True)
         trace, vals = execute(self.catalog, p.flow, p.state, workers=self.workers, order=p.order, costs=self.cost_book,
                               policy=p.policy, known=p.known, early_exit=self._early(early_exit), hashes=False)
         if p.rejected:
@@ -493,7 +631,7 @@ class System:
         results, feasible, violations = self._results(p.questions, p.flow, trace, vals)
         if self.guards:
             from .guarantees.guarantee import apply_guards
-            apply_guards(self, results, trace, vals, p.flow)
+            apply_guards(self, results, trace, vals, p.flow, live=False)
         resp = Response(results, p.flow, trace, vals, now_ms() - t0, feasible, violations, self.catalog)
         resp._heads, resp._system = self.heads, self
         return resp
@@ -502,6 +640,20 @@ class System:
         return self.early_exit if early_exit is None else bool(early_exit)
 
     # --- text in
+    def depends(self, question):
+        """The initial fact names this question's declared flow reads (a new set).
+
+        Uses the same planner/declarations as input schemas, including hard
+        checks, heads, aliases and explicitly declared applicability inputs.
+        This is dependency analysis, not a causal explanation. An opaque
+        applicability predicate needs applicable_inputs or Question.uses.
+        """
+        if not isinstance(question, str):
+            raise TypeError("depends takes one question name")
+        self._names(question)
+        from ._inputs import question_inputs
+        return set(question_inputs(self, question)["properties"])
+
     def entry_points(self, questions=None):
         """The questions as entry points: each question's name, text and the typed input state it reads — every given fact
         its flow reads, with its type, description and whether the question needs it (the schemas `solvi serve` publishes).
@@ -553,6 +705,9 @@ class System:
         if hit is not None:
             return self._serve(hit, t0, store)
         p = self._prepare_text(read, order)
+        if p.flow.answer_stages:
+            return self._keep(key, self._ask_answers(p, t0, store, workers=workers or self.workers,
+                                                   early_exit=early_exit))
         trace, vals = execute(self.catalog, p.flow, p.state, workers=workers or self.workers, order=p.order,
                               costs=self.cost_book, policy=p.policy, known=p.known, early_exit=self._early(early_exit),
                               memo=memo)
@@ -569,6 +724,9 @@ class System:
             return self._serve(hit, t0, store)
         p = self._prepare_text(read, order)
         _speculate_note(speculate, p)
+        if p.flow.answer_stages:
+            return self._keep(key, await self._aask_answers(p, t0, store, timeout=timeout,
+                                                          speculate=speculate, early_exit=early_exit))
         trace, vals = await aexecute(self.catalog, p.flow, p.state, order=p.order, costs=self.cost_book, policy=p.policy,
                                      known=p.known, timeout=self.timeout if timeout is None else timeout,
                                      speculate=speculate, early_exit=self._early(early_exit))
@@ -601,6 +759,9 @@ class System:
                 return self._serve(hit, t0, store)
         p = self._prepare(init_state, questions, order)
         _speculate_note(speculate, p)
+        if p.flow.answer_stages:
+            return self._keep(key, await self._aask_answers(p, t0, store, timeout=timeout,
+                                                          speculate=speculate, early_exit=early_exit))
         trace, vals = await aexecute(self.catalog, p.flow, p.state, order=p.order, costs=self.cost_book, policy=p.policy,
                                      known=p.known, timeout=self.timeout if timeout is None else timeout,
                                      speculate=speculate, early_exit=self._early(early_exit))
@@ -629,6 +790,8 @@ class System:
                 known = {k: t for k, t in ft.items() if k in init_state}   # rejected fields are not in init_state
         else:
             rejected = None
+        if _PROBE_MARKER in init_state:
+            raise ValueError("the hypothetical probe marker is reserved for System.probe")
         clash = sorted(k for k in init_state if k in self.catalog.parts)
         if clash:                                     # the planner would take the given value for the part's own: a check
             raise ValueError(_clash(self.catalog, clash, "the input has"))   # named in the input would never run
@@ -658,7 +821,203 @@ class System:
         deterministic solvi.core.plan.strategist.plan when none is set), with the declared costs.
         Everything that plans for this system goes through here — ask, answers_of, facts_for / fit, learn_order, the input
         schemas of `solvi serve` and `solvi check` — so they all see the same flow."""
-        return (plan if self.strategist is None else self.strategist.plan)(self.catalog, questions, init_keys, self.heads)
+        planner = plan if self.strategist is None else self.strategist.plan
+        refs = self._answer_refs()
+        if not refs:
+            return planner(self.catalog, questions, init_keys, self.heads)
+        from .runtime import Flow
+        questions = list(questions)
+        if all(q.name == '__all__' for q in questions):
+            return planner(self.catalog, questions, init_keys, self.heads)
+        groups = {q: {q} for q in self.questions}
+        for constraint in self.catalog.constraints.values():
+            names = set(constraint.inputs) & set(groups)
+            merged = set().union(*(groups[n] for n in names))
+            for name in merged:
+                groups[name] = merged
+        ordered, flows, visiting, visited = [], {}, set(), set()
+
+        def visit(name):
+            if name not in self.questions:
+                raise ValueError(f'answer_fact source question {name!r} is not declared in this System')
+            group = tuple(q for q in self.questions if q in groups[name])
+            if group in visiting:
+                raise ValueError('answer_fact dependency cycle (including joint constraints)')
+            if group in visited:
+                return
+            visiting.add(group)
+            flow = planner(self.catalog, [self.questions[q] for q in group], init_keys, self.heads)
+            for step in flow.steps:
+                source = refs.get(step.part.name)
+                if source is not None:
+                    visit(source)
+            visiting.remove(group)
+            visited.add(group)
+            ordered.append(list(group))
+            flows[group] = flow
+
+        for q in questions:
+            visit(q.name)
+        out = Flow([], {}, {}, {}, answer_stages=ordered)
+        out._answer_flows = flows
+        seen = set()
+        for group in ordered:
+            flow = flows[tuple(group)]
+            for step in flow.steps:
+                if step.part.name not in seen:
+                    out.steps.append(step)
+                    seen.add(step.part.name)
+            out.per_question.update(flow.per_question)
+            out.unresolved.update(flow.unresolved)
+            out.types.update(flow.types)
+            out.batches.extend(flow.batches)
+            out.skipped.update(flow.skipped)
+            for q in group:
+                inherited = set(out.unresolved.get(q, ()))
+                for fact in flow.per_question.get(q, ()):
+                    if fact in refs:
+                        inherited.update(out.unresolved.get(refs[fact], ()))
+                if inherited:
+                    out.unresolved[q] = sorted(inherited)
+        out.skipped = {n: why for n, why in out.skipped.items() if n not in seen}
+        return out
+
+    def _answer_refs(self):
+        return {n: p.func.__solvi_answer_ref__ for n, p in self.catalog.parts.items()
+                if hasattr(p.func, '__solvi_answer_ref__')}
+
+    def _answer_stage_flow(self, names, p):
+        from .runtime import Flow
+        contracts = getattr(self.catalog, 'contracts', {})
+        active = [n for n in names if n not in contracts or contracts[n].applies(p.state)[0]]
+        if active != names:
+            planner = plan if self.strategist is None else self.strategist.plan
+            return planner(self.catalog, [self.questions[n] for n in active], p.state.keys(), self.heads)
+        planned = getattr(p.flow, '_answer_flows', {}).get(tuple(names))
+        if planned is not None:
+            return planned
+        own = {n: p.flow.per_question.get(n, []) for n in names}
+        used = set().union(*(set(v) for v in own.values()))
+        used.update('answer:' + n for n in names if n in self.catalog.rules)
+        return Flow([s for s in p.flow.steps if s.part.name in used], own, {},
+                    {n: p.flow.unresolved[n] for n in names if n in p.flow.unresolved}, p.flow.types,
+                    [b for b in p.flow.batches if set(b) <= used])
+
+    def _publish_answers(self, context, names, results, flow, *, hashes=True):
+        import copy
+        from .runtime import StepOut
+        for fact, source in self._answer_refs().items():
+            if source not in names or fact in context.outputs:
+                continue
+            result = results[source]
+            value = MISSING if result.status == 'abstain' else copy.deepcopy(result.answer)
+            error = f'answer {source} abstained: {result.why}' if value is MISSING else None
+            inputs = {r.name: vhash(r.value) for r in context.trace.records
+                      if r.name in flow.per_question.get(source, ()) or r.name == 'answer:' + source}
+            record = Record(0, 'answer_ref', fact, inputs if hashes else {}, value,
+                            confidence=result.confidence, error=error,
+                            extra={'question': source, 'result': result.model_dump(mode='json')})
+            if hashes:
+                _append(context.trace, record, len(context.trace.records))
+            else:
+                record.step = len(context.trace.records) + 1
+                context.trace.records.append(record)
+            context.outputs[fact] = StepOut(value, None, result.confidence, error, record.inputs,
+                                            extra=record.extra)
+            if value is not MISSING:
+                context.vals[fact] = copy.deepcopy(value)
+
+    def _accept_stage(self, p, context, names, flow, *, lightweight=False):
+        planned = set().union(*(set(p.flow.per_question.get(n, ())) for n in names))
+        planned.update('answer:' + n for n in names if n in self.catalog.rules)
+        actual = {s.part.name for s in flow.steps} | set(context.outputs)
+        context.trace.skipped.extend((n, 'not applicable') for n in sorted(planned - actual))
+        if not lightweight and getattr(flow, 'strategy', None) is not None and getattr(self.strategist, 'record', True):
+            from .plan.cost import plan_record
+            _append(context.trace, plan_record(flow), len(context.trace.records))
+        if p.textin is not None and not any(r.kind == 'textin' for r in context.trace.records):
+            for record in p.textin.records():
+                _append(context.trace, record, len(context.trace.records))
+        results, feasible, violations = self._results([self.questions[n] for n in names], flow,
+                                                     context.trace, context.vals, p.textin)
+        if self.guards and _PROBE_MARKER not in p.state:
+            from .guarantees.guarantee import apply_guards
+            apply_guards(self, results, context.trace, context.vals, flow, live=not lightweight)
+        if _PROBE_MARKER in p.state:
+            _mark_probe_results(results, p.state[_PROBE_MARKER])
+        self._publish_answers(context, names, results, flow, hashes=not lightweight)
+        return results, feasible, violations
+
+    def _answer_response(self, p, context, accepted, feasible, violations, t0, store, *, lightweight=False):
+        trace = context.trace
+        trace.rejected = p.rejected
+        diagnostic = _PROBE_MARKER in p.state
+        if not lightweight:
+            trace.fingerprint = self._fingerprint(p.flow)
+            for name, ms in trace.timings.items() if not diagnostic else ():
+                self.cost_book.observe(name, ms)
+            if self.learn and not diagnostic:
+                self._observe(trace, p.state, context.vals, p.policy)
+        absent = [q for q in p.questions if q.name not in accepted]
+        if absent:
+            accepted.update(self._results(absent, p.flow, trace, context.vals, p.textin, record_only=True)[0])
+        results = {q.name: accepted[q.name] for q in p.questions}
+        resp = Response(results, p.flow, trace, context.vals, now_ms() - t0, feasible, violations, self.catalog)
+        resp._heads, resp._system, resp.read = self.heads, self, p.textin
+        resp.experimental = experimental_of(self)
+        if self.lang != 'en':
+            resp.lang = self.lang
+        if not lightweight and not diagnostic:
+            self._count(resp)
+            if self.storage is not None and store:
+                self.storage.save(resp)
+        return resp
+
+    def _ask_answers(self, p, t0, store, *, workers, early_exit, lightweight=False):
+        from .runtime import _ExecutionContext
+        context, accepted, feasible, violations = _ExecutionContext(), {}, True, []
+        for names in p.flow.answer_stages:
+            flow = self._answer_stage_flow(names, p)
+            execute(self.catalog, flow, p.state, workers=workers, order=p.order, costs=self.cost_book,
+                    policy=p.policy, known=p.known, early_exit=self._early(early_exit),
+                    hashes=not lightweight, context=context)
+            results, ok, problems = self._accept_stage(p, context, names, flow, lightweight=lightweight)
+            accepted.update(results)
+            feasible = feasible and ok
+            violations.extend(problems)
+        return self._answer_response(p, context, accepted, feasible, violations, t0, store, lightweight=lightweight)
+
+    async def _aask_answers(self, p, t0, store, *, timeout, speculate, early_exit):
+        from .runtime import _ExecutionContext
+        context, accepted, feasible, violations = _ExecutionContext(), {}, True, []
+        for names in p.flow.answer_stages:
+            flow = self._answer_stage_flow(names, p)
+            await aexecute(self.catalog, flow, p.state, order=p.order, costs=self.cost_book, policy=p.policy,
+                           known=p.known, timeout=self.timeout if timeout is None else timeout,
+                           speculate=speculate, early_exit=self._early(early_exit), context=context)
+            results, ok, problems = self._accept_stage(p, context, names, flow)
+            accepted.update(results)
+            feasible = feasible and ok
+            violations.extend(problems)
+        return self._answer_response(p, context, accepted, feasible, violations, t0, store)
+
+    def _verify_answer_ref(self, record, trace, flow, values):
+        import copy
+        source = self._answer_refs().get(record.name)
+        if source is None or (record.extra or {}).get('question') != source:
+            raise ValueError('answer reference source changed')
+        if flow is None:
+            flow = self._plan([self.questions[source]], trace.init.keys())
+        prefix = copy.copy(trace)
+        prefix.records = [r for r in trace.records if r.step < record.step]
+        names = next((s for s in getattr(flow, 'answer_stages', ()) if source in s), [source])
+        result = self.answers_of(prefix, names, flow)[source]
+        value = MISSING if result.status == 'abstain' else result.answer
+        inputs = {r.name: vhash(r.value) for r in prefix.records
+                  if r.name in flow.per_question.get(source, ()) or r.name == 'answer:' + source}
+        if (vhash(value) != vhash(record.value) or result.model_dump(mode='json') != record.extra.get('result')
+                or result.confidence != record.confidence or inputs != record.inputs):
+            raise ValueError('answer reference differs from accepted source answer')
 
     def _computable(self, init_keys):
         """The facts this system's strategist can compute from these given facts (with a strategist set, a fact needs one
@@ -704,7 +1063,7 @@ class System:
             self.storage.save(resp)                   # sets resp.stored_id
         return resp
 
-    def _results(self, qs, flow, trace, vals, textin=None):
+    def _results(self, qs, flow, trace, vals, textin=None, *, record_only=False):
         """The answers from an executed flow: rules / hard checks / heads, calibration, constraints, the low-confidence
         safeguard → (results, feasible, violations). No side effects besides an answer head's record in the trace."""
         by = {r.name: r for r in trace.records}
@@ -721,7 +1080,7 @@ class System:
                                              kind=q.answer.kind, extra={"contract": [{"code": "not_applicable",
                                                                                      "message": why}]})
                     continue
-            r = self._answer(q, flow, trace, vals, by, hard, pcache)
+            r = self._answer(q, flow, trace, vals, by, hard, pcache, record_only=record_only)
             r.kind = q.answer.kind
             if c is not None and r.status == "ok":
                 r = _contracted(self, c, q, r, flow, trace)
@@ -733,9 +1092,28 @@ class System:
             results[q.name] = r
         if textin is not None:
             _read_results(textin, results)
-        feasible, violations = self._joint(results)
+        repair_paths = {}
+        if self.catalog.constraints or self.calib:
+            for q in qs:
+                rule, head = self.catalog.rules.get(q.name), self.heads.get(q.name)
+                inputs = rule.inputs if rule is not None else head.features if head is not None else ()
+                saved_head = by.get(f"answer:{q.name}") if record_only and rule is None else None
+                recorded_head = (saved_head is not None and saved_head.kind == "head"
+                                 and isinstance((saved_head.extra or {}).get("head_why"), str))
+                if recorded_head:
+                    inputs = saved_head.inputs
+                pc = path_confidence(self.catalog, trace, inputs, pcache)
+                read_cap = 1.0
+                if textin is not None and textin.question == q.name:
+                    read_cap = min([float(textin.route.get("confidence", 1.0))] +
+                                   [f.confidence for f in textin.fields.values() if f.status == "read"])
+                repair_paths[q.name] = (pc, recorded_head or rule is None and head is not None, read_cap)
+        feasible, violations = self._joint(results, confidence_paths=repair_paths)
         for q in qs:                                  # low-confidence safeguard: abstain rather than answer unsure
             r = results[q.name]
+            if q.name in self.calib and r.status == "ok":
+                pc, _, read_cap = repair_paths[q.name]
+                r.confidence = min(r.confidence, pc, read_cap)
             if q.min_confidence is not None and r.status == "ok" and r.confidence < q.min_confidence:
                 results[q.name] = Result(None, r.confidence, f"low confidence {r.confidence:.2f} < {q.min_confidence}; "
                                          f"would have answered {r.answer!r} ({r.why})", "abstain", r.probs, r.provenance,
@@ -756,11 +1134,25 @@ class System:
         for r in trace.records:
             if r.value is not MISSING:
                 vals[r.name] = r.value
-        results = self._results(qs, flow, t, vals, _read_of_trace(trace))[0]
+        results = self._results(qs, flow, t, vals, _read_of_trace(trace), record_only=True)[0]
+        if _PROBE_MARKER in trace.init:
+            return _mark_probe_results(results, trace.init[_PROBE_MARKER])
         if self.guards:                               # the recorded guard verdicts, re-derived (solvi.core.guarantees.guarantee)
             from .guarantees.guarantee import apply_guards
             apply_guards(self, results, t, vals, flow, live=False)
         return results
+
+    def rename(self, *, inputs=None, answers=None):
+        """Return a new declarative system with old→external boundary names.
+
+        inputs maps external fact names to new names through Catalog.alias; answers
+        maps question names to new names. Rules and hard-check explanations remain
+        traceable. Storage and accumulated execution statistics start fresh.
+        Existing heads/calibration/guards are reused. For an input_model system,
+        declare external fields directly and use Catalog.alias for fact adaptation;
+        inputs= renaming of model fields is refused to preserve its validators.
+        """
+        return _rename_system(self, inputs=inputs, answers=answers)
 
     def fingerprint(self):
         """What makes this system's decisions: {"catalog": the catalog's fingerprint (every part's code and declarations,
@@ -879,8 +1271,8 @@ class System:
     def _rule_result(q, r, rule, pc, conf, why, trace):
         """The answer a computed rule gives (its value, or the abstention when it returned None / a value outside the
         options), with its `why`."""
-        src = rule.func.__name__ if rule.func is not None else rule.name
-        if r.value is None:                       # the rule itself declined to answer (e.g. a split vote): a deliberate abstention
+        src = getattr(rule.func, "__name__", type(rule.func).__name__) if rule.func is not None else rule.name
+        if r.value is None and not (q.answer.kind == 'structured' and q.answer.type is Any):
             return Result(None, 0.0, f"the rule abstained (returned None); {why}", "abstain", provenance=r.origin,
                           source=src, guard="rule_abstained")
         if q.answer.primitive or q.require_evidence or (r.extra is not None and "evidence" in r.extra):
@@ -892,7 +1284,7 @@ class System:
             return Result(None, 0.0, f"rule returned {srepr(r.value)}, not one of the answer options; {why}", "abstain",
                           provenance=r.origin, source=src, guard="outside_options")
 
-    def _answer(self, q, flow, trace, vals, by, hard, pcache=None):
+    def _answer(self, q, flow, trace, vals, by, hard, pcache=None, *, record_only=False):
         facts = flow.per_question.get(q.name, [])
         # hard checks: a false hard check in the question's flow decides the answer (the model cannot override it).
         # A hard check with `then` governs only the questions listed there (and those that require it);
@@ -909,7 +1301,7 @@ class System:
             said = f"hard check {f} is false" + (": " + "; ".join(because) if because else "")
             if q.name in part.then:
                 if callable(part.then[q.name]):   # a function of facts gives the answer (1.0): run and recorded here
-                    return _then_answer(self.catalog, part, q, trace, vals, flow, said)
+                    return _then_answer(self.catalog, part, q, trace, vals, flow, said, record_only=record_only)
                 try:
                     forced = q.answer.normalize(part.then[q.name])
                 except ValueError as e:           # a `then` answer that is not an answer of this question: the check
@@ -951,7 +1343,7 @@ class System:
                 g = classify(r.error)
                 if g in ("escalated", "no_answer", "low_confidence", "instruction", "memory"):  # the answer step escalated
                     return Result(None, r.confidence, r.error, "abstain", dict(r.probs), r.origin,
-                                  rule.func.__name__ if rule.func is not None else rule.name, g)
+                                  getattr(rule.func, "__name__", type(rule.func).__name__) if rule.func is not None else rule.name, g)
             if r is None or r.value is MISSING:
                 from .provenance import TIMED_OUT       # a call that did not finish in time (aask): safeguard "timeout"
                 late = any(TIMED_OUT in (by[f].error or "") for f in list(facts) + [rule.name]
@@ -960,7 +1352,8 @@ class System:
                 grounding = r is not None and classify(r.error) == "grounding"     # a model rule's quote not in the text
                 return Result(None, 0.0, "rule not computed: " + (r.error if r else "no step") +
                               (f"; missing {', '.join(missing)}" if missing else "") + _caused_by(by, r), "abstain",
-                              guard="timeout" if late else "grounding" if grounding else None)
+                              guard="timeout" if late else "grounding" if grounding else
+                              "type_rejected" if r is not None and classify(r.error) == "type_rejected" else None)
             pc = path_confidence(self.catalog, trace, rule.inputs, pcache)
             conf = min(pc, r.confidence)
             why = _rule_why(rule, r, vals, by)
@@ -969,17 +1362,34 @@ class System:
                 olds.append(_rule_why(rule, r, vals, by, legacy=True))
             return _why_before(self._rule_result(q, r, rule, pc, conf, why, trace), why, *olds)
         head = self.heads.get(q.name)
+        if record_only:
+            saved = by.get("answer:" + q.name)
+            meta = saved.extra if saved is not None and isinstance(saved.extra, dict) else {}
+            if saved is not None and saved.kind == "head" and meta.get('head_failure') == 'nonfinite_probabilities':
+                return Result(None, 0.0, meta['head_why'], 'abstain', source=meta.get('head_source'),
+                              guard='missing_facts')
+            if saved is not None and saved.kind == "head" and isinstance(meta.get("head_why"), str):
+                pc = path_confidence(self.catalog, trace, list(saved.inputs), pcache)
+                return Result(saved.value, saved.confidence * pc, meta["head_why"], probs=dict(saved.probs or {}),
+                              provenance=saved.origin, source=meta.get("head_source"))
         if head is None:
             return Result(None, 0.0, "no rule and the answer head is not fitted (fit)", "abstain")
         lost = [f for f in head.features if f not in vals]
         if lost:                                      # a head never guesses from facts that could not be computed
             return Result(None, 0.0, "head features not computed: " + ", ".join(lost), "abstain")
+        if record_only:
+            return Result(None, 0.0, 'answer head has no recorded output', 'abstain', guard='missing_record')
         p = head.predict(vals)
         if not all(math.isfinite(v) for v in p.values()):   # a NaN / inf feature: the head cannot say, so it does not answer
             bad = [f for f in head.features if isinstance(vals.get(f), float) and not math.isfinite(vals[f])]
-            return Result(None, 0.0, "the answer head gave no finite probabilities"
-                          + (" (non-finite " + ", ".join(bad) + ")" if bad else ""), "abstain", source=type(head).__name__,
-                          guard="missing_facts")
+            why = "the answer head gave no finite probabilities" + (" (non-finite " + ", ".join(bad) + ")" if bad else "")
+            _append(trace, Record(step=0, kind='head', name='answer:' + q.name,
+                                  inputs={f: vhash(vals[f]) for f in head.features}, value=MISSING, confidence=0.0,
+                                  error=why, model=model_info(head), probs={},
+                                  extra={'head_failure': 'nonfinite_probabilities', 'head_why': why,
+                                         'head_source': type(head).__name__, 'head_status': 'abstain',
+                                         'head_guard': 'missing_facts'}), len(flow.steps))
+            return Result(None, 0.0, why, 'abstain', source=type(head).__name__, guard='missing_facts')
         if q.answer.kind == "multi":                  # p: option -> probability it applies
             a = tuple(o for o in q.answer.options if p[o] >= 0.5)
             base = min(max(v, 1 - v) for v in p.values())
@@ -999,7 +1409,8 @@ class System:
             why += "; failed checks: " + ", ".join(soft_failed)
         conf = base * path_confidence(self.catalog, trace, head.features, pcache)
         _append(trace, Record(step=0, kind="head", name="answer:" + q.name, inputs={f: vhash(vals[f]) for f in head.features},
-                              value=a, confidence=base, provenance="learned", model=model_info(head), probs=dict(p)),
+                              value=a, confidence=base, provenance="learned", model=model_info(head), probs=dict(p),
+                              extra={"head_why": why, "head_source": type(head).__name__}),
                 len(flow.steps))
         return Result(a, conf, why, probs=p, provenance="learned", source=type(head).__name__)
 
@@ -1077,7 +1488,7 @@ class System:
         return self.order_model
 
     # --- constraints between answers: joint decoding
-    def _joint(self, results, max_combos=50_000):
+    def _joint(self, results, max_combos=50_000, *, confidence_paths=None):
         import itertools
         import math
         cons = [c for c in self.catalog.constraints.values() if all(q in results for q in c.inputs)]
@@ -1113,7 +1524,7 @@ class System:
                 rc = rank_candidates(at, r.probs)
             if rc is not None:
                 cands[q] = rc
-            elif r.status == "ok" and r.probs and at.kind not in ("span", "estimate", "rank"):
+            elif r.status == "ok" and r.probs and at.kind not in ("span", "estimate", "rank", "structured"):
                 if at.kind == "multi":
                     opts = []
                     for bits in itertools.product([0, 1], repeat=len(at.options)):
@@ -1154,13 +1565,21 @@ class System:
                 if r.probs:
                     r.confidence = (math.exp(dict(cands[q])[r.answer]) if self.questions[q].answer.kind in ("multi", "rank")
                                     else r.probs.get(r.answer, r.confidence))
+                    pc, multiply, read_cap = (confidence_paths or {}).get(q, (1.0, False, 1.0))
+                    r.confidence = r.confidence * pc if multiply else min(r.confidence, pc)
+                    if q in self.calib:
+                        # The previous answer's calibration was replaced with a
+                        # new class probability: calibrate this selected score,
+                        # then retain independent evidence/entry-point bounds.
+                        r.confidence = _platt(r.confidence, *self.calib[q])
+                    r.confidence = min(r.confidence, pc, read_cap)
                 broken = [c.name for c in cons if q in c.inputs and not ok({**current}, c)]
                 r.why += f"; changed from {was!r} to satisfy {', '.join(broken)}"
                 r.repaired = (was, broken)
         return True, []
 
     # --- task-specific training
-    def facts_for(self, init_state):
+    def facts_for(self, init_state, *, features=None):
         """All computable facts (for head training): a "compute everything" flow without rules, planned by the system's
         strategist (so a fact `ask` computes around a dead-end producer is a feature candidate too)."""
         init_state = self._state(init_state)[0]
@@ -1168,6 +1587,25 @@ class System:
         flow = self._plan([q], init_state.keys())
         flow.steps = [s for s in flow.steps if s.part.kind != "rule"]
         _, vals = execute(self.catalog, flow, init_state, early_exit=False)
+        if features is not None and self._answer_refs():
+            refs, pending, seen, sources = self._answer_refs(), list(features), set(), set()
+            while pending:
+                fact = pending.pop()
+                if fact in seen:
+                    continue
+                seen.add(fact)
+                if fact in refs:
+                    sources.add(refs[fact])
+                part = self.catalog.parts.get(fact)
+                if part is not None:
+                    pending.extend(part.inputs)
+            if sources:
+                decided = self._decide(init_state, sorted(sources), early_exit=False)
+                vals.update({n: v for n, v in decided.values.items() if not n.startswith('answer:')})
+                target = Question('__features__', '', None, uses=list(features))
+                planner = plan if self.strategist is None else self.strategist.plan
+                feature_flow = planner(self.catalog, [target], vals.keys(), self.heads)
+                _, vals = execute(self.catalog, feature_flow, vals, early_exit=False)
         return vals
 
     def fit(self, question, examples, features=None, *, select=None, min_gain=0.0, lam=None, refit=2.0,
@@ -1193,11 +1631,32 @@ class System:
         q = self.questions[question]
         examples = _learnable(q, examples)
         t0 = time.perf_counter()
-        rows = [self.facts_for(s) for s, _ in examples]
+        if features is not None:
+            features = list(features)
+            pending, visited, refs, sources = list(features), set(), self._answer_refs(), set()
+            while pending:
+                fact = pending.pop()
+                if fact in visited:
+                    continue
+                visited.add(fact)
+                if refs.get(fact) == question:
+                    raise ValueError('a head cannot train on its own accepted answer')
+                if fact in refs:
+                    sources.add(refs[fact])
+                part = self.catalog.parts.get(fact)
+                if part is not None:
+                    pending.extend(part.inputs)
+            keys = self._state(examples[0][0])[0].keys()
+            for source in sources:
+                source_flow = self._plan([self.questions[source]], keys)
+                if any(question in stage for stage in source_flow.answer_stages):
+                    raise ValueError('a head cannot train on its own accepted answer through another question')
+        rows = [self.facts_for(s, features=features) for s, _ in examples]
         explicit = features is not None
         keys = set(self._state(examples[0][0])[0].keys())
         if features is None:
-            features = sorted(self._computable(keys))      # the given keys too
+            features = (sorted(set().union(*(set(row) for row in rows))) if self._answer_refs()
+                        else sorted(self._computable(keys)))      # the given keys too
         features = list(features)
         select = not explicit if select is None else bool(select)
         ans = [q.answer.normalize(a) for _, a in examples]
@@ -1430,7 +1889,7 @@ class System:
         head = self.heads.get(question)
         dec = decision_of(self.catalog, question)
         if isinstance(head, (FastHead, MultiHead)) and getattr(head, "online", True):
-            ms = head.teach(self.facts_for(init_state), correct)
+            ms = head.teach(self.facts_for(init_state, features=head.features), correct)
         if dec is not None:
             try:
                 label = dec.spec.label(correct)           # the decision's own label (a bool decision: "yes" / "no")
@@ -1577,11 +2036,18 @@ def _served(ref, ms):
     results = {}
     for q, r in ref.results.items():
         r = results[q] = copy.copy(r)
+        if r.kind == "structured":
+            r.answer = copy.deepcopy(r.answer)
+            r.extra = copy.deepcopy(r.extra)
         if isinstance(r.probs, dict):
             r.probs = dict(r.probs)
     trace = copy.copy(ref.trace)
-    trace.records = list(ref.trace.records)
-    resp = Response(results, ref.flow, trace, dict(ref.values), ms, ref.feasible, ref.violations, ref.catalog,
+    structured = any(r.kind == "structured" for r in ref.results.values())
+    trace.records = copy.deepcopy(ref.trace.records) if structured else list(ref.trace.records)
+    if structured:
+        trace.init = copy.deepcopy(ref.trace.init)
+    values = copy.deepcopy(ref.values) if structured else dict(ref.values)
+    resp = Response(results, ref.flow, trace, values, ms, ref.feasible, ref.violations, ref.catalog,
                     list(ref.safeguards or []), ref.model_outputs)
     for k in ("_heads", "_system", "read", "experimental", "lang"):
         if k in ref.__dict__:
@@ -1716,7 +2182,7 @@ def _combine_failed(catalog, q, failed):
 _ABSTAIN, _BAD = object(), object()
 
 
-def _then_answer(catalog, check, q, trace, vals, flow, said):
+def _then_answer(catalog, check, q, trace, vals, flow, said, *, record_only=False):
     """A failed hard check's `then` function for question q: called on the facts it reads (typed like a part's), its value
     normalized to an answer of q and recorded in the trace (kind "then", name "then:<question>"; replay re-runs it) →
     Result "forced", or an abstention (guard "hard_check") when it cannot run or gives no answer of q."""
@@ -1733,21 +2199,30 @@ def _then_answer(catalog, check, q, trace, vals, flow, said):
                       guard="hard_check")
     from .catalog import Quote
     plain = {x: (v.value if isinstance(v, Quote) else v) for x, v in args.items()}
-    why = None
-    if tp is not None and tp.tin is not None:
-        from .types import typed_in
-        plain, why = typed_in(tp, plain)
-    answer, err = None, why
-    if err is None:
-        try:
-            answer = q.answer.normalize(fn(**plain))
-        except ValueError as e:
-            err = f"its value is not an answer of {q.name!r}: {e}"
-        except Exception as e:  # noqa: BLE001
-            err = f"{type(e).__name__}: {str(e)[:120]}"
-    _append(trace, Record(step=0, kind="then", name="then:" + q.name, inputs={x: vhash(args[x]) for x in names},
-                          value=MISSING if err else answer, error=err, provenance="computed",
-                          extra={"check": check.name}), len(flow.steps))
+    saved = next((r for r in reversed(trace.records) if r.kind == "then" and r.name == "then:" + q.name
+                  and isinstance(r.extra, dict) and r.extra.get("check") == check.name), None) \
+        if record_only else None
+    if saved is not None:
+        answer, err = saved.value, saved.error
+    elif record_only:
+        return Result(None, 0.0, f'{said}; {label} has no recorded output', 'abstain',
+                      source=check.name, guard='missing_record')
+    else:
+        why = None
+        if tp is not None and tp.tin is not None:
+            from .types import typed_in
+            plain, why = typed_in(tp, plain)
+        answer, err = None, why
+        if err is None:
+            try:
+                answer = q.answer.normalize(fn(**plain))
+            except ValueError as e:
+                err = f"its value is not an answer of {q.name!r}: {e}"
+            except Exception as e:  # noqa: BLE001
+                err = f"{type(e).__name__}: {str(e)[:120]}"
+        _append(trace, Record(step=0, kind="then", name="then:" + q.name, inputs={x: vhash(args[x]) for x in names},
+                              value=MISSING if err else answer, error=err, provenance="computed",
+                              extra={"check": check.name}), len(flow.steps))
     if err:
         return Result(None, 0.0, f"{said}; {label} gave no answer: {err}", "abstain", source=check.name,
                       guard="hard_check")
@@ -1852,4 +2327,181 @@ def _platt_fit(xs, ys):
     return float(a), float(b)
 
 
-__all__ = ["governs", "MultiHead", "Response", "System"]
+__all__ = ["governs", "MultiHead", "Response", "System", "UnrecordedResponse"]
+
+
+_PROBE_MARKER = '__solvi_hypothetical_probe__'
+
+
+def _mark_probe_results(results, marker):
+    import copy
+    for name, original in list(results.items()):
+        r = copy.copy(original)
+        r.why = 'hypothetical probe; ' + r.why
+        r.extra = {**(r.extra or {}), 'probe': copy.deepcopy(marker)}
+        results[name] = r
+    return results
+
+
+def _probe(system, question, facts, *, override=False):
+    import copy
+    from .provenance import no_probes
+    from .response import Response
+    from .runtime import execute, now_ms
+
+    if not isinstance(question, str):
+        raise TypeError('probe takes one question name')
+    if type(facts) is not dict or any(not isinstance(k, str) for k in facts):
+        raise TypeError('probe facts must be a dictionary with string names')
+    if type(override) is not bool:
+        raise TypeError('override must be bool')
+    system._names(question)
+    # Supplying a computed fact is explicit. Supplying the answer rule itself
+    # would skip the rule being probed, so is never an allowed override.
+    replaced = sorted(k for k in facts if k in system.catalog.parts)
+    if _PROBE_MARKER in facts:
+        raise ValueError('probe marker is reserved')
+    if any(k.startswith('answer:') for k in facts):
+        raise ValueError('probe cannot replace answer rules')
+    checks = [k for k in replaced if system.catalog.parts[k].kind == 'check']
+    if checks:
+        raise ValueError('probe cannot replace checks; supply their input facts instead')
+    if set(replaced) & set(system._answer_refs()):
+        raise ValueError('probe cannot replace accepted answer facts; supply source inputs instead')
+    if replaced and not override:
+        raise ValueError(_clash(system.catalog, replaced, 'probe input has'))
+    t0 = now_ms()
+    state = copy.deepcopy(facts)
+    marker = {'hypothetical': True, 'overridden': replaced, 'guarantee_applied': False}
+    state[_PROBE_MARKER] = copy.deepcopy(marker)
+    q = system.questions[question]
+    cs = getattr(system.catalog, 'contracts', None) or {}
+    applicable = question not in cs or cs[question].applies(state)[0]
+    flow = system._plan([q] if applicable else [], state.keys())
+    with no_probes():
+        if flow.answer_stages:
+            prepared = _Prepared(state, None, None, [q], flow, None, None)
+            response = system._ask_answers(prepared, t0, False, workers=1, early_exit=system.early_exit)
+            response.trace.fingerprint = {**system._fingerprint(flow), 'probe': marker}
+            response._system = None
+            return response
+        trace, values = execute(system.catalog, flow, state, workers=1, early_exit=system.early_exit)
+        results, feasible, violations = system._results([q], flow, trace, values)
+    _mark_probe_results(results, marker)
+    trace.fingerprint = {**system._fingerprint(flow), 'probe': marker}
+    return Response(results, flow, trace, values, now_ms() - t0, feasible, violations, system.catalog)
+
+
+def _rename_system(system, *, inputs=None, answers=None):
+    from copy import deepcopy
+    inputs, answers = dict(inputs or {}), dict(answers or {})
+    external = {name for q in system.entry_points() for name in q.fields}
+    for old, new in inputs.items():
+        if not isinstance(new, str) or not new.isidentifier():
+            raise ValueError('external input names must be Python fact identifiers')
+        if old not in external:
+            raise ValueError(f'not an external input: {old!r}')
+        if new in external or new in system.catalog.parts:
+            raise ValueError(f'input rename collides with existing fact: {new!r}')
+    if len(set(inputs.values())) != len(inputs):
+        raise ValueError('input renames must have unique destinations')
+    for old, new in answers.items():
+        if old not in system.questions:
+            raise ValueError(f'unknown question: {old!r}')
+        if not isinstance(new, str) or not new.strip():
+            raise ValueError('question names must be nonempty strings')
+    names = [answers.get(q, q) for q in system.questions]
+    if len(set(names)) != len(names):
+        raise ValueError('answer rename collides with another question')
+    # Names are translated simultaneously; swaps do not form dependency cycles.
+    cat = deepcopy(system.catalog)
+    for old, new in inputs.items():
+        declared = list((cat.readers.get(old) or {}).values())
+        if not declared or not all(t == declared[0] for t in declared):
+            from typing import Any
+            cat.alias(old, new, type=Any)
+        else:
+            cat.alias(old, new)
+    cat._boundary_given_aliases = frozenset(getattr(cat, '_boundary_given_aliases', ())) | frozenset(inputs)
+    def question(name):
+        return answers.get(name, name)
+    def part_name(name):
+        return 'answer:' + question(name[7:]) if name.startswith('answer:') else name
+    for part in list(cat.parts.values()) + list(cat.rules.values()):
+        if part.question is not None:
+            part.question = question(part.question)
+            part.name = part_name(part.name)
+        part.then = {question(q): v for q, v in part.then.items()}
+        if part.then_parts:
+            part.then_parts = {question(q): p for q, p in part.then_parts.items()}
+    cat.rules = {question(q): p for q, p in cat.rules.items()}
+    for fact, source in system._answer_refs().items():
+        if question(source) != source:
+            original = cat.parts.pop(fact)
+            cat.answer_fact(question(source), name=fact)
+            original.func = cat.parts[fact].func
+            cat.parts[fact] = original
+    cat.sensitive = frozenset(set(cat.sensitive) | {inputs[n] for n in cat.sensitive if n in inputs})
+    if hasattr(cat, 'contracts'):
+        from dataclasses import replace
+        contracts = {}
+        for q, contract in cat.contracts.items():
+            changes = {}
+            if inputs and contract.applicable is not None:
+                def adapt_applicable(fn, mapping):
+                    def applicable(state):
+                        return fn({**state, **{old: state[new] for old, new in mapping.items() if new in state}})
+                    applicable.__name__ = getattr(fn, '__name__', type(fn).__name__)
+                    applicable.__doc__ = getattr(fn, '__doc__', None)
+                    return applicable
+                changes['applicable'] = adapt_applicable(contract.applicable, inputs)
+            if contract.applicable_inputs is not None:
+                changes['applicable_inputs'] = tuple(inputs.get(n, n) for n in contract.applicable_inputs)
+            if isinstance(contract.echo, tuple):
+                changes['echo'] = tuple(inputs.get(n, n) for n in contract.echo)
+            contracts[question(q)] = replace(contract, **changes)
+        cat.contracts = contracts
+    for constraint in cat.constraints.values():
+        old_inputs = tuple(constraint.inputs)
+        new_inputs = tuple(question(q) for q in old_inputs)
+        if old_inputs != new_inputs:
+            fn = constraint.func
+            def adapt(fn=fn, old_inputs=old_inputs, new_inputs=new_inputs):
+                def call(**values):
+                    return fn(**{old: values[new] for old, new in zip(old_inputs, new_inputs)})
+                call.__name__ = fn.__name__
+                return call
+            constraint.func = adapt()
+            constraint.inputs = list(new_inputs)
+            if constraint.types:
+                constraint.types = {question(q): t for q, t in constraint.types.items()}
+                from .types import compile_part
+                compile_part(constraint)
+    questions = deepcopy(list(system.questions.values()))
+    for q in questions:
+        q.name = question(q.name)
+        q.requires = [part_name(n) for n in q.requires]
+        if q.uses is not None:
+            q.uses = [inputs.get(n, n) for n in q.uses]
+        if q.answer is not None and q.answer.kind == 'span':
+            source = q.answer.source or 'doc'
+            if source in inputs:
+                q.answer.source = inputs[source]
+    input_model = system.input_model
+    if inputs and input_model is not None:
+        raise ValueError('rename inputs on an input_model system requires a model with external field names; use Catalog.alias')
+    result = System(cat, questions, workers=system.workers, order=system.order,
+                    producers=system.producers, learn=system.learn, input_model=input_model,
+                    strategist=system.strategist, timeout=system.timeout, lang=system.lang,
+                    early_exit=system.early_exit)
+    for attr in ('heads', 'calib', 'shift_watch', 'guards', 'learned_rules'):
+        setattr(result, attr, {question(q): value for q, value in getattr(system, attr).items()})
+    from copy import copy
+    from .guarantees.guarantee import QuestionGuard
+    for name, guard in list(result.guards.items()):
+        if isinstance(guard, QuestionGuard) and guard.question != name:
+            adapted = copy(guard)
+            adapted.question = name
+            adapted.__dict__.pop('_fp', None)
+            result.guards[name] = adapted
+    return result

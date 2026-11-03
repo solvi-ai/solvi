@@ -312,6 +312,32 @@ def _compile_off(torch):
         torch.compile = real
 
 
+def _load_torch_encoder(torch, path, *, block):
+    """Build the encoder; retry only the known Python/Dynamo incompatibility without compilation.
+
+    Runtime detection avoids guessing support from torch/platform version numbers. Compilation is disabled only
+    while importing/building the encoder, and reference_compile=False also disables ModernBERT's runtime path.
+    """
+    def load(disabled):
+        with _compile_off(torch) if disabled else contextlib.nullcontext():
+            from transformers import AutoConfig, AutoModel
+            cfg = AutoConfig.from_pretrained(path)
+            if disabled and hasattr(cfg, "reference_compile"):
+                cfg.reference_compile = False
+            if block:
+                cfg._attn_implementation = "sdpa"
+                return AutoModel.from_config(cfg, attn_implementation="sdpa")
+            return AutoModel.from_config(cfg)
+
+    disabled = no_compile()
+    try:
+        return load(disabled)
+    except RuntimeError as exc:
+        if disabled or str(exc) != "Dynamo is not supported on Python 3.12+":
+            raise
+    return load(True)
+
+
 class TorchScorer(_NetScorer):
     """The checkpoint's encoder (transformers AutoModel from config.json) + the option head, weights from model.safetensors.
     The block layout passes per-layer-type attention masks and position ids (sdpa attention)."""
@@ -324,16 +350,7 @@ class TorchScorer(_NetScorer):
         self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
         self._setup(path, max_len, bs, caps)
         sd = load_file(os.path.join(path, "model.safetensors"))
-        with _compile_off(torch) if no_compile() else contextlib.nullcontext():
-            from transformers import AutoConfig, AutoModel
-            cfg = AutoConfig.from_pretrained(path)
-            if no_compile() and hasattr(cfg, "reference_compile"):
-                cfg.reference_compile = False      # transformers 4.x ModernBERT: no compiled MLP at run time either
-            if self.mq is not None and self.mq["layout"] == "block":
-                cfg._attn_implementation = "sdpa"
-                encoder = AutoModel.from_config(cfg, attn_implementation="sdpa")
-            else:
-                encoder = AutoModel.from_config(cfg)
+        encoder = _load_torch_encoder(torch, path, block=self.mq is not None and self.mq["layout"] == "block")
         h = encoder.config.hidden_size
         n_out = sd["head.3.weight"].shape[0] if "head.3.weight" in sd else 2
         head = torch.nn.Sequential(torch.nn.Linear(h, h), torch.nn.GELU(), torch.nn.LayerNorm(h), torch.nn.Linear(h, n_out))

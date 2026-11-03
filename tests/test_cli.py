@@ -775,10 +775,10 @@ def test_ask_text_takes_today_and_asks_the_end_user_in_their_words(tmp_path, cap
     assert run(capsys, "ask", f"{f}:system", "--state", "{}", "--today", "2026-09-28")[0] == 2
 
 
-def test_help_and_the_unknown_command_error_list_every_command(capsys):
-    assert main(["--help"]) == 0
+def test_all_help_and_the_unknown_command_error_list_every_command(capsys):
+    assert main(["--all-help"]) == 0
     text = capsys.readouterr().out
-    listed = text.split("positional arguments:")[1].split("option")[0]
+    listed = text.split("commands:")[1].split("\n\n")[0]
     for cmd in ("verify", "replay", "diff", "report", "serve", "check", "ask", "calibrate", "models", "init", "test",
                 "honesty", "mutants", "hook"):
         assert f" {cmd} " in listed or f"{cmd}," in listed, cmd

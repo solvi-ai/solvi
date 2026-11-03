@@ -16,6 +16,7 @@ pydantic is imported on the first typed part (or BaseModel input, or serializati
 from __future__ import annotations
 
 import inspect
+import math
 import re
 import sys
 import types
@@ -269,6 +270,12 @@ def typed_in(part, args, known=None):
 def typed_out(part, value):
     """Validate / coerce a typed part's plain output → (value, None) or (None, the rejection reason)."""
     s = part.tout
+    if part.kind == "rule" and is_structured_type(part.returns) and type(value) in (dict, list, tuple):
+        from .types import _structured_json as _json
+        try:
+            _json(value)
+        except ValueError as err:
+            return None, f"{TYPE_REJECTED}: structured return ({err})"
     nv, err = check(s, value)
     if err is None:
         return nv, None
@@ -276,6 +283,16 @@ def typed_out(part, value):
         from .provenance import OUTSIDE_OPTIONS
         return None, f"decision {_short(value)} is {OUTSIDE_OPTIONS} {s.closed} (return type {s.name})"
     return None, f"{TYPE_REJECTED}: returned {_short(value)}, not {s.name} ({err})"
+
+
+def is_structured_type(t):
+    t, _ = split_unknown(t)
+    s = _strip(t)
+    if _is_union(s):
+        ms = [m for m in get_args(s) if m is not type(None)]
+        return bool(ms) and any(is_structured_type(m) for m in ms)
+    return (closed_values(s) is None and ((get_origin(s) or s) in (dict, list, tuple) or _record_like(s)
+            or (isinstance(s, type) and hasattr(s, "__required_keys__") and hasattr(s, "__optional_keys__"))))
 
 
 def compile_part(p):
@@ -658,6 +675,8 @@ def answer_type_of(t, ordinal=False):
     if s is bool:
         return Answer.yes_no()
     cv = closed_values(s)
+    if is_structured_type(s):
+        return Answer.structured(s)
     if cv is None:
         hint = ("; a number a rule computes: Question(..., answer=Answer.estimate()) — an estimate without bins is the "
                 "rule's number as it is (confidence: the facts it rests on) — or Estimate[edges]; a number quoted from a "
@@ -678,6 +697,11 @@ def check_answer(rule, q):
     at = q.answer
     if at is None or t is None:
         return
+    if at.kind == 'structured' and at.type is Any:
+        _, unknown = split_unknown(t)
+        if unknown and not at.unknown:
+            raise FactTypeError(f'rule {_fname(rule)} may return Unknown; declare Answer.maybe(...) to allow it')
+        return  # return annotation validation remains the runtime part's responsibility
     if is_primitive(t):
         t2, unknown = split_unknown(t)
         got = answer_type_of(t2)
@@ -798,3 +822,139 @@ __all__ = ["adapter", "answer_type_of", "Bins", "check", "check_answer", "compat
            "FactTypeError", "field_types", "forget_rule", "hints", "is_model", "Maybe", "Ordinal", "primitive_answer",
            "producers", "question_kind", "Rank", "RankOf", "register", "Scale", "Span", "span_value", "SpanOf", "Spec",
            "spec", "split_unknown", "state_of", "type_name", "typed_in", "typed_out"]
+
+
+# --- private structured answer validation and schema encoding
+def _validate_structured_type(t):
+    origin, args = get_origin(t), get_args(t)
+    if origin is dict and args and args[0] not in (str, Any):
+        raise ValueError('structured JSON object schemas require string keys')
+    if origin not in (Literal,):
+        for x in args:
+            _validate_structured_type(x)
+
+
+def _structured_type_data(t):
+    """A restricted, reversible type description; never evaluate a type expression."""
+    if t is Any:
+        return {'kind': 'any'}
+    if t is type(None):
+        return {'kind': 'none'}
+    if t is Ellipsis:
+        return {'kind': 'ellipsis'}
+    origin, args = get_origin(t), get_args(t)
+    names = {dict: 'dict', list: 'list', tuple: 'tuple', Literal: 'literal', Union: 'union', types.UnionType: 'union'}
+    if origin is dict and args and args[0] not in (str, Any):
+        raise ValueError('structured JSON object schemas require string keys')
+    if origin in names:
+        return {'kind': names[origin], 'args': list(args) if origin is Literal else [_structured_type_data(x) for x in args]}
+    if t in (dict, list, str, int, float, bool):
+        return {'kind': 'builtin', 'name': t.__name__}
+    if isinstance(t, type) and '<locals>' not in t.__qualname__:
+        return {'kind': 'class', 'name': f'{t.__module__}:{t.__qualname__}', 'schema': adapter(t).json_schema()}
+    raise ValueError('a structured answer type must be importable to serialize it; local classes are not restorable')
+
+
+def _load_structured_type(data):
+    from .schema import _span_type
+    kind = data['kind']
+    if kind == 'any':
+        return Any
+    if kind == 'none':
+        return type(None)
+    if kind == 'ellipsis':
+        return Ellipsis
+    if kind == 'builtin':
+        return {t.__name__: t for t in (dict, list, str, int, float, bool)}[data['name']]
+    if kind == 'class':
+        t = _span_type(data['name'])
+        if adapter(t).json_schema() != data['schema']:
+            raise ValueError('structured answer class schema changed since serialization')
+        return t
+    args = tuple(data.get('args', ()))
+    if kind == 'literal':
+        return Literal[args]
+    args = tuple(_load_structured_type(x) for x in args)
+    if kind == 'union':
+        return Union[args]
+    if kind == 'dict':
+        return dict[args]
+    if kind == 'list':
+        return list[args[0]]
+    if kind == 'tuple':
+        return tuple[args]
+    raise ValueError(f'unknown structured type kind {kind!r}')
+
+
+def _structured_json(v, active=None, depth=0):
+    if v is None or type(v) in (str, bool, int):
+        return
+    if type(v) is float and math.isfinite(v):
+        return
+    if depth > 128:
+        raise ValueError('structured JSON nesting exceeds 128 levels')
+    if type(v) not in (list, tuple, dict) or (type(v) is dict and any(type(k) is not str for k in v)):
+        raise ValueError('structured answers contain only finite JSON values and string object keys')
+    active = set() if active is None else active
+    if id(v) in active:
+        raise ValueError('structured JSON cannot contain cycles')
+    active.add(id(v))
+    try:
+        for x in v.values() if type(v) is dict else v:
+            _structured_json(x, active, depth + 1)
+    finally:
+        active.remove(id(v))
+
+
+def _normalize_structured(at, value):
+    # Check raw containers before coercion so int keys / nonfinite values cannot
+    # silently become strings / null during JSON serialization.
+    if at.type is Any or type(value) in (dict, list, tuple):
+        _structured_json(value)
+    ta = adapter(at.type or dict)
+    validated = ta.validate_python(value)
+    _structured_json(ta.dump_python(validated, mode='python', warnings='error'))
+    result = ta.dump_python(validated, mode='json', warnings='error')
+    if at.type is not Any and type(result) not in (dict, list):
+        raise ValueError('a structured answer is a JSON object or array')
+    _structured_json(result)
+    return result
+
+
+def _structured_fields(value, declared, init):
+    """Validate explicit JSON Pointer metadata, grounding any supporting quotes."""
+    from .catalog import Quote, find_quote
+    if not isinstance(declared, dict):
+        raise ValueError('field explanations are a JSON Pointer -> metadata object')
+    result = {}
+    for pointer, meta in declared.items():
+        if not isinstance(pointer, str) or not pointer.startswith('/') or not isinstance(meta, dict):
+            raise ValueError('field explanations need JSON Pointer paths and metadata objects')
+        item = value
+        for part in pointer[1:].split('/'):
+            if '~' in part.replace('~0', '').replace('~1', ''):
+                raise ValueError('invalid JSON Pointer escape')
+            part = part.replace('~1', '/').replace('~0', '~')
+            if isinstance(item, list):
+                if not part.isdecimal() or str(int(part)) != part:
+                    raise ValueError('array JSON Pointer needs a canonical nonnegative index')
+                item = item[int(part)]
+            else:
+                item = item[part]
+        why = meta.get('why')
+        conf = meta.get('confidence', 1.0)
+        if not isinstance(why, str) or not why.strip() or isinstance(conf, bool) or not isinstance(conf, (int, float)) \
+                or not math.isfinite(conf) or not 0 <= conf <= 1:
+            raise ValueError('each explained field needs a nonempty why and finite confidence in [0, 1]')
+        evidence = []
+        for e in meta.get('evidence', []):
+            q = Quote(**e) if isinstance(e, dict) else find_quote(e, {k: v for k, v in init.items() if isinstance(v, str)})
+            if q is None or not isinstance(init.get(q.source), str) or not 0 <= q.start <= q.end <= len(init[q.source]) \
+                    or init[q.source][q.start:q.end] != q.value:
+                raise ValueError('field evidence is not literally in its source')
+            if isinstance(q.confidence, bool) or not isinstance(q.confidence, (int, float)) or not math.isfinite(q.confidence) or not 0 <= q.confidence <= 1:
+                raise ValueError('field evidence confidence must be finite and in [0, 1]')
+            conf = min(conf, q.confidence)
+            evidence.append({'value': q.value, 'start': q.start, 'end': q.end, 'source': q.source})
+        result[pointer] = {'why': why, 'confidence': float(conf), 'evidence': evidence}
+    return result

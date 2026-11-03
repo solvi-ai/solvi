@@ -74,11 +74,12 @@ def test_min_k_in_the_law_set():
 
 # ───────────────────────────────────────────── Unknown
 def test_unknown_refutes_nothing_and_counts_as_spent():
+    # Isolate split-phase Unknown accounting from the independent leftover falsification stage.
     g = grammar(k=1)
     probes = [(s, "do") for s in ALL]
     cands = Enumerate().propose(LawSet(g, base=off), tuple([True] * F), "do", "on")
     ls = LawSet(g, base=off)
-    adm = ls.admit_by_probes(cands, lambda s, a: Unknown, probes=probes, budget=5)
+    adm = ls.admit_by_probes(cands, lambda s, a: Unknown, probes=probes, budget=5, falsify=None)
     assert adm.status == "undetermined" and adm.asked == [] and len(adm.unknown) == 5
     assert adm.refuted == 0 and ls.cost["probes"] == 5 and "budget" in adm.why
     assert all(t.observed is Unknown for t in adm.unknown)
@@ -88,7 +89,7 @@ def test_unknown_refutes_nothing_and_counts_as_spent():
         calls.append(s)
         return Unknown if len(calls) <= 2 else world(s, a)
     ls = LawSet(g, base=off)
-    adm = ls.admit_by_probes(cands, flaky, probes=probes, budget=30)
+    adm = ls.admit_by_probes(cands, flaky, probes=probes, budget=30, falsify=None)
     assert adm.status == "accepted" and adm.law.condition == ("x0",) and len(adm.unknown) == 2
     assert ls.cost["probes"] == len(adm.asked) + 2
     assert {t.state for t in adm.unknown}.isdisjoint({t.state for t in adm.asked})   # not asked again

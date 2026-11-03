@@ -42,8 +42,20 @@ own counters in `self` and must pickle (the loop's checkpoint saves it).
   answered by nobody, so it is short as soon as the window is full; with holdout=0 there is no window and the signal
   reads short). With the pre-freeze gates on, a training also waits for the labels those gates need — ≥ min_holdout
   held-out labels and ≥ the calib labels the calib threshold needs (`min_calib`; `gates.calib_min`, 73 at α = 0.05)
-  — since a training with fewer is refused at birth (with the default shares the first training comes at about 470
-  train labels, not 300).
+  — since a training with fewer is refused at birth. These are accepted labels, not decisions.
+  For fresh distinct keys and stationary acquisition, the rough total accepted-label requirement is
+  max(T / (1 - calib - holdout), C / calib, H / holdout), where T is the current train floor,
+  C = calib_floor(alpha), H = min_holdout; omit a zero-share split only when its required floor is zero.
+  Defaults at alpha=0.05 give max(300/0.70, 73/0.15, 100/0.15), about 667 accepted labels
+  (about 467 train labels in expectation). Hash-split fluctuations, repeated keys, maturity and
+  improvement-signal gates, and budget limits can delay it further. To estimate decision cost,
+  divide by the measured accepted-labels/decision rate on the relevant stream/window, not by
+  an assumed coverage formula: escalation, coin sampling, missing/refused outcomes and changing
+  traffic all affect that rate. At rate 0.17 the floors alone suggest roughly 3922 decisions;
+  this is an illustration, not a timing guarantee or a promise to train within 2400 decisions.
+  policy.why_not_train(loop._state()) reports the first currently blocking gate, not all blockers
+  or an ETA. train_now() can bypass scheduling floors but still pays training/budget costs and
+  can fail the unchanged post-training freeze gates. No safety floor is reduced to force a run.
 - select — one row per content key (the latest label wins), then a class-balanced sample of ≤ budget.max_examples
   of them, half from the latest 2 × the served version's n_train rows; seeded by the next version number, so the
   same rows give the same selection.
@@ -138,10 +150,15 @@ class Budget:
     runner stops a training at its estimate + the runner's grace_s, which must cover what the estimate leaves out:
     loading the checkpoint, calibration and saving);
     cpu_threads: torch threads of the runner on a CPU; device: "auto" (cuda when present and ≥ free_gpu_mb free, else
-    cpu), "cpu", "cuda" or "cuda:<i>"; max_examples: rows per training; max_versions_kept: versions held in memory
-    (served and retired, version 0 counted): past it the loop evicts the oldest retired ones (released, no longer a
-    rollback target; files on disk are never deleted) — never the served version, the rollback target or version 0. per_day=0 or max_trainings=0 means "never train"; max_trainings
-    counts failed trainings too."""
+    cpu), "cpu", "cuda" or "cuda:<i>"; max_examples: rows per training; max_versions_kept:
+    soft retention target for served/retired version-table rows (version 0 counted), not
+    a memory cap. Eligible oldest retired rows are released; their files remain.
+    Version 0, current served and rollback target are protected, so three protected
+    rows may exceed a smaller target. Additive layers are excluded and bounded
+    separately by max_layers (base included); a resident candidate is excluded too.
+    status()["resident_versions"] inventories version-table model references across
+    states, not bytes or unique model/tensor storage. per_day=0 or max_trainings=0
+    means "never train"; max_trainings counts failed trainings too."""
     max_trainings: int | None = None
     per_day: int = 24
     min_interval_s: float = 600.0
@@ -572,7 +589,12 @@ class DefaultPolicy(LoopPolicy):
 
     # --- training
     def why_not_train(self, st) -> str | None:
-        """Why want_train says no, or None when it says yes."""
+        """First currently blocking gate, or None when want_train says yes.
+
+        Not an ETA or a complete list: fixing this blocker may expose the next.
+        Labels are accepted outcomes, not decision counts; distinct-key floors and
+        observed acquisition rates determine how slowly the gate can be reached.
+        """
         if st.paused:
             return "paused"
         if st.job is not None:

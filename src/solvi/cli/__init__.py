@@ -38,6 +38,7 @@ usage errors."""
 from __future__ import annotations
 
 import argparse
+import copy
 import importlib
 import json
 import sys
@@ -370,6 +371,19 @@ COMMANDS = {"test": ("solvi.testing", "decision regression tests from cases.json
                      "skill, install them")}
 
 
+class _RootHelpFormatter(argparse.HelpFormatter):
+    """Filter display metadata only; every registered parser remains routable."""
+    def _format_action(self, action):
+        if isinstance(action, argparse._SubParsersAction) and not getattr(action, '_all_help', False):
+            shown = copy.copy(action)
+            shown._choices_actions = sorted(
+                (item for item in action._get_subactions()
+                 if getattr(action.choices[item.dest], '_primary_help_order', None) is not None),
+                key=lambda item: action.choices[item.dest]._primary_help_order)
+            return super()._format_action(shown)
+        return super()._format_action(action)
+
+
 def main(argv=None):
     argv = list(sys.argv[1:] if argv is None else argv)
     if argv and argv[0] in ("--version", "-V"):
@@ -384,13 +398,15 @@ def main(argv=None):
                 warnings.simplefilter("ignore", ExperimentalWarning)
             module = importlib.import_module(module)
         return module.main(argv[1:])
-    p = argparse.ArgumentParser(prog="solvi", description="solvi: init a project; ask, check, serve a system; test, "
-                                                          "honesty; calibrate a model decision; models; verify, replay, "
-                                                          "diff and report stored decisions",
-                                epilog="solvi COMMAND --help shows a command's options")
-    sub = p.add_subparsers(dest="cmd", required=True)
+    p = argparse.ArgumentParser(prog="solvi", description="solvi: build, test and run a decision system",
+                                formatter_class=_RootHelpFormatter,
+                                epilog="Use --all-help for every command, or COMMAND --help for its options.")
+    p.add_argument("--all-help", action="store_true", help="show every registered command")
+    sub = p.add_subparsers(dest="cmd", title="commands", metavar="COMMAND")
     for k, (_, w) in COMMANDS.items():                # listed here; dispatched above, to their own option parsers
-        sub.add_parser(k, help=w, add_help=False)
+        command = sub.add_parser(k, help=w, add_help=False)
+        if k == "test":
+            command._primary_help_order = 1
 
     def common(sp, system=True, filters=True):
         sp.add_argument("store", help=STORE_HELP)
@@ -430,20 +446,26 @@ def main(argv=None):
     rp.add_argument("--drift-window", type=int, help="--overview: the DriftMonitor's window (default 100)")
     rp.add_argument("--no-drift", action="store_true", help="--overview: do not run the DriftMonitor")
     from ..serve import add_parser as serve_parser, cmd_serve
-    serve_parser(sub)
+    serve_parser(sub)._primary_help_order = 3
     from ..check import add_parser as check_parser, cmd_check
-    check_parser(sub)
-    ask_parser(sub)
+    check_parser(sub)._primary_help_order = 4
+    ask_parser(sub)._primary_help_order = 2
     from ._calibrate import add_parser as calibrate_parser, cmd_calibrate
     calibrate_parser(sub)
     from ._models import add_parser as models_parser, cmd_models
-    models_parser(sub)
+    models_parser(sub)._primary_help_order = 5
     from ._migrate import add_parser as migrate_parser, cmd_migrate
     migrate_parser(sub)
     from ._scaffold import add_parser as init_parser, cmd_init
-    init_parser(sub)
+    init_parser(sub)._primary_help_order = 0
     try:
         a = p.parse_args(argv)
+        if a.all_help:
+            sub._all_help = True
+            p.print_help()
+            return 0
+        if a.cmd is None:
+            p.error("the following arguments are required: cmd")
     except SystemExit as e:                            # --help: 0; usage errors: 2 — returned, not raised
         return e.code if isinstance(e.code, int) else 2
     try:

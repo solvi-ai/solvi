@@ -138,6 +138,23 @@ class Knowledge:
             out["answer_changes"], out["justification_only"] = changes, same
         return out
 
+    def redecide(self, storage, decide, *, affected, valid_at_key, fact="knowledge"):
+        """Reconsider stored answers on current knowledge at each explicit input date.
+
+        Does not retract affected items or save decisions. All candidate dates and
+        snapshots are validated before callbacks; callbacks retain their own effects.
+        valid_at_key names a top-level ISO YYYY-MM-DD/date input field. Baseline
+        is the current callback rerun on the historical snapshot, not a saved
+        historical prediction. Callback outputs must be finite JSON; System
+        Unknown answers render as {"$solvi": "unknown"}; when present, result
+        entries include old_unknown_paths/new_unknown_paths JSON Pointer sidecars
+        to distinguish them from identical literal JSON objects. Comparison also
+        distinguishes Unknown from literal JSON. Sidecars are relative to old/new.
+        """
+        changes, same = self.store.redecide(storage, affected, decide, fact=fact, upto="now",
+                                           skip_retracted=False, valid_at_key=valid_at_key)
+        return {"answer_changes": changes, "justification_only": same}
+
     def forget(self, writer, *, by=None, why=None, storage=None, decide=None):
         """Forget a source in one call: what `writer` told is taken back, and with `storage=` (the decisions'
         TraceStorage or its path) and `decide=` (a System or a function init → answers) the stored decisions that
@@ -278,23 +295,42 @@ class Knowledge:
         return self.store.snapshot(**query)
 
     @staticmethod
-    def value(snapshot, s, r, default=None, *, valid_at=None):
-        """The value of the active fact (s, r) in a snapshot (the fact "knowledge" a rule reads), or `default`.
+    def values(snapshot, s, r, *, valid_at=None, scope=None):
+        """Distinct matching fact values, in snapshot order (not a precedence order).
 
-        valid_at: a world time — only a fact that holds then is read: its effective intervals (the row's "periods",
-        when a later version closes it or it was told for several periods) or else its validity (`valid=` when it was
-        told; the row's "valid"); a fact told without `valid` holds at any time. Without it the first matching fact is read, which on a key
-        with several validity intervals is the first interval's value: pass the decision's world time (or take the
-        snapshot with `valid_at=`)."""
-        from ..core.knowledge.store import covers
+        ``scope`` is a partial scope filter, as in KnowledgeStore.snapshot. ``valid_at``
+        selects effective ``periods`` when present, otherwise ``valid``; an undated
+        fact holds at any time. Without a time, all matching intervals are read.
+        Equal values are returned once, including unhashable JSON values.
+        """
+        from ..core.knowledge.store import covers, scope_matches
+        values = []
         for row in (snapshot or {}).get("facts") or ():
             b = row.get("body") or {}
             if isinstance(b, dict) and b.get("s") == s and b.get("r") == r:
+                if scope is not None and not scope_matches(row.get("scope") or {}, scope):
+                    continue
                 if valid_at is not None and not (any(covers(iv, valid_at) for iv in row["periods"]) if "periods" in row
                                                  else covers(row.get("valid"), valid_at)):
                     continue
-                return b.get("o")
-        return default
+                value = b.get("o")
+                if value not in values:
+                    values.append(value)
+        return values
+
+    @staticmethod
+    def value(snapshot, s, r, default=None, *, valid_at=None, scope=None):
+        """The unique matching fact value, or ``default`` when no fact matches.
+
+        Raise ValueError for distinct matching values: narrow the read with world
+        time ``valid_at`` and/or partial ``scope``, or use ``values`` for a plural
+        relation. Repeated equal values are unambiguous. See ``values`` for time
+        filtering; without a time all matching intervals participate.
+        """
+        values = Knowledge.values(snapshot, s, r, valid_at=valid_at, scope=scope)
+        if len(values) > 1:
+            raise ValueError(f"Ambiguous knowledge value for ({s!r}, {r!r}); use valid_at, scope, or Knowledge.values()")
+        return values[0] if values else default
 
     def report(self):
         """What was learned and from whom (the store's report), the agenda (done, open, blocked), the action model

@@ -101,7 +101,7 @@ def test_entry_points_list_questions_with_typed_inputs():
 # --------------------------------------------------------------------------------------------------- parsers
 @pytest.mark.parametrize("s,want", [("1.5 million", "1500000"), ("1,500.50", "1500.5"), ("1 500 000 руб", "1500000"),
                                     ("2k", "2000"), ("полтора миллиона", "1500000"), ("12,5", "12.5"), ("€ 99", "99"),
-                                    ("a million", "1000000"), ("1.500.000", "1500000"), ("3 млн", "3000000"), ("-4", "-4")])
+                                    ("1.44 trillion", "1440000000000"), ("two trillions", "2000000000000"), ("a million", "1000000"), ("1.500.000", "1500000"), ("3 млн", "3000000"), ("-4", "-4")])
 def test_parse_number(s, want):
     assert parse_number(s) == want
 
@@ -644,3 +644,18 @@ def test_an_unsure_read_passes_the_field_to_the_next_extractor():
     alone = TextIn(s, extractor=[_Unsure(), _Unsure()], today=TODAY)
     f = alone.read("refund order A-7: amount 250 EUR", question="request_refund").fields
     assert f["amount"].status == "unsure" and f["amount"].quote.value == "7"
+
+
+@pytest.mark.parametrize("sign", ["-", "−", "–"])
+@pytest.mark.parametrize("amount", ["{sign}$369.7 billion", "${sign}369.7 billion", "{sign}369.7 billion"])
+def test_currency_and_number_minus_signs(sign, amount):
+    assert parse_number(amount.format(sign=sign)) == "-369700000000"
+
+
+@pytest.mark.parametrize("separator", [" ", "\u00a0", "\u202f"])
+def test_space_grouping_declared_decimal_comma(separator):
+    quote = f"534{separator}947"
+    assert parse_number(quote, {"decimal": ","}) == "534947"
+    if separator == " ":
+        with pytest.raises(ParseError):
+            parse_number(quote)

@@ -80,7 +80,7 @@ BUILTIN = ("argument_errors", "call_arguments", "grounding", "proposal", "argume
            "arguments_from_user", "schema_error", "schema_readable",
            "no_injected_arguments", "no_instructions_in_tool_outputs", "request_authorizes", "verdict", "tools_known",
            "known_tool", "not_made_before", "confirmation", "user_confirmed", "action_prediction", "agenda_blocks",
-           "action_model_allows", "agenda_allows", "slot_grounding", "slots_grounded", "request_facts")
+           "action_model_allows", "agenda_allows", "slot_grounding", "slots_grounded", "request_facts", "effect_boundary", "effect_declared", "egress_authorized")
 ROLES = {"user": "user", "human": "user", "assistant": "assistant", "ai": "assistant", "model": "assistant",
          "tool": "tool", "function": "tool", "function_call_output": "tool", "tool_result": "tool", "system": "system",
          "developer": "system"}
@@ -503,6 +503,10 @@ class Tool:
     confirm: tuple | None = None                               # require_confirmation: (spec JSON, callable matchers, on_fail)
     firewall: dict | None = None                               # Guard.firewall: the declaration that applies (see there)
 
+    effect: str = "unknown"
+    destinations: tuple = ()
+    approved_urls: tuple = ()
+
     @property
     def arguments(self):
         return list(self.model.model_fields) if self.model is not None else []
@@ -621,7 +625,7 @@ def _grounding(spec, matchers=None):
                 if s <= a and b <= e:
                     return i
             return None
-        found, missing, injected, from_tools, outside = {}, [], [], [], {}
+        found, missing, injected, injected_fields, from_tools, outside = {}, [], [], [], [], {}
         tool_values = rules.get("tool_values") == "escalate"
         for arg, allowed in rules["roles"].items():
             v = call_arguments.get(arg)
@@ -676,6 +680,7 @@ def _grounding(spec, matchers=None):
                                                                 f"last {rules['last']})" if stale else ""))
                     continue
                 if best[4]:
+                    injected_fields.append({'argument': arg, 'how': best[5], 'quote': best[:4]})
                     says = "; ".join(_short(x, 80) for x in best[4])
                     injected.append(
                         f"{arg}={_short(item)} appears only in a tool output that says {says}" if best[5] == "own" else
@@ -687,6 +692,8 @@ def _grounding(spec, matchers=None):
             if quotes:
                 found[arg] = quotes
         out = {"found": found, "missing": missing, "injected": injected}
+        if injected_fields:
+            out['injected_fields'] = injected_fields
         if tool_values:
             out["from_tools"], out["from_tool_quotes"] = from_tools, outside
         return out
@@ -787,6 +794,7 @@ def _plain_value(v):
 def _slot_grounding(spec, with_facts):
     """The firewall's per-slot report as a computed fact (its declaration, as JSON, is in `spec`)."""
     def report(tool_arguments, call_arguments, conversation, conversation_roles, request_facts=None):
+        import datetime as dt
         import enum
         from decimal import Decimal
         rules = json.loads(spec)
@@ -799,15 +807,29 @@ def _slot_grounding(spec, with_facts):
         given = tool_arguments if isinstance(tool_arguments, dict) else {}
         for arg in [a for a in call_arguments if a in given]:
             for path, spath, v in _slots(call_arguments[arg], arg, arg):
-                pv = _plain_value(v)
+                # Pydantic has already converted ISO arguments to date/datetime.
+                # These still carry user-supplied values; ground their canonical
+                # ISO text instead of exempting them as opaque Python objects.
+                if isinstance(v, dt.date) and not isinstance(v, enum.Enum):
+                    v = v.isoformat()
                 why = ("declared" if arg in exempt or path in exempt or spath in exempt else
                        "enumeration" if isinstance(v, enum.Enum) or spath in enums else
                        "boolean" if isinstance(v, bool) else "null" if v is None else
                        "empty" if isinstance(v, str) and not _visible(v).strip() else
-                       None if isinstance(v, (str, int, float, Decimal)) else "not a text or a number")
+                       None)
                 if why is not None:
-                    slots[path] = {"value": pv, "status": "exempt", "why": why}
+                    slots[path] = {"value": _plain_value(v), "status": "exempt", "why": why}
                     continue
+                if not isinstance(v, (str, int, float, Decimal)):
+                    # Serialization/str() is not evidence that an opaque value
+                    # means what its printable representation says. Only the
+                    # supported scalar representations enter the matcher.
+                    reason = f"unsupported grounding scalar type: {type(v).__name__}"
+                    slots[path] = {"value": {"unsupported_type": type(v).__name__},
+                                   "status": "missing", "why": reason}
+                    missing.append(f"{path}: {reason}")
+                    continue
+                pv = _plain_value(v)
                 at = None
                 for s, e in texts:
                     occ = _occurrences(v, conversation[s:e], match, locale)
@@ -816,6 +838,8 @@ def _slot_grounding(spec, with_facts):
                         break
                 if at is None:
                     for where, f in leaves:
+                        if isinstance(f, dt.date):
+                            f = f.isoformat()
                         if isinstance(f, bool) or f is None:
                             continue
                         hit = (isinstance(f, (int, float, Decimal)) and isinstance(v, (int, float, Decimal))
@@ -1176,6 +1200,101 @@ def _short(v, n=60):
     return repr(v) if len(v) <= n else repr(v[: n - 1] + "…")
 
 
+def _egress_destination(value):
+    """Strict destination identity: canonical ASCII authority, exact scheme/path/query/fragment bytes.
+
+    Only the scheme's own default port is equivalent to an omitted port. No www removal, IDNA expansion,
+    scheme upgrade, trailing slash removal or percent decoding. Ambiguous/noncanonical authorities fail closed.
+    """
+    import ipaddress
+    from urllib.parse import urlsplit
+    if not isinstance(value, str) or not value.startswith(("http://", "https://")):
+        return None
+    if any(c.isspace() or ord(c) < 32 or ord(c) == 127 or c == "\\" for c in value) or _cf().search(value):
+        return None
+    try:
+        sp = urlsplit(value)
+        authority = sp.netloc
+        if not authority or "@" in authority or not authority.isascii() or authority != authority.lower():
+            return None
+        if authority.startswith("["):
+            end = authority.index("]")
+            host, tail = authority[:end + 1], authority[end + 1:]
+            ipaddress.IPv6Address(host[1:-1])
+            if "%" in host:
+                return None
+        else:
+            if authority.count(":") > 1:
+                return None
+            host, sep, port = authority.partition(":")
+            tail = sep + port
+            if not host or len(host) > 253 or not all(_HOST_LABEL.fullmatch(x) for x in host.split(".")):
+                return None
+            if all(c in "0123456789." for c in host):
+                ipaddress.IPv4Address(host)
+        port = None
+        if tail:
+            if not tail.startswith(":") or not tail[1:].isdigit():
+                return None
+            port = int(tail[1:])
+            if not 1 <= port <= 65535 or str(port) != tail[1:]:
+                return None
+        if port == (443 if sp.scheme == "https" else 80):
+            port = None
+        if any(seg in (".", "..") or re.fullmatch(r"(\.|%2e){1,2}", seg, re.I) for seg in sp.path.split("/")):
+            return None
+        return sp.scheme, host, port, sp.path, sp.query, sp.fragment, "?" in value.split("#", 1)[0], "#" in value
+    except (ValueError, IndexError):
+        return None
+
+
+def _egress_in_request(value, request):
+    """Match literal complete URLs in the request without the soft human-facing URL aliases."""
+    identity = _egress_destination(value)
+    return identity is not None and any(_egress_destination(m.group()) == identity
+                                       for m in re.finditer(r'https?://[^\s<>"\'`]+', request))
+
+
+def _effect_boundary(spec):
+    def effect_boundary(call_arguments, conversation, conversation_roles) -> dict:
+        """Owner-declared effects and exact URL authorization; unknown is unverified, not a safety assertion."""
+        rules = json.loads(spec)
+        users = [r for r in conversation_roles if r[2] == "user"]
+        request = conversation[users[-1][0]:users[-1][1]] if users else ""
+        result = {"effect": rules["effect"], "destinations": rules["destinations"],
+                  "status": "unverified" if rules["effect"] == "unknown" else "declared",
+                  "declared": rules["effect"] != "unknown", "require_effects": rules["require_effects"],
+                  "approved_urls": rules["approved_urls"],
+                  "authorized": True if rules["effect"] == "egress" else None, "urls": {},
+                  "why": ("effect is unknown; owner declaration required" if rules["effect"] == "unknown"
+                          else "effect declared by application owner; actual I/O is not verified")}
+        for argument in rules["destinations"]:
+            value = call_arguments.get(argument)
+            parsed = _egress_destination(value)
+            valid = parsed is not None
+            approved = valid and any(parsed == _egress_destination(u) for u in rules["approved_urls"])
+            current = valid and _egress_in_request(value, request)
+            source = "approved_urls" if approved else "current_user_request" if current else None
+            result["urls"][argument] = {"value": value, "authorized": bool(source), "source": source}
+            if not source:
+                result["authorized"] = False
+        if rules["effect"] == "egress":
+            result["status"] = "authorized" if result["authorized"] else "denied"
+            result["why"] = "egress destinations require exact URLs in the current user request or owner approved_urls"
+        return result
+    return effect_boundary
+
+
+def effect_declared(effect_boundary) -> bool:
+    """An owner declared the tool's effect, or legacy unknown effects are explicitly tolerated by this Guard."""
+    return not effect_boundary["require_effects"] or effect_boundary["declared"]
+
+
+def egress_authorized(effect_boundary) -> bool:
+    """Every declared egress destination is an exact authorized URL; prefix grounding grants no new suffix."""
+    return effect_boundary["effect"] != "egress" or effect_boundary["authorized"]
+
+
 def _schema_error(text):
     def schema_error(tool_name) -> str:
         """Why the tool's input schema could not be read (adopt): its arguments are not checked against types."""
@@ -1212,6 +1331,18 @@ def arguments_from_user(grounding) -> bool:
 def no_injected_arguments(grounding) -> bool:
     """No argument comes only from a tool output that carries instruction-like text."""
     return not grounding["injected"]
+
+
+def _confirmation_taint_check():
+    def no_injected_arguments(grounding, confirmation) -> bool:
+        """Tool-tainted fields require the user's acceptance of these exact values; other grounding still applies."""
+        if not grounding['injected']:
+            return True
+        fields = grounding.get('injected_fields', ())
+        return (bool(confirmation.get('confirmed')) and len(fields) == len(grounding['injected'])
+                and all(field['how'] in ('own', 'context')
+                        and field['argument'] in confirmation.get('found', {}) for field in fields))
+    return no_injected_arguments
 
 
 def no_instructions_in_tool_outputs(conversation, conversation_roles) -> bool:
@@ -1505,18 +1636,23 @@ class Guard:
     taken as given, as before. `signed_messages(keys)` is a verifier over HMAC tokens from `sign_message(text, sender,
     key)` carried in the message's "signature" field.
 
+    require_effects=True escalates every unknown owner effect declaration. False (default) preserves legacy tools,
+    but records their effect as unverified; it does not assert they are local/read-only. A declared egress tool always
+    requires exact destination authorization (see tool), in either mode. Remote readOnlyHint is never a declaration.
+
     The stop button: `guard.pause(reason, by=)` stops every call — each check / call after it is denied
     (`guard_not_paused`) and no tool runs — until `guard.resume(by=)`. Both are written to the store as events with
     their time, who and why; the pause lives in memory (a new Guard starts running: see `pause`)."""
 
     @_deprecate.removed_kwargs(facts="fact_names")
     def __init__(self, storage=None, authorizer=None, fact_names=None, lang="en", scan_user=False, tool_values="deny",
-                 knowledge=None, user_verifier=None, message_verifier=None):
+                 knowledge=None, user_verifier=None, message_verifier=None, require_effects=False):
         from ...core.store import open_storage
         if user_verifier is not None and not callable(user_verifier):
             raise TypeError("user_verifier is a function (approval, decision) → the verified identity, or None")
         if message_verifier is not None and not callable(message_verifier):
             raise TypeError("message_verifier is a function (message) → the verified sender, or None")
+        self.require_effects = bool(require_effects)
         self.user_verifier = user_verifier
         self.message_verifier = message_verifier
         self.storage = open_storage(storage)
@@ -1546,10 +1682,18 @@ class Guard:
     # --- the catalog
     def tool(self, func=None, *, name=None, schema=None, description=None, ground=(), ground_from=("user", "tool", "system"),
              injections="grounded", authorize=None, locale=None, scan_user=None, tool_values=None, ground_last=None,
-             once=False):
+             once=False, effect="unknown", destinations=(), approved_urls=()):
         """Declare a tool the agent may call. As a decorator on a typed function (`@guard.tool`, `@guard.tool(ground=[...])`),
         or `guard.tool(name="refund", schema=RefundArgs)` (a pydantic model or a JSON schema) for a tool the framework or
         an MCP server runs. The function is returned unchanged.
+
+        effect: owner assertion unknown (default), local_read, write or egress. Network reads are egress too.
+        destinations: schema argument names carrying egress URLs (required for egress). Each must match an exact
+        HTTP(S) URL in the CURRENT (last) user message or approved_urls, a trusted owner-configured tuple, never facts or
+        tool output. Path/query/fragment suffixes and url_prefix grounding do not authorize a new URL. Existing
+        grounding/taint/policies still apply. This checks destinations, not body/header payloads or actual tool I/O.
+        Guard(require_effects=True) escalates unknown effects; the default legacy mode leaves them UNVERIFIED,
+        not effect-safe. MCP readOnlyHint/remote annotations are not effect declarations.
 
         ground: arguments that must be quoted from the conversation (a string as a whole word; numbers as number tokens;
         a list item by item; an empty string never) — a list of names, or {name: matcher}: "token" (the default: not
@@ -1585,6 +1729,19 @@ class Guard:
         keep it; with guard.check / guard.call pass facts={"calls_made": [...]} (strings
         from solvi.solutions.guard.proposal; [] when none was made). A call checked without it escalates: the check
         cannot be evaluated."""
+        if effect not in ("unknown", "local_read", "write", "egress"):
+            raise ValueError("effect is unknown, local_read, write or egress")
+        if isinstance(destinations, str) or not all(isinstance(a, str) for a in destinations):
+            raise ValueError("destinations is a tuple of schema argument names")
+        destinations = tuple(destinations)
+        if (effect == "egress") != bool(destinations):
+            raise ValueError("effect='egress' needs destinations; other effects cannot declare destinations")
+        if isinstance(approved_urls, str) or any(_egress_destination(u) is None
+                                                 for u in approved_urls):
+            raise ValueError("approved_urls is a tuple of complete HTTP(S) URLs")
+        approved_urls = tuple(approved_urls)
+        if approved_urls and effect != "egress":
+            raise ValueError("approved_urls requires effect='egress'")
         def add(f):
             n = name or (f.__name__ if f is not None else None)
             if not n:
@@ -1621,7 +1778,8 @@ class Guard:
             t = Tool(n, f, model, desc.strip(), {a: roles for a in spec}, injections, authorize,
                      {a: m for a, m in spec.items() if m != "token"}, locale=locale,
                      scan_user=self.scan_user if scan_user is None else bool(scan_user), tool_values=tv,
-                     ground_last=ground_last, once=bool(once))
+                     ground_last=ground_last, once=bool(once), effect=effect,
+                     destinations=destinations, approved_urls=approved_urls)
             t.firewall = self._firewall_of(n)
             self._check_tool(t)
             self.tools[n] = t
@@ -1669,7 +1827,8 @@ class Guard:
         pass what it cannot check.
 
         grounded — every slot value the call gives (each argument it sends, each nested field and list item) is
-        written in the request: the messages of the roles in `sources` (default: the user's; the MCP proxy sees only
+        written in the request: typed date/datetime values are matched as their canonical ISO text (isoformat()),
+        without interpreting natural-language dates. The messages are of the roles in `sources` (default: the user's; the MCP proxy sees only
         tool outputs — use ("tool",) there), or is a fact your app gives with the call (`facts=` of check / call;
         facts=False: the text only). A string is found as a whole word after normalisation (`match`: "nocase" —
         letters without their case, typographic dashes and quotes as plain ones, Unicode spaces as spaces; "token",
@@ -1681,6 +1840,11 @@ class Guard:
         declaration: an argument declared as an enumeration (Literal, an Enum, a
         JSON-schema enum / const), a boolean, null, an empty string, and the arguments named in `exempt` (dotted for
         nested fields, "legs[].city" for list items). An argument the call does not send (its default) is not a slot.
+        Other unsupported scalar types are missing with an explicit unsupported-type reason, not implicitly exempt:
+        their str() or JSON representation alone is not grounding evidence. This includes typed Path, URL, UUID and
+        time objects unless explicitly exempted; even matching request text does not supply an implicit normalizer.
+        To migrate, pass a supported string/number value under a corresponding tool schema, or deliberately declare
+        exempt for an application-trusted argument. With grounded=False this check remains off.
         A call with a slot found nowhere fails `slots_grounded` → on_ungrounded: "escalate" (default: a person
         decides) or "deny". The report per slot is `decision.slots` ({path: {"value", "status": "found" | "missing"
         | "exempt", "where" / "why"}}), recorded in the trace as the fact `slot_grounding`.
@@ -1721,6 +1885,9 @@ class Guard:
         if bad:
             raise ValueError(f"tool {t.name}: argument(s) {bad} collide with the facts the guard gives or computes "
                              f"({', '.join(GIVEN + tuple(self.facts))}); rename them")
+        missing_destinations = [a for a in t.destinations if a not in t.arguments]
+        if missing_destinations:
+            raise ValueError(f"tool {t.name}: destinations names no argument: {missing_destinations}")
         unknown = [a for a in t.ground if a not in t.arguments]
         if unknown:
             raise ValueError(f"tool {t.name}: ground= names no argument: {unknown} (its arguments: {t.arguments})")
@@ -1924,13 +2091,14 @@ class Guard:
             t = self.tools[name]
             tools.append([name, t.definition() if t.model is not None else None, fp(t.func), fp(t.ground),
                           t.injections, t.authorize, fp(t.match), t.schema_error, t.locale, t.scan_user, t.tool_values,
-                          t.ground_last, t.once, fp(t.confirm), fp(t.firewall)])
+                          t.ground_last, t.once, fp(t.confirm), fp(t.firewall),
+                          t.effect, t.destinations, t.approved_urls])
         policies = [[fp(f), sorted(ts) if ts else None, on_fail] for f, ts, on_fail, *_ in self._policies]
         fns = [[fp(f), sorted(ts) if ts else None] for f, ts in self._fns]
         firewalls = [[sorted(ts) if ts else None, fp(spec)] for ts, spec in self._firewalls]
         auth = None if self._authorizer is None else model_fingerprint(self._authorizer)
         return digest("Guard", tools, policies, fns, firewalls, auth, self.tool_values, self.scan_user,
-                      sorted(self.facts))
+                      sorted(self.facts), self.require_effects)
 
     def _build(self, t):
         from ...core.provenance import code_fingerprint
@@ -1963,6 +2131,11 @@ class Guard:
             cat.fn(_schema_error(t.schema_error))
             check(schema_readable, "deny" if fw is not None else "escalate")
         check(arguments_valid, "deny")
+        cat.fn(_effect_boundary(json.dumps({"effect": t.effect, "destinations": t.destinations,
+                                           "approved_urls": t.approved_urls, "require_effects": self.require_effects},
+                                          sort_keys=True)))
+        check(effect_declared, "escalate")
+        check(egress_authorized, "deny")
         if fw is not None and fw["grounded"]:
             spec = {k: fw[k] for k in ("sources", "exempt", "match")}
             spec["enums"] = sorted(_enum_paths(t.model.model_json_schema()))
@@ -1993,7 +2166,8 @@ class Guard:
             if middle:
                 check(arguments_from_user, "escalate")
             if t.injections != "off":
-                check(no_injected_arguments, "escalate")
+                check(_confirmation_taint_check() if t.confirm is not None and t.injections != 'any'
+                      else no_injected_arguments, "escalate")
         if t.injections == "any":
             check(no_instructions_in_tool_outputs, "escalate")
         if t.once:
@@ -2184,9 +2358,10 @@ class Guard:
         return self.storage.save(res, meta={"guard": {"event": event, "by": None if by is None else str(by),
                                                       "reason": reason, "at": at}})
 
-    def _paused_decision(self, c, pause, store):
+    def _paused_decision(self, c, pause, store, facts=None):
         s = self._paused_system()
         state = {"tool_name": c.name, "tool_arguments": c.arguments, "guard_pause": pause}
+        state.update({k: facts[k] for k in ('_guard_batch_plan', '_guard_batch_index') if facts and k in facts})
         return self._decision(c, s, s.ask(state, store=False), store)
 
     def _allowed(self, allowed_tools):
@@ -2253,6 +2428,7 @@ class Guard:
             state.update(self._knowledge_facts(c, facts))
         if c.name not in self.tools:
             state = {"tool_name": c.name, "tool_arguments": c.arguments, "tools_known": sorted(self.tools)}
+            state.update({k: facts[k] for k in ('_guard_batch_plan', '_guard_batch_index') if k in facts})
         return state
 
     def _knowledge_facts(self, c, facts):
@@ -2289,9 +2465,10 @@ class Guard:
         c = ToolCall.parse(call)
         pause = self.paused
         if pause is not None:
-            return self._paused_decision(c, pause, store)
+            return self._paused_decision(c, pause, store, facts)
         scope = self._out_of_scope(c, self._allowed(allowed_tools))
         if scope is not None:
+            scope.update({k: facts[k] for k in ('_guard_batch_plan', '_guard_batch_index') if facts and k in facts})
             s = self._scope_system()
             return self._decision(c, s, s.ask(scope, store=False), store)
         s = self.system(c.name)
@@ -2303,9 +2480,10 @@ class Guard:
         c = ToolCall.parse(call)
         pause = self.paused
         if pause is not None:
-            return self._paused_decision(c, pause, store)
+            return self._paused_decision(c, pause, store, facts)
         scope = self._out_of_scope(c, self._allowed(allowed_tools))
         if scope is not None:
+            scope.update({k: facts[k] for k in ('_guard_batch_plan', '_guard_batch_index') if facts and k in facts})
             s = self._scope_system()
             return self._decision(c, s, s.ask(scope, store=False), store)
         s = self.system(c.name)
@@ -2452,6 +2630,8 @@ class Guard:
             n = p.name
             if n == "arguments_valid":
                 out.append("invalid arguments: " + "; ".join(vals.get("argument_errors") or []))
+            elif n in ("effect_declared", "egress_authorized"):
+                out.append(str((vals.get("effect_boundary") or {}).get("why", "effect boundary failed")))
             elif n == "arguments_grounded":
                 out.append("not in the conversation: " + ", ".join(vals["grounding"]["missing"]))
             elif n == "arguments_from_user":
@@ -2590,6 +2770,10 @@ class Session:
     """A conversation with an agent: `session.call(proposal)` checks and makes calls in its context and appends each
     made call's result as a tool output (`add` appends other messages).
 
+    A session has one owner: callers must serialize its mutations and batches.
+    Batch preflight covers one batch, not concurrent sessions or an external transaction.
+    Runtime failure or cancellation can leave partial external effects; no rollback is implied.
+
     `made` lists the calls that were made and did not fail — what a `once=True` tool reads. A call of a tool without
     a function (the framework runs it) that `session.call` allows is counted as made when it is allowed, since it is
     handed over to be made; `session.record(decision, result)` adds its result as a tool output, and with `error=` takes
@@ -2674,6 +2858,144 @@ class Session:
 
     def call(self, call):
         return self._done(self.guard.call(call, self.context, self._facts(), allowed_tools=self.allowed_tools))
+
+    def _preflight_many(self, calls, advance):
+        from copy import deepcopy
+        from collections.abc import Mapping
+        if advance is not None and not callable(advance):
+            raise TypeError('advance must be a callable or None')
+        plan = [deepcopy(ToolCall.parse(call)) for call in calls]
+        full_plan = [{'name': c.name, 'arguments': deepcopy(c.arguments)} for c in plan]
+        facts, context, made = deepcopy(self.facts), deepcopy(self.context), list(self.made)
+        decisions, predicted = [], []
+        for index, call in enumerate(plan):
+            given = {**deepcopy(facts), 'calls_made': list(made),
+                     '_guard_batch_plan': deepcopy(full_plan), '_guard_batch_index': index}
+            decision = self.guard.check(call, deepcopy(context), given, store=False, allowed_tools=self.allowed_tools)
+            decisions.append(decision)
+            if decision.allowed:
+                made.append(proposal(decision.tool, decision.arguments))
+                if advance is not None:
+                    updated = advance(deepcopy(facts), deepcopy(decision))
+                    if not isinstance(updated, Mapping):
+                        raise TypeError('advance must return a mapping of predicted facts')
+                    facts = deepcopy(dict(updated))
+                    for key in ('_guard_batch_plan', '_guard_batch_index', 'calls_made'):
+                        facts.pop(key, None)
+            predicted.append(deepcopy(facts))
+        return ({'allowed': all(d.allowed for d in decisions), 'decisions': decisions,
+                 'executed': [], 'handed_off': [], 'runtime_error': None}, predicted)
+
+    def check_many(self, calls, *, advance=None):
+        """Preflight every call without running tools or changing this session.
+
+        advance(facts, decision) returns predicted caller facts after each allowed
+        call (e.g. spent budget). It receives private copies. Every decision binds
+        the full plan and its index. Policies/authorizers can themselves perform
+        I/O, as with Guard.check. No external transaction or rollback is implied.
+        """
+        result, _ = self._preflight_many(calls, advance)
+        return result
+
+    def call_many(self, calls, *, advance=None):
+        """Preflight all calls; a denied/escalated member executes none.
+
+        Allowed decisions run once with validated arguments, without rechecking.
+        A tool error stops later calls; earlier effects are not rolled back.
+        Successful calls and allowed framework handoffs commit predicted facts;
+        a handoff is not proof of external completion. executed lists only tool
+        functions actually started. A rejected preflight leaves session/storage
+        unchanged.
+        """
+        result, predicted = self._preflight_many(calls, advance)
+        if not result['allowed']:
+            return result
+        for index, decision in enumerate(result['decisions']):
+            if self.guard.paused is not None:
+                result['runtime_error'] = {'index': index, 'error': 'guard paused before execution'}
+                break
+            self.guard._run(decision)
+            self.guard._save(decision)
+            self._done(decision)
+            if decision.executed:
+                result['executed'].append(index)
+            elif not decision.error:
+                result['handed_off'].append(index)
+            if decision.error:
+                result['runtime_error'] = {'index': index, 'error': decision.error}
+                break
+            if advance is not None:
+                self.facts = predicted[index]
+        return result
+
+    async def _apreflight_many(self, calls, advance):
+        from copy import deepcopy
+        from collections.abc import Mapping
+        if advance is not None and not callable(advance):
+            raise TypeError('advance must be a callable or None')
+        plan = [deepcopy(ToolCall.parse(call)) for call in calls]
+        full_plan = [{'name': c.name, 'arguments': deepcopy(c.arguments)} for c in plan]
+        facts, context, made = deepcopy(self.facts), deepcopy(self.context), list(self.made)
+        decisions, predicted = [], []
+        for index, call in enumerate(plan):
+            given = {**deepcopy(facts), 'calls_made': list(made),
+                     '_guard_batch_plan': deepcopy(full_plan), '_guard_batch_index': index}
+            decision = await self.guard.acheck(call, deepcopy(context), given, store=False, allowed_tools=self.allowed_tools)
+            decisions.append(decision)
+            if decision.allowed:
+                made.append(proposal(decision.tool, decision.arguments))
+                if advance is not None:
+                    updated = advance(deepcopy(facts), deepcopy(decision))
+                    if inspect.isawaitable(updated):
+                        updated = await updated
+                    if not isinstance(updated, Mapping):
+                        raise TypeError('advance must return a mapping of predicted facts')
+                    facts = deepcopy(dict(updated))
+                    for key in ('_guard_batch_plan', '_guard_batch_index', 'calls_made'):
+                        facts.pop(key, None)
+            predicted.append(deepcopy(facts))
+        return ({'allowed': all(d.allowed for d in decisions), 'decisions': decisions,
+                 'executed': [], 'handed_off': [], 'runtime_error': None}, predicted)
+
+    async def acheck_many(self, calls, *, advance=None):
+        """check_many on an event loop; async policies and advance are awaited.
+
+        Like check_many, callbacks may perform I/O but registered tool functions
+        do not run. A framework handoff does not prove external completion.
+        """
+        result, _ = await self._apreflight_many(calls, advance)
+        return result
+
+    async def acall_many(self, calls, *, advance=None):
+        """Preflight all calls; a denied/escalated member executes none.
+
+        Allowed decisions run once with validated arguments, without rechecking.
+        A tool error stops later calls; earlier effects are not rolled back.
+        Successful calls and allowed framework handoffs commit predicted facts;
+        a handoff is not proof of external completion. executed lists only tool
+        functions actually started. A rejected preflight leaves session/storage
+        unchanged.
+        """
+        result, predicted = await self._apreflight_many(calls, advance)
+        if not result['allowed']:
+            return result
+        for index, decision in enumerate(result['decisions']):
+            if self.guard.paused is not None:
+                result['runtime_error'] = {'index': index, 'error': 'guard paused before execution'}
+                break
+            await self.guard._arun(decision)
+            self.guard._save(decision)
+            self._done(decision)
+            if decision.executed:
+                result['executed'].append(index)
+            elif not decision.error:
+                result['handed_off'].append(index)
+            if decision.error:
+                result['runtime_error'] = {'index': index, 'error': decision.error}
+                break
+            if advance is not None:
+                self.facts = predicted[index]
+        return result
 
     async def acall(self, call):
         return self._done(await self.guard.acall(call, self.context, self._facts(), allowed_tools=self.allowed_tools))

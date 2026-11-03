@@ -26,14 +26,22 @@ not name (a name that disappears — the server stops reporting one — is not a
 not answer (an escalation) is left out of the comparison; when fewer than half of the probes answer, the round gives no
 verdict (`"verdict": "unanswered"`).
 
-When: `every=N` probes after every N decisions the model makes (cache hits included); `canary.probe()` on demand;
+Local adapters must support suspension and restoration during probes; otherwise an on-demand probe raises
+NotImplementedError (scheduled probes record an error), and no raw provider identity is established.
+
+When: `every=N` probes after every N decisions the model makes (cache hits included). This counts calls to the
+model's decision path, not outer `System.ask` requests: one ask may make several model decisions (different
+questions, retries or perturbation checks), or none. The count is not a count of provider HTTP requests either.
+`canary.probe()` runs on demand;
 `every=None` (the default) only on demand. Probes cost calls — len(probes) requests a round, twice that when a
 difference is confirmed — so nothing is asked unless you attach a canary and ask or schedule it. A scheduled round runs
 on the thread of the decision that made it due, so that one decision waits for the round; the round runs outside the
 canary's lock, so the model's other decisions go on, and while one round runs no second one starts. A scheduled round
 that raises (a scorer error the decision path does not hit) is recorded as an event with "verdict": "error" and the
 decision is returned untouched; `probe()` on demand raises. The first round is
-the reference; `accept()` takes the latest round as the new reference (after you recalibrate on the new model).
+the reference; a confirmed change clears the model's scored-output cache before you recalibrate on fresh outputs.
+`accept()` takes the latest round as the new reference and clears the cache again (after you recalibrate on the new
+model). An unchanged or unconfirmed round leaves the cache alone.
 
 After a change every decision of the model carries `extra["canary"] = {"changed": True, "event", "reference",
 "identity"}` — recorded in the trace like every decision's extra — until `accept()`. `on_change="flag"` (the default)
@@ -41,7 +49,7 @@ only marks: a `DriftMonitor` observing those decisions — the Decision, or the 
 read from its `answer:<question>` trace record) — flags the signal "identity", and a Dispatcher with that monitor treats
 it as drift. A bare Result of a choice question carries no extra, so it shows no mark. `on_change="escalate"` also escalates them ("model identity changed ...; would have answered ...").
 A decision that triggered a probe round carries `extra["canary"]["probed"]` with the round's number. `events` holds
-every round: {"n", "at" (decisions seen), "reason", "verdict" ("reference", "same", "changed", "unanswered", "error"),
+every round: {"n", "at" (decisions seen), "reason", "verdict" ("reference", "same", "unconfirmed", "changed", "unanswered", "error"),
 "answers_changed", "tv", "served", "identity", "reference", "calls"}. "identity" hashes the round's answers and served
 model names only, so a round changed by the probability rule alone keeps the reference's identity.
 
@@ -52,7 +60,15 @@ canary's state is not part of the replayed input.
 
 What it is not: a statistical test with a false-alarm rate. It compares answers of a fixed probe set, so its false
 alarms come from the provider's own non-determinism on the probes (choose clear ones, keep `confirm=True`), and a
-change the probes do not touch is missed. fpverify (MIT) does an anytime-valid sequential test on many probes; this
+change the probes do not touch is missed. With partial routing, confirmation can discard a real difference;
+such a round has verdict "unconfirmed" and preserves both comparison reports. Repeating fixed probes of a
+deterministic provider adds no coverage: a harmful swap can stay invisible when those probes agree. Clear probes
+reduce noise but may also reduce sensitivity; neither the default tolerance nor probe advice guarantees detection.
+Every event includes diagnostics for the configured probes: reference top probability, top-two gap, probability
+shift and confirmation agreement when available, plus explicit blind spots. `diagnose()` explicitly spends two
+rounds on repeat agreement without changing the reference or verdict. These descriptive reports neither estimate
+general detection power nor select probes or tune tolerance.
+fpverify (MIT) does an anytime-valid sequential test on many probes; this
 canary is the cheap first step, tested on fake servers only (tests/test_identity_canary.py)."""
 from __future__ import annotations
 
@@ -146,7 +162,7 @@ class IdentityCanary:
         pairs = [(_Spec(task, options, desc), m.text(text)) for text, task, options, desc in self.probes]
         with self._lock:
             self.calls += len(pairs)
-        out, _ = m._score(pairs)
+        out, _ = m._score_provider(pairs)
         res = []
         for (sp, text), o in zip(pairs, out):
             z, _ = m._pick(sp, o, text)
@@ -177,6 +193,46 @@ class IdentityCanary:
         return {"answers_changed": int(changed), "tv": round(tv, 4), "served": served,
                 "differs": changed >= self.min_changed or tv > self.tol or bool(served)}
 
+    def _diagnostics(self, reference, current, repeat=None):
+        """Descriptive values for these probes only, never a detection power estimate."""
+        rows = []
+        for i, (ref, cur) in enumerate(zip(reference, current)):
+            def gap(row):
+                p = sorted(row.get("p", []), reverse=True)
+                return round(p[0] - p[1], 4) if len(p) > 1 else None
+            valid = ref["answer"] is not None and cur["answer"] is not None
+            rep = repeat[i] if repeat is not None else None
+            rows.append({"index": i, "text": self.probes[i][0], "task": self.probes[i][1],
+                         "options": list(self.probes[i][2]),
+                         "reference_top_probability": max(ref.get("p", []), default=None),
+                         "reference_top_gap": gap(ref), "current_top_gap": gap(cur),
+                         "probability_shift_tv": round(float(0.5 * np.abs(np.subtract(ref["p"], cur["p"])).sum()), 4) if valid else None,
+                         "repeat_answer_agreement": (cur["answer"] == rep["answer"])
+                         if rep is not None and cur["answer"] is not None and rep["answer"] is not None else None})
+        agreements = [r["repeat_answer_agreement"] for r in rows if r["repeat_answer_agreement"] is not None]
+        return {"probes": rows, "tol": self.tol, "min_changed": self.min_changed,
+                "very_clear_reference_count": sum((r["reference_top_probability"] or 0) >= .99 for r in rows),
+                "repeat_agreement": sum(agreements) / len(agreements) if agreements else None,
+                "repeat_comparable": len(agreements),
+                "blind_spots": ["Fixed probes provide no coverage of unprobed inputs or detection-power estimate.",
+                               "Probability shifts at or below tol with unchanged answers can be missed.",
+                               "Clear probes can hide swaps; boundary probes can amplify provider noise.",
+                               "Repeated deterministic agreement adds no input coverage.",
+                               "Confirmation can leave partial routing unconfirmed; served names are self-reported."]}
+
+    def diagnose(self):
+        """Ask exactly two rounds of the configured probes for descriptive stability.
+
+        Uses the existing reference (or the first diagnostic round). Does not accept,
+        establish a reference, flag a change or tune probes/tolerance. Costs two
+        provider rounds; agreement is descriptive, not a confidence bound.
+        """
+        if self.model is None:
+            raise ValueError("attach the canary to a model first")
+        with self._round:
+            first, repeat = self._ask(), self._ask()
+            return self._diagnostics(self.reference or first, first, repeat)
+
     def probe(self, reason="on demand"):
         """Ask the probes now → the round's event (see the module docs). The first answered round is the reference.
         Waits for a round another thread is running; an error of the probe path is raised (a scheduled round records
@@ -192,6 +248,7 @@ class IdentityCanary:
             calls0, at, ref = self.calls, self.seen, self.reference
         cur = self._ask()
         ev = {"reason": reason}
+        first, again = cur, None
         if ref is None:
             answered = sum(r["answer"] is not None for r in cur)
             ev.update(verdict="unanswered" if 2 * answered < len(self.probes) else "reference")
@@ -201,19 +258,25 @@ class IdentityCanary:
                 again = self._ask()
                 cmp2 = self._compare(ref, again)
                 if cmp2 is None or not cmp2["differs"]:
-                    cmp = {**(cmp2 or cmp), "differs": False, "unconfirmed": cmp}
+                    ev.update(verdict="unconfirmed", unconfirmed=dict(cmp),
+                              confirmation=None if cmp2 is None else dict(cmp2))
+                    cmp = {**cmp, "differs": False}
                 else:
                     cur, cmp = again, cmp2
             if cmp is None:
                 ev.update(verdict="unanswered")
             else:
-                ev.update(verdict="changed" if cmp.pop("differs") else "same", **cmp)
+                differs = cmp.pop("differs")
+                ev.update(verdict=ev.get("verdict", "changed" if differs else "same"), **cmp)
+        ev["diagnostics"] = self._diagnostics(ref or first, first, again)
         with self._lock:
             if ev["verdict"] == "reference":
                 self.reference = cur
             self.latest = cur
             ev = {"n": len(self.events) + 1, "at": at, **ev}
             ev.update(identity=_identity(cur), reference=self.identity, calls=self.calls - calls0)
+            if ev["verdict"] == "changed":
+                self.model.clear_cache()
             if ev["verdict"] == "changed" and self._change is None:
                 self._change = ev
             self.events.append(ev)
@@ -222,6 +285,8 @@ class IdentityCanary:
     def accept(self):
         """Take the latest round as the new reference (after recalibrating on the new model): the change is cleared."""
         with self._lock:
+            if self.model is not None:
+                self.model.clear_cache()
             if self.latest is not None and any(r["answer"] is not None for r in self.latest):
                 self.reference = self.latest
             self._change = None

@@ -1,10 +1,11 @@
 """Proposers of a ChartSpec. Any callable `(source, question) -> ChartSpec | dict` is one; these are three:
 
-  RuleProposer   — rule-based, no model: numbers of one unit and the words before them as labels (tests, simple texts);
+  RuleProposer   — structured label: value lines by default; allow_prose=True explicitly opts into heuristic prose;
   LLMProposer    — any OpenAI-compatible chat-completions server (standard library HTTP), asked for the spec as JSON;
   FixedProposer  — returns a spec given in advance (a stand-in for a model, a hand-written spec, a recorded proposal).
 
-A proposer is never trusted: the checker verifies every number it writes against the source."""
+The checker verifies numbers/units at source quotes, not semantic labels or measurement roles.
+Free prose requires an explicit proposer; heuristic prose proposals carry only that numeric guarantee."""
 from __future__ import annotations
 
 import re
@@ -14,6 +15,7 @@ from decimal import Decimal
 
 from .check import SENT_END, SourceIndex, canon_unit
 from .spec import SCALES, ChartSpec
+from ...core.textin import NUMBER_SCALES
 
 _TRAIL = {"was", "were", "is", "are", "at", "of", "to", "for", "by", "rose", "grew", "fell", "reached", "accounted",
           "made", "up", "came", "in", "with", "totalled", "totaled", "totalling", "totaling", "hit", "stood", "about",
@@ -53,14 +55,68 @@ class RuleProposer:
     unit: the unit to chart ("%", "USD", "employees" …); None: the unit most numbers share (with a question, the one
     whose sentences share most words with it). kind: "bar" / "line" / "pie"; None: pie for shares that add up to 100%,
     line for time labels (years, quarters, months), bars otherwise. A number whose label says "total" becomes the
-    spec's total."""
+    spec's total. These prose heuristics are available only with allow_prose=True;
+    labels/roles are not semantically verified. By default every nonempty source
+    line must fully match label: one value [scale/unit]. Labels are literal, dates
+    may appear on the label side, units must agree, and unsupported lines refuse
+    the whole proposal. Use explicit Fixed/LLM proposers for other inputs; their
+    checker guarantee remains numeric quote verification only."""
 
     id = "rules v1"
 
-    def __init__(self, unit=None, kind=None, title=None):
+    def __init__(self, unit=None, kind=None, title=None, *, allow_prose=False, decimal=None):
         self.unit, self.kind, self.title = unit, kind, title
+        self.allow_prose, self.decimal = allow_prose, decimal
+        self.id = 'rules prose numeric-only v1' if allow_prose else 'rules structured v2'
+
+    def _structured(self, source, question):
+        points, units, labels = [], [], set()
+        offset = 0
+        for line in source.splitlines(keepends=True):
+            raw = line.rstrip('\r\n')
+            if not raw.strip():
+                offset += len(line)
+                continue
+            if raw.count(':') != 1:
+                raise ValueError('structured chart requires label: one value [scale/unit] on every nonempty line')
+            left, right = raw.split(':', 1)
+            label, rhs = left.strip(), right.strip()
+            if not label or label in labels or not rhs:
+                raise ValueError('structured chart requires nonempty distinct labels and one value per line')
+            idx = SourceIndex(rhs, decimal=self.decimal)
+            if len(idx.readings) != 1:
+                raise ValueError('structured chart refuses multiple values, dates or uncertainty on a value line')
+            r = idx.readings[0]
+            if r.start != 0 or r.ambiguous or r.value is None:
+                raise ValueError('structured chart requires one unambiguous numeric value')
+            tail = rhs[r.end:].strip()
+            if tail == '.' and r.unit and re.search(r'(?:руб|долл|р)$', r.as_written, re.I):
+                tail = ''  # explicit currency abbreviation's terminal period
+            # Exactly one explicit unit word is allowed after the numeric reader;
+            # free prose, uncertainty, conjunctions and punctuation are not parsed.
+            if tail and (r.unit or tail.lower() in NUMBER_SCALES or not re.fullmatch(r'[^\W\d_]+', tail)):
+                raise ValueError('unsupported residue after the structured numeric value')
+            unit = canon_unit(r.unit or tail)
+            if self.unit is not None and unit != canon_unit(self.unit):
+                raise ValueError('structured value unit differs from requested unit')
+            if units and unit != units[0]:
+                raise ValueError('structured chart requires one common unit for every line')
+            if re.search(r'\d[.,]$', r.as_written):
+                raise ValueError('unsupported trailing numeric punctuation')
+            start = offset + len(left) + 1 + len(right) - len(right.lstrip())
+            points.append({'label': label, 'value': format(r.value, 'f'),
+                           'quote': {'text': rhs, 'start': start}})
+            units.append(unit)
+            labels.add(label)
+            offset += len(line)
+        if not points:
+            raise ValueError('structured chart requires at least one label: value line')
+        return {'kind': self.kind or 'bar', 'title': self.title or question or 'Values from explicit labels',
+                'unit': units[0], 'scale': '', 'series': [{'points': points}]}
 
     def __call__(self, source, question=None):
+        if not self.allow_prose:
+            return self._structured(source, question)
         idx = SourceIndex(source)
         flat = _UNWRAP.sub(" ", source)          # a hard-wrapped line break is a space (offsets unchanged)
         cands = []

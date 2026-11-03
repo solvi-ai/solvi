@@ -306,7 +306,7 @@ def test_the_api_reference_is_grouped_by_level_and_has_no_private_module():
         for mod in re.findall(r"^::: (\S+)$", page.read_text(), re.M):
             assert not any(part.startswith("_") for part in mod.split(".")), f"{page.name}: {mod}"
     for mod in re.findall(r"\[`(solvi[a-z_.]*)`\]", index):
-        group = exp if mod.startswith("solvi.experimental") else low if mod.startswith("solvi.core") else high
+        group = exp if mod.startswith("solvi.experimental") else low if mod.startswith(("solvi.core", "solvi.stat")) else high
         assert f"[`{mod}`]" in group, mod
 
 

@@ -771,6 +771,7 @@ def test_no_deadlock_between_decisions_controls_a_background_training_and_the_pa
                                   initial=s1.holder.ver, policy=_policy(first=60), wait=False, additive=False)
         assert loop.part is part
         errs, stop = [], threading.Event()
+        side_calls = [0, 0]
 
         def asks(k):
             try:
@@ -783,6 +784,9 @@ def test_no_deadlock_between_decisions_controls_a_background_training_and_the_pa
             try:
                 while not stop.is_set():
                     s1.ask({"email": "my parcel is late"})
+                    side_calls[0] += 1
+                    # RLock fairness is not a contract: let dispatcher calls contend too.
+                    stop.wait(0.001)
             except Exception as e:  # noqa: BLE001
                 errs.append(repr(e))
 
@@ -794,6 +798,7 @@ def test_no_deadlock_between_decisions_controls_a_background_training_and_the_pa
                     loop.pause()
                     loop.resume()
                     loop.train_now()
+                    side_calls[1] += 1
             except Exception as e:  # noqa: BLE001
                 errs.append(repr(e))
         th = [threading.Thread(target=asks, args=(k,)) for k in range(3)]
@@ -807,6 +812,7 @@ def test_no_deadlock_between_decisions_controls_a_background_training_and_the_pa
             t.join(30)
         assert not any(t.is_alive() for t in th + side), "deadlock"
         assert not errs, errs[:3]
+        assert all(side_calls), side_calls
         assert loop.n == 450 and loop.replay()["ok"]
         loop.detach()
     finally:

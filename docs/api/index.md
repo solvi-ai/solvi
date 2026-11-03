@@ -7,7 +7,8 @@ internal and have no page.
 
 ## High level: ready to use
 
-[Using solvi](../using.md) explains these. Stable in 1.x.
+[Using solvi](../using.md) explains these. Stable in ordinary 1.x updates; the planned breaking 1.5 transition is
+documented in the [candidate migration notes](../migration-1.5-candidate.md).
 
 | Module | What it holds |
 |---|---|
@@ -29,10 +30,20 @@ internal and have no page.
 | [`solvi.solutions`](solutions.md) | the ready-made systems, one module each (above) |
 | [`solvi.cli`](cli.md) | the `solvi` command line |
 
+[Fact aliases](fact-aliases.md) connect external names to unchanged consumers.
+
+[Hypothetical rule evaluation](system-probe.md) tests intermediate values without production bookkeeping.
+
+[Structured rule answers](structured-answers.md) carry typed JSON values and explicit field explanations.
+
+[Ordinary function calls](calls.md) record JSON inputs, outputs and parent calls in the same storage chain.
+
+[Unrecorded decisions](unrecorded-decisions.md) evaluate a supported synchronous catalog with `System.decide`.
+
 ## Low level: building blocks
 
-`solvi.core` and its areas; [Building blocks](../building_blocks.md) has one reference per extension point. Stable in
-1.x (an extension point's promise is stated in its docstring).
+`solvi.core` and its areas, plus the shared statistics in `solvi.stat`; [Building blocks](../building_blocks.md) has
+one reference per extension point and describes the stability policy and planned transition exception.
 
 | Module | What it holds |
 |---|---|
@@ -52,6 +63,7 @@ internal and have no page.
 | [`solvi.core.plan.strategist`](strategist.md) | the strategist: a flow per request (`Flow`, `PlanError`), the learned order of hard checks and producer policy |
 | [`solvi.core.plan.cost`](strategy.md) | the code strategist (`CostStrategist`): dead ends dropped, the cheapest verified plan |
 | [`solvi.core.costs`](costs.md) | measured run times (`CostBook`), the dollars of recorded model calls (`price_of`), `Budget` and `Cost` |
+| [`solvi.stat`](stat.md) | bounded-mean e-processes, reusable checkpoint state, delta budgets, e-BH and sequential e-LOND |
 | [`solvi.core.calibration`](calibration.md) | reliability, expected calibration error, coverage at a target accuracy |
 | [`solvi.core.calibfile`](calibfile.md) | calibration files (`save_calibration` / `load_calibration`) and `solvi calibrate` |
 | [`solvi.core.guarantees.guarantee`](guarantee.md) | a calibrated threshold with a stated promise on a question (`System.guarantee`), a computed fact or any scalar |

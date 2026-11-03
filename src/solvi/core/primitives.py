@@ -55,6 +55,9 @@ def _short(v, n=48):
 
 # --- plain normalization (hard-check `then` values, fit / teach answers): no text to ground against
 def normalize(at, v):
+    if at.kind == "structured":
+        from .types import _normalize_structured as structured_normalize
+        return structured_normalize(at, v)
     if at.kind == "span":
         return v.value if isinstance(v, Quote) else v
     if at.kind == "rank":
@@ -199,6 +202,17 @@ def resolve(at, rec, init, quotes="normalized"):
         return {"answer": Unknown, "confidence": conf, "probs": probs or {}, "evidence": ev, "extra": None}
     kind = at.kind
     ns = float(probs.get(Unknown, 0.0)) if probs else 0.0
+    if kind == "structured":
+        from .types import _structured_fields as fields
+        try:
+            value = normalize(at, v)
+            meta = fields(value, (rec.extra or {}).get("fields", {}), init)
+        except (ValueError, TypeError, KeyError, IndexError, OverflowError) as err:
+            raise Rejected(GUARD_TYPE_REJECTED, f"{PROVENANCE_TYPE_REJECTED}: structured answer ({err})") from None
+        if meta:
+            conf = min(conf, *(m['confidence'] for m in meta.values()))
+        return {"answer": value, "confidence": conf, "probs": {}, "evidence": ev,
+                "extra": {"fields": meta} if meta else None}
     if kind == "span":
         src = at.source or "doc"
         if rec.quote:

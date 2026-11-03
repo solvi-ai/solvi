@@ -242,8 +242,44 @@ def test_check_strategist_fails_a_planner_that_leaves_a_hard_check_out():
             flow.per_question = {q: [n for n in ns if n != "not_sanctioned"] for q, ns in flow.per_question.items()}
             return flow
     cat, qs = _loans()
-    with pytest.raises(ValueError, match="hard check not_sanctioned sets `then=`"):
+    with pytest.raises(cf.ConformanceError, match="strategist.*hard check not_sanctioned sets `then=`") as exc:
         cf.check_strategist(Careless(), cat, qs, STATES)
+    assert isinstance(exc.value.__cause__, ValueError)
+
+
+def test_decider_determinism_reaches_scorer_without_changing_the_serving_cache():
+    from solvi.core.deciders import DecideModel
+
+    class Alternating:
+        model_id = "alternating"
+
+        def __init__(self):
+            self.calls = 0
+            self.alternate = False
+
+        def logits(self, items):
+            out = []
+            for _ in items:
+                self.calls += 1
+                flip = self.alternate and self.calls % 2 == 0
+                out.append(np.array([-3.0, 3.0]) if flip else np.array([3.0, -3.0]))
+            return out
+
+    scorer = Alternating()
+    model = DecideModel(scorer, meta={})
+    part = model.decision("team", "Which team?", "text", ["a", "b"])
+    assert part(text="request").value == "a"  # populate the ordinary serving cache
+    before = scorer.calls
+    scorer.alternate = True
+    with pytest.raises(cf.ConformanceError, match="same input the same way"):
+        cf.check_decider(part, [{"text": "request"}])
+    assert scorer.calls == before + 2
+    calls = scorer.calls
+    assert part(text="request").value == "a"
+    assert scorer.calls == calls, "a failed check must preserve the normal serving cache"
+    scorer.alternate = False
+    assert cf.check_decider(part, [{"text": "request"}])["inputs"] == 1
+    assert scorer.calls == calls + 3
 
 
 # ------------------------------------------------------------------------------------------------ Head
@@ -396,6 +432,31 @@ def test_the_built_in_monitor_conforms():
     assert out["changed"] and out["reset"]
 
 
+class _ScheduledMonitor:
+    def __init__(self, alarms):
+        self.alarms = alarms
+        self.reset()
+
+    def observe(self, decision, label=None, question=None):
+        self.flagged = self.alarms(self.n)
+        self.n += 1
+        return {"drift": self.flagged, "why": ["scheduled"] if self.flagged else []}
+
+    def reset(self):
+        self.n = 0
+        self.flagged = False
+
+
+def test_check_monitor_rejects_all_flag_baseline():
+    with pytest.raises(cf.ConformanceError, match="every observation"):
+        cf.check_monitor(lambda: _ScheduledMonitor(lambda n: True), list(range(8)))
+
+
+@pytest.mark.parametrize("alarms", [lambda n: n == 3, lambda n: n >= 2])
+def test_check_monitor_allows_occasional_alarm_and_reference_phase(alarms):
+    assert cf.check_monitor(lambda: _ScheduledMonitor(alarms), list(range(8)))["reset"]
+
+
 # ------------------------------------------------------------------------------------------------ Environment
 class Corridor:
     """The smallest environment: walk right to the door at 3; a wall at 0 refuses "left"."""
@@ -513,7 +574,7 @@ def test_check_specialist_on_the_charts_specialist_and_on_a_random_render():
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         from solvi.experimental.charts import ChartSpecialist, RuleProposer
-    got = cf.check_specialist(ChartSpecialist(), [PRESS, QUARTERS, WASTE], proposer=RuleProposer())
+    got = cf.check_specialist(ChartSpecialist(), [PRESS, QUARTERS, WASTE], proposer=RuleProposer(allow_prose=True))
     assert got["sources"] == 3 and got["replayed"] == 3 and got["blocked"] == 3
     assert got["stored"] == 6 and got["store_replayed"] == 6 and got["edit_caught"] is True    # the core store path
 
@@ -523,13 +584,13 @@ def test_check_specialist_on_the_charts_specialist_and_on_a_random_render():
             d["proposal"] = None
             return d
     with pytest.raises(cf.ConformanceError, match="every stored run replays from"):
-        cf.check_specialist(Forgetful(), [PRESS], proposer=RuleProposer())
+        cf.check_specialist(Forgetful(), [PRESS], proposer=RuleProposer(allow_prose=True))
 
     class Noisy(ChartSpecialist):
         def render(self, checked):
             return super().render(checked) + f"<!-- {random.random()} -->"
     with pytest.raises(cf.ConformanceError, match="identical bytes"):
-        cf.check_specialist(Noisy(), [PRESS])
+        cf.check_specialist(Noisy(RuleProposer(allow_prose=True)), [PRESS])
 
 
 def _corridor_clone(env, state):

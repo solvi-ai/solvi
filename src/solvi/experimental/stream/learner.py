@@ -219,6 +219,11 @@ class HashedTextLearner:
         self._b = np.zeros(max(1, len(self.classes)))
         self._seen = 0
 
+    @property
+    def options(self):
+        """Closed answer vocabulary, or None when new labels are allowed."""
+        return list(self.classes) if self.closed else None
+
     def _config(self):
         return {"n_features": self.n_features, "words": self.words, "chars": self.chars, "lr": self.lr}
 
@@ -268,6 +273,12 @@ class HashedTextTrainer:
             raise ValueError("epochs is at least 1")
         self._kw = {"options": options, "lr": lr, "n_features": n_features, "words": words, "chars": chars}
         self.epochs, self._seen = int(epochs), 0
+
+    @property
+    def options(self):
+        """Closed answer vocabulary, or None when new labels are allowed."""
+        options = self._kw["options"]
+        return None if options is None else list(options)
 
     def update(self, x, y, **_) -> None:
         self._seen += 1

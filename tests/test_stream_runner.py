@@ -331,3 +331,54 @@ def test_a_training_refused_by_its_estimate_is_recorded_and_replays(helper, tmp_
     assert sum(1 for e in _events(loop, "train_start") if e.get("control")) == 1
     r = loop.replay()
     assert r["ok"], r["mismatches"][:5]
+
+
+@pytest.mark.parametrize("ending", ["done", "refused", "failed"])
+def test_terminal_line_waits_for_an_inflight_heartbeat(tmp_path, monkeypatch, ending):
+    """Force a heartbeat past its stop check but before its write as the target finishes."""
+    import threading
+    from solvi.experimental.stream import runner as module
+
+    heartbeat_entered = threading.Event()
+    release_heartbeat = threading.Event()
+    stopping = threading.Event()
+    ctx = module.RunContext(_budget(), "cpu", "test", tmp_path / "race.log", heartbeat_s=.001)
+    original_log, original_stop = ctx.log, ctx.stop
+
+    def log(message):
+        if message.startswith("heartbeat"):
+            heartbeat_entered.set()
+            assert release_heartbeat.wait(5), "test did not release heartbeat"
+        original_log(message)
+
+    def stop():
+        stopping.set()
+        original_stop()
+
+    def target(payload, context):
+        assert heartbeat_entered.wait(5), "heartbeat never started"
+        if ending == "refused":
+            raise TrainingRefused("test refusal")
+        if ending == "failed":
+            raise ValueError("test failure")
+        return {"ok": True}
+
+    monkeypatch.setattr(ctx, "log", log)
+    monkeypatch.setattr(ctx, "stop", stop)
+    monkeypatch.setattr(module, "_target", lambda name: target)
+    result = {}
+    worker = threading.Thread(target=lambda: result.update(module._call("test:target", {}, ctx)))
+    worker.start()
+    try:
+        assert stopping.wait(5), "target never reached shutdown"
+        lines = ctx.log_path.read_text().splitlines()
+        assert not any(line.split(" ", 1)[1].startswith(("done", "refused:", "failed:")) for line in lines)
+        assert worker.is_alive(), "completion must wait for the in-flight heartbeat"
+    finally:
+        release_heartbeat.set()
+        worker.join(5)
+    assert not worker.is_alive() and not ctx._beat.is_alive()
+    assert result["state"] == ending
+    messages = [line.split(" ", 1)[1] for line in ctx.log_path.read_text().splitlines()]
+    assert messages[-2].startswith("heartbeat")
+    assert messages[-1].startswith(ending)

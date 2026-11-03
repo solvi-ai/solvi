@@ -126,14 +126,27 @@ class Contract:
     """The contract of an answer (see the module docs). returns: a Python type, a tuple of types or an answer type
     (None: the question's own); echo: True, a list of fact names, False, or None (by the answer's kind: free text
     only); applicable: a function of the given facts
-    → bool (None: always applies)."""
+    → bool (None: always applies). applicable_inputs: declared INITIAL given-fact
+    names, never computed predicate dependencies. None leaves reads undeclared;
+    () explicitly means no inputs. Arbitrary Python callables can read keys via
+    helpers/closures, so exported input schemas require this declaration (or an
+    explicit Question.uses fallback) rather than guessing reads from source/AST.
+    Local applies()/System.ask retain their existing execution semantics."""
     returns: Any = None
     echo: Any = None
     applicable: Callable | None = None
+    applicable_inputs: tuple[str, ...] | None = None
 
     def __post_init__(self):
         if self.applicable is not None and not callable(self.applicable):
             raise TypeError("applicable is a function (state) -> bool")
+        if self.applicable_inputs is not None:
+            names = self.applicable_inputs
+            if not isinstance(names, (tuple, list)) or any(not isinstance(n, str) for n in names):
+                raise TypeError("applicable_inputs must be a tuple/list of given-fact names")
+            if any(not n.isidentifier() for n in names) or len(set(names)) != len(names):
+                raise ValueError("applicable_inputs needs distinct nonempty identifier names")
+            object.__setattr__(self, 'applicable_inputs', tuple(names))
         if self.echo is not None and not isinstance(self.echo, bool):
             names = (self.echo,) if isinstance(self.echo, str) else tuple(self.echo)
             if not all(isinstance(x, str) for x in names):
@@ -209,7 +222,7 @@ class Contract:
         return out
 
     def fingerprint(self):
-        """What the contract's verdicts depend on: the type, the echo setting and the code of `applicable` (its source,
+        """Contract identity: the type, echo setting, declared applicability inputs and code of `applicable` (its source,
         or its bytecode when there is none) → a short hash. Changing any of them changes the fingerprint of the
         System or slow path that carries the contract, so a decision made under another contract does not replay."""
         import hashlib
@@ -217,7 +230,10 @@ class Contract:
         rt = repr(r) if _is_answer_type(r) else _type_name(r) if r is not None else None
         code = None if self.applicable is None else _code_text(self.applicable)
         echo = list(self.echo) if isinstance(self.echo, tuple) else "auto" if self.echo is None else self.echo
-        blob = repr((rt, echo, code))
+        data = (rt, echo, code)
+        if self.applicable_inputs is not None:
+            data += (("applicable_inputs", self.applicable_inputs),)
+        blob = repr(data)
         return hashlib.sha256(blob.encode()).hexdigest()[:16]
 
 

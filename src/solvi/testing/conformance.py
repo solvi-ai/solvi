@@ -213,7 +213,10 @@ def check_strategist(strategist, catalog, questions, states):
     from ..core.system import System
     _ok(isinstance(strategist, Strategist), f"{type(strategist).__name__} has no plan(catalog, questions, init_keys, "
                                             "heads)")
-    system = System(catalog, list(questions), strategist=strategist)
+    try:
+        system = System(catalog, list(questions), strategist=strategist)
+    except ValueError as exc:
+        raise ConformanceError(f"strategist produces a valid System plan: {exc}") from exc
     qs = list(system.questions.values())
     hard = [(p.name, qn) for p in catalog.parts.values() if p.kind == "check" and p.hard for qn in (p.then or {})
             if qn in system.questions]
@@ -288,35 +291,72 @@ def check_head(make, options, rows, answers, features=None):
 
 
 # ------------------------------------------------------------------------------------------------ Decider
-def check_decider(decider, inputs, *, system=None, states=None):
+def check_decider(decider, inputs, *, system=None, states=None, repeats=3):
     """decider: a Decider (called with the facts it reads); inputs: [{fact: value}]; system, states: a System using it
-    and inputs to ask it — its decisions must replay and record the decider's fingerprint. → what was checked."""
-    from ..core import Decision, Unknown
+    and inputs to ask it — its decisions must replay and record the decider's fingerprint. DecideModel calls bypass
+    its serving cache during the check, so repeats test the scorer itself. repeats (int >= 2, default 3):
+    two adjacent calls per input, then full passes over the inputs to detect inter-input state leaks. Each call gets
+    a deep copy and input mutation is refused without changing caller data. These finite checks cannot prove
+    determinism for all future calls. → what was checked."""
+    from ..core import Decision
+    from ..core.deciders.model import _uncached_decisions
     from ..core.deciders.protocols import Decider
     _ok(isinstance(decider, Decider), f"{type(decider).__name__} lacks options / fingerprint() / __call__")
+    from copy import deepcopy
+    _ok(isinstance(repeats, int) and not isinstance(repeats, bool) and repeats >= 2,
+        "repeats is an integer >= 2")
+    inputs = list(inputs)
+    def call(x):
+        payload = deepcopy(x)
+        before = _vh(payload)
+        with _uncached_decisions():
+            result = decider(**payload)
+        _ok(_vh(payload) == before, "a decider does not mutate its input")
+        return result
+    def same(d, e):
+        _ok(isinstance(e, Decision), "a repeated call returns a Decision")
+        _ok(_vh((e.value, e.probs, e.conf, e.escalate)) == _vh((d.value, d.probs, d.conf, d.escalate)),
+            "a deterministic decider decides the same input the same way")
+    originals = []
     fp = decider.fingerprint()
     _ok(isinstance(fp, str) and fp, "fingerprint() is a non-empty str")
     opts = decider.options
     for x in inputs:
-        d = decider(**x)
+        d = call(x)
         _ok(isinstance(d, Decision), f"a call → a solvi.Decision, not {type(d).__name__}")
         vals = d.value if isinstance(d.value, (list, tuple, set)) else [d.value]
-        if opts is not None and not d.escalate:
-            _ok(all(v in opts or v is Unknown for v in vals), f"{d.value!r} is one of the options {opts}")
+        # An escalation may have no proposal; an actual proposal still has to
+        # obey the closed set. Unknown is a label only when declared.
+        if opts is not None and not (d.escalate is not None and d.value is None):
+            _ok(all(v in opts for v in vals), f"{d.value!r} is one of the options {opts}")
+        _ok(math.isfinite(d.conf) and 0 <= d.conf <= 1, f"confidence in [0, 1]: {d.conf}")
         if d.probs:
             ps = list(d.probs.values())
             _ok(all(math.isfinite(p) and -1e-9 <= p <= 1 + 1e-9 for p in ps), f"probabilities in [0, 1]: {d.probs}")
+            if opts is not None:
+                _ok(all(k in opts for k in d.probs), f"probability keys are options: {d.probs}")
+                # Multi-label scores are independent Bernoulli probabilities.
+                # Rank/score/number have their own decoding semantics.
+                single = (not getattr(decider, "multi", False)
+                          and getattr(decider, "kind", "choice") in ("choice", "noul")
+                          and not isinstance(d.value, (list, tuple, set)))
+                if single:
+                    _ok(math.isclose(sum(ps), 1.0, rel_tol=1e-6, abs_tol=1e-6),
+                        f"single-choice probabilities sum to 1: {d.probs}")
         if getattr(decider, "deterministic", True):
-            e = decider(**x)
-            _ok(_vh(e.value) == _vh(d.value) and _vh(e.probs) == _vh(d.probs), "a deterministic decider decides the "
-                                                                                "same input the same way")
+            originals.append(deepcopy(d))
+            same(originals[-1], call(x))
+    if getattr(decider, "deterministic", True):
+        for _ in range(repeats - 2):
+            for x, d in zip(inputs, originals):
+                same(d, call(x))
     _ok(decider.fingerprint() == fp, "deciding does not change the fingerprint")
     out = {"inputs": len(inputs), "closed_set": opts is not None}
     if system is not None:
         models = system.fingerprint()["models"]
         _ok(fp in models.values(), "the System records the decider's fingerprint among its models")
         for st in states or []:
-            res = system.ask(dict(st))
+            res = system.ask(deepcopy(st))
             rep = res.trace.replay(system)
             _ok(rep["ok"], f"a decision replays: {rep['mismatches'][:3]}")
             _ok(any((r.model or {}).get("fp") == fp for r in res.trace.records),
@@ -367,7 +407,9 @@ def check_extractor(extractor, system, texts, *, question=None, **textin):
 # ------------------------------------------------------------------------------------------------ Monitor
 def check_monitor(make, stream, *, changed=None):
     """make: () → a fresh monitor; stream: decisions of an unchanged stream (Responses, Results, Decisions or dicts the
-    monitor reads); changed: decisions after a change — when given, the monitor must flag it. → what was checked."""
+    monitor reads); changed: decisions after a change — when given, the monitor must flag it. The unchanged stream
+    must contain at least one unflagged observation when non-empty: this rejects an all-flag baseline, not a
+    statistical false-alarm-rate test. Occasional alarms and a reference phase are allowed. → what was checked."""
     from ..core.guarantees.monitor import Monitor
     m = make()
     _ok(isinstance(m, Monitor), f"{type(m).__name__} lacks observe / flagged / reset")
@@ -382,6 +424,7 @@ def check_monitor(make, stream, *, changed=None):
             out.append(rep["drift"])
         return out
     first = run(m, stream)
+    _ok(not first or not all(first), "the unchanged stream is not flagged on every observation (all-flag baseline)")
     flagged_on_change = None
     if changed is not None:
         after = run(m, changed)

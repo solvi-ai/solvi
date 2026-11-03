@@ -110,7 +110,7 @@ def write(root, rel, content):
 def test_block_names_the_rule_and_the_lines(proj):
     p = edit(proj, "app/api/employees/route.ts", "  return Response.json({ ok: true })",
              '  const id = new URL(req.url).searchParams.get("employeeId")\n  return Response.json(await db.employee.find(id))')
-    code, out, err, _ = hook(proj, p, "pre-edit", "--rules", ".claude/solvi-rules.toml")
+    code, out, err, _ = hook(proj, p, "pre-edit", "--rules", ".claude/solvi-rules.toml", "--record-content")
     assert code == 0 and not err
     d, why = decision(out)
     assert d == "deny"
@@ -260,6 +260,55 @@ def test_changes_of_edits_and_patches(tmp_path):
     assert up.added == [[2, "TWO"]] and up.result == "one\nTWO\nthree\ntwo\n" and gone.deleted and gone.path == "b.py"
 
 
+@pytest.mark.parametrize("absolute", [False, True])
+def test_patch_move_checks_source_deletion_and_destination_write(proj, absolute):
+    source = proj / "protected.py"
+    source.write_text("dangerous()\nkeep = 1\n")
+    destination = proj / "moved.py"
+    src = str(source) if absolute else source.name
+    dst = str(destination) if absolute else destination.name
+    patch = (f"*** Begin Patch\n*** Update File: {src}\n*** Move to: {dst}\n"
+             "@@\n dangerous()\n-keep = 1\n+keep = 2\n*** End Patch")
+    payload = pre_tool_use(proj, "apply_patch", {"input": patch})
+    changes = hooks.changes_of(payload, str(proj))
+    assert len(changes) == 2
+    gone, written = changes
+    assert gone.path == "protected.py" and gone.deleted and gone.result is None and gone.added == []
+    assert written.path == "moved.py" and not written.deleted
+    assert written.result == "dangerous()\nkeep = 2\n"
+    assert written.added == [[1, "dangerous()"], [2, "keep = 2"]]
+    rules = proj / ".claude" / "solvi-rules.toml"
+    for text, rule in [
+        ('[[rule]]\nid = "protect-source"\npaths = ["protected.py"]\n', "protect-source"),
+        ('[[rule]]\nid = "protect-target"\npaths = ["moved.py"]\nforbid = ["dangerous"]\n', "protect-target"),
+    ]:
+        rules.write_text(text)
+        outcome, why = decision(hook(proj, payload, "pre-edit")[1])
+        assert outcome == "deny" and rule in why
+    assert source.read_text() == "dangerous()\nkeep = 1\n" and not destination.exists()
+
+
+@pytest.mark.parametrize("tool,fields", [
+    ("Edit", {"old_string": "x", "new_string": 5}),
+    ("Edit", {"old_string": "x", "new_string": None}),
+    ("Edit", {"old_string": None, "new_string": "y"}),
+    ("Write", {"content": None}),
+    ("MultiEdit", {"edits": [{"old_string": "x", "new_string": []}]}),
+])
+def test_malformed_edit_fields_ask(proj, tool, fields):
+    payload = {"tool_name": tool, "tool_input": {"file_path": "a.py", **fields}}
+    with pytest.raises(ValueError, match="must be a string"):
+        hooks.changes_of(payload, str(proj))
+    outcome, reason = decision(hook(proj, payload, "pre-edit")[1])
+    assert outcome == "ask" and "must be a string" in reason
+
+
+def test_edit_directory_asks(proj):
+    payload = {"tool_name": "Write", "tool_input": {"file_path": ".", "content": "x"}}
+    outcome, reason = decision(hook(proj, payload, "pre-edit")[1])
+    assert outcome == "ask" and "directory" in reason
+
+
 def test_globs():
     g = hooks.glob_regex
     assert g("**/*.py").match("x.py") and g("**/*.py").match("a/b/x.py") and not g("*.py").match("a/x.py")
@@ -307,12 +356,20 @@ def test_pick_one_skill(proj):
         'The project skill "db-migrations" matches this request') and "renames" in ctx["additionalContext"]
 
 
+def test_pick_skill_prompt_starting_with_absolute_path(proj):
+    skills(proj)
+    code, out, err, _ = hook(proj, prompt_submit(proj,
+        "/app/migration.py: Add a migration that renames the salary column, with a rollback"), "pick-skill")
+    assert code == 0 and not err
+    assert '"db-migrations"' in out["hookSpecificOutput"]["additionalContext"]
+
+
 def test_none_and_tie_are_silent(proj):
     skills(proj)
     for prompt in ("fix the typo in the README",                            # none
                    "write the release notes for the new API route",         # a near tie: release-notes / api-routes
                    "/review the migration"):                               # a slash command: the user chose
-        code, out, err, _ = hook(proj, prompt_submit(proj, prompt), "pick-skill")
+        code, out, err, _ = hook(proj, prompt_submit(proj, prompt), "pick-skill", "--record-content")
         assert code == 0 and out is None and not err, prompt
     recs = [json.loads(x) for x in (proj / ".solvi" / "traces" / "hooks.jsonl").read_text().splitlines()]
     assert [r["meta"]["status"] for r in recs] == ["ok", "abstain"]         # the slash command is not asked
@@ -323,10 +380,10 @@ def test_pick_skill_with_a_model(proj):
     skills(proj)
     (proj / "standin.py").write_text(STANDIN)
     code, out, err, _ = hook(proj, prompt_submit(proj, "add a migration for the salary column"), "pick-skill",
-                             "--decider", "standin.py:model")
+                             "--decider", "standin.py:model", "--record-content")
     assert code == 0 and not err
     assert out["hookSpecificOutput"]["additionalContext"].startswith('The project skill "db-migrations"')
-    code, out, err, _ = hook(proj, prompt_submit(proj, "what time is it"), "pick-skill", "--decider", "standin.py:model")
+    code, out, err, _ = hook(proj, prompt_submit(proj, "what time is it"), "pick-skill", "--decider", "standin.py:model", "--record-content")
     assert code == 0 and out is None and not err                   # the decider says "none"
     rec = json.loads((proj / ".solvi" / "traces" / "hooks.jsonl").read_text().splitlines()[0])
     assert rec["models"] and rec["models"][0]["id"] == "test/keyword-decider"
@@ -346,12 +403,12 @@ def test_install_merges_and_uninstall_restores(proj):
     settings.write_text(json.dumps(original, indent=2))
     r = solvi(proj, "hook", "install", "--project", proj, "--command", "solvi")
     assert r.returncode == 0, r.stderr
-    assert "added PreToolUse (Edit|Write|MultiEdit) → solvi hook pre-edit --rules .claude/solvi-rules.toml" in r.stdout
+    assert "added PreToolUse (Edit|Write|MultiEdit|NotebookEdit) → solvi hook pre-edit --rules .claude/solvi-rules.toml" in r.stdout
     assert "added UserPromptSubmit → solvi hook pick-skill --skills-dir .claude/skills" in r.stdout
     assert "kept 2 other hook handler(s)" in r.stdout and ".solvi/ to .gitignore" in r.stdout
     s = json.loads(settings.read_text())
     assert s["permissions"] == original["permissions"] and s["hooks"]["Stop"] == original["hooks"]["Stop"]
-    assert [g["matcher"] for g in s["hooks"]["PreToolUse"]] == ["Bash", "Edit|Write|MultiEdit"]
+    assert [g["matcher"] for g in s["hooks"]["PreToolUse"]] == ["Bash", "Edit|Write|MultiEdit|NotebookEdit"]
     r = solvi(proj, "hook", "install", "--project", proj, "--command", "solvi")          # again: replaced, not doubled
     assert "replaced PreToolUse" in r.stdout
     s2 = json.loads(settings.read_text())
@@ -372,7 +429,8 @@ def test_install_and_uninstall_recognise_entries_whose_command_is_quoted(proj):
         assert [len(hooks_[ev]) for ev in ("PreToolUse", "UserPromptSubmit")] == [1, 1], command
         assert hooks_["PreToolUse"][0]["hooks"][0]["command"].startswith(command + " hook pre-edit")
         r = solvi(proj, "hook", "uninstall", "--project", proj)
-        assert r.stdout.count("removed") == 2 and "hooks" not in json.loads((proj / ".claude" / "settings.json").read_text())
+        assert r.stdout.count("removed") == 2
+        assert not (proj / ".claude" / "settings.json").exists()
     for other in ("resolvi hook pre-edit", "'/opt/tools/notsolvi' hook pre-edit", "'/opt/solvi tools/lint' hook pre-edit"):
         assert not hooks._ours({"type": "command", "command": other})    # another tool's command stays
 
@@ -388,11 +446,11 @@ def test_install_writes_the_sample_rules_and_codex_hooks(tmp_path):
     assert "gitignore" not in r.stdout
     cx = json.loads((root / ".codex" / "hooks.json").read_text())
     h = cx["hooks"]["PreToolUse"][0]
-    assert h["matcher"] == "apply_patch|Edit|Write" and h["hooks"][0]["command"].endswith("--decider 'llm:http://x/v1#m' --agent codex")
+    assert h["matcher"] == "apply_patch|Edit|Write|NotebookEdit" and h["hooks"][0]["command"].endswith("--decider 'llm:http://x/v1#m' --agent codex")
     assert "--agent" not in cx["hooks"]["UserPromptSubmit"][0]["hooks"][0]["command"]
     solvi(root, "hook", "uninstall", "--project", root, "--agent", "both")
-    assert json.loads((root / ".codex" / "hooks.json").read_text()) == {}
-    assert json.loads((root / ".claude" / "settings.json").read_text()) == {}
+    assert not (root / ".codex").exists()
+    assert not (root / ".claude").exists()
 
 
 def test_install_refuses_a_broken_settings_file(proj):
@@ -415,9 +473,9 @@ def test_installed_command_runs(proj):
 # --------------------------------------------------------------------------------------------------- the trace
 def test_every_decision_is_stored_and_verifies(proj):
     skills(proj)
-    hook(proj, write(proj, ".github/workflows/x.yml", "on: push\n"), "pre-edit")
-    hook(proj, edit(proj, "app/lib/format.ts", "export const x = 1", "export const x = 2"), "pre-edit")
-    hook(proj, prompt_submit(proj, "add a migration with a rollback for the salary column"), "pick-skill")
+    hook(proj, write(proj, ".github/workflows/x.yml", "on: push\n"), "pre-edit", "--record-content")
+    hook(proj, edit(proj, "app/lib/format.ts", "export const x = 1", "export const x = 2"), "pre-edit", "--record-content")
+    hook(proj, prompt_submit(proj, "add a migration with a rollback for the salary column"), "pick-skill", "--record-content")
     store = proj / ".solvi" / "traces" / "hooks.jsonl"
     recs = [json.loads(x) for x in store.read_text().splitlines()]
     assert [(r["meta"]["hook"], r["meta"].get("outcome", r["meta"].get("skill"))) for r in recs] == [
@@ -436,7 +494,7 @@ def test_every_decision_is_stored_and_verifies(proj):
 def test_parallel_hooks_keep_one_chain(proj):
     p = edit(proj, "app/lib/format.ts", "export const x = 1", "export const x = 2")
     with ThreadPoolExecutor(6) as ex:
-        list(ex.map(lambda _: hook(proj, p, "pre-edit"), range(6)))
+        list(ex.map(lambda _: hook(proj, p, "pre-edit", "--record-content"), range(6)))
     v = solvi(proj, "verify", proj / ".solvi" / "traces" / "hooks.jsonl")
     assert v.returncode == 0 and "6 record(s)" in v.stdout
 
@@ -444,17 +502,17 @@ def test_parallel_hooks_keep_one_chain(proj):
 def test_a_store_without_its_head_is_read_in_full(proj):
     p = write(proj, ".github/workflows/x.yml", "on: push\n")
     store = proj / ".solvi" / "traces" / "hooks.jsonl"
-    hook(proj, p, "pre-edit")
+    hook(proj, p, "pre-edit", "--record-content")
     Path(str(store) + ".head").unlink()                                      # the fast open cannot trust it: read all
-    hook(proj, p, "pre-edit")
-    hook(proj, p, "pre-edit")
+    hook(proj, p, "pre-edit", "--record-content")
+    hook(proj, p, "pre-edit", "--record-content")
     v = solvi(proj, "verify", store)
     assert v.returncode == 0 and "3 record(s)" in v.stdout
 
 
 def test_another_store_and_no_store(proj):
     p = write(proj, ".github/workflows/x.yml", "on: push\n")
-    hook(proj, p, "pre-edit", "--store", "decisions.db")
+    hook(proj, p, "pre-edit", "--store", "decisions.db", "--record-content")
     assert solvi(proj, "verify", "decisions.db").returncode == 0
     hook(proj, p, "pre-edit", "--no-store")
     assert not (proj / ".solvi").exists()
@@ -480,7 +538,7 @@ def test_latency(proj):
 def test_audit_replays_a_decision_against_the_rules(proj):
     p = edit(proj, "app/api/employees/route.ts", "  return Response.json({ ok: true })",
              '  const id = new URL(req.url).searchParams.get("employeeId")')
-    hook(proj, p, "pre-edit")
+    hook(proj, p, "pre-edit", "--record-content")
     r = solvi(proj, "hook", "audit", "--project", proj)
     assert r.returncode == 0, r.stderr
     assert "deny — Edit app/api/employees/route.ts" in r.stdout and "(hard, decides the answer)" in r.stdout
@@ -560,7 +618,7 @@ def test_forbid_calls_sees_aliases_changed_keyword_lines_symlinks_and_asks_when_
 
 def test_a_secret_blocked_by_a_redacting_rule_is_not_written_to_the_store(proj):
     key = "sk-" + "a1B2c3D4e5F6g7H8i9J0k1L2"
-    code, out, _, _ = hook(proj, write(proj, "app/lib/config.ts", f'export const OPENAI_API_KEY = "{key}"\n'), "pre-edit")
+    code, out, _, _ = hook(proj, write(proj, "app/lib/config.ts", f'export const OPENAI_API_KEY = "{key}"\n'), "pre-edit", "--record-content")
     d, why = decision(out)
     assert d == "deny" and key not in why
     store = proj / ".solvi" / "traces" / "hooks.jsonl"
@@ -569,8 +627,23 @@ def test_a_secret_blocked_by_a_redacting_rule_is_not_written_to_the_store(proj):
     assert recs[0].get("redacted") and recs[-1]["kind"] == "redaction"
     from solvi.core.store import open_storage
     assert open_storage(str(store)).verify()["ok"]
-    hook(proj, write(proj, "tools/x.py", "eval('1')\n"), "pre-edit")    # a rule that does not redact: stored whole
+    hook(proj, write(proj, "tools/x.py", "eval('1')\n"), "pre-edit", "--record-content")    # a rule that does not redact: stored whole
     assert "eval('1')" in store.read_text()
+
+
+@pytest.mark.parametrize("data,key", [
+    ({"hooks": []}, "hooks"),
+    ({"hooks": {"PreToolUse": {}}}, "PreToolUse"),
+])
+def test_install_rejects_malformed_hook_settings(proj, data, key):
+    settings = proj / ".claude" / "settings.json"
+    original = json.dumps(data)
+    settings.write_text(original)
+    with pytest.raises(hooks.SettingsError, match=key):
+        hooks.install(str(proj))
+    result = solvi(proj, "hook", "install", "--project", proj)
+    assert result.returncode != 0 and key in result.stderr and "Traceback" not in result.stderr
+    assert settings.read_text() == original
 
 
 def test_library_functions_of_hooks_raise_ordinary_exceptions_not_system_exit(proj, monkeypatch):
@@ -619,3 +692,261 @@ def test_the_0_7_spelling_of_the_decider_option_still_works_for_hooks_installed_
     with contextlib.redirect_stdout(out):
         hook_main(["install", "--project", str(tmp_path), "--command", "solvi", "--model", "llm:http://x/v1#m", "--dry-run"])
     assert "--decider 'llm:http://x/v1#m'" in out.getvalue()
+
+
+@pytest.mark.parametrize("agent", ["claude", "codex"])
+def test_custom_wrapper_install_replaces_and_uninstall_removes(tmp_path, agent):
+    path = tmp_path / (".claude/settings.json" if agent == "claude" else ".codex/hooks.json")
+    foreign = {"hooks": {"Stop": [{"hooks": [{"type": "command", "command": "/opt/run-guard.sh unrelated"}]}]}}
+    path.parent.mkdir()
+    path.write_text(json.dumps(foreign))
+    for command in ("/opt/run-guard.sh", "'/opt/tools with spaces/guard'", "/opt/changed-wrapper.sh"):
+        hooks.install(str(tmp_path), agent=agent, command=command)
+        hooks.install(str(tmp_path), agent=agent, command=command)
+        settings = json.loads(path.read_text())
+        assert len(settings["hooks"]["PreToolUse"]) == 1
+        assert len(settings["hooks"]["UserPromptSubmit"]) == 1
+        installed = [group["hooks"][0] for event in ("PreToolUse", "UserPromptSubmit")
+                     for group in settings["hooks"][event]]
+        assert all(set(handler) <= {"type", "command", "timeout", "statusMessage"}
+                   for handler in installed)
+        journal = json.loads((tmp_path / ".solvi-hook-install.json").read_text())
+        assert journal["files"][str(path)]["commands"] == [h["command"] for h in installed]
+    hooks.uninstall(str(tmp_path), agent=agent)
+    assert json.loads(path.read_text()) == foreign
+
+
+@pytest.mark.parametrize("agent", ["claude", "codex"])
+def test_uninstall_keeps_user_replacement_of_marked_wrapper(tmp_path, agent):
+    hooks.install(str(tmp_path), agent=agent, command="/opt/run-guard.sh")
+    path = tmp_path / (".claude/settings.json" if agent == "claude" else ".codex/hooks.json")
+    settings = json.loads(path.read_text())
+    replacement = settings["hooks"]["PreToolUse"][0]["hooks"][0]
+    replacement["command"] = "solvi hook pre-edit --rules my-rules.toml"
+    path.write_text(json.dumps(settings))
+    hooks.uninstall(str(tmp_path), agent=agent)
+    remaining = json.loads(path.read_text())["hooks"]
+    assert remaining == {"PreToolUse": [settings["hooks"]["PreToolUse"][0]]}
+
+
+@pytest.mark.parametrize("original", [b'{"hooks":{}}', b'{  "permissions": {} }\n\n'])
+def test_install_restores_original_bytes(tmp_path, original):
+    path = tmp_path / ".claude/settings.json"
+    path.parent.mkdir()
+    path.write_bytes(original)
+    hooks.install(str(tmp_path), command="solvi")
+    hooks.install(str(tmp_path), command="/opt/reinstalled-wrapper")
+    hooks.uninstall(str(tmp_path))
+    assert path.read_bytes() == original
+    assert not (tmp_path / ".claude/solvi-rules.toml").exists()
+    assert not (tmp_path / ".solvi-hook-install.json").exists()
+
+
+def test_partial_uninstall_keeps_shared_rules_and_modified_artifacts(tmp_path):
+    for agent in ("claude", "codex"):
+        hooks.install(str(tmp_path), agent=agent, command="solvi")
+    rules = tmp_path / ".claude/solvi-rules.toml"
+    rules.write_text("# user rules\n")
+    hooks.uninstall(str(tmp_path), agent="claude")
+    assert rules.read_text() == "# user rules\n"
+    assert (tmp_path / ".codex/hooks.json").exists()
+    hooks.uninstall(str(tmp_path), agent="codex")
+    assert rules.read_text() == "# user rules\n"
+    assert not (tmp_path / ".codex").exists()
+
+
+def test_legacy_uninstall_is_non_destructive(tmp_path):
+    path = tmp_path / ".claude/settings.json"
+    path.parent.mkdir()
+    original = b'{"hooks":{"PreToolUse":[{"hooks":[{"type":"command","command":"solvi hook pre-edit"}]}]}}'
+    path.write_bytes(original)
+    hooks.uninstall(str(tmp_path))
+    assert path.read_bytes() == original
+
+
+@pytest.mark.parametrize("agent", ["claude", "codex"])
+def test_reinstall_rebases_user_edits_without_restoring_installed_hooks(tmp_path, agent):
+    hooks.install(str(tmp_path), agent=agent, command="/opt/old-wrapper")
+    path = tmp_path / (".claude/settings.json" if agent == "claude" else ".codex/hooks.json")
+    settings = json.loads(path.read_text())
+    replacement = settings["hooks"]["PreToolUse"][0]["hooks"][0]
+    replacement["command"] = "solvi hook pre-edit --rules user.toml"
+    settings["permissions"] = {"allow": ["Read"]}
+    user_hook = {"hooks": [{"type": "command", "command": "echo user"}]}
+    settings["hooks"]["Stop"] = [user_hook]
+    path.write_text(json.dumps(settings))
+    hooks.install(str(tmp_path), agent=agent, command="/opt/new-wrapper")
+    hooks.uninstall(str(tmp_path), agent=agent)
+    assert json.loads(path.read_text()) == {
+        "permissions": {"allow": ["Read"]},
+        "hooks": {"PreToolUse": [{"matcher": settings["hooks"]["PreToolUse"][0]["matcher"],
+                                   "hooks": [replacement]}], "Stop": [user_hook]}}
+    assert not (tmp_path / ".claude/solvi-rules.toml").exists()
+    assert not (tmp_path / ".solvi-hook-install.json").exists()
+
+
+def test_reinstall_both_partial_uninstall_preserves_user_edits(tmp_path):
+    paths = {"claude": tmp_path / ".claude/settings.json", "codex": tmp_path / ".codex/hooks.json"}
+    for agent, path in paths.items():
+        hooks.install(str(tmp_path), agent=agent, command="/opt/old-wrapper")
+        settings = json.loads(path.read_text())
+        settings["user_setting"] = agent
+        settings["hooks"]["Stop"] = [{"hooks": [{"command": "echo user"}]}]
+        path.write_text(json.dumps(settings))
+        hooks.install(str(tmp_path), agent=agent, command="/opt/new-wrapper")
+    rules = tmp_path / ".claude/solvi-rules.toml"
+    hooks.uninstall(str(tmp_path), agent="claude")
+    assert rules.exists()
+    assert "PreToolUse" in json.loads(paths["codex"].read_text())["hooks"]
+    hooks.uninstall(str(tmp_path), agent="codex")
+    for agent, path in paths.items():
+        assert json.loads(path.read_text()) == {"user_setting": agent,
+            "hooks": {"Stop": [{"hooks": [{"command": "echo user"}]}]}}
+    assert not rules.exists()
+    assert not (tmp_path / ".solvi-hook-install.json").exists()
+
+
+
+def test_case_sensitive_files_remain_distinct(tmp_path):
+    (tmp_path / 'db').mkdir()
+    (tmp_path / 'DB').mkdir()
+    (tmp_path / 'db' / 'x.py').write_text('lower')
+    (tmp_path / 'DB' / 'x.py').write_text('upper')
+    if os.path.samefile(tmp_path / 'db', tmp_path / 'DB'):
+        pytest.skip('requires case-sensitive filesystem')
+    rule = hooks.Rule('frozen', ['db/**'])
+    assert rule.applies(hooks.relpath('db/x.py', str(tmp_path)))
+    assert not rule.applies(hooks.relpath('DB/x.py', str(tmp_path)))
+
+
+def test_case_insensitive_lookup_probe_and_rule_matching(tmp_path, monkeypatch):
+    root = str(tmp_path / 'project')
+    # Model filesystem lookup, including missing descendants, on Linux.
+    original_samefile = hooks.os.path.samefile
+    def samefile(left, right):
+        if left == root and right == str(tmp_path / 'PROJECT'):
+            return True
+        return original_samefile(left, right)
+    Path(root).mkdir()
+    monkeypatch.setattr(hooks.os.path, 'samefile', samefile)
+    path = hooks.relpath('DB/Migrations/NEW.py', root)
+    assert path.case_insensitive
+    assert hooks.Rule('frozen', ['db/migrations/**']).applies(path)
+    assert not hooks.Rule('excluded', ['**', '!db/migrations/**']).applies(path)
+    assert hooks.relpath('../outside/new.py', root).startswith('/')
+
+
+@pytest.mark.parametrize('target', ['../outside.txt', '.claude/new.json', '.codex/new.json', '.git/new'])
+def test_approve_keeps_client_permissions_outside_project_or_control_dirs(proj, target):
+    code, out, err, _ = hook(proj, write(proj, target, 'plain text'), 'pre-edit', '--approve')
+    assert code == 0 and out is None and not err
+
+
+@pytest.mark.parametrize('tool,ti', [('Read', {'file_path': 'app/lib/format.ts'}), ('Bash', {'command': 'ls'})])
+def test_approve_does_not_approve_non_edits(proj, tool, ti):
+    assert hook(proj, pre_tool_use(proj, tool, ti), 'pre-edit', '--approve')[1] is None
+
+@pytest.mark.parametrize("before,after,expected", [
+    ("a\nb\nc\n", "a\nx\nc\n", [[2, "x"]]),
+    ("a\nc", "a\nb\nc", [[2, "b"]]),
+    ("a\nb\nc", "a\nc", []),
+    ("x\nx\nx", "x\ny\nx", [[2, "y"]]),
+])
+def test_added_lines_small_known_changes(before, after, expected):
+    assert hooks.added_lines(before, after) == expected
+
+
+def test_added_lines_repeated_50k_external_timeout():
+    code = "from solvi.experimental.hooks import added_lines; a=['x']*50000; b=a.copy(); b[25000]='danger'; assert added_lines('\\n'.join(a), '\\n'.join(b)) == [[25001, 'danger']]"
+    subprocess.run([sys.executable, "-c", code], check=True, timeout=10)
+
+
+def test_added_lines_bounded_fallback_keeps_all_added_content():
+    before = "old\n" + "x\n" * 1000 + "tail"
+    after = "new\n" + "x\n" * 500 + "danger\n" + "x\n" * 500 + "changed"
+    added = hooks.added_lines(before, after)
+    assert [1, "new"] in added and [502, "danger"] in added and [1003, "changed"] in added
+
+
+@pytest.mark.parametrize("mode,extra", [("replace", {"cell_id": "a"}), ("delete", {"cell_id": "a"}), ("insert", {"cell_type": "code"})])
+def test_notebook_source_preview_and_paths(proj, mode, extra):
+    payload = pre_tool_use(proj, "NotebookEdit", {"notebook_path": str(proj / "note.ipynb"), "new_source": "secret = 1", "edit_mode": mode, **extra})
+    ch, = hooks.changes_of(payload, str(proj))
+    assert ch.path == "note.ipynb" and ch.added == [[1, "secret = 1"]] and ch.result is None
+    rules = proj / ".claude" / "solvi-rules.toml"
+    rules.write_text('[[rule]]\nid = "source"\npaths = ["*.ipynb"]\nforbid = ["secret"]\n')
+    assert decision(hook(proj, payload, "pre-edit")[1])[0] == "deny"
+    rules.write_text('[[rule]]\nid = "protected-notebook"\npaths = ["*.ipynb"]\n')
+    outcome, reason = decision(hook(proj, payload, "pre-edit")[1])
+    assert outcome == "deny" and "protected-notebook" in reason
+    rules.write_text("")
+    assert decision(hook(proj, payload, "pre-edit")[1])[0] == "ask"
+
+
+@pytest.mark.parametrize("extra", [{"unknown": 1}, {"new_source": None}, {"cell_id": None}, {"edit_mode": "guess"}, {"notebook_path": "relative.ipynb"}])
+def test_notebook_unknown_or_incomplete_preview_asks(proj, extra):
+    fields = {"notebook_path": str(proj / "note.ipynb"), "new_source": "ok", "cell_id": "a", **extra}
+    assert decision(hook(proj, pre_tool_use(proj, "NotebookEdit", fields), "pre-edit")[1])[0] == "ask"
+
+
+
+@pytest.mark.parametrize('agent', ['claude', 'codex'])
+@pytest.mark.parametrize('dry_run', [False, True])
+def test_s363_install_refuses_home_without_mutation(tmp_path, monkeypatch, agent, dry_run):
+    home = tmp_path / 'home'
+    home.mkdir()
+    monkeypatch.setenv('HOME', str(home))
+    before = list(home.rglob('*'))
+    with pytest.raises(hooks.SettingsError, match='home'):
+        hooks.install(str(home), agent=agent, dry_run=dry_run)
+    assert list(home.rglob('*')) == before
+
+
+@pytest.mark.parametrize('agent', ['claude', 'codex'])
+def test_s366_obsolete_model_pre_edit_is_structured_gate(proj, agent):
+    code, out, err, _ = hook(proj, edit(proj, 'app/lib/format.ts', '1', 'eval(1)'),
+                              'pre-edit', '--model', 'obsolete-model', '--agent', agent)
+    assert code == 0 and out is not None
+    if agent == 'claude':
+        outcome, reason = decision(out)
+        assert outcome == 'ask' and '--decider' in reason
+    else:
+        outcome, reason = decision(out)
+        assert outcome == 'deny' and '--decider' in reason
+    assert not (proj / '.solvi').exists()
+
+
+def test_s366_obsolete_model_optional_picker_is_nonblocking(proj):
+    code, out, err, _ = hook(proj, prompt_submit(proj, 'test'), 'pick-skill', '--model', 'old')
+    assert code == 1 and out is None and '--decider' in err
+
+
+def test_s365_default_does_not_copy_existing_secret_and_recording_is_explicit(proj):
+    secret = 'existing-secret-marker-S365'
+    path = proj / 'app/lib/format.ts'
+    path.write_text(f'// {secret}\nexport const x = 1\n')
+    payload = edit(proj, 'app/lib/format.ts', 'x = 1', 'x = 2')
+    code, _, _, _ = hook(proj, payload, 'pre-edit')
+    assert code == 0 and not (proj / '.solvi').exists()
+    code, _, _, _ = hook(proj, payload, 'pre-edit', '--record-content', '--no-store')
+    assert code == 0 and not (proj / '.solvi').exists()
+    code, _, _, _ = hook(proj, payload, 'pre-edit', '--record-content')
+    assert code == 0
+    assert secret in (proj / '.solvi/traces/hooks.jsonl').read_text()
+
+
+def test_s367_two_independent_stems_default_and_explicit_legacy(proj):
+    candidates = [('profiling', 'python performance'), ('migration', 'database schema'),
+                  ('release', 'version publishing'), ('style', 'visual formatting')]
+    assert hooks.pick_skill('python python', candidates)[0] is None
+    assert hooks.pick_skill('python performance', candidates)[0] == 'profiling'
+    assert hooks.pick_skill('python', candidates, min_shared=1)[0] == 'profiling'
+    folder = proj / '.claude/skills'
+    for name, description in candidates:
+        target = folder / name
+        target.mkdir(parents=True)
+        (target / 'SKILL.md').write_text(f'---\nname: {name}\ndescription: {description}\n---\n')
+    code, out, _, _ = hook(proj, prompt_submit(proj, 'python python'), 'pick-skill')
+    assert code == 0 and out is None
+    code, out, _, _ = hook(proj, prompt_submit(proj, 'python'), 'pick-skill', '--min-shared', '1')
+    assert code == 0 and 'profiling' in out['hookSpecificOutput']['additionalContext']

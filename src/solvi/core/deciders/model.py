@@ -3,6 +3,7 @@ solvi.core.deciders, which re-exports every name.)"""
 from __future__ import annotations
 
 import contextlib
+import contextvars
 import dataclasses
 import json
 import os
@@ -29,6 +30,17 @@ from .part import DecisionPart
 
 _SHADOW = threading.local()      # per thread: {(id(model), lora_key): adapter or None} — solvi.experimental.lora.scoring
 #                                  and .adapt: {(id(model), adaptation key): Adaptation or None} — the version's own
+_NO_DECISION_CACHE = contextvars.ContextVar("solvi_no_decision_cache", default=False)
+
+
+@contextlib.contextmanager
+def _uncached_decisions():
+    """Conformance calls reach the scorer, without reading or changing a model's serving cache."""
+    token = _NO_DECISION_CACHE.set(True)
+    try:
+        yield
+    finally:
+        _NO_DECISION_CACHE.reset(token)
 
 
 class NetGate:
@@ -195,6 +207,7 @@ class DecideModel:
         self.loras: dict = {}                # lora_key → an Adapter (solvi.experimental.lora.LoraAdapter; experimental: solvi.experimental.lora.adapt_lora)
         self._lora_extra: dict = {}          # adapter name → an Adapter installed on the scorer outside any slot (scored in shadow; not in the fingerprint)
         self._cache, self._cache_size, self._lock = OrderedDict(), cache_size, threading.Lock()
+        self._cache_epoch = 0
         self._pass_lock = threading.Lock()
         self._block_failed = False
         self._wfp = None
@@ -583,6 +596,27 @@ class DecideModel:
             for k in [k for k in self._cache if lora_key(k[0])[:3] == key[:3]]:
                 del self._cache[k]
 
+    def _score_provider(self, pairs, read_len=0):
+        """Unadapted provider outputs, with any local adapter state restored afterwards.
+        Adapters must explicitly support this operation; ordinary using(active=False)
+        need not restore the previously active adapter.
+        """
+        with self._plain() as plain:
+            if plain:
+                return self._score_plain(pairs, read_len)
+        # _plain(False) holds no gate: a concurrent removal may have emptied
+        # both registries. Recheck under the exclusive gate, before the adapter
+        # lock used by provider_using; never upgrade a shared gate in place.
+        with net_gate(self.scorer):
+            ads = list(self.loras.values()) + list((getattr(self, "_lora_extra", None) or {}).values())
+            if not ads:
+                return self._score_plain(pairs, read_len)
+            raw = getattr(ads[0], "provider_using", None)
+            if not callable(raw):
+                raise NotImplementedError("raw provider identity unsupported: adapter cannot suspend and restore")
+            with raw(self.scorer):
+                return self._score_plain(pairs, read_len)
+
     def _score(self, pairs, read_len=0):
         """[(spec, text)] → scorer outputs, in order; the questions with a LoRA adapter (solvi.experimental.lora) are scored with it
         active, apart from the others. read_len: see _score_plain."""
@@ -654,19 +688,28 @@ class DecideModel:
         self.passes += len(items)
         return out, False
 
+    def clear_cache(self):
+        """Forget scored outputs after a provider change. Adaptations are kept; recalibrate them on fresh outputs.
+        A forward pass already in flight may finish, but cannot put its old outputs back in the cache."""
+        with self._lock:
+            self._cache.clear()
+            self._cache_epoch += 1
+
     def _raw_full(self, specs_texts, info=None, read_len=0):
         """[(spec, text)] → [(raw logits of the mode's column [K], act logit or None)] (cached by text and question).
         info: a dict that receives "block": whether what was scored now went through block passes. read_len: read each
         text whole up to that many tokens (long="full"; cached apart)."""
         out, todo = [None] * len(specs_texts), []
+        use_cache = not _NO_DECISION_CACHE.get()
 
         def key(sp, t):                               # "not stated" allowed is another question to the scorer: a
             k = (self._ck(sp), t, "unknown") if sp.unknown else (self._ck(sp), t)    # Maybe[...] part and a plain one do not share a reply
             return k + (("read", int(read_len)),) if read_len else k
         with self._lock:
+            epoch = self._cache_epoch
             for i, (sp, t) in enumerate(specs_texts):
                 k = key(sp, t)
-                if k in self._cache:
+                if use_cache and k in self._cache:
                     self._cache.move_to_end(k)
                     out[i] = self._cache[k]
                 else:
@@ -679,7 +722,7 @@ class DecideModel:
                 for i, o in zip(todo, got):
                     sp = specs_texts[i][0]
                     out[i] = self._pick(sp, o, specs_texts[i][1])
-                    if not getattr(out[i][0], "transient", False):     # a server that did not answer: ask again
+                    if use_cache and epoch == self._cache_epoch and not getattr(out[i][0], "transient", False):
                         self._cache[key(sp, specs_texts[i][1])] = out[i]
                 while len(self._cache) > self._cache_size:
                     self._cache.popitem(last=False)
@@ -700,8 +743,13 @@ class DecideModel:
             return [(z, a, info["block"]) for z, a in res]
         sig = tuple(self._ck(sp) for sp in specs)
         keys = [(ck, text, sig) for ck in sig]
+        use_cache = not _NO_DECISION_CACHE.get()
+        with self._lock:
+            epoch = self._cache_epoch
 
         def cached():
+            if not use_cache:
+                return None
             with self._lock:
                 if all(k in self._cache for k in keys):
                     for k in keys:
@@ -729,8 +777,9 @@ class DecideModel:
             else:
                 res = [(*self._pick(sp, o, text), True) for sp, o in zip(specs, outs)]
             with self._lock:
-                for k, v in zip(keys, res):
-                    self._cache[k] = v
+                if use_cache and epoch == self._cache_epoch:
+                    for k, v in zip(keys, res):
+                        self._cache[k] = v
                 while len(self._cache) > self._cache_size:
                     self._cache.popitem(last=False)
             return res

@@ -39,14 +39,16 @@ def __getattr__(name):
     """`solvi.Facts` (lazy: a top-level export must not drag `solvi.core.deciders` into every `import solvi` —
     the import-layers rule), a name solvi exported in 0.9 and no longer does (`solvi.JSONLStorage`), or a moved
     module (`solvi.typed`): found at its 1.0 place, with a SolviDeprecationWarning, until 1.1."""
+    if name == "trace":
+        from .core.store.calls import trace
+        return trace
     if name == "Facts":
         from .core.deciders import Facts
         return Facts
     return _deprecate.old_attribute(__name__, name)
 
 
-# 25 names (LAYOUT §1; "document" added in 1.4 by the author's decision, 2026-10-27; "Facts" in 1.4 by the
-# author's decision on the S7 list, 2026-10-30)
+# 26 names: the candidate transition adds explicit ordinary-function recording via trace.
 __all__ = ["build", "document", "Agent", "Guard", "Knowledge", "Budget", "Catalog", "Question", "Answer", "System", "Response", "Quote", "Claim", "Decision", "Facts",
            "Fail", "Unknown", "Span", "Maybe", "Rank", "Estimate", "Scale", "Bins", "SolviDeprecationWarning",
-           "ExperimentalWarning"]
+           "ExperimentalWarning", "trace"]

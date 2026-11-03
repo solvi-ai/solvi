@@ -33,6 +33,7 @@ import traceback
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 from .honesty import gold_of, load_task, same, system_of
 from .honesty import _plain
@@ -282,11 +283,22 @@ def _run_case(system, case, state, store, fast=False):
             out.problems.append(f"{q}: not asked (unknown question, or left out by \"ask\")")
             continue
         r, at = res[q], system.questions[q].answer
-        if _abstains(want, at):
+        json_value = at.kind == "structured" and at.type is Any
+        literal = json_value and (case.get("status") or {}).get(q) == "ok"
+        if _abstains(want, at) and not literal:
             if r.status != "abstain":
                 out.problems.append(f"{q}: expected an abstention, got {_show(r.answer)!r} [{r.status}]")
         elif r.status == "abstain":
             out.problems.append(f"{q}: expected {want!r}, abstained ({r.why})")
+        elif json_value:
+            try:
+                wanted = at.normalize(want)
+                matches = json.dumps(r.answer, sort_keys=True, allow_nan=False) == json.dumps(
+                    wanted, sort_keys=True, allow_nan=False)
+            except (ValueError, TypeError):
+                matches = False
+            if not matches:
+                out.problems.append(f"{q}: expected {want!r}, got {_show(r.answer)!r} [{r.status}]")
         elif not same(r.answer, gold_of(at, want)):
             out.problems.append(f"{q}: expected {want!r}, got {_show(r.answer)!r} [{r.status}]")
     for q, st in (case.get("status") or {}).items():
@@ -324,7 +336,8 @@ def _run_case(system, case, state, store, fast=False):
     return out
 
 
-def run_file(path, fuzz_n=0, seed=0, store=False, timeout=None, reruns=0, isolate=False, max_mem=None, fast=False):
+def run_file(path, fuzz_n=0, seed=0, store=False, timeout=None, reruns=0, isolate=False, max_mem=None, fast=False,
+             *, _stop_on_failure=False, _on_built=None):
     """Run every case of a cases file → FileResult (with fuzz_n > 0, each case is also fuzzed; crashes are problems).
     store=True: the cases (never the fuzz mutations) are saved to the system's storage, when it has one.
     timeout: seconds each case may take (see run_case; None: no limit). reruns: a failing case is asked that many times
@@ -369,12 +382,16 @@ def run_file(path, fuzz_n=0, seed=0, store=False, timeout=None, reruns=0, isolat
     except Exception as e:  # noqa: BLE001
         out.error = f"{type(e).__name__}: {e}"
         return out
+    if _on_built is not None:
+        _on_built()
     for i, case in enumerate(suite.cases):
         try:
             state = suite.state(case)
         except Exception as e:  # noqa: BLE001
             out.cases.append(CaseResult(case.get("name", f"#{i + 1}"), [f"prepare failed: {type(e).__name__}: {e}"],
                                         status="error"))
+            if _stop_on_failure:
+                break
             continue
         r = run_case(system, case, state, store, timeout, reruns, fast)
         if fuzz_n:
@@ -383,6 +400,8 @@ def run_file(path, fuzz_n=0, seed=0, store=False, timeout=None, reruns=0, isolat
             if found and r.status == "ok":
                 r.status = "error"
         out.cases.append(r)
+        if _stop_on_failure and not r.ok:
+            break
     return out
 
 

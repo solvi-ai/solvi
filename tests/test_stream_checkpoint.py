@@ -648,3 +648,107 @@ def test_a_loaded_loop_keeps_the_trial_clock_in_decisions_since_the_freeze(tmp_p
     assert da[0]["why"].startswith("certified, not better") and da[0]["decision"] >= fr["frozen_at"] + 1200
     assert da[0]["samples"] < 1200
     assert _norm(a.log) == _norm(b.log) and b.replay()["ok"]
+
+@pytest.mark.parametrize("valid", [False, True])
+def test_legacy_closed_labels_are_excluded_only_from_future_training(tmp_path, valid):
+    learner = _Det()  # legacy writer did not expose its closed vocabulary
+    loop = _loop(learner, policy=_plain(first=10 ** 6))
+    loop.step(("a", 0.1), lambda: "legacy")
+    if valid:
+        loop.step(("a", 0.2), lambda: "a")
+    loop.save(tmp_path / "old")
+    fresh = _Det()
+    fresh.options = ("a", "b")
+    loaded = _load(tmp_path / "old", fresh)
+    old_rows, old_log = list(loaded._rows), list(loaded.log)
+    old_samples = {v: list(row["samples"]) for v, row in loaded._vs.items()}
+    calls = []
+    original = fresh.train
+    def train(job):
+        calls.append(job)
+        assert all(r.y in fresh.options for r in job.rows)
+        assert "training_selection" not in job.hyper
+        assert job.status["training_selection"]["excluded"] == 1
+        return original(job)
+    fresh.train = train
+    job = loaded.train_now(wait=True)
+    assert job.state == ("done" if valid else "refused")
+    assert loaded.status()["trainings"] == int(valid)
+    assert len(calls) == int(valid)
+    assert loaded._rows == old_rows and loaded.log[:len(old_log)] == old_log
+    assert {v: list(loaded._vs[v]["samples"]) for v in old_samples} == old_samples
+    event = _events(loaded, "train_start" if valid else "train")[-1]
+    assert event["training_selection"]["reasons"] == {"outside_learner_options": 1}
+    assert loaded.replay()["ok"], loaded.replay()["mismatches"]
+    loaded.save(tmp_path / "new")
+    again = _Det()
+    again.options = ("a", "b")
+    resumed = _load(tmp_path / "new", again)
+    assert resumed._rows == old_rows
+    assert resumed.replay()["ok"], resumed.replay()["mismatches"]
+
+
+def test_legacy_bad_truth_survives_calibration_holdout_and_resume(tmp_path, monkeypatch):
+    from solvi.experimental.stream import loop as loop_mod
+
+    legacy = _loop(policy=_plain(first=10 ** 6, calib=0.3, holdout=0.3), detector=None)
+    keys = {split: [] for split in ("train", "calib", "holdout")}
+    for i in range(100):
+        key = f"legacy-split-{i}"
+        keys[legacy.policy.split(legacy._state(), key)].append(key)
+    # The old writer has no options attribute: these are real accepted historical labels.
+    for split in keys:
+        legacy.step(("a", 0.1), lambda: "legacy", key=keys[split][0])
+    assert legacy._holdout and legacy._holdout[-1][1] is True
+    assert legacy._vs[0]["fed"]  # historical bad truth really entered the stream certificate
+    legacy.save(tmp_path / "legacy")
+
+    fresh = _Det()
+    fresh.options = ("a", "b")
+    resumed = _load(tmp_path / "legacy", fresh)
+    old_rows = list(resumed._rows)
+    old_fed = list(resumed._vs[0]["fed"])
+    assert resumed._report_inputs()["calib"][0].y == "legacy"
+    assert resumed._report_inputs()["hold"][0].y == "legacy"
+    scored = []
+    original_calibrate = loop_mod.calib_threshold
+
+    def calibrate(rows, alpha):
+        scored.extend(rows)
+        return original_calibrate(rows, alpha)
+
+    monkeypatch.setattr(loop_mod, "calib_threshold", calibrate)
+    calls = []
+    original_train = fresh.train
+
+    def train(job):
+        calls.append(job)
+        assert [(r.key, r.y) for r in job.rows] == [(keys["train"][1], "a")]
+        assert [(r.key, r.y) for r in job.calib] == [(keys["calib"][0], "legacy")]
+        assert job.status["training_selection"]["excluded_keys"] == [keys["train"][0]]
+        return original_train(job)
+
+    fresh.train = train
+    resumed.step(("a", 0.1), lambda: "a", key=keys["train"][1])
+    assert resumed.train_now(wait=True).state == "done"
+    assert len(calls) == 1 and scored == [(0.95, True)]
+    report = _events(resumed, "train")[-1]["report"]
+    assert report["n_holdout"] == 1 and report["n_train"] == 1
+    assert report["right"] == report["served_right"] == 0
+    assert report["items"][0][0] == keys["holdout"][0]
+    assert resumed._rows[:len(old_rows)] == old_rows
+    assert resumed._vs[0]["fed"][:len(old_fed)] == old_fed
+    assert resumed._holdout[-1][1] is True
+    # A genuine post-freeze certificate, carried through another checkpoint and replay.
+    resumed.step(("a", 0.1), lambda: "a", key=keys["holdout"][1])
+    candidate = resumed.candidate
+    assert candidate is not None and resumed._vs[candidate]["samples"]
+    samples = list(resumed._vs[candidate]["samples"])
+    resumed.save(tmp_path / "new")
+    again = _Det()
+    again.options = fresh.options
+    restored = _load(tmp_path / "new", again)
+    assert restored._rows == resumed._rows
+    assert restored._vs[candidate]["samples"] == samples
+    assert restored._holdout == resumed._holdout
+    assert restored.replay()["ok"], restored.replay()["mismatches"]

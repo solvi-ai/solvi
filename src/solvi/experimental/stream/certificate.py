@@ -267,11 +267,24 @@ class StreamPromise:
                     self._set_grid(pts)
         return self.state()
 
-    def learn(self, signal, answer, label, floor=None) -> dict:
+    def learn(self, signal, answer, label, floor=None, *, sampling_policy="uniform") -> dict:
         """One labelled sample: the decision's score, the answer it would give alone, its label (None: missing — a loss
         wherever it would have been answered alone). Before the grid is fixed the sample is not read (`dropped`).
         floor: grid points below it do not bet on this sample (no wealth or peak change; `n` counts the sample once) —
-        an additive layer relearning on the rows it owns ({score ≥ Λ}), a biased sample of its zone below Λ."""
+        an additive layer relearning on the rows it owns ({score ≥ Λ}), a biased sample of its zone below Λ.
+
+        sampling_policy declares how the caller selected this sample: "uniform" means a coin independent of the
+        current input and label (its rate may depend on the past); "complete" means every decision is labelled.
+        Known "input_dependent" sampling is refused: this unweighted certificate does not implement IPW or DR.
+        This checks the caller's declaration only. The default does NOT detect a hidden slice-dependent coin;
+        the certificate's guarantee still requires the declared sampling assumption to hold. Dispatcher already
+        enforces an input-independent coin and a rate determined from the past in its own sampling path.
+        Invalid declarations are refused before any state change or delta-budget charge."""
+        if sampling_policy == "input_dependent":
+            raise ValueError("input_dependent sampling is unsupported by this unweighted certificate; "
+                             "use an input-independent coin or separate uniform promises per slice")
+        if sampling_policy not in ("uniform", "complete"):
+            raise ValueError("sampling_policy must be 'uniform' or 'complete'")
         if self.grid is None:
             self.dropped += 1
             return self.state()
@@ -413,6 +426,9 @@ class StreamPromise:
     def fingerprint(self) -> str:
         from ...core.provenance import digest
         extra = () if self.procedure == "fixed" else (self.procedure,)    # fixed: the fingerprint as before
+        horizon = getattr(self.budget, "horizon", None)
+        if horizon is not None:
+            extra += ("budget_horizon", horizon)
         return digest("StreamPromise", self.kind, self.level, self.delta, self.budget.schedule, self.grid_spec,
                       self.grid_from, self.grid_size, self.bets, list(self.fractions), list(self.weights), self.c,
                       *extra)
@@ -430,6 +446,7 @@ class _Mirror:
     def __init__(self, promise):
         self.promise = promise
         self.delta, self.schedule = promise.budget.delta, promise.budget.schedule
+        self.horizon = getattr(promise.budget, "horizon", None)
 
     def delta_at(self, v):
         return self.promise.budget.delta_at(v)

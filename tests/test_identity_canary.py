@@ -66,6 +66,76 @@ def test_reference_then_the_same_model():
     assert srv.requests == 2 * len(PROBES)
 
 
+def test_confirmed_change_discards_cached_outputs_before_recalibration():
+    srv = Server()
+    m = _model(srv)
+    c = IdentityCanary(PROBES).attach(m)
+    texts = [f"Where is my parcel {i}" for i in range(4)]
+    assert all(m.decide(t, "Which team?", TEAMS).value == "shipping" for t in texts)
+    c.probe()
+    srv.swapped = True
+    assert c.probe()["verdict"] == "changed"
+    calls = srv.requests
+    part = m.decision("team", "Which team?", "email", TEAMS)
+    part.fit([(t, "billing") for t in texts] * 2)
+    assert srv.requests > calls, "recalibration must ask the new model, not read old logits"
+    c.accept()
+    logits = m.logits(texts[0], "Which team?", TEAMS)
+    assert logits["billing"] > logits["shipping"]
+    assert part.decide(texts[0]).value == "billing"
+
+
+def test_same_and_unconfirmed_probe_rounds_keep_the_decision_cache():
+    srv = Server()
+    m = _model(srv)
+    c = IdentityCanary(PROBES).attach(m)
+    part = m.decision("team", "Which team?", "email", TEAMS)
+    part.decide("a parcel")
+    c.probe()
+    assert c.probe()["verdict"] == "same"
+    calls = srv.requests
+    part.decide("a parcel")
+    assert srv.requests == calls
+    srv.flip = 1
+    assert c.probe()["verdict"] == "unconfirmed"
+    calls = srv.requests
+    part.decide("a parcel")
+    assert srv.requests == calls
+
+
+def test_old_inflight_output_cannot_refill_the_cache_after_a_change():
+    import concurrent.futures
+    import threading
+
+    entered, release = threading.Event(), threading.Event()
+
+    class SlowScorer:
+        model_id = "swappable"
+        swapped = False
+
+        def logits(self, items):
+            old = not self.swapped
+            if old and any(it.text == "request" for it in items):
+                entered.set()
+                assert release.wait(10)
+            return [np.array([3.0, -3.0]) if old else np.array([-3.0, 3.0]) for _ in items]
+
+    scorer = SlowScorer()
+    model = DecideModel(scorer, meta={})
+    canary = IdentityCanary([("probe", "Which?", ["a", "b"])]).attach(model)
+    canary.probe()
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+        old = pool.submit(model.decide, "request", "Which?", ["a", "b"])
+        try:
+            assert entered.wait(10)
+            scorer.swapped = True
+            assert canary.probe()["verdict"] == "changed"
+        finally:
+            release.set()
+        assert old.result(timeout=10).value == "a"
+    assert model.decide("request", "Which?", ["a", "b"]).value == "b"
+
+
 def test_a_silent_swap_is_found_marked_and_flagged_by_drift():
     srv = Server()
     m = _model(srv)
@@ -112,7 +182,7 @@ def test_a_one_off_flip_is_not_confirmed():
     c.probe()
     srv.flip = 1                                               # one noisy reply, then the same model again
     ev = c.probe()
-    assert ev["verdict"] == "same" and ev["unconfirmed"]["answers_changed"] == 1 and not c.changed
+    assert ev["verdict"] == "unconfirmed" and ev["unconfirmed"]["answers_changed"] == 1 and not c.changed
     srv.flip = 1
     ev = IdentityCanary(PROBES, confirm=False).attach(_model(srv)).probe()   # a fresh canary: its reference has the flip
     assert ev["verdict"] == "reference"
@@ -294,3 +364,186 @@ def test_a_probe_round_does_not_hold_up_other_decisions():
     u.join(10)
     assert out["a"].extra["canary"] == {"probed": 1} and [e["verdict"] for e in c.events] == ["reference"]
     assert c.seen == 2
+
+
+def _local_adapter_model(monkeypatch):
+    """Faithful active adapter seam: logits see the same mutable state as switching."""
+    from solvi.experimental import lora
+    from solvi.core.deciders.model import lora_key
+    from solvi.core.deciders.adapt import _Spec
+    srv = Server()
+    m = _model(srv)
+    state = {"active": "local"}
+    m.scorer._lora = state
+    monkeypatch.setattr(lora, "_activate", lambda scorer, st, name: st.update(active=name))
+    original = m.scorer.logits
+    def logits(items):
+        out = original(items)
+        if state["active"] is not None:
+            for o in out:
+                o["logits"] = np.asarray(o["logits"])[::-1].copy()
+        return out
+    m.scorer.logits = logits
+    # Use the real LoRA suspension implementation without loading torch/weights.
+    class Adapter:
+        provider_using = lora.LoraAdapter.provider_using
+        def fingerprint(self):
+            return "local"
+        def using(self, scorer, active=True):
+            return lora.using(scorer, "local" if active else None)
+    # _net uses the same gate; state lock is the real adapter lock.
+    import threading
+    state["lock"] = threading.RLock()
+    m.loras[lora_key(_Spec("Which team?", TEAMS))] = Adapter()
+    return m, srv, state
+
+
+def test_local_adapter_does_not_change_provider_identity(monkeypatch):
+    m, srv, state = _local_adapter_model(monkeypatch)
+    c = IdentityCanary(PROBES).attach(m)
+    state["active"] = None
+    assert c.probe()["verdict"] == "reference"
+    state["active"] = "local"
+    assert c.probe()["verdict"] == "same"
+    assert state["active"] == "local"
+    # The adapter really changes ordinary model scoring.
+    assert m.decide("Where is my parcel", "Which team?", TEAMS).value == "billing"
+
+
+def test_provider_swap_detected_under_active_local_adapter(monkeypatch):
+    m, srv, state = _local_adapter_model(monkeypatch)
+    c = IdentityCanary(PROBES).attach(m)
+    c.probe()
+    srv.swapped = True
+    assert c.probe()["verdict"] == "changed"
+    assert state["active"] == "local"
+
+
+def test_probe_restores_local_adapter_after_error(monkeypatch):
+    m, srv, state = _local_adapter_model(monkeypatch)
+    c = IdentityCanary(PROBES).attach(m)
+    def fail(items):
+        assert state["active"] is None
+        raise RuntimeError("probe failure")
+    m.scorer.logits = fail
+    with pytest.raises(RuntimeError, match="probe failure"):
+        c.probe()
+    assert state["active"] == "local"
+    assert c.reference is None
+
+
+def test_adapter_without_raw_support_is_explicitly_unsupported(monkeypatch):
+    m, srv, state = _local_adapter_model(monkeypatch)
+    next(iter(m.loras.values())).provider_using = None
+    c = IdentityCanary(PROBES).attach(m)
+    with pytest.raises(NotImplementedError, match="raw provider identity unsupported"):
+        c.probe()
+    assert c.reference is None and state["active"] == "local"
+
+
+@pytest.mark.parametrize("registry", ["loras", "_lora_extra"])
+def test_provider_probe_after_concurrent_last_adapter_removal(monkeypatch, registry):
+    import concurrent.futures
+    import contextlib
+    import threading
+    from solvi.core.deciders.adapt import _Spec
+    from solvi.core.deciders.model import net_gate
+
+    m, srv, state = _local_adapter_model(monkeypatch)
+    adapter = next(iter(m.loras.values()))
+    if registry == "_lora_extra":
+        m._lora_extra = {"local": adapter}
+        m.loras = {}
+    original_plain = m._plain
+    checked, removed = threading.Event(), threading.Event()
+
+    @contextlib.contextmanager
+    def paused_plain():
+        with original_plain() as plain:
+            assert not plain
+            yield plain
+        # Reproduce removal precisely after the unprotected False check.
+        checked.set()
+        assert removed.wait(10)
+
+    monkeypatch.setattr(m, "_plain", paused_plain)
+    sp = _Spec("Which team?", TEAMS)
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+        probe = pool.submit(m._score_provider, [(sp, "Where is my parcel")])
+        try:
+            assert checked.wait(10)
+            # Same gate / adapter-lock order as unstage and uninstall, without
+            # loading a GPU backend. Removal leaves the plain network active.
+            with net_gate(m.scorer), state["lock"]:
+                setattr(m, registry, {})
+                state["active"] = None
+        finally:
+            removed.set()
+        outputs, used = probe.result(timeout=10)
+    assert not used and srv.requests == 1
+    np.testing.assert_allclose(outputs[0]["logits"], np.log([0.1, 0.9]))
+    assert state["active"] is None
+    assert not m.loras and not m._lora_extra
+    assert state["lock"].acquire(blocking=False)
+    state["lock"].release()
+    # Both gate modes remain usable after the race (no leaked/upgrade lock).
+    with net_gate(m.scorer):
+        with original_plain() as plain:
+            assert plain
+
+
+class ScriptedProbeProvider:
+    model_id = 'scripted-fixed-name'
+
+    def __init__(self, probabilities):
+        self.probabilities = iter(probabilities)
+
+    def logits(self, items):
+        return [np.log([p, 1 - p]) for p in (next(self.probabilities) for _ in items)]
+
+
+def _scripted_canary(probabilities):
+    return IdentityCanary([('fixed probe', 'Which?', ['a', 'b'])]).attach(
+        DecideModel(ScriptedProbeProvider(probabilities), meta={}))
+
+
+def test_s374_partial_route_preserves_both_reports_and_is_unconfirmed():
+    c = _scripted_canary([.9, .1, .9])
+    c.probe()
+    event = c.probe()
+    assert event['verdict'] == 'unconfirmed' and not c.changed
+    assert event['unconfirmed']['differs'] is True
+    assert event['confirmation']['differs'] is False
+    assert event['unconfirmed']['answers_changed'] == 1
+    assert event['confirmation']['answers_changed'] == 0
+    assert event['diagnostics']['repeat_agreement'] == 0
+    assert event['diagnostics']['probes'][0]['probability_shift_tv'] == pytest.approx(.8)
+
+
+def test_s375_fixed_probe_blindness_and_tolerance_boundary_are_reported():
+    c = _scripted_canary([.999, .999, .999, .999])
+    c.probe()
+    assert c.probe()['verdict'] == 'same'
+    report = c.diagnose()
+    assert report['repeat_agreement'] == 1
+    assert report['very_clear_reference_count'] == 1
+    assert report['probes'][0]['reference_top_gap'] == pytest.approx(.998)
+    assert report['blind_spots'] and c.tol == .15
+    assert len(c.events) == 2 and not c.changed
+    # No answer flip, and a shift just below the existing TV tolerance.
+    boundary = _scripted_canary([.9, .7501])
+    boundary.probe()
+    event = boundary.probe()
+    assert event['verdict'] == 'same'
+    assert event['diagnostics']['probes'][0]['probability_shift_tv'] == .1499
+
+
+def test_s375_boundary_probe_repeat_disagreement_exposes_noise_without_tuning():
+    c = _scripted_canary([.51, .51, .49])
+    c.probe()
+    reference = c.reference
+    report = c.diagnose()
+    assert report['probes'][0]['reference_top_gap'] == .02
+    assert report['repeat_agreement'] == 0
+    assert c.reference is reference and not c.changed
+    assert len(c.events) == 1 and c.tol == .15

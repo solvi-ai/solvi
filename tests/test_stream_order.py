@@ -188,6 +188,7 @@ def test_tickets_held_on_wrong_answers_restart_and_replay_exactly(tmp_path):
             desk.resolve(t, gold(cc))
         if c == 120:                                            # a restart with tickets open
             state = sp.state()
+            desk.close()                                       # release the single persistent-store owner
             desk, sp, p = _desk(JSONLStorage(path))
             assert sp.state() == state and desk.open()
     for _, cc, t in held:

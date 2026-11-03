@@ -17,7 +17,10 @@ Three kinds of extension point:
 - **concrete classes** (`System`, `Response`, `Dispatcher`): use them, extend them through what they take (a
   strategist, a store, a slow path, a monitor), do not subclass them.
 
-Promises: **stable** — no breaking change in 1.x, a deprecation lasts at least one minor release; **stable to use,
+Promises: **stable** — compatible ordinary 1.x updates, with deprecations lasting at least one minor release.
+The planned 1.5 transition is an explicit breaking-change exception; its changes are listed in the
+[candidate migration notes](migration-1.5-candidate.md). This development tree is not a release announcement.
+**Stable to use,
 provisional to subclass** — calling it is stable, a subclass may need a change in a minor release. The names load on
 first use, so `import solvi.core` stays light.
 

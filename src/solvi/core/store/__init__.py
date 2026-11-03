@@ -173,7 +173,7 @@ def _body(rec):
 
 
 KEPT = ("v", "kind", "seq", "time", "prev", "init_hash", "catalog", "records", "flow", "producers", "models", "guards",
-        "safeguards", "teach", "source", "of", "of_hash", "by", "note", "segment", "run", "stream", "pending")
+        "safeguards", "teach", "source", "of", "of_hash", "by", "note", "segment", "run", "stream", "pending", "ticket_request")
 """The fields of a record that are never erased (redact leaves them; a redaction record is made of them)."""
 
 

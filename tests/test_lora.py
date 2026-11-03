@@ -397,8 +397,9 @@ def test_solvi_no_compile_loads_the_encoder_without_torch_compile(ckpt, monkeypa
         return real_build(cfg, **kw)
     monkeypatch.setattr(torch, "compile", refuse)
     monkeypatch.setattr(transformers.AutoModel, "from_config", build_compiling)
-    with pytest.raises(RuntimeError, match="Dynamo"):
-        DecideModel.load(ckpt, backend="torch", device="cpu")
+    auto = DecideModel.load(ckpt, backend="torch", device="cpu")
+    assert auto.decision("t", "Which team?", "email", TEAMS).decide("my invoice").value in TEAMS
+    assert torch.compile is refuse                                # automatic retry restores it too
     monkeypatch.setenv("SOLVI_NO_COMPILE", "1")
     m = DecideModel.load(ckpt, backend="torch", device="cpu")
     assert m.decision("t", "Which team?", "email", TEAMS).decide("my invoice").value in TEAMS

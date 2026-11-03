@@ -236,7 +236,7 @@ def test_the_charts_specialist_stores_its_runs(tmp_path):
         from solvi.experimental.charts import ChartSpecialist, RuleProposer
     store = JSONLStorage(str(tmp_path / "c.jsonl"))
     text = "Revenue by region: Europe 42%, North America 35%, Asia-Pacific 23%."
-    sp = ChartSpecialist(RuleProposer(), storage=store)
+    sp = ChartSpecialist(RuleProposer(allow_prose=True), storage=store)
     r = sp.run(text, "revenue by region")
     assert r.ok and store.record(r.stored_id)["specialist"] == "charts" and sp.replay(r.stored_id, text).ok
     assert replay_runs(store, ChartSpecialist(), [text]) == []

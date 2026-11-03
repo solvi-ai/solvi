@@ -137,6 +137,18 @@ class LoraAdapter:
         a time."""
         return using(scorer, self.name if active else None)
 
+    @contextlib.contextmanager
+    def provider_using(self, scorer):
+        """Suspend local adaptation for probes and restore even after scorer errors."""
+        st = _state(scorer)
+        with _net(scorer, st):
+            previous = st["active"]
+            try:
+                _activate(scorer, st, None)
+                yield
+            finally:
+                _activate(scorer, st, previous)
+
     def save(self, path):
         """Write the adapter (a .safetensors file with its config, the question and the checkpoint) → path."""
         import torch

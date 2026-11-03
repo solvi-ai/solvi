@@ -11,6 +11,9 @@ code checks each value against the text, draws only what verified, and says what
      each dropped or changed, with the reason;
   4. the trace: stored as JSON, replayed — the same checks and the same SVG bytes; an edited record is caught.
 
+This example explicitly opts into RuleProposer(allow_prose=True). Its labels are heuristic: the checker verifies
+source numbers and units, not semantic label/role assignments. Default chart() instead requires structured label: value lines.
+
 Swap the proposer for a model: `LLMProposer("http://127.0.0.1:8080/v1", "qwen2.5-7b-instruct")` (any OpenAI-compatible
 server), or any function `(text, question) -> ChartSpec | dict`. The checks stay the same.
 
@@ -22,7 +25,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-from solvi.experimental.charts import ChartSpecialist, FixedProposer, chart
+from solvi.experimental.charts import ChartSpecialist, FixedProposer, RuleProposer, chart
 
 PRESS = """ACME Corp. reports third-quarter 2025 results
 
@@ -53,13 +56,13 @@ def main(out):
     saved = []
 
     print("1. A press release → revenue by region")
-    r1 = chart(PRESS, "revenue by region")
+    r1 = chart(PRESS, "revenue by region", proposer=RuleProposer(allow_prose=True))
     print(r1.report())
     saved.append(out / "21_region_pie.svg")
     saved[-1].write_text(r1.output)
 
     print("\n2. A quarterly table → revenue by quarter, against the stated total")
-    r2 = chart(QUARTERS, "quarterly revenue")
+    r2 = chart(QUARTERS, "quarterly revenue", proposer=RuleProposer(allow_prose=True))
     print(r2.report())
     saved.append(out / "21_quarters_line.svg")
     saved[-1].write_text(r2.output)
@@ -74,7 +77,7 @@ def main(out):
 
     print("\n4. The trace: stored, replayed, tampered")
     record = json.loads(json.dumps(r3.to_dict()))
-    sp = ChartSpecialist()
+    sp = ChartSpecialist(RuleProposer(allow_prose=True))
     rep = sp.replay(record, PRESS)
     print(f"   replay: {rep.ok} (the same checks, the same {len(r3.output.encode())} SVG bytes)")
     record["trace"][1]["data"]["spec"]["series"][0]["points"][1]["value"] = "35"      # someone "fixes" the record

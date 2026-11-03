@@ -112,6 +112,7 @@ from collections import defaultdict
 from contextlib import contextmanager
 
 from ..runtime import vhash
+from . import _merkle
 from .gates import RANK, SOURCES, Verdict, WriterGate, default_gates, with_source_gate
 
 KINDS = ("fact", "rule", "skill", "action", "episode")
@@ -435,6 +436,8 @@ class KnowledgeStore:
         self.journal = []                            # the entries in order, each with its position "n"
         self.items: dict[str, _Item] = {}
         self.by_key = defaultdict(set)
+        self._by_subject = defaultdict(set)
+        self._by_relation = defaultdict(set)
         self.dependents = defaultdict(set)
         self.resolves = defaultdict(list)            # key → [(t, value, by)]
         self.flags = {}                              # t → {"ids", "scope", "key", "why", "by", "parent", "ended"}
@@ -446,6 +449,8 @@ class KnowledgeStore:
         self._expiry = []                            # sorted (clock an item's expiry can flip at, id): the tick index
         self._resolved_clock = 0                     # the clock the state was last resolved at
         self._fp = None
+        self._fingerprint_root = None
+        self._fingerprint_rows = {}
         self._taints = {}                            # id → the journal position its support was last cut at (memo)
         self._guards = {}                            # key → _GuardKey: the revival guard's per-key cache (S266)
         if self.storage is not None and _replay:
@@ -586,6 +591,16 @@ class KnowledgeStore:
             value = r["body"].get("o") if isinstance(r["body"], dict) else None
             it = _Item(iid, r["item_kind"], r["body"], r["scope"], key, value, r.get("reconfirm_after"))
             self.items[iid] = it
+            # Bodies are immutable; retain every status so as-of facts and hints
+            # use the same candidate set after writes and journal replay.
+            body = it.body if isinstance(it.body, dict) else {}
+            for field, index in (("s", self._by_subject), ("r", self._by_relation)):
+                value = body.get(field)
+                try:
+                    hash(value)
+                except TypeError:
+                    continue  # unhashable filters retain the full-scan fallback
+                index[value].add(iid)
             if key is not None:
                 self.by_key[key].add(iid)
         it.asserts.append({"t": t, "clock": r.get("clock", 0), "source": r["source"], "by": r.get("by"),
@@ -980,7 +995,7 @@ class KnowledgeStore:
     # ------------------------------------------------------------------------------------------------ resolution
     def upstream(self, ids):
         """Items whose state can change the state of `ids`: premises (transitively) and same-key competitors."""
-        seen, todo = set(), list(ids)
+        seen, seen_keys, todo = set(), set(), list(ids)
         while todo:
             i = todo.pop()
             if i in seen or i not in self.items:
@@ -989,13 +1004,14 @@ class KnowledgeStore:
             it = self.items[i]
             for a in it.asserts:
                 todo.extend(a["just"])
-            if it.key is not None:
+            if it.key is not None and it.key not in seen_keys:
+                seen_keys.add(it.key)
                 todo.extend(self.by_key[it.key])
         return seen
 
     def component(self, ids):
         """The connected component(s) of `ids`: premise edges both ways and shared keys."""
-        seen, todo = set(), list(ids)
+        seen, seen_keys, todo = set(), set(), list(ids)
         while todo:
             i = todo.pop()
             if i in seen or i not in self.items:
@@ -1005,14 +1021,15 @@ class KnowledgeStore:
             for a in it.asserts:
                 todo.extend(a["just"])
             todo.extend(self.dependents.get(i, ()))
-            if it.key is not None:
+            if it.key is not None and it.key not in seen_keys:
+                seen_keys.add(it.key)
                 todo.extend(self.by_key[it.key])
         return seen
 
     def downstream(self, ids):
         """Items whose state a change to `ids` can change: `ids`, what is derived from them (transitively) and same-key
         competitors — what a write re-resolves (the rest keeps its state)."""
-        seen, todo = set(), list(ids)
+        seen, seen_keys, todo = set(), set(), list(ids)
         while todo:
             i = todo.pop()
             if i in seen or i not in self.items:
@@ -1020,7 +1037,8 @@ class KnowledgeStore:
             seen.add(i)
             todo.extend(self.dependents.get(i, ()))
             k = self.items[i].key
-            if k is not None:
+            if k is not None and k not in seen_keys:
+                seen_keys.add(k)
                 todo.extend(self.by_key.get(k, ()))
         return seen
 
@@ -1106,6 +1124,16 @@ class KnowledgeStore:
                 self.state[i] = new[i]
             else:
                 self.state.pop(i, None)
+        for i in comp:
+            row = self._fingerprint_row(i) if i in self.state else None
+            if row == self._fingerprint_rows.get(i):
+                continue
+            if row is None:
+                self._fingerprint_rows.pop(i, None)
+            else:
+                self._fingerprint_rows[i] = row
+            self._fingerprint_root = _merkle.put(self._fingerprint_root, i,
+                None if row is None else _merkle.digest("solvi.km2.leaf", row))
         self._fp = None
         self._update_questions(comp)
 
@@ -1322,8 +1350,20 @@ class KnowledgeStore:
         if valid_at is not None:
             q["valid_at"] = valid_at
         subjects = None if about is None else ({about} if isinstance(about, str) else set(about))
+        candidates = None
+        if subjects is not None:
+            candidates = set().union(*(self._by_subject.get(subject, ()) for subject in subjects))
+        if relation is not None:
+            try:
+                hash(relation)
+            except TypeError:
+                pass
+            else:
+                matching = self._by_relation.get(relation, set())
+                candidates = matching if candidates is None else candidates & matching
+        ids = self.state if candidates is None else (iid for iid in candidates if iid in self.state)
         facts, hints, memo = [], [], {}
-        for iid in sorted(self.state):
+        for iid in sorted(ids):
             it = self.items[iid]
             b = it.body if isinstance(it.body, dict) else {}
             if kinds is not None and it.kind not in kinds:
@@ -1335,7 +1375,7 @@ class KnowledgeStore:
             if scope is not None and not scope_matches(it.scope, scope):
                 continue
             st = self.status(iid)
-            row = {"id": iid, "kind": it.kind, "body": it.body, "source": it.asserts[-1]["source"]}
+            row = {"id": iid, "kind": it.kind, "body": it.body, "scope": it.scope, "source": it.asserts[-1]["source"]}
             v = self.valid(iid)
             if v is not None:                            # the validity a reader filters on (Knowledge.value(valid_at=))
                 row["valid"] = v
@@ -1374,15 +1414,27 @@ class KnowledgeStore:
         return {"at": len(self.journal), "fp": self.fingerprint(), "query": q, "facts": facts, "hints": hints,
                 "rests_on": sorted(self.upstream(ids)) if ids else []}
 
+    def _fingerprint_row(self, i):
+        st, it = self.state[i], self.items[i]
+        return [i, it.kind, it.body, it.scope, st["status"], st["rank"], st["n_confirm"], st["refuted_by"],
+                st["learned_at"], st["invalidated_at"]]
+
     def fingerprint(self):
-        """A hash of what the store believes: every present item with its status, rank, support and time range."""
+        """Versioned SHA-256 Merkle identity of the existing belief-row payload.
+
+        Version 1.5 uses ``km2:sha256:<64 hex>``; old persisted identities must be
+        compared with ``legacy_fingerprint()``. Journal hashes and item IDs are
+        unchanged. Updates cost expected O(changed log N), reads O(1). Direct
+        mutation of internal state/items is unsupported and bypasses this index.
+        """
+        self._settle()
+        return "km2:sha256:" + (self._fingerprint_root.hash if self._fingerprint_root else _merkle.EMPTY)
+
+    def legacy_fingerprint(self):
+        """Exact pre-1.5 16-hex identity; rebuilds the full store after writes."""
+        self._settle()
         if self._fp is None:
-            rows = []
-            for i in sorted(self.state):
-                st, it = self.state[i], self.items[i]
-                rows.append([i, it.kind, it.body, it.scope, st["status"], st["rank"], st["n_confirm"], st["refuted_by"],
-                             st["learned_at"], st["invalidated_at"]])
-            self._fp = vhash({"items": rows})[:16]
+            self._fp = vhash({"items": [self._fingerprint_row(i) for i in sorted(self.state)]})[:16]
         return self._fp
 
     def counts(self):
@@ -1405,7 +1457,8 @@ class KnowledgeStore:
                 "flags_pending": [{"flag": t, "why": self.flags[t]["why"]} for t in self._pending_flags()]}
 
     # ------------------------------------------------------------------------------------------------ re-deciding
-    def redecide(self, storage, retracted, decide, *, fact="knowledge", upto="decision"):
+    def redecide(self, storage, retracted, decide, *, fact="knowledge", upto="decision",
+                 skip_retracted=True, valid_at_key=None):
         """The stored decisions that rested on retracted items, re-run on their re-built snapshots.
 
         storage: the decisions' TraceStorage; retracted: the retracted item ids; decide: init_state → {question: answer}
@@ -1419,23 +1472,72 @@ class KnowledgeStore:
         is recorded."""
         if upto not in ("decision", "now"):
             raise ValueError(f'upto is "decision" or "now", not {upto!r}')
+        correction = valid_at_key is not None
+        if type(skip_retracted) is not bool or (not skip_retracted and not correction):
+            raise ValueError("skip_retracted=False requires explicit valid_at_key")
+        if correction:
+            if upto != "now" or skip_retracted or not isinstance(valid_at_key, str) or not valid_at_key:
+                raise ValueError("correction redecision requires upto='now', skip_retracted=False and a date key")
+            if not isinstance(fact, str) or not fact or isinstance(retracted, (str, bytes)):
+                raise ValueError("fact and affected IDs must be explicit")
+            if not callable(decide) and not callable(getattr(decide, "ask", None)):
+                raise TypeError("decide must be callable or a System")
         retracted = set(retracted)
+        if correction and (not retracted or any(not isinstance(i, str) or i not in self.items for i in retracted)):
+            raise ValueError("affected must contain existing item IDs")
         storage = _storage(storage)
-        run = _decider(decide)
+        if correction and not callable(getattr(storage, "iter", None)):
+            raise TypeError("storage must provide iter()")
+        run = _correction_decider(decide) if correction else _decider(decide)
         rebuilt, changes, same = {}, [], []
+        prepared = []
+        candidate_ids = set()
         for s in storage.iter():
             init = s.input or {}
             snap = init.get(fact)
+            if correction and isinstance(snap, dict) and retracted & set(snap.get("rests_on") or ()):
+                if type(snap.get("at")) is not int or snap["at"] < 0 or type(snap.get("query")) is not dict:
+                    raise ValueError("affected snapshot requires a journal position and query mapping")
+                if not isinstance(s.id, str) or not s.id or s.id in candidate_ids:
+                    raise ValueError("affected stored decision IDs must be unique nonempty strings")
+                candidate_ids.add(s.id)
             if not isinstance(snap, dict) or "at" not in snap or not retracted & set(snap.get("rests_on") or ()):
                 continue
             at = None if upto == "now" else int(snap["at"])
             if at not in rebuilt:
-                rebuilt[at] = self.rebuild(upto=at, skip=retracted)
-            new_snap = rebuilt[at].snapshot(**{k: v for k, v in (snap.get("query") or {}).items()})
+                rebuilt[at] = self.rebuild(upto=at, skip=retracted if skip_retracted else ())
+            query = dict(snap.get("query") or {})
+            if correction:
+                raw = init.get(valid_at_key)
+                if type(raw) is _dt.date:
+                    date = raw.isoformat()
+                elif type(raw) is str:
+                    try:
+                        date = _dt.date.fromisoformat(raw).isoformat()
+                    except ValueError:
+                        raise ValueError("valid_at_key requires an ISO YYYY-MM-DD date") from None
+                    if date != raw:
+                        raise ValueError("valid_at_key requires an ISO YYYY-MM-DD date")
+                else:
+                    raise ValueError("valid_at_key requires an ISO YYYY-MM-DD date")
+                if "valid_at" in query and _time(query["valid_at"]) != date:
+                    raise ValueError("recorded snapshot valid_at differs from the explicit input date")
+                query["valid_at"] = date
+            new_snap = rebuilt[at].snapshot(**query)
             if _content(new_snap) == _content(snap):
                 continue
-            old, new = run(init), run({**init, fact: new_snap})
-            (changes if old != new else same).append({"id": s.id, "old": old, "new": new})
+            if correction:
+                from copy import deepcopy
+                prepared.append((s.id, deepcopy(init), deepcopy({**init, fact: new_snap})))
+            else:
+                old, new = run(init), run({**init, fact: new_snap})
+                (changes if old != new else same).append({"id": s.id, "old": old, "new": new})
+        for sid, old_input, new_input in prepared:
+            (old, old_key, old_unknown), (new, new_key, new_unknown) = run(old_input), run(new_input)
+            change = {"id": sid, "old": old, "new": new}
+            if old_unknown or new_unknown:
+                change.update(old_unknown_paths=old_unknown, new_unknown_paths=new_unknown)
+            (changes if old_key != new_key else same).append(change)
         return changes, same
 
 
@@ -1449,6 +1551,61 @@ def _storage(where):
         return where
     from ..store import open_storage
     return open_storage(where)
+
+
+def _correction_json(value, *, unknown=False, active=None):
+    """Return finite JSON and a type-aware comparison tree, without repr coercion."""
+    import math
+    from ..catalog import Unknown
+    if unknown and value is Unknown:
+        return {"$solvi": "unknown"}, ("unknown",)
+    kind = type(value)
+    if value is None or kind in (str, bool, int):
+        return value, (kind.__name__, value)
+    if kind is float and math.isfinite(value):
+        return value, ("float", value)
+    if kind not in (dict, list):
+        raise ValueError("correction callbacks must return finite JSON values")
+    active = set() if active is None else active
+    if id(value) in active or len(active) > 128:
+        raise ValueError("correction callbacks must return acyclic finite JSON values")
+    if kind is dict and any(type(k) is not str for k in value):
+        raise ValueError("correction callbacks require string JSON keys")
+    active.add(id(value))
+    try:
+        if kind is list:
+            pairs = [_correction_json(v, unknown=unknown, active=active) for v in value]
+            return [v for v, _ in pairs], ("list", tuple(k for _, k in pairs))
+        pairs = [(k, _correction_json(v, unknown=unknown, active=active)) for k, v in sorted(value.items())]
+        return {k: v for k, (v, _) in pairs}, ("dict", tuple((k, tag) for k, (_, tag) in pairs))
+    finally:
+        active.remove(id(value))
+
+
+def _correction_decider(decide):
+    """Baseline is the CURRENT callback rerun on the historical snapshot, not a saved prediction."""
+    if callable(getattr(decide, "ask", None)):
+        def run(init):
+            response = decide.ask(init, store=False)
+            raw = {q: [r.answer, r.status] for q, r in sorted(response.results.items())}
+            value, key = _correction_json(raw, unknown=True)
+            from ..catalog import Unknown
+            paths = []
+
+            def walk(node, path):
+                if node is Unknown:
+                    paths.append(path)
+                elif type(node) is list:
+                    for i, child in enumerate(node):
+                        walk(child, path + "/" + str(i))
+                elif type(node) is dict:
+                    for name, child in sorted(node.items()):
+                        walk(child, path + "/" + name.replace("~", "~0").replace("/", "~1"))
+
+            walk(raw, "")
+            return value, key, paths
+        return run
+    return lambda init: (*_correction_json(decide(init)), [])
 
 
 def _decider(decide):

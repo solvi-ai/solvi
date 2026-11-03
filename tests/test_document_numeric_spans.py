@@ -160,3 +160,9 @@ def test_numeric_reading_change_does_not_silently_reuse_old_calibration():
     fixture = Path(__file__).parent / "fixtures/document_numbers_before.json"
     with pytest.raises(ValueError, match="catalog|fingerprint|different"):
         ops_system(Server(case_reply()), calibration=fixture)
+
+
+@pytest.mark.parametrize("word", ["trillion", "trillions"])
+def test_document_trillion_remains_in_written_units(word):
+    value, _ = _read_quote(Decimal, f"$1.44 {word}")
+    assert value == Decimal("1.44")

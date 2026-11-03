@@ -94,7 +94,13 @@ def _journal(seed, disjoint=False, storage=None):
 def _observe(ks):
     keys = sorted({it.key for it in ks.items.values() if it.key is not None})
     snaps = {json.dumps(k): ks.snapshot(about=k[1]) for k in keys}
-    return {"journal": vhash(ks.journal), "fp": ks.fingerprint(), "report": vhash(ks.report()),
+    for snap in snaps.values():
+        snap["fp"] = ks.legacy_fingerprint()
+        for row in snap["facts"] + snap["hints"]:
+            row.pop("scope", None)
+    report = ks.report()
+    report["fingerprint"] = ks.legacy_fingerprint()
+    return {"journal": vhash(ks.journal), "fp": ks.legacy_fingerprint(), "report": vhash(report),
             "counts": ks.counts(), "snapshots": vhash(snaps), "statuses": {i: ks.status(i) for i in sorted(ks.items)}}
 
 
@@ -122,8 +128,8 @@ def test_journals_written_before_the_change_load_verify_and_replay(tmp_path):
         shutil.copy(FIXTURES / f"{name}.jsonl", path)
         shutil.copy(FIXTURES / f"{name}.jsonl.head", f"{path}.head")
         ks = KnowledgeStore(str(path))
-        assert ks.verify() and ks.fingerprint() == golden[name]["fp"]
-        assert ks.rebuild().fingerprint() == golden[name]["fp"]
+        assert ks.verify() and ks.legacy_fingerprint() == golden[name]["fp"]
+        assert ks.rebuild().legacy_fingerprint() == golden[name]["fp"]
         assert {i: ks.status(i) for i in sorted(ks.items)} == golden[name]["statuses"]
 
 
@@ -137,10 +143,10 @@ def test_the_three_admitted_shapes_differ_from_the_store_before_the_change_exact
     b = ks.add("fact", {"s": "s0", "r": "r0", "o": 24}, source="outcome", by="crm", valid=(5, 9))
     ks.add("fact", {"s": "s0", "r": "r0", "o": 12}, source="outcome", by="crm", valid=(9, 14))
     rows = {r["id"]: r for r in ks.snapshot()["facts"]}
-    assert ks.status(a) == ks.status(b) == "active" and ks.fingerprint().startswith("860b12da2aef")
+    assert ks.status(a) == ks.status(b) == "active" and ks.legacy_fingerprint().startswith("860b12da2aef")
     assert rows[a]["valid"] == [9, 14] and rows[a]["periods"] == [[0, 5], [9, 14]]
     assert rows[b] == {"id": b, "kind": "fact", "body": {"s": "s0", "r": "r0", "o": 24}, "source": "outcome",
-                       "valid": [5, 9]}
+                       "scope": {}, "valid": [5, 9]}
     assert [r["body"]["o"] for r in ks.snapshot(about="s0", valid_at=7)["facts"]] == [24]
     # A derived item over premises with `valid`. Before: its "assert" entry had valid None and its row no "valid";
     # now the entry and the row carry the intersection [4, 10]. Its status and the fingerprint are the same.
@@ -149,7 +155,7 @@ def test_the_three_admitted_shapes_differ_from_the_store_before_the_change_exact
     q = ks.add("fact", {"s": "s1", "r": "r1", "o": 2}, source="outcome", by="lab", valid=(4, 20))
     d = ks.add("fact", {"s": "s2", "r": "r0", "o": 3}, source="spec", by="rule", derived_from=[p, q])
     assert [r.get("valid") for r in ks.journal if r.get("item") == d] == [[4, 10]]
-    assert ks.status(d) == "active" and ks.fingerprint().startswith("51b4397b3af2")
+    assert ks.status(d) == "active" and ks.legacy_fingerprint().startswith("51b4397b3af2")
     assert {r["id"]: r.get("valid") for r in ks.snapshot()["facts"]}[d] == [4, 10]
     # On a plain key: an item a rule only re-infers follows its premise's passed re-test. Before: d stayed a
     # hypothesis "pending retest" (fingerprint b12854ad1810…); now it is active, and the fingerprint changes.
@@ -160,7 +166,7 @@ def test_the_three_admitted_shapes_differ_from_the_store_before_the_change_exact
     ks.add("fact", {"s": "s0", "r": "r0", "o": 1}, source="outcome", by="sync")
     ks.retest(a, ok=True)
     assert ks.status(d) == "active" and not ks.pending_retest(d)
-    assert ks.fingerprint().startswith("ea8fb3057797") and not ks.fingerprint().startswith("b12854ad1810")
+    assert ks.legacy_fingerprint().startswith("ea8fb3057797") and not ks.legacy_fingerprint().startswith("b12854ad1810")
     assert sorted(r["id"] for r in ks.snapshot()["facts"]) == sorted([a, d]) and ks.snapshot()["hints"] == []
 
 

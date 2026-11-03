@@ -131,6 +131,18 @@ def plan(catalog, questions, init_keys, heads=None):
             targets, why = q.uses, f"uses hint {q.name}"
         else:
             targets = sorted(f for f in reach - init_keys if catalog.parts[f].kind != "rule")
+            # A not-yet-fitted question must not infer its own accepted answer
+            # (or facts computed from it) as training features. Explicit uses,
+            # rule inputs and fitted features still retain real cycle checks.
+            references = {n for n, p in catalog.parts.items() if hasattr(p.func, '__solvi_answer_ref__')}
+            if references:
+                blocked = set(references)
+                while True:
+                    added = {n for n, p in catalog.parts.items() if set(p.inputs) & blocked} - blocked
+                    if not added:
+                        break
+                    blocked.update(added)
+                targets = [f for f in targets if f not in blocked]
             why = f"{q.name}: flow not narrowed (no rule, fit or uses)"
         for f in targets:
             need(f, why, q.name)
@@ -149,7 +161,10 @@ def plan(catalog, questions, init_keys, heads=None):
                 if p.name in fs or q not in qs:
                     continue
                 have = fs | init_keys
-                touched = [x for x in p.inputs if x in fs and x not in init_keys]
+                # A System.rename boundary transfer keeps a raw input's role:
+                # ordinary Catalog.alias computations still trigger these checks.
+                boundary_given = getattr(catalog, '_boundary_given_aliases', ())
+                touched = [x for x in p.inputs if x in fs and x not in init_keys and x not in boundary_given]
                 if touched and all(x in have for x in p.inputs):
                     st = chosen.setdefault(p.name, Step(p))
                     why = "check on computed: " + ", ".join(touched)

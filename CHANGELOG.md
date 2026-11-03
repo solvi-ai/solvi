@@ -2,6 +2,163 @@
 
 ## 1.4.1 — unreleased
 
+- `Knowledge.redecide` explicitly binds each stored input's date to current knowledge, retaining earlier valid
+  assertions. It prepares private snapshots before callbacks and distinguishes answer changes from justification changes.
+- `solvi.stat.agreement_diagnostics` reports conditional agreement counts, correlations and matching wrong answers
+  on fixed normalized rows, with explicit missing values and undefined denominators.
+
+- `System.decide` returns explicitly unrecorded, nonreplayable answers for a narrow synchronous catalog. It refuses
+  configured guards, calibration, storage, models and adaptive execution before evaluating inputs or user callbacks.
+
+- `solvi.trace` records eager synchronous JSON function calls, their outcomes and parent UUIDs in ordinary storage.
+  Explicit helpers replay trusted callables, compare replacements and export native fixtures without importing stored code.
+- Decision cases can test literal JSON null and reserved strings with `Answer.value()` and an explicit successful status;
+  JSON-value comparisons distinguish booleans from numbers.
+
+- `Answer.value()` accepts finite JSON values, including scalars and explicit `null`, while ordinary `None` retains
+  its abstention meaning. Structured arrays retain list shape when loading saved responses.
+
+- A joint-repaired answer receives the fitted calibration for its selected path-aware score, before independent
+  fact/text-entry bounds and the final confidence threshold. Calibration no longer disappears during repair.
+- The concurrency test's direct-call stress loop yields cooperatively: Python RLock does not promise fairness.
+  Original deadlines, all450 dispatcher outcomes, side-call coverage and replay checks remain in place.
+
+- Joint repair retains the evidence path and text-entry confidence bounds when replacing an answer. Learned-head
+  candidate probabilities retain their path multiplier. Low-confidence refusal still applies after repair.
+
+- `System.depends(question)` reports declared initial inputs using the same planner as input schemas, including
+  transitive computations, checks, aliases and applicability declarations. It does not infer causal relevance.
+
+- `Catalog.alias` adapts an external fact name for unchanged consumers, with an explicit or inferred common type,
+  source descriptions in entry points/input schemas, cycle and declaration-collision checks. It retains ordinary
+  traces/replay and changes catalog identity; question/answer renaming is a separate request.
+
+- `System.probe` evaluates an actual rule at explicit intermediate fact values. It marks results/traces hypothetical,
+  preserves replay, and bypasses production bookkeeping and calibrated guarantees. Checks and answer rules cannot
+  be overridden; identity canaries remain disabled by serial execution in the diagnostic context.
+
+### Accepted-answer dependencies and naming
+
+- Nonfinite answer-head outcomes are recorded and replayed as abstentions without storing NaN probabilities.
+  Head replay validates finite recorded probabilities and their confidence arithmetic even when models are trusted.
+- Historical stateful-guard metadata survives subsequent learning; record-free candidate evaluation does not
+  advance the promise or freeze its automatic grid.
+
+- Guard sessions preflight an entire batch before starting registered tools (`check_many` / `call_many` and async
+  counterparts). An explicit `advance` callback simulates cumulative caller facts; rejected plans execute no tools.
+  Session access must be serialized; tool failures/cancellation can leave partial external effects, without rollback.
+- Exact user confirmation discharges tool-taint only for the confirmed fields. User-only grounding, scan-user
+  taint, unconfirmed fields and the `injections="any"` policy remain enforced.
+- Head training rejects dependencies on its own accepted answer through other questions before replacing a head.
+
+- `LawSet.why_not` names observed overlap with narrower same-effect laws when net gain is zero; this diagnostic
+  does not relax admission or claim coverage on unseen inputs. README retirement wording matches the experimental registry.
+
+- Instruction-like text detection distinguishes conventional invoice/reference lines from explicit assistant
+  addresses and task prerequisites. New matching preserves Unicode normalization, original offsets and the
+  `actions=False` user-message contract; it remains a lexical heuristic, not a calibrated safety certificate.
+- Ticket documentation separates an isolated blind payload from the external oracle sampling-independence
+  assumption; repeated decisions may disclose System 1 behavior.
+
+- `Catalog.answer_fact` publishes normalized accepted answers within a staged request, including refusals,
+  confidence bounds, structured metadata, source checks/guarantees, async execution and checked replay.
+- `Catalog.rule(text=...)` records an explicit condition in explanations and catalog fingerprints.
+- `System.rename(inputs=..., answers=...)` adapts external names with contracts, constraints and source references;
+  rename transfers preserve automatic-check selection. Input-model renames require an explicit external model.
+- Re-deriving a head or callable hard-check answer from an incomplete trace refuses instead of calling user code.
+
+### Structured rule answers
+
+- `Answer.structured` and inferred object/array/model answers preserve the normal trace and confidence, with explicit
+  field explanations in `Claim.extra['fields']`. JSON types and rule return annotations are checked separately;
+  invalid metadata/evidence abstains. Importable class schemas bind serialized types and Process identities.
+  Structured cached values and traces are isolated from caller mutation. No new statistical guarantee is implied.
+
+### Base revision dependencies
+
+- **S235:** opt-in law sets bind exceptions to an owner-declared base revision. `set_base` retires old active
+  and suspended exceptions, refreshes caches and refuses token reuse or revision changes during admission.
+  Absolute laws retain the default behavior. Bound compile/Knowledge exports refuse to erase the dependency.
+
+
+### Shared statistics
+
+- `solvi.stat` exposes the existing bounded-mean, mixture, mirror and skill certificate processes;
+  experimental paths re-export the same classes. `MeanBound.dump/restore` supports data-only replay.
+- `DeltaBudget` adds an explicit finite horizon. `e_bh` and sequential `ELOND` operate on valid e-values;
+  online allocations precede outcomes and cannot be refunded. These APIs do not establish e-value validity
+  for arbitrary scores or demonstrate autonomous improvement.
+
+
+### Breaking development changes (candidate for 1.5; not released)
+
+- Laws evaluate matched observations by default. Automatic falsification uses leftover probes on supported exact
+  single-law paths; explicit `support_on="applied", falsify=None` retains the previous policy. Finite probe pools
+  do not prove a law on unseen inputs.
+- `Knowledge.value` refuses ambiguous distinct values instead of picking the first fact. Use `scope=`, `valid_at=`
+  or `Knowledge.values` to select the intended fact(s). Snapshots include each item's scope.
+- Knowledge fingerprints use a versioned full-SHA256 Merkle root, maintained incrementally. `legacy_fingerprint()`
+  returns the previous 16-character identity. Journal hashes and item IDs keep their formats; old and new belief
+  fingerprints are deliberately distinct. Addressed snapshots use indexes, and graph traversals expand each key once.
+- Hook CLI content recording is opt-in with `--record-content`; full edited files and prompts are then retained for
+  audit/replay. `--no-store` overrides it. The deterministic skill picker requires two shared stems by default;
+  `--min-shared=1` selects the older heuristic.
+
+### External handoff stabilization
+
+- The default chart proposer accepts explicit `label: value [scale/unit]` rows and refuses unsupported prose instead
+  of guessing series labels or turning years/uncertainties into measurements. `RuleProposer(allow_prose=True)` retains
+  the heuristic path explicitly; numeric quote verification does not establish semantic correctness of those labels.
+- Law readers and compiled books expose all matching/maximal predictions and violations. Memoized scoring retains
+  weak buffer identity, so recycled object IDs cannot return another buffer's scores.
+- Guard tools can declare effects and outbound destination arguments. Explicit egress requires a strict full URL from
+  the current authorized user request or application-owned approved URLs; prefix grounding and remote read-only hints
+  do not authorize it. `require_effects=True` escalates unknown effects; legacy mode records them as unverified.
+- The torch encoder retries the specific unsupported Python 3.12 Dynamo error with compilation temporarily disabled.
+  Other runtime failures propagate; the fallback is covered by simulated loaders, not a tested Intel Mac deployment.
+- Stream status lists resident version references separately from the soft retained-version target. Documentation
+  distinguishes accepted-label floors from decision counts and names the current additive checkpoint format.
+- Root CLI help shows six entry commands; `--all-help` lists all registered commands. Existing commands still route.
+- Contracts declare initial-state applicability dependencies with `applicable_inputs=`. Exported input schemas include
+  these required facts; opaque undeclared predicates fail export with an actionable error instead of silently omitting
+  their inputs. Local `ask` behavior is unchanged; explicit `Question.uses` remains a compatibility declaration.
+- Guard slot grounding checks typed dates and datetimes in canonical ISO form, including nested values and facts;
+  type coercion no longer makes an unauthorized date exempt from the grounding check. Existing explicit/enum/bool
+  exemptions retain their declared semantics; no natural-language date parser is implied.
+
+- Stream training rejects labels outside a closed vocabulary before changing learner state; legacy invalid training
+  rows are quarantined without removing real calibration/holdout failures. `AdapterLoop.replay_all` names the full
+  protocol-log replay; online snapshots remain independent of their mutable learner.
+- Ticket desks lease persistent stores, close explicitly and support durable `request_id` retries, open-ticket recovery
+  and refusal. Redacted incomplete requests fail closed. Oracle MCP instructions and option schemas describe the oracle
+  role; idle tickets expire under the server's tool lock, and ignored oracle CLI options are refused.
+- Numeric guards and charts preserve Unicode signs, declared decimal commas, grouped digits, currency aliases and
+  trillion scales. Malformed or unknown numeric forms refuse rather than partially verify. Numeric provenance lookups
+  avoid repeated full scans; optional rescaling/rounding retains its documented fallback.
+- Hooks check both sides of moves, notebooks and filesystem case behavior; restrict explicit approval to checked
+  project edits; bound repetitive line diffs; validate malformed payload/settings; restore owned install artifacts;
+  refuse accidental HOME installation; and return a structured decision for obsolete pre-edit flags.
+- Mutation workers bound the whole lifecycle, preserve local imports, stop killed mutants early and terminate their
+  own POSIX process groups on timeout. Main guards are excluded, function scopes are available, and identical ASTs
+  are deduplicated. Distinct behaviorally equivalent programs remain a limitation.
+- Conformance checks validate probability/option contracts, bypass serving caches, interleave repeat decisions and
+  detect input mutation. Protocol-only callable deciders register without private marker/name requirements.
+  Identity canaries isolate provider probes from local adapters and report unconfirmed differences and probe diagnostics.
+  Finite probes/repeats do not prove detection of every provider change or future deterministic behavior.
+- Watches reject superseded targets and terminate with an explicit superseded event if a newer snapshot takes effect;
+  they do not unexpectedly revert the newer snapshot. Lint reports hard checks reading question answers as input facts.
+- README starts with an executable offline example and an init/test/ask path.
+
+### Fixed (model identity and conformance — S373/S378)
+
+- A confirmed `IdentityCanary` change clears the model's scored-output cache before recalibration;
+  `accept()` clears it again. An older forward pass cannot repopulate the cleared cache. Local adaptations
+  are retained and must still be recalibrated on the new model. `DecideModel.clear_cache()` also exposes
+  this invalidation explicitly; unchanged and unconfirmed probe rounds leave the cache alone.
+- `check_decider` bypasses `DecideModel`'s serving cache while checking outputs and determinism, including
+  calls through combinations. A cached first answer no longer makes a changing scorer pass the repeat check;
+  the serving cache and its settings are preserved, including when conformance fails.
+
 ### Fixed (numeric document spans)
 
 - Numeric document reads accept complete ASCII/curly-apostrophe thousands groups and a field's exact own

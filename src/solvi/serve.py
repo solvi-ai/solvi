@@ -792,6 +792,59 @@ MCP_INSTRUCTIONS = ("Each tool is a question of a solvi decision system: pass th
                     "confidence, why, safeguards and the id of the stored trace.")
 
 
+def _mcp_instructions(svc):
+    if svc.oracle is None:
+        return MCP_INSTRUCTIONS
+    return ("You are the oracle for System 1. Use decide with the case and a stable request_id for retries. "
+            "A needs_verdict result is a blind ticket: judge the input yourself and resolve with one of its options "
+            "before expires_in_s elapses. Your external labels calibrate and certify System 1; do not infer a label "
+            "from whether a case was escalated or sampled. Recover outstanding work with open_tickets, or give_up "
+            "when you cannot judge. Missing or expired verdicts count as failures, never as correct labels.")
+
+
+def _sweep_oracle(svc):
+    """Idle expiry shares the tool lock; a running call finishes before its next sweep."""
+    if svc.oracle is not None and svc._lock.acquire(blocking=False):
+        try:
+            svc.oracle.sweep()
+        finally:
+            svc._lock.release()
+
+
+def _mcp_lines(svc, stdin, interval=0.5):
+    if svc.oracle is None:
+        while True:
+            item = _readline(stdin, svc.limits.max_body)
+            yield item
+            if not item[0] and not item[1]:
+                return
+    else:
+        import queue
+        pending = queue.Queue(maxsize=1)
+        def read():
+            try:
+                while True:
+                    item = _readline(stdin, svc.limits.max_body)
+                    pending.put(item)
+                    if not item[0] and not item[1]:
+                        return
+            except BaseException as exc:  # noqa: BLE001 — forward reader-thread failures to the server owner
+                pending.put(exc)
+        # A blocked pipe reader must not keep the server alive after its owner stops it.
+        threading.Thread(target=read, daemon=True, name='solvi-oracle-input').start()
+        while True:
+            try:
+                item = pending.get(timeout=interval)
+            except queue.Empty:
+                _sweep_oracle(svc)
+                continue
+            if isinstance(item, BaseException):
+                raise item
+            yield item
+            if not item[0] and not item[1]:
+                return
+
+
 def run_builtin(svc, stdin=None, stdout=None):
     """A stdio MCP server without the SDK: JSON-RPC 2.0, one message per line; initialize, ping, tools/list, tools/call
     (notifications are read and ignored). A message is at most `svc.limits.max_body` characters and max_depth deep; a
@@ -813,8 +866,7 @@ def run_builtin(svc, stdin=None, stdout=None):
     def error(id_, code, msg):
         send({"jsonrpc": "2.0", "id": id_, "error": {"code": code, "message": msg}})
     try:
-        while True:
-            line, too_long = _readline(stdin, lim.max_body)
+        for line, too_long in _mcp_lines(svc, stdin):
             if too_long:
                 error(None, -32600, f"invalid request: a message is at most {lim.max_body} characters")
                 continue
@@ -845,7 +897,7 @@ def run_builtin(svc, stdin=None, stdout=None):
                     send({"jsonrpc": "2.0", "id": id_, "result": {
                         "protocolVersion": v if v in PROTOCOL_VERSIONS else PROTOCOL_VERSIONS[-1],
                         "capabilities": {"tools": {"listChanged": False}},
-                        "serverInfo": {"name": "solvi", "version": __version__}, "instructions": MCP_INSTRUCTIONS}})
+                        "serverInfo": {"name": "solvi", "version": __version__}, "instructions": _mcp_instructions(svc)}})
                 elif method == "ping":
                     send({"jsonrpc": "2.0", "id": id_, "result": {}})
                 elif method == "tools/list":
@@ -904,12 +956,22 @@ def run_sdk(svc):
         return types.CallToolResult(content=[types.TextContent(type="text", text=dumps(out, ensure_ascii=False,
                                                                                        default=repr))],
                                     structured_content=out, is_error=bad)
-    server = Server("solvi", version=__version__, instructions=MCP_INSTRUCTIONS, on_list_tools=list_tools,
+    server = Server("solvi", version=__version__, instructions=_mcp_instructions(svc), on_list_tools=list_tools,
                     on_call_tool=on_call)
 
     async def main():
         async with stdio_server() as (r, w):
-            await server.run(r, w, server.create_initialization_options())
+            async with anyio.create_task_group() as tasks:
+                async def expire_idle():
+                    while True:
+                        await anyio.sleep(0.5)
+                        _sweep_oracle(svc)
+                if svc.oracle is not None:
+                    tasks.start_soon(expire_idle)
+                try:
+                    await server.run(r, w, server.create_initialization_options())
+                finally:
+                    tasks.cancel_scope.cancel()
     anyio.run(main)
 
 
@@ -977,6 +1039,8 @@ def _refuse_others(a, mode, _fail):
 
 def cmd_serve(a):
     """`solvi serve` (see solvi.cli) → exit status."""
+    if getattr(a, "agent_oracle", False) and not a.mcp:
+        _fail("serve --agent-oracle: an MCP mode — add --mcp")
     mode = "guard" if getattr(a, "guard", None) or getattr(a, "upstream", None) else "mcp" if a.mcp else "http"
     if mode == "guard" and (a.system or a.decider):
         _fail("serve --guard: a proxy serves the upstream server's tools; drop the System / --decider")
@@ -1040,17 +1104,25 @@ def _serve_oracle(a):
     if not a.system:
         _fail("serve --agent-oracle: name the TicketDesk (module:attr or file.py:attr — a TicketDesk or a function "
               "returning one)")
-    for k in ("store", "decider"):
-        if getattr(a, k):
-            _fail(f"serve --agent-oracle: --{k} does nothing here — the desk's Dispatcher carries its storage and "
+    for k in ("store", "decider", "pull", "api_key", "backend", "allow_client_no_store", "max_questions", "max_options"):
+        if getattr(a, k, None) != SERVE_DEFAULTS.get(k):
+            _fail(f"serve --agent-oracle: --{k.replace('_', '-')} does nothing here — the desk's Dispatcher carries its storage and "
                   "its System")
-    desk = load_object(a.system)
-    if not all(callable(getattr(desk, k, None)) for k in ("mcp_tools", "call_tool", "decide", "resolve")):
-        _fail(f"serve --agent-oracle: {a.system} is not a TicketDesk (the stream package's tickets)")
-    if a.mcp_impl == "sdk" and not sdk_available():
-        _fail("serve --mcp-impl sdk: the MCP SDK (mcp>=2) is not installed: pip install 'solvi[mcp]'")
-    run_mcp(Service(limits=_limits(a), agent_oracle=desk), a.mcp_impl)
-    return 0
+    try:
+        desk = load_object(a.system)
+    except ValueError as e:
+        _fail(f"serve --agent-oracle: cannot open {a.system}: {e}")
+    try:
+        if not all(callable(getattr(desk, k, None)) for k in ("mcp_tools", "call_tool", "decide", "resolve")):
+            _fail(f"serve --agent-oracle: {a.system} is not a TicketDesk (the stream package's tickets)")
+        if a.mcp_impl == "sdk" and not sdk_available():
+            _fail("serve --mcp-impl sdk: the MCP SDK (mcp>=2) is not installed: pip install 'solvi[mcp]'")
+        run_mcp(Service(limits=_limits(a), agent_oracle=desk), a.mcp_impl)
+        return 0
+    finally:
+        close = getattr(desk, "close", None)
+        if callable(close):
+            close()
 
 
 def _limits(a):

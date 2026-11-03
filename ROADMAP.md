@@ -11,6 +11,17 @@ The historical tables below include release-time snapshots; “on dev” in a 1.
 that the feature is absent from the released 1.4.0. The current changelog is authoritative for fixes.
 The next proposed application and its evaluation gates are in [the development plan](docs/development-1.4.1.md).
 
+## Current stabilization and autonomy work
+
+| Work | Status |
+|---|---|
+| External handoff: stream labels/tickets, hooks, numeric grounding, mutation isolation, conformance and knowledge lifecycle | In progress; local regression candidates, overall acceptance pending |
+| Safer law defaults, ambiguous knowledge readers, versioned incremental belief fingerprints | In progress; breaking changes considered for 1.5, no release yet |
+| Offline onboarding and executable README | In progress |
+| Separate autonomous observer: durable feeds/labels, frozen candidates, paired trials and rollback | In progress; research gate closed, no established autonomous growth |
+| Public common e-process API and additional autonomous modules | Planned after stabilization and their research gates |
+| Rust core and WASM | Deferred until transferred work and autonomy are completed |
+
 ## Toward 1.0: what solvi is for, and everything that exists landed
 
 First the goal and an honest account of what is there; the module cleanup and the split into two levels come after,

@@ -203,6 +203,8 @@ class RunContext:
 
     def stop(self):
         self._stop.set()
+        if self._beat is not None and self._beat is not threading.current_thread():
+            self._beat.join()                     # drain any heartbeat already writing before the terminal line
 
 
 def _target(name):
@@ -220,15 +222,16 @@ def _call(target, payload, ctx) -> dict:
         out = _target(target)(payload, ctx)
         out = dict(out or {})
         out.setdefault("state", "done")
-        ctx.log("done")
+        terminal = "done"
     except TrainingRefused as e:
-        ctx.log(f"refused: {e}")
+        terminal = f"refused: {e}"
         out = {"state": "refused", "why": str(e)}
     except Exception as e:  # noqa: BLE001 — the target's failure is the caller's to record
-        ctx.log(f"failed: {type(e).__name__}: {e}")
+        terminal = f"failed: {type(e).__name__}: {e}"
         out = {"state": "failed", "why": f"{type(e).__name__}: {e}", "traceback": traceback.format_exc()}
     finally:
         ctx.stop()
+    ctx.log(terminal)
     out.setdefault("device", ctx.device)
     out.setdefault("estimate_s", ctx.estimate_s)
     return out

@@ -19,7 +19,7 @@ POINT = r"^/series/\d+/points/\d+$"
 
 
 def setup(texts=TEXTS):
-    sp = ChartSpecialist(RuleProposer())
+    sp = ChartSpecialist(RuleProposer(allow_prose=True))
     return sp, [(k, t, sp.run(t).proposal) for k, t in texts.items()]
 
 
@@ -45,7 +45,7 @@ def test_values_swapped_between_two_points_are_caught_and_whole_points_swapped_a
     vals = corrupt(sp, recs, {"swap": swap(paths=VALUE)}, n=30, seed=2)
     assert vals.n == 30 and vals.rate == 1.0          # each label now holds a number its quote does not state
     whole = corrupt(sp, recs, {"swap": swap(paths=POINT)}, n=30, seed=2)
-    assert whole.n == 30 and whole.caught == 0        # label, value and quote move together: the chart is as true
+    assert whole.n == 30 and whole.caught == 0        # label, value and quote move together: numeric grounding is unchanged
 
 
 def test_a_dropped_point_is_judged_by_a_relation():

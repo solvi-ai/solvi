@@ -8,7 +8,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-SCALES = {"": 1, "thousand": 10 ** 3, "million": 10 ** 6, "billion": 10 ** 9}
+SCALES = {"": 1, "thousand": 10 ** 3, "million": 10 ** 6, "billion": 10 ** 9, "trillion": 10 ** 12}
 KINDS = ("bar", "line", "pie")
 
 
@@ -56,13 +56,13 @@ class Series(BaseModel):
 
 class ChartSpec(BaseModel):
     """kind: bar | line | pie. unit: "%", a currency ("USD", "$", "EUR", "₽" …), "pp", a word ("tonnes", "users") or ""
-    for plain counts. scale: the values are in thousands / millions / billions of the unit ("" = as is). total: a total
+    for plain counts. scale: the values are in thousands / millions / billions / trillions of the unit ("" = as is). total: a total
     the source states for the values (checked like any value; the parts must add up to it)."""
     model_config = ConfigDict(extra="forbid")
     kind: Literal["bar", "line", "pie"]
     title: str = ""
     unit: str = ""
-    scale: Literal["", "thousand", "million", "billion"] = ""
+    scale: Literal["", "thousand", "million", "billion", "trillion"] = ""
     series: list[Series] = Field(min_length=1)
     total: Point | None = None
 
@@ -88,7 +88,7 @@ class VerifiedChart(BaseModel):
     title: str
     unit: str                                # canonical: "%", "pp", "USD", a word, or ""
     unit_label: str = ""                     # the unit as the spec writes it ("tonnes"), for the caption
-    scale: Literal["", "thousand", "million", "billion"] = ""
+    scale: Literal["", "thousand", "million", "billion", "trillion"] = ""
     categories: list[str]
     series: list[VerifiedSeries]
     total: VerifiedPoint | None = None

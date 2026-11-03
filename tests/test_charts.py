@@ -7,7 +7,7 @@ from itertools import combinations
 
 import pytest
 
-from solvi.experimental.charts import (PALETTE, ChartSpecialist, FixedProposer, LLMProposer, chart, contrast,
+from solvi.experimental.charts import (PALETTE, ChartSpecialist, FixedProposer, LLMProposer, RuleProposer, chart, contrast,
                           render_svg)
 from solvi.experimental.charts.render import BG, INK, MIN_FONT, MUTED
 from solvi.core.specialist import BLOCKED, CHANGED, DROPPED, WARNING, Trace
@@ -52,7 +52,7 @@ def codes(r, severity=None):
 
 # ------------------------------------------------------------------------------------------------ the happy paths
 def test_rule_proposer_press_release_pie():
-    r = chart(PRESS, "revenue by region")
+    r = chart(PRESS, "revenue by region", proposer=RuleProposer(allow_prose=True))
     assert r.ok and r.checked.verified.kind == "pie"
     assert [p.label for p in r.checked.verified.series[0].points] == ["Europe", "North America", "Asia-Pacific"]
     assert not codes(r, DROPPED)
@@ -61,7 +61,7 @@ def test_rule_proposer_press_release_pie():
 
 
 def test_rule_proposer_quarters_line_with_total():
-    r = chart(QUARTERS, "quarterly revenue")
+    r = chart(QUARTERS, "quarterly revenue", proposer=RuleProposer(allow_prose=True))
     v = r.checked.verified
     assert r.ok and v.kind == "line" and v.unit == "USD" and v.scale == "million"
     assert v.total is not None and str(v.total.value) == "6.9"
@@ -70,7 +70,7 @@ def test_rule_proposer_quarters_line_with_total():
 
 
 def test_rule_proposer_labels_after_the_number_and_total():
-    r = chart(WASTE)
+    r = chart(WASTE, proposer=RuleProposer(allow_prose=True))
     v = r.checked.verified
     assert [c for c in v.categories] == ["recycled", "composted", "landfill"]
     assert v.unit == "tonne" and v.unit_label == "tonnes" and v.total.value == 4500
@@ -80,18 +80,18 @@ def test_rule_proposer_labels_after_the_number_and_total():
 @pytest.mark.parametrize("text", ["In 2023 and 2024 things happened.", "Since 2019 offices opened in Lyon.",
                                   "From 2020 to 2024 stores closed."])
 def test_rule_proposer_does_not_chart_a_year_followed_by_a_word(text):
-    r = chart(text)
+    r = chart(text, proposer=RuleProposer(allow_prose=True))
     assert not r.ok and r.checked.verified is None and r.proposal.series[0].points == []
 
 
 def test_rule_proposer_still_charts_a_four_digit_count_that_is_not_a_year():
-    r = chart("In 2023 the plant had 2000 employees and the office 1950 employees.")
+    r = chart("In 2023 the plant had 2000 employees and the office 1950 employees.", proposer=RuleProposer(allow_prose=True))
     v = r.checked.verified
     assert r.ok and v.unit == "employee" and sorted(p.as_written for p in v.series[0].points) == ["1950", "2000"]
 
 
 def test_russian_currency_space_grouped():
-    r = chart(RU)
+    r = chart(RU, proposer=RuleProposer(allow_prose=True))
     v = r.checked.verified
     assert r.ok and v.unit == "RUB" and v.categories == ["Москва", "Казань", "Самара"]
     assert v.scale == "thousand" and "1,500k ₽" in r.output and "650k ₽" in r.output
@@ -129,7 +129,7 @@ def test_trap_made_up_value_by_stand_in_proposer():
 
 
 def test_trap_percentages_that_do_not_sum():
-    r = chart(SURVEY, "how people commute")
+    r = chart(SURVEY, "how people commute", proposer=RuleProposer(allow_prose=True))
     assert r.proposal.kind == "bar"                 # the rule proposer does not propose a pie: 108%
     s = spec([("bus", 48, "48%"), ("bicycle", 39, "39%"), ("car", 21, "21%")], kind="pie")
     r = run(SURVEY, s)
@@ -234,8 +234,8 @@ def test_nothing_verified_invalid_proposal_and_failing_proposer():
 
 # --------------------------------------------------------------------------------------- the trace and the replay
 def test_trace_replay_identical_bytes_and_tamper_detection():
-    r = chart(PRESS, "revenue by region")
-    sp = ChartSpecialist()
+    r = chart(PRESS, "revenue by region", proposer=RuleProposer(allow_prose=True))
+    sp = ChartSpecialist(RuleProposer(allow_prose=True))
     rec = json.loads(json.dumps(r.to_dict()))                         # stored as JSON and read back
     assert not Trace(rec["trace"]).verify()
     assert sp.replay(rec, PRESS).ok and sp.replay(r).ok
@@ -254,8 +254,8 @@ def test_trace_replay_identical_bytes_and_tamper_detection():
 
 
 def test_rendering_is_deterministic():
-    a = chart(QUARTERS, "quarterly revenue").output
-    b = chart(QUARTERS, "quarterly revenue").output
+    a = chart(QUARTERS, "quarterly revenue", proposer=RuleProposer(allow_prose=True)).output
+    b = chart(QUARTERS, "quarterly revenue", proposer=RuleProposer(allow_prose=True)).output
     assert a == b
 
 
@@ -280,7 +280,7 @@ def test_colours_meet_contrast():
 @pytest.mark.parametrize("text,question", [(PRESS, "revenue by region"), (QUARTERS, "quarterly revenue"), (WASTE, None),
                                            (RU, None), (SURVEY, None)])
 def test_layout_no_overlaps(text, question):
-    r = chart(text, question)
+    r = chart(text, question, proposer=RuleProposer(allow_prose=True))
     _assert_layout(ChartSpecialist().draw(r.checked))
 
 
@@ -327,7 +327,7 @@ def test_negative_values_bars():
 
 
 def test_render_svg_directly():
-    r = chart(PRESS, "revenue by region")
+    r = chart(PRESS, "revenue by region", proposer=RuleProposer(allow_prose=True))
     d = render_svg(r.checked.verified)
     assert d.svg == r.output and "3 values quoted from the source" in d.svg
 
@@ -394,7 +394,7 @@ def test_a_year_is_not_verified_as_a_currency_amount():
 
 
 def test_the_rule_proposer_charts_the_amounts_by_year_and_a_negative_amount_with_its_sign():
-    r = chart(YEARS)
+    r = chart(YEARS, proposer=RuleProposer(allow_prose=True))
     v = r.checked.verified
     assert r.ok and not r.issues and v.unit == "USD" and v.scale == "million"
     assert [(p.label, str(p.value), p.as_written) for p in v.series[0].points] == [
@@ -462,3 +462,96 @@ def test_render_svg_draws_a_one_point_line_and_refuses_what_it_cannot_draw():
                                ("bar", ["a", "b"], [None, None])):
         with pytest.raises(ValueError, match="render_svg"):
             render_svg(chart_of(kind, cats, values))
+
+
+@pytest.mark.parametrize("sign", ["-", "−", "–"])
+@pytest.mark.parametrize("amount,unit", [("{sign}$369.7 billion", "USD"),
+                                         ("${sign}369.7 billion", "USD"),
+                                         ("{sign}369.7 billion", "")])
+def test_minus_sign_is_verified_before_currency_or_number(sign, amount, unit):
+    quote = amount.format(sign=sign)
+    source = f"Net transactions were {quote}."
+    honest = run(source, spec([("Net transactions", -369.7, quote)], unit=unit, scale="billion"))
+    wrong = run(source, spec([("Net transactions", 369.7, quote)], unit=unit, scale="billion"))
+    assert honest.checked.kept
+    assert not codes(honest, DROPPED)
+    assert not wrong.checked.kept
+    assert codes(wrong, DROPPED)
+
+
+@pytest.mark.parametrize("word", ["trillion", "trillions"])
+@pytest.mark.parametrize("scale,value,caption", [("", "1440000000000", "USD"),
+    ("billion", "1440", "billions"), ("trillion", "1.44", "trillions")])
+def test_trillion_values_and_axis_units(word, scale, value, caption):
+    quote = f"$1.44 {word}"
+    source = f"Exports increased $58.8 billion to {quote} in the second quarter."
+    honest = run(source, spec([("Exports", value, quote)], unit="USD", scale=scale))
+    assert honest.ok and not honest.issues
+    assert caption in honest.output
+    wrong = run(source, spec([("Exports", "1.44" if scale != "trillion" else "1440", quote)],
+                             unit="USD", scale=scale))
+    assert wrong.output is None and "scale_mismatch" in codes(wrong)
+    currency = run(source, spec([("Exports", value, quote)], unit="EUR", scale=scale))
+    assert currency.output is None and "unit_mismatch" in codes(currency)
+
+
+@pytest.mark.parametrize("unit", ["USD", "долл.", "долл", "долларов"])
+def test_russian_explicit_currency_aliases(unit):
+    source = "Экспорт 310,7 млрд долл., импорт 399,3 млрд долларов."
+    proposed = spec([("Экспорт", 310.7, "310,7 млрд долл."),
+                     ("Импорт", 399.3, "399,3 млрд долларов")], unit=unit, scale="billion")
+    result = chart(source, proposer=FixedProposer(proposed), decimal=",")
+    assert result.output and not result.dropped
+    proposed["unit"] = "EUR"
+    assert chart(source, proposer=FixedProposer(proposed), decimal=",").output is None
+
+
+@pytest.mark.parametrize("separator", [" ", "\u00a0", "\u202f"])
+def test_space_grouped_counts_require_explicit_locale(separator):
+    quote = f"534{separator}947"
+    proposed = spec([("Заявки", 534947, quote)], unit="")
+    source = f"Заявки: {quote}."
+    assert chart(source, proposer=FixedProposer(proposed), decimal=",").output
+    assert chart(source, proposer=FixedProposer(proposed)).output is None
+
+
+@pytest.mark.parametrize('source', [
+    'The July increase in the goods and services deficit reflected an increase in the goods deficit of $17.6 billion to $119.6 billion and an increase in the services surplus of $0.2 billion to $31.0 billion.',
+    'Advance Estimates of U.S. Retail and Food Services. Advance estimates of U.S. retail and food services sales for September 2026, adjusted for seasonal variation and holiday and trading-day differences, but not for price changes, were $745.0 billion, up 0.8 percent (±0.4 percent) from the previous month, and up 6.3 percent (±0.5 percent) from September 2025. Total sales for the July 2026 through September 2026 period were up 5.5 percent (±0.5 percent) from the same period a year ago. The July 2026 to August 2026 percent change was revised from up 1.1 percent (±0.4 percent) to up 1.3 percent (±0.1 percent).',
+    'Заявки на регистрацию бизнеса. Число заявок на регистрацию бизнеса в сентябре 2026 года с учётом сезонности составило 534\u00a0947, что на 0,5% больше, чем в августе 2026 года.',
+])
+def test_default_refuses_release_prose_instead_of_inferring_labels(source):
+    assert chart(source).output is None
+    assert chart(source).issues
+    # Explicit historical proposer only claims numeric quote verification.
+    assert chart(source, proposer=RuleProposer(allow_prose=True)).output is not None
+
+
+def test_default_structured_labels_values_signs_scales_and_spans():
+    source = '  September 2026: -$1.2 million\n\nOctober 2026: $2.4 million\n'
+    result = chart(source)
+    assert result.output is not None
+    verified = result.checked.verified
+    assert verified.unit == 'USD'
+    points = verified.series[0].points
+    assert [p.label for p in points] == ['September 2026', 'October 2026']
+    assert [p.value for p in points] == [-1200000, 2400000]
+    for p in points:
+        assert source[p.start:p.end] == p.as_written
+    proposal = RuleProposer()(source)
+    assert [p['label'] for p in proposal['series'][0]['points']] == ['September 2026', 'October 2026']
+    for p in proposal['series'][0]['points']:
+        q = p['quote']
+        assert source[q['start']:q['start'] + len(q['text'])] == q['text']
+    assert chart('2026-09-30: 3.4%\n2026-10-31: 4.1%').output is not None
+    assert chart('Москва: 1,5 млн руб.\nКазань: 2,5 млн руб.', decimal=',').output is not None
+
+
+@pytest.mark.parametrize('source', [
+    'A: 12%; B: 13%', 'A: 12% ± 1%', 'A: 12% (margin of error)',
+    'A: 12% from July', 'A: September 30, 2026', 'A: 12\nfree prose here',
+    'A: 12\nB: 13%', 'A: 12\nA: 13', 'A: 12 million billion',
+    'A: 12 and 13', ': 12', 'A:', 'A: 12.', 'A: 12 ±error',
+])
+def test_default_refuses_entire_malformed_structured_input(source):
+    assert chart(source).output is None

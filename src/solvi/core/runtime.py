@@ -10,6 +10,7 @@ import json
 import math
 import sys
 import time
+import threading
 from dataclasses import dataclass, field
 from json.encoder import encode_basestring as _jstr
 from typing import Any
@@ -43,6 +44,7 @@ class Flow:
     unresolved: dict                # question → facts nothing can compute
     types: dict = field(default_factory=dict)   # fact → type, for the typed facts of the flow (see solvi.core.types)
     batches: list = field(default_factory=list)  # [[step name]]: decision parts scored together in one forward pass
+    answer_stages: list = field(default_factory=list)  # accepted-answer dependency groups, in execution order
 
     def __str__(self):
         lines = []
@@ -446,6 +448,17 @@ class Trace(Serial):
             if vhash(r.body()) != r.hash:
                 bad.append(Mismatch(r.step, r.name, "record modified after execution", "integrity"))
             prev = r.hash
+            if r.kind == "answer_ref":
+                if system is None:
+                    bad.append(Mismatch(r.step, r.name, "answer reference requires its System", "unavailable"))
+                else:
+                    try:
+                        system._verify_answer_ref(r, self, flow, vals)
+                    except (ValueError, KeyError, TypeError) as error:
+                        bad.append(Mismatch(r.step, r.name, str(error), "recompute"))
+                if r.value is not MISSING:
+                    vals[r.name] = r.value
+                continue
             if r.kind == "head":
                 bad += _replay_head(r, heads, vals, trust_models, models)
                 continue
@@ -899,8 +912,51 @@ def _replay_head(r, heads, vals, trust_models, models):
         if f not in vals or vhash(vals[f]) != h:
             bad.append(Mismatch(r.step, r.name, f"input {f} does not match the recorded one", "integrity"))
     p = r.probs or {}
-    if p and r.value not in _head_answers(p):
-        bad.append((r.step, r.name, f"answer {r.value!r} does not follow from the recorded probabilities"))
+    meta = r.extra if isinstance(r.extra, dict) else {}
+    failure = r.value is MISSING or r.error is not None or 'head_failure' in meta
+    if failure:
+        nonfinite = [f for f in r.inputs if isinstance(vals.get(f), float) and not math.isfinite(vals[f])]
+        why = 'the answer head gave no finite probabilities' + (' (non-finite ' + ', '.join(nonfinite) + ')' if nonfinite else '')
+        valid = (meta.get('head_failure') == 'nonfinite_probabilities' and r.value is MISSING
+                 and r.confidence == 0.0 and r.probs == {} and r.error == why and meta.get('head_why') == why
+                 and meta.get('head_status') == 'abstain' and meta.get('head_guard') == 'missing_facts'
+                 and isinstance(r.model, dict) and bool(r.model.get('fp'))
+                 and meta.get('head_source') == r.model.get('type'))
+        if not valid:
+            bad.append(Mismatch(r.step, r.name, 'invalid nonfinite head failure metadata', 'integrity'))
+    if p:
+        try:
+            finite = all(math.isfinite(value) for value in p.values())
+        except (TypeError, ValueError):
+            finite = False
+        if not finite:
+            return bad + [Mismatch(r.step, r.name, 'recorded head probabilities are not finite', 'integrity')]
+    if not failure:
+        if not p:
+            return bad + [Mismatch(r.step, r.name, 'head record has no probabilities', 'integrity')]
+        if r.value not in _head_answers(p):
+            bad.append((r.step, r.name, f"answer {r.value!r} does not follow from the recorded probabilities"))
+        # Record.confidence is not in its legacy hash body. Verify the same
+        # base confidence arithmetic as _answer for class/ordinal/multi heads.
+        bases = []
+        largest = max(p, key=p.get)
+        if r.value == largest:
+            bases.append(p[largest])
+        acc = 0.0
+        for option in p:
+            acc += p[option]
+            if acc >= 0.5:
+                if r.value == option:
+                    bases.append(p[option])
+                break
+        if r.value == tuple(option for option in p if p[option] >= 0.5):
+            bases.append(min(max(value, 1 - value) for value in p.values()))
+        try:
+            consistent = math.isfinite(r.confidence) and any(abs(r.confidence - base) <= 1e-6 for base in bases)
+        except (TypeError, ValueError):
+            consistent = False
+        if not consistent:
+            bad.append(Mismatch(r.step, r.name, 'head confidence does not follow from recorded probabilities', 'integrity'))
     head = None if heads is None else heads.get(q)
     if head is None:
         models.append((r.step, r.name, "unavailable"))
@@ -916,7 +972,12 @@ def _replay_head(r, heads, vals, trust_models, models):
         return bad
     models.append((r.step, r.name, "recomputed"))
     now = head.predict({f: vals.get(f) for f in r.inputs})
-    if set(now) != set(p) or any(abs(float(now[k]) - float(p[k])) > 1e-6 for k in p):
+    if failure:
+        if all(math.isfinite(value) for value in now.values()):
+            bad.append(Mismatch(r.step, r.name, 'head no longer gives nonfinite probabilities', 'recompute'))
+        return bad
+    if set(now) != set(p) or any(not math.isfinite(float(now[k])) or
+                                abs(float(now[k]) - float(p[k])) > 1e-6 for k in p):
         bad.append((r.step, r.name, "head probabilities differ from the recorded ones"))
     return bad
 
@@ -1335,8 +1396,57 @@ def provenance_of(part, out):
     return "computed"
 
 
+class _ExecutionContext:
+    """Private, single-request execution ledger. Plans still use the original input keys."""
+
+    def __init__(self):
+        self.catalog = None
+        self.init_state = None
+        self.hashes = None
+        self.trace = None
+        self.vals = {}
+        self.outputs = {}
+        self.flow = Flow([], {}, {}, {})
+        self.known = {}
+        self._lease = threading.Lock()
+
+    @property
+    def _busy(self):
+        return self._lease.locked()
+
+    @property
+    def combinedflow(self):
+        return self.flow
+
+    def acquire(self, catalog, init_state, hashes):
+        if not self._lease.acquire(blocking=False):
+            raise RuntimeError("execution context is already in use")
+        try:
+            # This private checksum guards request identity even in hashes=False mode;
+            # it does not create input/record hashes in the returned trace.
+            input_hash = vhash(init_state)
+            definition = catalog_fingerprint(catalog)
+            if self.catalog is not None:
+                if (self.catalog is not catalog or self.hashes != hashes or self._input_hash != input_hash
+                        or self._catalog_fingerprint != definition):
+                    raise ValueError("execution context requires the same catalog definition, raw input and hash mode")
+            else:
+                self.catalog = catalog
+                self.init_state = dict(init_state)
+                self.hashes = hashes
+                self._input_hash = input_hash
+                self._catalog_fingerprint = definition
+                self.vals = dict(init_state)
+        except BaseException:
+            self.release()
+            raise
+
+    def release(self):
+        self._lease.release()
+
+
 def execute(catalog, flow, init_state, workers=1, early_exit=True, order=None, costs=None, policy=None, known=None,
-            hashes=True, memo=None):
+            hashes=True, memo=None, context=None):
     """Run the flow. Hard checks and what they depend on run first; a failed hard check settles the questions whose flow contains
     it, and the steps only those questions needed are skipped (early exit). Steps that do not depend on each other run in
     parallel when workers > 1 (threads: suits I/O-bound parts such as API calls and model inference). Records are always written
@@ -1354,14 +1464,18 @@ def execute(catalog, flow, init_state, workers=1, early_exit=True, order=None, c
     records, but nothing is hashed (no input hashes, no record hashes, an empty init hash): for answers that are never
     stored or replayed (the candidates of solvi.core.slow.search); such a trace does not replay. memo: a HashMemo of
     this very init_state whose init_hash() was taken already (System(cache=) hashes the input for its key): reused."""
-    run = _Run(catalog, flow, init_state, early_exit, order, costs, policy, known, hashes, memo)
-    for idxs in run.phases():
-        run.run_sync(idxs, workers)
-    return run.finish()
+    run = _Run(catalog, flow, init_state, early_exit, order, costs, policy, known, hashes, memo, context)
+    try:
+        for idxs in run.phases():
+            run.run_sync(idxs, workers)
+        return run.finish()
+    finally:
+        if context is not None:
+            context.release()
 
 
 async def aexecute(catalog, flow, init_state, early_exit=True, order=None, costs=None, policy=None, known=None,
-                   timeout=None, speculate=False):
+                   timeout=None, speculate=False, context=None):
     """execute, on an event loop: `async def` parts are awaited, parts marked blocking run in worker threads, plain sync
     parts inline; steps whose inputs are ready run concurrently. timeout: seconds per call of a part without its own
     `timeout=` (None: no limit) — a step that does not finish in time fails with "timed out after ... s".
@@ -1369,21 +1483,35 @@ async def aexecute(catalog, flow, init_state, early_exit=True, order=None, costs
     step starts that execute would not run. speculate=True (default order only): every step starts as soon as its inputs
     are ready; a failed hard check cancels the pending steps that only the questions it settles needed, and steps that
     finished anyway are dropped. Either way the records, values and hashes are those of execute (a timeout aside)."""
-    run = _Run(catalog, flow, init_state, early_exit, order, costs, policy, known)
-    run.timeout = timeout
-    if speculate and early_exit and run.hard and order is None:
-        await run.speculate()
-    else:
-        for idxs in run.phases():
-            await run.run_async(idxs)
-    return run.finish()
+    run = _Run(catalog, flow, init_state, early_exit, order, costs, policy, known, context=context)
+    try:
+        run.timeout = timeout
+        if speculate and context is None and early_exit and run.hard and order is None:
+            await run.speculate()
+        else:
+            for idxs in run.phases():
+                await run.run_async(idxs)
+        return run.finish()
+    finally:
+        if context is not None:
+            context.release()
 
 
 class _Run:
     """One execution of a flow: the plan of phases and the state the sync and async drivers share."""
 
     def __init__(self, catalog, flow, init_state, early_exit=True, order=None, costs=None, policy=None, known=None,
-                 hashes=True, memo=None):
+                 hashes=True, memo=None, context=None):
+        if context is not None:
+            context.acquire(catalog, init_state, hashes)
+        try:
+            self._initialize(catalog, flow, init_state, early_exit, order, costs, policy, known, hashes, memo, context)
+        except BaseException:
+            if context is not None:
+                context.release()
+            raise
+
+    def _initialize(self, catalog, flow, init_state, early_exit, order, costs, policy, known, hashes, memo, context):
         from .costs import CostBook
         self.catalog, self.flow, self.init_state = catalog, flow, init_state
         self.early_exit, self.order, self.policy = early_exit, order, policy
@@ -1405,13 +1533,6 @@ class _Run:
             self.init_hash = self.memo.init_hash()    # first: the steps then find every given value already hashed
         else:                                         # a lean run: _step hashes nothing when its memo is False
             self.memo, self.init_hash = False, ""
-        self.batch_of = {}                            # step name → (names, decision parts) of its shared forward pass
-        for group in getattr(flow, "batches", None) or ():
-            group = [n for n in group if n in index]
-            if len(group) > 1:
-                b = (group, [steps[index[n]].part.func for n in group])
-                for n in group:
-                    self.batch_of[n] = b
         self.hard = [i for i, st in enumerate(steps) if st.part.kind == "check" and st.part.hard]
         self.gov = {}
         for i in self.hard:
@@ -1419,6 +1540,25 @@ class _Run:
             checkpoint_of = {r.split(" ", 1)[1] for r in steps[i].reasons if r.startswith("checkpoint ")}
             self.gov[i] = {q for q in flow.per_question if names[i] in flow.per_question[q]
                            and (not part.then or q in part.then or q in checkpoint_of)}
+
+        self.context = context
+        self.reused = set()
+        if context is not None:
+            self.vals = dict(context.vals)
+            if self.known is not None:
+                self.known.update(context.known)
+            for i, name in enumerate(names):
+                if name in context.outputs:
+                    self.done[i] = context.outputs[name]
+                    self.reused.add(i)
+
+        self.batch_of = {}                            # step name → (names, decision parts) of its shared forward pass
+        for group in getattr(flow, "batches", None) or ():
+            group = [n for n in group if n in index and index[n] not in self.reused]
+            if len(group) > 1:
+                b = (group, [steps[index[n]].part.func for n in group])
+                for n in group:
+                    self.batch_of[n] = b
 
     def step(self, i, vals):
         return _step(self.steps[i].part, vals, self.init_state, self.policy, self.costs, self.known, self.memo,
@@ -1538,7 +1678,7 @@ class _Run:
         def seen(i, out):
             if i in hard and out.value is False:
                 live.difference_update(self.gov[i])
-        todo = {i for i in range(len(self.steps)) if want(i)}
+        todo = {i for i in range(len(self.steps)) if i not in self.done and want(i)}
         deps = {i: {self.index[x] for x in self.steps[i].part.inputs if x in self.index} for i in todo}
         await self._tasks(todo, deps, want, seen)
         self.settle()
@@ -1577,13 +1717,21 @@ class _Run:
         """The records in flow order (hash-chained), the skipped steps and why → (trace, values)."""
         steps, done, catalog, flow = self.steps, self.done, self.catalog, self.flow
         init_hash = self.init_hash
-        prev, recs, skipped, timings = init_hash, [], [], {}
+        context = self.context
+        old = context.trace if context is not None else None
+        prev = old.records[-1].hash if old and old.records else init_hash
+        recs = list(old.records) if old else []
+        skipped, timings = [], dict(old.timings) if old else {}
+        new_steps = []
         for i, st in enumerate(steps, 1):
             if i - 1 not in done:
                 by = sorted({self.settled_by[q] for q in self.settled_by if st.part.name in flow.per_question.get(q, ()) or
                              (st.part.kind == "rule" and st.part.question == q)})
                 skipped.append((st.part.name, "not needed: hard check " + ", ".join(by) + " failed" if by else "not needed"))
                 continue
+            if i - 1 in self.reused:
+                continue
+            new_steps.append(st)
             o = done[i - 1]
             timings[st.part.name] = o.ms
             for a, ms in (o.alt_ms or {}).items():
@@ -1591,7 +1739,7 @@ class _Run:
             part = st.part
             if o.producer is not None:
                 part = catalog.alternative(st.part.name, o.producer)
-            rec = Record(step=i, kind=part.kind, name=st.part.name, inputs=o.hashes, value=o.value, quote=o.quote,
+            rec = Record(step=(recs[-1].step + 1 if recs else 1) if context is not None else i, kind=part.kind, name=st.part.name, inputs=o.hashes, value=o.value, quote=o.quote,
                          confidence=o.confidence, error=o.error, prev=prev, producer=o.producer, tried=o.tried,
                          provenance=provenance_of(part, o), model=model_info(part.model) if part.model is not None else None,
                          probs=o.probs, extra=o.extra, tried_models=o.tried_models)
@@ -1602,9 +1750,23 @@ class _Run:
         if self.memo is not False:
             self.memo.clear()
         final = {k: v for k, v in self.vals.items()}
-        trace = Trace(init_hash, recs, dict(self.init_state), skipped, self.schedule, timings,
+        trace = Trace(init_hash, recs, dict(self.init_state), skipped, (list(old.schedule) if old else []) + self.schedule, timings,
                       early_exit=bool(self.early_exit))
         trace._outs = {self.names[i]: o for i, o in done.items() if o.outcomes is not None}   # for the producer policy
+        if context is not None:
+            context.outputs.update({self.names[i]: o for i, o in done.items()})
+            context.vals = final
+            context.known = dict(self.known or {})
+            context.flow.steps.extend(new_steps)
+            for q, names in flow.per_question.items():
+                context.flow.per_question.setdefault(q, [])
+                context.flow.per_question[q] = list(dict.fromkeys(context.flow.per_question[q] + list(names)))
+            context.flow.types.update(flow.types)
+            context.flow.unresolved.update(flow.unresolved)
+            recorded = set(context.outputs)
+            trace.skipped = [(n, why) for n, why in (list(old.skipped) if old else []) + skipped if n not in recorded]
+            trace._outs = {n: o for n, o in context.outputs.items() if o.outcomes is not None}
+            context.trace = trace
         return trace, final
 
 

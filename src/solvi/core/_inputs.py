@@ -15,21 +15,63 @@ def question_inputs(system, name):
     """The given facts a question's flow reads → {"properties": [fact], "required": [fact]}. Planned with every given fact
     of the catalog present; a fact is required when the question cannot be answered without it (the strategist leaves it
     unresolved), so the inputs of alternative producers are optional. Planned by the system's own strategist
-    (System(strategist=)), as `ask` plans."""
+    (System(strategist=)), as `ask` plans. Applicability declarations are always required initial facts,
+    including facts no rule reads. Opaque callables need applicable_inputs (or explicit q.uses);
+    their arbitrary Python reads cannot safely be inferred. Computed parts are not initial inputs."""
     from .plan.strategist import PlanError, given_facts
     cat, q = system.catalog, system.questions[name]
-    given = given_facts(cat, system.questions.values())
+    contract = getattr(cat, 'contracts', {}).get(name)
+    applicable_inputs = ()
+    if contract is not None and contract.applicable is not None:
+        applicable_inputs = contract.applicable_inputs
+        if applicable_inputs is None:
+            if q.uses is None:
+                raise ValueError(f"question {name!r}: applicable callable has opaque reads; declare applicable_inputs "
+                                 "(use () for no inputs), or explicitly set Question.uses")
+            applicable_inputs = tuple(q.uses)
+        computed = sorted(set(applicable_inputs) & set(cat.parts))
+        if computed:
+            raise ValueError(f"question {name!r}: applicable_inputs are initial given facts, not computed parts: "
+                             f"{', '.join(computed)}")
+    given = given_facts(cat, system.questions.values()) | set(applicable_inputs)
+    if system._answer_refs():
+        for candidate in getattr(cat, 'contracts', {}).values():
+            given.update(candidate.applicable_inputs or ())
     try:
         flow = system._plan([q], given)
     except PlanError:
-        return {"properties": [], "required": []}
-    used = {x for s in flow.steps for x in s.part.inputs if x in given}
+        flow = None
+    used = {x for s in flow.steps for x in s.part.inputs if x in given} if flow is not None else set()
+    if flow is not None and flow.answer_stages:
+        for source in {n for stage in flow.answer_stages for n in stage} - {name}:
+            source_contract = getattr(cat, 'contracts', {}).get(source)
+            if source_contract is None or source_contract.applicable is None:
+                continue
+            declared = source_contract.applicable_inputs
+            if declared is None:
+                declared = system.questions[source].uses
+                if declared is None:
+                    raise ValueError(f'question {source!r}: applicable callable has opaque reads; declare applicable_inputs')
+            computed = sorted(set(declared) & set(cat.parts))
+            if computed:
+                raise ValueError(f'question {source!r}: applicable_inputs are initial given facts, not computed parts: '
+                                 + ', '.join(computed))
+            applicable_inputs = tuple(set(applicable_inputs) | set(declared))
+    used |= set(applicable_inputs)
     used |= set(q.uses or ()) & given
     head = system.heads.get(name)
     if head is not None:
         used |= set(head.features) & given
-    required = []
-    for f in sorted(used):
+    # A guard may read a supplied fact which no catalog part reads. Internal
+    # answer signals belong to the decider, never to the client's input state.
+    guard = system.guards.get(name)
+    signal = guard.signal if guard is not None else None
+    external_signal = (isinstance(signal, str) and signal not in {"confidence", "probability", "act"}
+                       and not signal.startswith("extra:") and signal not in cat.parts)
+    if external_signal:
+        used.add(signal)
+    required = sorted(set(applicable_inputs) | ({signal} if external_signal else set()))
+    for f in sorted(used - set(required)):
         try:
             if system._plan([q], given - {f}).unresolved.get(name):
                 required.append(f)
@@ -42,14 +84,15 @@ def _fact_type(system, fact):
     """The type of a given fact → (type or Any, description): System(input_model=...)'s field, else the one type its typed
     readers declare (Any when they disagree or nobody declares one)."""
     readers = system.catalog.readers.get(fact) or {}
+    description = (getattr(system.catalog, "fact_descriptions", None) or {}).get(fact)
     m = system.input_model
     if m is not None and fact in m.model_fields:
-        return m.model_fields[fact].annotation, m.model_fields[fact].description
+        return m.model_fields[fact].annotation, m.model_fields[fact].description or description
     types = []
     for t in readers.values():
         if t not in types:
             types.append(t)
-    return (types[0] if len(types) == 1 else Any), None
+    return (types[0] if len(types) == 1 else Any), description
 
 
 def _schema_ok(t):

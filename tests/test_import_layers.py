@@ -168,7 +168,7 @@ def test_nothing_below_the_server_and_agent_layer_imports_it():
 
 # --- the tier map (LAYOUT §2 / §6): a module belongs to the tier of its longest listed prefix (after "solvi.")
 LOW_TIERS = {
-    "kernel": "_deprecate _loader _migrate _rpc core",                  # solvi.core.* unless listed below
+    "kernel": "_deprecate _loader _migrate _rpc core stat",                  # solvi.core.* unless listed below
     "parts": "core.deciders core.extract core.plan core._inputs",
     "guarantees": "core.guarantees",
     "records": "core.store core.response core.specialist",
@@ -312,7 +312,7 @@ def test_experimental_modules_warn_on_import_and_say_their_status():
 SURFACES = {
     "solvi": ["build", "document", "Agent", "Guard", "Knowledge", "Budget", "Catalog", "Question", "Answer", "System", "Response",
               "Quote", "Claim", "Decision", "Facts", "Fail", "Unknown", "Span", "Maybe", "Rank", "Estimate", "Scale", "Bins",
-              "SolviDeprecationWarning", "ExperimentalWarning"],          # LAYOUT §1: 25 names ("Facts" in 1.4, the S7 call)
+              "SolviDeprecationWarning", "ExperimentalWarning", "trace"],  # candidate transition: ordinary-function tracing
     "solvi.core": ["ExperimentalWarning", "NOT_STATED", "accept", "accepts", "Answer", "AnswerType", "bin_labels",
                    "Catalog", "check_evidence", "Claim", "cuts_number", "Decision", "evidence_rows", "find_quote",
                    "find_whole", "ground", "has_evidence", "locate", "NOT_STATED_KEY", "NotStated", "Part", "plain_json",
@@ -358,7 +358,7 @@ def test_the_public_surfaces_are_the_pinned_ones():
     assert solvi.build.__module__ == "solvi.solutions.decisions" and solvi.Guard.__module__ == "solvi.solutions.guard"
     assert solvi.Agent.__module__ == "solvi.solutions.agent" and solvi.Knowledge.__module__ == "solvi.solutions.knowledge"
     assert solvi.document.__module__ == "solvi.solutions.document"
-    assert len(solvi.__all__) == 25   # "Facts" joined in 1.4 (the author's S7 call)
+    assert len(solvi.__all__) == 26   # candidate transition adds trace
 
 
 # --- (rule 6) the 1.0 shims resolve: every 0.9 module path and every name solvi no longer exports reach the same object,

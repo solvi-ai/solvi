@@ -831,7 +831,11 @@ def apply_guards(system, results, trace, vals, flow, live=True):
             s = v
             ok = s >= thr
             why = None if ok else f"{guard.describe_signal()} {s:.4g} < {thr:.4g} (threshold of the guarantee: {p.promise})"
-        g = p.record()
+        if p.stateful and not live and old is not None:
+            from copy import deepcopy
+            g = deepcopy(old.extra or {})     # counters/budget describe the historical decision, not today's stream
+        else:
+            g = p.record()
         g.update(signal=guard.describe_signal(), value=s, threshold=thr if math.isfinite(thr) else None, answered=bool(ok),
                  fingerprint=guard.fingerprint())
         if node is not None:

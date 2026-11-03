@@ -1,7 +1,8 @@
 """Verified charts: a text with numbers → a chart in which every number is quoted from the text.
 
     from solvi.experimental.charts import chart, RuleProposer, LLMProposer
-    run = chart(text, "revenue by region")                 # the rule-based proposer by default
+    run = chart("Europe: 42%\nAsia: 23%")                  # structured-only default
+    run = chart(text, proposer=RuleProposer(allow_prose=True))  # explicit prose heuristic
     run = chart(text, proposer=LLMProposer("http://127.0.0.1:8080/v1", "qwen2.5-7b-instruct"))
     open("chart.svg", "w").write(run.output)               # None when nothing verified
     print(run.report())                                     # kept / dropped / changed, and why
@@ -13,7 +14,9 @@ ambiguous "1.000" or "3 100" is not), with the chart's unit (percent is not perc
 "480 employees" is not 480 "stores") and scale — and the chart type against the data (a pie only for shares that add up
 to 100% or to a stated total, a line needs two points, one unit per chart). A value that does not verify is not drawn:
 the report says what was dropped and why, and the chart marks the gap. The renderer draws a deterministic, accessible
-SVG from the verified values only, and the trace replays: the same checks, the same bytes."""
+SVG from the numerically verified values only. Labels, series meanings and uncertainty roles are not semantically
+verified; default structured input binds literal labels to their explicit values, while other proposers retain only
+the numeric quote guarantee. Unsupported default input refuses the whole proposal. The trace replays: the same checks, the same bytes."""
 from __future__ import annotations
 
 from ...core.specialist import Checked, Specialist
@@ -35,7 +38,7 @@ class ChartSpecialist(Specialist):
     spec_type = ChartSpec
 
     def __init__(self, proposer=None, *, decimal=None, storage=None, store_source=False):
-        super().__init__(proposer or RuleProposer(), storage=storage, store_source=store_source)
+        super().__init__(proposer or RuleProposer(decimal=decimal), storage=storage, store_source=store_source)
         self.checker = ChartChecker(decimal=decimal)
 
     def parse(self, proposal):
@@ -58,7 +61,10 @@ class ChartSpecialist(Specialist):
 
 
 def chart(text, question=None, *, proposer=None, decimal=None):
-    """A text (and a question) → Run: `.output` (the SVG, or None), `.report()`, `.issues`, `.trace`."""
+    """Structured label: value lines → Run (.output SVG or None, .report(), .issues).
+    Free prose requires an explicit proposer, e.g. RuleProposer(allow_prose=True).
+    The checker verifies numeric quotes, not semantic labels or uncertainty roles.
+    """
     return ChartSpecialist(proposer, decimal=decimal).run(text, question)
 
 

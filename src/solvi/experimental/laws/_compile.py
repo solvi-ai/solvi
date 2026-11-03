@@ -35,6 +35,8 @@ def missing_code(grammar, condition) -> list[str]:
 def law_to_code(law, grammar, name: str | None = None) -> str:
     """The source of `def <name>(s, a)`: (True, effect) where the law applies to action `a` in state `s`, else
     (False, None). ValueError: an atom without code (named), an action or effect that is not a literal."""
+    if getattr(law, "base_version", None) is not None:
+        raise ValueError("compiled laws do not preserve base-revision dependencies")
     miss = missing_code(grammar, law.condition)
     if miss:
         raise ValueError(f"{law.id}: atoms without code {miss} (give Atom(..., code=...) to compile them)")
@@ -54,7 +56,13 @@ def lawset_to_module(lawset) -> str:
     """One module for the active laws: the atoms' defs (each once), one function per law, LAWS in dispatch order
     (most specific first, ties by the set's `ties` — the law set's own order), applied(s, a) → the law id or None,
     predict(s, a, base=None, apply=None) → the first applying law's effect (through `apply` if given), else
-    base(s, a), else None. ValueError naming every atom without code."""
+    base(s, a), else None. matching/maximal return law ids; predictions returns
+    (id, value) pairs, and violations lists maximal constraints disagreeing with an
+    observation. These readers preserve the serving order, including shadowed
+    siblings. Pass apply/agrees callbacks for custom effect/equality semantics.
+    ValueError naming every atom without code."""
+    if getattr(lawset, "lapse_on_base_change", False):
+        raise ValueError("compiled law sets do not preserve base-revision dependencies")
     miss = sorted({x for law in lawset.laws for x in missing_code(lawset.grammar, law.condition)})
     if miss:
         raise ValueError(f"atoms without code {miss}: give Atom(..., code=...) to compile them")
@@ -69,11 +77,48 @@ def lawset_to_module(lawset) -> str:
     parts = [f'"""A compiled law set: {len(lawset.laws)} laws, most specific first, the base predictor as the '
              f'fallback."""', _NO_MODULE_IMPORTS, *[d.rstrip("\n") for d in defs], *[f.rstrip("\n") for f in fns],
              f"LAWS = ({table}{',' if len(lawset.laws) == 1 else ''})",
+             "CONDITIONS = " + repr({law.id: tuple(law.condition) for law in lawset.laws}),
              _DISPATCH]
     return "\n\n\n".join(parts) + "\n"
 
 
-_DISPATCH = '''def applied(s, a):
+_DISPATCH = '''def matching(s, a):
+    """Ids of every matching active law, in serving order (including defaults)."""
+    return [lid for lid, fn in LAWS if fn(s, a)[0]]
+
+
+def _maximal_ids(ids):
+    conditions = [set(CONDITIONS[lid]) for lid in ids]
+    return [lid for lid, condition in zip(ids, conditions)
+            if not any(other > condition for other in conditions)]
+
+
+def maximal(s, a):
+    """Ids of all maximal matches: exceptions override ancestors, siblings remain."""
+    return _maximal_ids(matching(s, a))
+
+
+def predictions(s, a, apply=None, *, maximal=False):
+    """All (law id, prediction) pairs; no base fallback or serving tie-break."""
+    found = []
+    for lid, fn in LAWS:
+        hit, effect = fn(s, a)
+        if hit:
+            found.append((lid, apply(effect, s) if apply is not None else effect))
+    if maximal:
+        ids = set(_maximal_ids([lid for lid, _ in found]))
+        found = [(lid, value) for lid, value in found if lid in ids]
+    return found
+
+
+def violations(s, a, observed, apply=None, agrees=None):
+    """Maximal matching law ids disagreeing with observed. Pass the law set's
+    agrees callback for a custom equality/tolerance, and apply for custom effects."""
+    return [lid for lid, value in predictions(s, a, apply=apply, maximal=True)
+            if not (agrees(value, observed) if agrees is not None else value == observed)]
+
+
+def applied(s, a):
     """The id of the first law that applies to action `a` in state `s`, or None."""
     for lid, fn in LAWS:
         if fn(s, a)[0]:

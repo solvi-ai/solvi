@@ -58,6 +58,9 @@ nav:
       - Guide: guide-part:Building blocks
       - Decider checkpoint and input format: decide_format.md
       - Stored decisions, format and replay rules: trace_spec.md
+      - Fact-name aliases: api/fact-aliases.md
+      - Structured rule answers: api/structured-answers.md
+      - Hypothetical rule evaluation: api/system-probe.md
       - Code strategist: strategist.md
   - Experimental:
       - experimental.md
@@ -68,6 +71,7 @@ nav:
   - Examples:
       - Examples: examples.md
       - Gallery: gallery.md
+  - Development migration notes: migration-1.5-candidate.md
   - Reference guide (all chapters): guide/index.md
   - API reference:
       - api/index.md
@@ -107,6 +111,7 @@ nav:
           - solvi.core.plan.strategist: api/strategist.md
           - solvi.core.plan.cost: api/strategy.md
           - solvi.core.costs: api/costs.md
+          - solvi.stat: api/stat.md
           - solvi.core.calibration: api/calibration.md
           - solvi.core.calibfile: api/calibfile.md
           - solvi.core.guarantees.guarantee: api/guarantee.md
@@ -115,6 +120,8 @@ nav:
           - solvi.core.guarantees.drift: api/drift.md
           - solvi.core.guarantees.monitor: api/monitor.md
           - solvi.core.store: api/storage.md
+          - solvi.core.store.calls: api/calls.md
+          - Unrecorded decisions: api/unrecorded-decisions.md
           - solvi.core.store.audit: api/audit.md
           - solvi.core.store.report: api/report.md
           - solvi.core.store.sysreport: api/sysreport.md

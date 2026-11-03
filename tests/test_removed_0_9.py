@@ -211,8 +211,11 @@ def test_files_and_command_lines(tmp_path, monkeypatch, capsys):
     p.write_text(json.dumps({"cases": [{"name": "a", "state": {}, "gold": {"q": "yes"}}]}))
     with pytest.raises(ValueError, match=r'has "gold", the key before 0.8 \(removed in 0.9\): name its right answers "expected"'):
         honesty.load_set(p)
-    assert hooks.main(["pre-edit", "--model", "m"]) == 1               # 1, not 2: an old installed hook blocks nothing
-    assert "--model was renamed in 0.8 and removed in 0.9: use --decider" in capsys.readouterr().err
+    assert hooks.main(["pre-edit", "--model", "m"]) == 0  # A structured ask preserves the gate on obsolete config.
+    captured = capsys.readouterr()
+    decision = json.loads(captured.out)["hookSpecificOutput"]
+    assert decision["permissionDecision"] == "ask" and not captured.err
+    assert "--model was renamed in 0.8 and removed in 0.9: use --decider" in decision["permissionDecisionReason"]
     monkeypatch.delenv("SOLVI_HOOK_DECIDER", raising=False)
     monkeypatch.setenv("SOLVI_HOOK_MODEL", "m")
     from solvi._loader import LoadError

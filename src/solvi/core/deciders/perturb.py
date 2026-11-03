@@ -385,14 +385,31 @@ def paragraphs(text):
     return out
 
 
+# Narrow document data forms. These are lexical classifications, not trusted instructions:
+# provenance restrictions still determine whether a tool may use a value.
+_DOCUMENT_ACTION = re.compile(
+    r"\s*\(?visit (the )?website for (more )?(details|information)\s+"
+    r"(?:https?://|www\.)[^\s()]+\)?[.!]?\s*|"
+    r"\s*(please|kindly) pay \d[\d,.]*(?: [a-z]{3})? to iban [a-z]{2}\d[a-z0-9]{6,32}"
+    r" by (monday|tuesday|wednesday|thursday|friday|saturday|sunday|\d{4}-\d{2}-\d{2})[.!]?\s*", _I)
+_ASSISTANT_ADDRESS = re.compile(
+    r"\bto you,?\s+(claude|chatgpt|assistant|ai|agent|model|bot|llm)\b|"
+    r"\bbefore you can (solve|complete|finish|perform) (the |your |this )?task\b"
+    r"[^.!?]{0,120}\b(do|perform|complete) the following first\b", _I)
+
+
 def injection_spans(text, actions=True):
     """The guard's detector of instruction-like text in a tool output → [(start, end)], merged: the instruction-like
     sentences and the quoted instructions (actions=True), read per line, again with the line breaks read as spaces (an
     instruction split across lines), again with escaped line breaks ("\\n" in a JSON or repr output) read as line
-    breaks, and each paragraph as a whole. A heuristic: it catches the common wordings, not
+    breaks, and each paragraph as a whole. Conventional due-date IBAN payment lines
+    and parenthetical website-for-details references are treated as document data;
+    explicit assistant addresses and task prerequisites remain instruction-like. A heuristic: it catches the common wordings, not
     every injection (a paraphrase, base64, letters spaced apart are not covered) — the guard's hard guarantee is where a
-    value comes from (`ground_from=("user",)`), not this. On a small review set (benchmarks/injection_review.py): 11 of 12 ordinary
-    tool outputs flagged, 14 of 20 reworded injections missed. actions=False: without the action rules ("pay / transfer …
+    value comes from (`ground_from=("user",)`), not this. This lexical classification is not a calibrated probability or proof that a document is safe.
+    Historical review set BEFORE this patch (benchmarks/injection_review.py): 11 of 12
+    ordinary tool outputs flagged and 14 of 20 reworded injections missed. That set
+    was not rerun here; those counts do not measure this patch or general quality. actions=False: without the action rules ("pay / transfer …
     now") — the overrides and role tags only, for text where requests are expected (the user's own messages)."""
     if not isinstance(text, str) or not text.strip():
         return []
@@ -405,6 +422,12 @@ def injection_spans(text, actions=True):
             spans += instruction_spans(unesc, actions=actions) + quoted_instructions(unesc, actions=actions)
     spans += [(a, b) for a, b in paragraphs(text)                  # a paragraph whose sentences alone say nothing
               if not any(a <= x < b for x, _ in spans) and instruction_rule(flat[a:b], actions=actions)]
+    # Explicit assistant address remains suspicious even when the surrounding
+    # document contains an ordinary invoice/reference request.
+    if actions:
+        spans += [(a, b) for a, b in paragraphs(text) if _ASSISTANT_ADDRESS.search(normalize(flat[a:b])[0])]
+        spans = [(a, b) for a, b in spans if not _DOCUMENT_ACTION.fullmatch(normalize(text[a:b])[0])
+                 or instruction_rule(text[a:b], actions=False) is not None]
     return _merge(spans)
 
 

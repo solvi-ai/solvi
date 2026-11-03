@@ -25,7 +25,7 @@ class AnswerSpec(BaseModel):
     """An answer type: yes/no, one of options, ordered levels, any subset, a span of a text, a ranking or an estimate;
     `unknown`: "not stated" is a valid answer."""
     model_config = ConfigDict(defer_build=True)       # validators built on first use: importing stays light
-    kind: Literal["yes_no", "choice", "ordinal", "multi", "span", "rank", "estimate"]
+    kind: Literal["yes_no", "choice", "ordinal", "multi", "span", "rank", "estimate", "structured"]
     options: list[Any]
     descriptions: dict[Any, str] = {}                # option → what it means (keyed by the option's text in JSON)
     unknown: bool = False
@@ -34,7 +34,7 @@ class AnswerSpec(BaseModel):
     coverage: Optional[float] = None
     unit: Optional[str] = None
     source: Optional[str] = None
-    type: Optional[str] = None                      # a span's value type, by name
+    type: Optional[str | dict] = None                      # a span's value type, by name
 
 
 class QuestionSpec(BaseModel):
@@ -136,6 +136,7 @@ class FlowModel(BaseModel):
     unresolved: dict[str, list[str]] = {}
     types: dict[str, str] = {}          # fact → type name
     batches: list[list[str]] = []       # decision parts scored together in one forward pass
+    answer_stages: list[list[str]] = []
 
 
 class SafeguardEvent(BaseModel):
@@ -423,7 +424,11 @@ def _answer(at):
         if v not in (None, False):                    # only what is set: answer types of 0.4 dump as before
             d[k] = list(v) if k == "bins" else v
     if at.type is not None:
-        d["type"] = _span_type_name(at.type)
+        if at.kind == "structured":
+            from .types import _structured_type_data as type_data
+            d["type"] = type_data(at.type)
+        else:
+            d["type"] = _span_type_name(at.type)
     return d
 
 
@@ -519,7 +524,8 @@ def _flow(f):
             "per_question": {q: list(v) for q, v in f.per_question.items()}, "skipped": dict(f.skipped),
             "unresolved": {q: list(v) for q, v in f.unresolved.items()},
             "types": {k: type_name(t) if not isinstance(t, str) else t for k, t in (getattr(f, "types", None) or {}).items()},
-            "batches": [list(b) for b in getattr(f, "batches", None) or ()]}
+            "batches": [list(b) for b in getattr(f, "batches", None) or ()],
+            **({"answer_stages": [list(s) for s in f.answer_stages]} if f.answer_stages else {})}
 
 
 def _names_hash(names):
@@ -647,10 +653,12 @@ def _load_answer(d):
     from .catalog import AnswerType
     if d is None:
         return None
+    from .types import _load_structured_type as load_type
+    value_type = load_type(d.type) if d.kind == "structured" and d.type else _span_type(d.type) if d.type else None
     by_text = {str(o): o for o in d.options}          # descriptions back on the options themselves (1, not "1")
     return AnswerType(d.kind, list(d.options), {by_text.get(str(k), k): v for k, v in d.descriptions.items()}, d.unknown,
                       d.k, None if d.bins is None else [int(b) if float(b).is_integer() else b for b in d.bins], d.coverage,
-                      d.unit, d.source, _span_type(d.type) if d.type else None)
+                      d.unit, d.source, value_type)
 
 
 def _probs(p):
@@ -661,7 +669,8 @@ def _probs(p):
 def _load_result(m):
     from .catalog import Quote, Unknown
     from .runtime import Result
-    a = Unknown if m.not_stated else tuple(m.answer) if isinstance(m.answer, list) else m.answer   # multi-label, rank: tuples
+    a = (Unknown if m.not_stated else tuple(m.answer)
+         if isinstance(m.answer, list) and m.kind != 'structured' else m.answer)   # multi-label, rank: tuples
     rep = None if m.repaired is None else (tuple(m.repaired[0]) if isinstance(m.repaired[0], list) else m.repaired[0],
                                            list(m.repaired[1]))
     ev = [Quote(e.text, e.start, e.end, e.source, e.confidence) for e in m.evidence]
@@ -738,7 +747,8 @@ def _load_flow(m, catalog):
             p = catalog.rules.get(s.name[7:]) if s.name.startswith("answer:") else catalog.parts.get(s.name)
         steps.append(Step(p if p is not None else _stub(s.name, s.kind, s.inputs, s.hard), list(s.reasons)))
     return Flow(steps, {q: list(v) for q, v in m.per_question.items()}, _unpack_skipped(m, steps, catalog),
-                {q: list(v) for q, v in m.unresolved.items()}, dict(m.types), [list(b) for b in m.batches])
+                {q: list(v) for q, v in m.unresolved.items()}, dict(m.types), [list(b) for b in m.batches],
+                [list(s) for s in m.answer_stages])
 
 
 def load(cls, data, catalog=None):
@@ -785,6 +795,8 @@ def response_model(system, questions=None):
         lit = Literal[tuple(at.options)] if at.options else Any
         ans = list[lit] if at.kind in ("multi", "rank") else float if at.kind == "estimate" else Any if at.kind == "span" \
             else lit
+        if at.kind == "structured":
+            ans = at.type or dict
         R = create_model(f"Result_{q.name}", __base__=ResultModel, __doc__=q.text or None,
                          answer=(Optional[ans], None))
         fields[q.name] = (R, ...)

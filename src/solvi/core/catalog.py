@@ -481,7 +481,7 @@ def _number_around(t, i, j):
     return t[i:j]
 
 
-PRIMITIVES = ("span", "rank", "estimate")         # answer kinds resolved by solvi.core.primitives (with their value's details)
+PRIMITIVES = ("span", "rank", "estimate", "structured")         # answer kinds resolved by solvi.core.primitives (with their value's details)
 
 
 @dataclass
@@ -642,6 +642,29 @@ class Answer:
         return AnswerType("multi", *_opts(options))
 
     @staticmethod
+    def value() -> AnswerType:
+        """Any finite JSON value, including scalars and null; null is an answer, not an abstention.
+
+        Uses the structured answer codec with an unrestricted JSON schema.
+        Rule return annotations are still validated independently.
+        """
+        return Answer.structured(Any)
+
+    @staticmethod
+    def structured(type=dict) -> AnswerType:
+        """A rule's typed JSON object / array, with the usual trace and confidence.
+
+        Field explanations may be supplied in Claim.extra['fields'], keyed by
+        JSON Pointer, each with why, confidence and optional evidence.
+        """
+        from .types import adapter
+        from .types import _structured_type_data as type_data, _validate_structured_type as validate_type
+        validate_type(type)
+        type_data(type)
+        adapter(type)  # reject an unusable schema at declaration, not at first ask
+        return AnswerType("structured", [], type=type)
+
+    @staticmethod
     def from_type(t, ordinal=False) -> AnswerType:
         """From a Python type: bool → yes_no; Literal[...] / an Enum → choice (`ordinal=True`: ordinal, in declaration
         order); list[Literal[...]] (or set, tuple, of an Enum) → multi. `X | None` is X (None = abstain)."""
@@ -700,6 +723,8 @@ class Part:
     #                                                                            function (its typed inputs; see check)
     tin: dict | None = field(default=None, repr=False, compare=False)   # compiled validators of the typed arguments
     tout: Any = field(default=None, repr=False, compare=False)          # ... and of the return type
+
+    text: str | None = None             # rule only: author-declared condition, rendered in why
 
     def strict(self):
         """Must a Quote from this part be literally at its offsets? Yes for model-backed parts (unless exact=False)."""
@@ -940,7 +965,11 @@ def answer_data(at):
             d[k] = list(v) if k == "bins" else v
     if at.type is not None:                           # a typed span: its name as the dump writes it (solvi.core.schema)
         from .schema import _span_type_name
-        d["type"] = _span_type_name(at.type)
+        if at.kind == "structured":
+            from .types import _structured_type_data as type_data
+            d["type"] = type_data(at.type)
+        else:
+            d["type"] = _span_type_name(at.type)
     return d
 
 
@@ -1002,6 +1031,14 @@ class Catalog:
 
     def _add(self, kind, f, **kw):
         sig = inspect.signature(f)
+        name = getattr(f, "__name__", type(f).__name__)
+        if kind in ("fn", "rule"):
+            # Match the Decider leaf contract without loading the high-level deciders package in execution core.
+            if callable(f) and hasattr(f, "options") and callable(getattr(f, "fingerprint", None)):
+                if kw.get("model") is None:
+                    kw["model"] = getattr(f, "__solvi_model__", None) or f
+                if kw.get("options") is None and f.options is not None:
+                    kw["options"] = list(f.options)
         # a function made by a model (e.g. extractor.field(...)) says so itself: its model and provenance come with it
         if kw.get("model") is None and getattr(f, "__solvi_model__", None) is not None:
             kw["model"] = f.__solvi_model__
@@ -1023,11 +1060,11 @@ class Catalog:
                 and x.kind in (x.POSITIONAL_OR_KEYWORD, x.KEYWORD_ONLY)]
         if dflt and kind != "constraint":              # every argument is a fact: a default value is never used
             has = "has a default value" if len(dflt) == 1 else "have default values"
-            warnings.warn(f"{kind} {f.__name__}: {', '.join(dflt)} {has}, but every argument of a part is a fact it reads — the default is never "
+            warnings.warn(f"{kind} {name}: {', '.join(dflt)} {has}, but every argument of a part is a fact it reads — the default is never "
                           f"used, and while no fact {dflt[0]!r} is given or computed the {kind} cannot run (a hard "
                           "check that cannot run makes its questions abstain). Bind the value without a default "
                           "(a closure: def make(lim): def chk(n): return n <= lim), or give the fact", stacklevel=3)
-        p = Part(kind=kind, name=f.__name__, inputs=list(sig.parameters), func=f, doc=(f.__doc__ or "").strip(),
+        p = Part(kind=kind, name=name, inputs=list(sig.parameters), func=f, doc=(f.__doc__ or "").strip(),
                  quotes=getattr(self, "quotes", "normalized"), **kw)
         if p.source is not None:                       # a Quote without its own source points into this text
             p.func = _sourced(f, p.source)
@@ -1126,6 +1163,89 @@ class Catalog:
                           model=model, provenance=provenance, exact=exact, source=source, timeout=timeout,
                           blocking=blocking, cites=cites_of(cite, clause))
 
+    def alias(self, name, source, *, type=None, description=None):
+        """Read internal fact `name` from external/source fact `source`.
+
+        Registers one ordinary typed computation, so existing consumers and rules
+        need no wrappers. It never replaces a declared part and refuses cycles.
+        type defaults to the one common type existing consumers declare; provide
+        it when declaring an alias before its consumers. description documents
+        the source fact in input schemas and entry points. If an input_model is
+        used, its fields must use the external names. Answers are not renamed.
+        """
+        import keyword
+        catalog, value_type = self, type
+        for label, value in (('alias', name), ('source', source)):
+            if not isinstance(value, str) or not value.isidentifier() or keyword.iskeyword(value):
+                raise ValueError(f'{label} must be a Python fact identifier')
+        if name == source:
+            raise ValueError('an alias cannot refer to itself')
+        if name in catalog.parts or name in catalog.rules or name in catalog.constraints:
+            raise ValueError(f'alias {name!r} would replace an existing catalog declaration')
+        if description is not None and (not isinstance(description, str) or not description.strip()):
+            raise ValueError('a fact description must be a nonempty string')
+        descriptions = getattr(catalog, 'fact_descriptions', {})
+        if description is not None and source in descriptions and descriptions[source] != description:
+            raise ValueError(f'fact {source!r} already has another description')
+        pending, seen = [source], set()
+        while pending:
+            fact = pending.pop()
+            if fact == name:
+                raise ValueError('fact alias would introduce a dependency cycle')
+            if fact in seen:
+                continue
+            seen.add(fact)
+            p = catalog.parts.get(fact)
+            if p is not None:
+                pending.extend(p.inputs)
+                for alt in p.alternatives or ():
+                    pending.extend(alt.inputs)
+        if value_type is None:
+            declared = list((catalog.readers.get(name) or {}).values())
+            if not declared or not all(t == declared[0] for t in declared):
+                raise ValueError('alias has no single consumer type; declare type= explicitly (Any for untyped facts)')
+            value_type = declared[0]
+        from .types import adapter
+        adapter(value_type)
+
+        def transfer(**values):
+            return values[source]
+
+        transfer.__name__ = name
+        transfer.__qualname__ = 'fact_alias.' + name
+        transfer.__doc__ = f'Fact {name} from {source}.' + (f' {description}' if description else '')
+        transfer.__signature__ = inspect.Signature([inspect.Parameter(source, inspect.Parameter.POSITIONAL_OR_KEYWORD)])
+        if value_type is not None:
+            transfer.__annotations__ = {source: value_type, 'return': value_type}
+        result = catalog.fn(transfer)
+        if description is not None:
+            if not hasattr(catalog, 'fact_descriptions'):
+                catalog.fact_descriptions = {}
+            catalog.fact_descriptions[source] = description
+        return result
+
+    def answer_fact(self, question, *, name=None):
+        """Declare a fact containing a System question's accepted answer, not its raw rule output.
+
+        The source question must belong to the System. Refused answers become missing facts;
+        consumers retain their own checks and inherit the source confidence bound.
+        """
+        if not isinstance(question, str) or not question:
+            raise ValueError('answer_fact requires a nonempty question name')
+        name = question if name is None else name
+        if not isinstance(name, str) or not name.isidentifier():
+            raise ValueError('answer_fact requires an identifier fact name')
+        if name in self.parts or name in self.constraints:
+            raise ValueError(f'answer fact {name!r} would replace an existing declaration')
+
+        def accepted_answer():
+            raise RuntimeError(f'answer fact {name!r} requires System staged execution of {question!r}')
+
+        accepted_answer.__name__ = name
+        accepted_answer.__qualname__ = 'answer_fact.' + name
+        accepted_answer.__solvi_answer_ref__ = question
+        return self.fn(accepted_answer)
+
     def fn(self, f=None, *, provides=None, cost=None, validate=None, model=None, provenance=None, options=None,
            min_confidence=None, timeout=None, blocking=None, cite=None, clause=None):
         """A computation. `provides`, `validate`, `cost`, `timeout`, `blocking`: as for extract. A model-backed fn (`model=`)
@@ -1179,13 +1299,17 @@ class Catalog:
             return f
         return deco
 
-    def rule(self, question, *, model=None, provenance=None, timeout=None, blocking=None, cite=None, clause=None):
+    def rule(self, question, *, model=None, provenance=None, timeout=None, blocking=None, cite=None, clause=None, text=None):
         """The answer rule of a question. With `model=` the rule is a model's decision: it may return a Decision with
         probabilities; an answer outside the question's options abstains, as for any rule. `timeout`, `blocking`, `cite`,
-        `clause`: as for extract."""
+        `clause`: as for extract. `text`: a nonempty condition expression shown in the answer's why,
+        alongside its input values. Author-declared text is not evaluated or inferred from source;
+        use because(...) for the reason of the branch actually taken."""
+        if text is not None and (not isinstance(text, str) or not text.strip()):
+            raise ValueError("rule text must be a nonempty string")
         cites = cites_of(cite, clause)
         return lambda f: self._add("rule", f, question=question, model=model, provenance=provenance, timeout=timeout,
-                                   blocking=blocking, cites=cites)
+                                   blocking=blocking, cites=cites, text=text)
 
     def replace_rule(self, part):
         """Install a ready rule Part (System.learn_rule: a learned rule list) as its question's rule, in place of the one
@@ -1198,7 +1322,7 @@ class Catalog:
         self.rules[part.question] = part
         return part
 
-    def contract(self, question, *, returns=None, echo=None, applicable=None):
+    def contract(self, question, *, returns=None, echo=None, applicable=None, applicable_inputs=None):
         """Declare the contract of a question's answer (solvi.core.contract): returns — the type the answer must have
         (a Python type, a tuple of types or an answer type; None: the question's own, which a System already holds its
         answers to); echo — the answer must not equal a given fact it was read from (True: every given fact its rule
@@ -1206,9 +1330,14 @@ class Catalog:
         kind — checked for free text such as a span, not for a declared choice, yes / no or number); applicable — a function of the given
         facts → bool checked before the question is computed. A broken contract is a hard refusal: the question
         abstains (guard "contract", or "not_applicable" without computing it), whatever the confidence. A System
-        raises when the catalog has a contract for a question it does not ask. → the Contract."""
+        raises when the catalog has a contract for a question it does not ask.
+        applicable_inputs explicitly lists the initial given facts the callable
+        reads (tuple/list of distinct identifier names; () means none). These are
+        required schema inputs, not computed predicates. Arbitrary callable reads
+        cannot be inferred safely; schema export refuses undeclared reads unless
+        Question.uses is explicitly set as a compatibility fallback. → the Contract."""
         from .contract import Contract
-        c = Contract(returns, echo, applicable)
+        c = Contract(returns, echo, applicable, applicable_inputs)
         self.contracts[str(question)] = c
         return c
 

@@ -802,6 +802,9 @@ def _answer_type(system, question):
         sysm = getattr(system, "system", None) or system
         qs = getattr(sysm, "questions", None)
         at = getattr(qs.get(question), "answer", None) if isinstance(qs, dict) else None
+        if at is not None and at.kind == "structured":
+            from ..core.catalog import answer_data
+            return _plain(answer_data(at))
         return None if at is None else _plain({"kind": at.kind, "options": list(at.options or [])})
     except Exception:  # noqa: BLE001 — a hint for the person only
         return None

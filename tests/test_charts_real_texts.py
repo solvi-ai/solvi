@@ -25,7 +25,7 @@ _spec.loader.exec_module(X)
 
 
 def rule(text):
-    return ChartSpecialist(RuleProposer()).run(text)
+    return ChartSpecialist(RuleProposer(allow_prose=True)).run(text)
 
 
 def fixed(text, spec):

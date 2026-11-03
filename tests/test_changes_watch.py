@@ -196,3 +196,82 @@ def test_false_reverts_at_the_promise_are_at_most_alpha():
                 hits += ev["event"] == "reverted"
                 break
     assert pipe.current == r1.version and hits / 200 <= 0.05 + 0.035
+
+
+def test_knowledge_watch_tracks_actual_target_state_and_predecessor_revival():
+    from solvi.experimental.changes import Approval, StageVerdict
+    class Ok:
+        name = "tests"
+        def run(self, ch, ctx):
+            return StageVerdict.admit()
+    ks = KnowledgeStore()
+    pipe = Pipeline([KnownFailures(), Static(), Ok()], None, store=ks,
+                    approval=Approval({("rule", "outcome"): "gate"}))
+    def version(value):
+        return pipe.propose(Change("outcome", payload={"kind": "rule", "body": {
+            "s": "same", "r": "value", "o": value}}, proposer="ann", reason="r",
+            evidence=["y1"], change_type="rule"))
+    a = version(1)
+    watch = pipe.watch(a.version, promise={"s": .1})
+    b = version(2)
+    assert a.promoted and b.promoted
+    assert ks.status(a.ref) == "refuted" and ks.status(b.ref) == "active"
+    assert [v["version"] for v in pipe.versions() if v["in_force"]] == [b.version]
+    with pytest.raises(KeyError, match="not.*force|superseded"):
+        pipe.watch(a.version, promise={"s": .1})
+    ev = watch.observe(False, "s")
+    assert ev["event"] == "superseded" and watch.alone == 0
+    assert ks.status(b.ref) == "active" and pipe.history("rollback") == []
+    assert pipe.revert(b.version) == [b.version]
+    assert ks.status(a.ref) == "active" and ks.status(b.ref) == "retracted"
+    assert [v["version"] for v in pipe.versions() if v["in_force"]] == [a.version]
+    assert pipe.watch(a.version, promise={"s": .1}).active
+
+
+def test_snapshot_watch_refuses_old_and_ends_before_reading_new_outcomes():
+    t = Snap()
+    pipe = Pipeline([], None, targets=[t], approval={("update", "person"): "gate"})
+    a = pipe.propose(Change("person", artifact="update", payload={"fingerprint": "a"}))
+    watch = pipe.watch(a.version, promise={"s": .1})
+    b = pipe.propose(Change("person", artifact="update", payload={"fingerprint": "b"}))
+    with pytest.raises(KeyError, match="superseded"):
+        pipe.watch(a.version, promise={"s": .1})
+    ev = watch.observe(False, "s")
+    assert ev["event"] == "superseded" and not watch.active
+    assert pipe.history("observed")[-1]["observed"]["event"] == "superseded"
+    assert watch.alone == 0 and watch.status()["s"]["outcomes"] == 0
+    assert t.state == "b" and pipe.history("rollback") == []
+    assert watch.observe(False, "s") is None
+    assert pipe.revert(b.version) == [b.version] and t.state == "a"
+    assert pipe.watch(a.version, promise={"s": .1}).active
+
+
+def test_snapshot_watch_automatically_reverts_latest_and_restores_predecessor():
+    t = Snap()
+    pipe = Pipeline([], None, targets=[t], approval={("update", "person"): "gate"})
+    a = pipe.propose(Change("person", artifact="update", payload={"fingerprint": "a"}))
+    b = pipe.propose(Change("person", artifact="update", payload={"fingerprint": "b"}))
+    assert a.promoted and b.promoted and t.state == "b"
+    watch = pipe.watch(b.version, promise={"s": .1}, alpha=.05)
+    assert pipe.history("rollback") == []
+    ev = None
+    for _ in range(100):
+        ev = watch.observe(False, "s")
+        if ev is not None:
+            break
+        assert t.state == "b" and pipe.history("rollback") == []
+    assert ev is not None and ev["event"] == "reverted"
+    assert ev["version"] == b.version and ev["slice"] == "s" and ev["undone"] == [b.version]
+    assert watch.state["s"]["evidence"] >= watch.threshold - 1e-12
+    assert not watch.active and t.state == "a" and pipe.current == a.version
+    assert [v["version"] for v in pipe.versions() if v["in_force"]] == [a.version]
+    rollback, = pipe.history("rollback")
+    assert {k: rollback[k] for k in ("to", "revert", "undone", "by", "why", "failed", "changes")} == {
+        "to": None, "revert": b.version, "undone": [b.version], "by": "ship_watch",
+        "why": ev["why"], "failed": True, "changes": [b.change_id],
+    }
+    observed = pipe.history("observed")[-1]
+    assert observed["change"] == b.change_id and observed["by"] == "ship_watch"
+    assert observed["observed"] == ev and pipe.journal.verify()["ok"]
+    assert watch.observe(False, "s") is None and pipe.history("rollback") == [rollback]
+    assert pipe.watch(a.version, promise={"s": .1}).active

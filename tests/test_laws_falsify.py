@@ -51,14 +51,17 @@ def run(world, pool, **kw):
     return ls, adm
 
 
-def test_default_is_unchanged_and_admits_the_wrong_law():
+def test_default_refutes_the_wrong_law_and_explicit_legacy_mode_still_admits():
+    # The breaking default spends leftover probes; explicit legacy options keep early admission.
     ls0, a0 = run(wrong_world, STATES)
-    ls1, a1 = run(wrong_world, STATES, falsify=None)
-    assert a0.status == a1.status == "accepted"
-    assert a0.law.condition == a1.law.condition == ("x0",)
-    assert a0.why == a1.why and a0.asked == a1.asked == []
-    assert ls0.cost == ls1.cost and len(ls0.laws) == len(ls1.laws) == 1
-    assert any(wrong_world(s, "do") != "E" for s in STATES if s[0])        # the admitted law is wrong somewhere
+    g, b, cands, probes = setup(wrong_world, STATES)
+    ls1 = LawSet(g, base=lambda s, a: "N", support_on="applied")
+    a1 = ls1.admit_by_probes(cands, wrong_world, probes=probes, budget=8, buffer=b, falsify=None)
+    assert a0.status == "undetermined" and a0.law is None
+    assert "falsified by probe" in a0.why and a0.asked and ls0.laws == []
+    assert a1.status == "accepted" and a1.law.condition == ("x0",)
+    assert a1.asked == [] and len(ls1.laws) == 1
+    assert any(wrong_world(s, "do") != "E" for s in STATES if s[0])
 
 
 def test_leftover_refutes_the_wrong_law_the_default_admits():

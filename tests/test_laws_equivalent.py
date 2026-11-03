@@ -92,6 +92,7 @@ def test_a_guard_is_required():
 
 
 def test_one_class_accepted_with_aliases_and_no_probe_between_the_congruent_pair():
+    # Probe count here measures class identification only; disable leftover falsification explicitly.
     rng = random.Random(1)
     cands = [Candidate("U", ("fa", "p"), "act"), Candidate("U", ("fa", "p"), "fwd")]
     buf = logged(rng, n=1, action="U", p=True, facing="U")         # a logged move refutes the set without a law
@@ -99,10 +100,10 @@ def test_one_class_accepted_with_aliases_and_no_probe_between_the_congruent_pair
     for s, _ in probes:
         s["act"] = "U"
     # without the declaration the pair are two conditions of one length the pool cannot tell apart
-    a0 = lawset().admit_by_probes(cands, world, probes=probes, buffer=buf, siblings="undetermined")
+    a0 = lawset().admit_by_probes(cands, world, probes=probes, buffer=buf, siblings="undetermined", falsify=None)
     assert a0.status == "undetermined" and "cannot tell apart" in a0.why
     ls = lawset(EQ)
-    a = ls.admit_by_probes(cands, world, probes=probes, buffer=buf, siblings="undetermined")
+    a = ls.admit_by_probes(cands, world, probes=probes, buffer=buf, siblings="undetermined", falsify=None)
     assert a.status == "accepted" and a.law.effect == "act" and a.law.aliases == ("fwd",)
     assert len(a.asked) == 0
 

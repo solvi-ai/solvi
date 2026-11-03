@@ -35,6 +35,25 @@ tolerance by the fitted constants' uncertainty. The χ² after a refit is built 
 [best practices](../best_practices.md) for the measurement and its cautions); the widened tolerance and the sign test
 are not shipped.
 
+
+## Exceptions tied to a base revision
+
+Absolute laws remain independent of the fallback by default. For exceptions to a published tariff, policy
+or other explicitly versioned base, declare `LawSet(grammar, base=pricing_v1,
+lapse_on_base_change=True, base_version="tariff-1")`. Every admitted law then records `base_version`.
+`set_base(pricing_v2, version="tariff-2")` retires active and suspended exceptions before the new fallback
+can answer. Old evidence stays in `retired`; admitting the exception for the new revision requires new
+validation. Existing acceptance accounting is kept.
+
+Use a new, never-recycled revision token even if a mutable callable keeps its Python identity. This is an
+owner declaration, not automatic inspection of changing tables or closures. Direct base assignment and
+per-prediction base overrides are refused for bound sets; changing revision inside admission or a dry run
+is also refused. A stored hypothesis from the old revision refuses to run. Operations remain owner-serialized.
+
+Compiled code and Knowledge export currently refuse bound laws because those formats do not enforce the
+revision dependency. Use a separate default (absolute) LawSet for rules whose meaning does not depend on
+an edition of the base. `version` also changes when the fallback changes, so callers can invalidate caches.
+
 ::: solvi.experimental.laws
 
 ## `solvi.experimental.laws.factored`

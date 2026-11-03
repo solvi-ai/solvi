@@ -482,10 +482,31 @@ class Pipeline:
         return in_force[-1] if in_force else 0
 
     def versions(self):
-        """Every promoted version → [{"version", "change", "parent", "artifact", "ref", "in_force", "id"}]."""
+        """Every promoted version, with effective `in_force`. Knowledge items must also be active in their store;
+        superseded items become in force again if reverting their successor restores them. Snapshot versions retain
+        their journal ancestry; only the latest snapshot of an artifact can be watched or individually reverted."""
         in_force, promoted = self._state()
         return [{"version": v, "change": d["change"], "parent": d["parent"], "artifact": d["artifact"], "ref": d["ref"],
-                 "in_force": v in in_force, "id": d["id"]} for v, d in sorted(promoted.items())]
+                 "in_force": v in in_force and (not isinstance(self.targets[d["artifact"]], KnowledgeTarget)
+                     or self.targets[d["artifact"]].store.status(d["ref"]) == "active"),
+                 "id": d["id"]} for v, d in sorted(promoted.items())]
+
+    def _watch_unavailable(self, version):
+        """None, or (terminal event, reason) before a watch reads an outcome of this version."""
+        rows = self.versions()
+        rec = next((r for r in rows if r["version"] == version), None)
+        journal_force, _ = self._state()
+        if rec is None or version not in journal_force:
+            return "ended", f"version {version} is no longer in force"
+        if not rec["in_force"]:
+            return "superseded", f"version {version} is superseded or its target is no longer active"
+        target = self.targets[rec["artifact"]]
+        if not getattr(target, "independent", False):
+            later = [r["version"] for r in rows if r["in_force"] and r["artifact"] == rec["artifact"]
+                     and r["version"] > version]
+            if later:
+                return "superseded", f"snapshot version {version} is superseded by versions {later}"
+        return None
 
     def rollback(self, version, *, by=None, why=None, failed=None):
         """Undo every version in force after `version` (newest first) through its target; recorded. → the undone

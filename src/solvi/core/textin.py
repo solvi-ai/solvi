@@ -109,20 +109,20 @@ _SCALES = {"hundred": 100, "thousand": 10 ** 3, "thousands": 10 ** 3, "k": 10 **
            "тысячи": 10 ** 3, "тысяч": 10 ** 3, "million": 10 ** 6, "millions": 10 ** 6, "mln": 10 ** 6, "mn": 10 ** 6,
            "m": 10 ** 6, "млн": 10 ** 6, "миллион": 10 ** 6, "миллиона": 10 ** 6, "миллионов": 10 ** 6,
            "billion": 10 ** 9, "billions": 10 ** 9, "bn": 10 ** 9, "b": 10 ** 9, "млрд": 10 ** 9, "миллиард": 10 ** 9,
-           "миллиарда": 10 ** 9, "миллиардов": 10 ** 9}
-_DIGITS = r"[-+−]?(?:\d{1,3}(?:[   ',]\d{3})+(?:[.,]\d+)?|\d{1,3}(?:\.\d{3})+,\d+|\d{1,3}(?:\.\d{3}){2,}|\d+(?:[.,]\d+)?)"
+           "миллиарда": 10 ** 9, "миллиардов": 10 ** 9, "trillion": 10 ** 12, "trillions": 10 ** 12}
+_DIGITS = r"[-+−–]?(?:\d{1,3}(?:[   ',]\d{3})+(?:[.,]\d+)?|\d{1,3}(?:\.\d{3})+,\d+|\d{1,3}(?:\.\d{3}){2,}|\d+(?:[.,]\d+)?)"
 _SCALE_RE = "|".join(sorted((re.escape(s) for s in _SCALES), key=len, reverse=True))
 _SCALE_WORDS_RE = "|".join(sorted((re.escape(s) for s in _SCALES if len(s) > 1), key=len, reverse=True))
 _WORD_RE = "|".join(sorted((re.escape(w) for w in _NUM_WORDS), key=len, reverse=True))
 _CUR = r"(?:[$€£₽¥]|usd|eur|rub|gbp)"
 # a currency after a number: the context that makes "1 500 000" one space-grouped number
-_CUR_AFTER = re.compile(r"\s?(?:[$€£₽¥]|(?:usd|eur|rub|gbp|руб\w*|р\.|rubles?|roubles?|euros?|dollars?|pounds?)(?!\w))",
+_CUR_AFTER = re.compile(r"\s?(?:[$€£₽¥]|(?:usd|eur|rub|gbp|руб\w*|р\.|rubles?|roubles?|euros?|dollars?|pounds?|долл\.?(?:\s+США)?|доллар(?:а|ов)?|евро|фунт(?:а|ов)?)(?!\w))",
                         re.I)
 _PCT = r"\s?(?:%|percent(?!\w)|per\s+cent(?!\w)|процент\w*)"
 # words of a number spelled out: next to a number that was read they mean the number goes on ("two thousand three
 # hundred", "две тысячи триста", "one hundred fifty") — only a number with one scale word is read, the rest is refused
 _MORE = (r"(?:and\s+)?(?:one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|\w+teen|twenty|thirty|forty|fifty|"
-         r"sixty|seventy|eighty|ninety|hundred|thousand|million|billion|"
+         r"sixty|seventy|eighty|ninety|hundred|thousand|million|billion|trillion|"
          r"один|одна|одну|два|две|три|четыре|пять|шесть|семь|восемь|девять|десять|\w+надцать|двадцать|тридцать|сорок|"
          r"пятьдесят|шестьдесят|семьдесят|восемьдесят|девяносто|сто|двести|триста|четыреста|\w+сот|тысяч\w*|"
          r"миллион\w*|миллиард\w*)")
@@ -161,7 +161,7 @@ def _more_around(text, m):
         return None
     return (before.start() if before else m.start()), (after.end() if after else m.end())
 NUMBER_RE = re.compile(
-    rf"(?<![\w.,\-/])(?P<cur>{_CUR}\s?)?(?:(?P<d>{_DIGITS})(?:(?P<sp>\s?)(?P<s1>{_SCALE_RE})\.?(?!\w))?|"
+    rf"(?<![\w.,\-/])(?:(?P<csign>[-−–])?(?P<cur>{_CUR}\s?))?(?:(?P<d>{_DIGITS})(?:(?P<sp>\s?)(?P<s1>{_SCALE_RE})\.?(?!\w))?|"
     rf"(?P<w>{_WORD_RE})\s+(?P<s2>{_SCALE_WORDS_RE})(?!\w))(?![\w]|[.,/\-]\d)(?P<pct>{_PCT})?", re.I)
 
 
@@ -169,7 +169,7 @@ def _digits(s, decimal=None):
     """A digit string with thousands separators and a decimal point or comma → Decimal. decimal: "." or "," when the
     locale says which one is the decimal separator; None: "1,000" is a thousand, "1,5" one and a half, and a single
     ".ddd" group ("1.000", "12.345") is ambiguous — an error, never a guess."""
-    s = s.replace("−", "-").replace("\u00a0", " ").replace("\u202f", " ")
+    s = s.replace("−", "-").replace("–", "-").replace("\u00a0", " ").replace("\u202f", " ")
     for sep in (" ", "'"):
         s = s.replace(sep, "")
     if decimal == ".":
@@ -222,7 +222,7 @@ def parse_number(s, spec=None):
                          "a number with one scale word is read (\"2 thousand\", \"two million\"), a longer one is not")
     if m.group("d") is not None:
         d = m.group("d")
-        if " " in d and not m.group("cur") and not m.group("s1") and not _CUR_AFTER.match(s, m.end()):
+        if " " in d and spec.get("decimal") != "," and not m.group("cur") and not m.group("s1") and not _CUR_AFTER.match(s, m.end()):
             raise ParseError(f"{d!r} is ambiguous: digits grouped by spaces without a currency may be two numbers")
         v = _digits(d, spec.get("decimal"))
         sc = m.group("s1")
@@ -232,6 +232,10 @@ def parse_number(s, spec=None):
     else:
         v = Decimal(_NUM_WORDS[m.group("w").lower()])
         sc = m.group("s2")
+    if m.group("csign"):
+        if m.group("d") and m.group("d")[:1] in "-−–+":
+            raise ParseError("multiple signs around a currency")
+        v = -v
     if m.group("pct") and not spec.get("percent"):
         raise ParseError(f"{m.group()!r} is a percentage, and the field is not declared in percent")
     if sc:

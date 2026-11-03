@@ -8,8 +8,9 @@ import json
 import math
 import random
 import warnings
+import weakref
 from dataclasses import dataclass, field
-from functools import lru_cache
+from functools import lru_cache, wraps
 from collections import deque
 from itertools import combinations
 from typing import Any, Callable, Iterable, Protocol
@@ -762,6 +763,7 @@ class Law:
     null: float | None = None
     admitted: str = "test"
     aliases: tuple = ()
+    base_version: str | None = None          # opt-in exceptions belong to one owner-declared base revision
     recent: Any = field(default=None, repr=False)      # the last observations (1 right, 0 wrong) with LawSet(recent=)
     doubt: Any = field(default=None, repr=False)       # suspended: the last observations where it would apply
 
@@ -1061,6 +1063,20 @@ class Delta:
     covered: bool
 
 
+def _stable_base(method):
+    """A bound revision cannot move midway through admission or a speculative snapshot."""
+    @wraps(method)
+    def protected(self, *args, **kwargs):
+        if not self.lapse_on_base_change:
+            return method(self, *args, **kwargs)
+        self._base_operations += 1
+        try:
+            return method(self, *args, **kwargs)
+        finally:
+            self._base_operations -= 1
+    return protected
+
+
 class LawSet:
     """Laws over one grammar, most specific first (see the package docstring).
 
@@ -1072,10 +1088,12 @@ class LawSet:
     cases; at most `cap` active laws. min_precision below retire_below is warned at construction: a law that passes
     with a precision between the two is retired by the check its own test runs, and the next mismatch accepts it again.
 
-    support_on: the rows a candidate's support, hits and precision are counted on — "applied" (the default): where it
+    support_on: the rows a candidate's support, hits and precision are counted on — "applied" (opt-in): where it
     would be the applied law, its condition's rows less those a more specific (or, at equal length, one `ties` puts
-    first) active law already claims, the rows its net is counted on too; "matched": every row its condition matches
-    (before 1.2). A default whose exceptions are already laws is judged on the rows they leave it: a default right on
+    first) active law already claims, the rows its net is counted on too; "matched" (the default): every row its
+    condition matches. This checks the full observed matching domain, including rows currently claimed by narrower
+    laws; it does not certify unseen inputs. Under "applied", a default whose exceptions are already laws is judged
+    on the rows they leave it: a default right on
     45 of its 45 rows with 10 rows of a known exception under it is 45 / 45, not 45 / 55 (refused at min_precision 0.9
     under "matched"), and its precision at acceptance is the precision its first `check` recounts.
     readmit: "any" (the default) — a retired law may be accepted again by the next test; "grown" — not on a buffer
@@ -1178,24 +1196,42 @@ class LawSet:
     A declaration that is false where the guard holds is caught on rows only: `check_equivalent(buffer)` lists the
     rows that contradict it, and a law that is wrong where its alias would be right falls by its running precision.
     Use `effects=` variants when you do not know which encoding the world uses; `equivalent` when you know where
-    they coincide."""
+    they coincide.
+
+    lapse_on_base_change=True, base_version="revision": every law in this set is an exception of one
+    owner-declared base revision. set_base(base, version="new-revision") retires active/suspended exceptions;
+    the default False keeps absolute laws independent of the fallback. Tokens are explicit declarations:
+    changes inside a mutable callable are not detected automatically. Do not change the base during admission
+    or a dry run; such attempts are refused. Bound laws cannot be compiled or exported to Knowledge without
+    preserving the dependency, so those exports currently refuse. Operations on a LawSet are owner-serialized;
+    this option does not add thread safety."""
 
     def __init__(self, grammar: Grammar, *, base: Callable | None = None, apply: Callable | None = None,
                  effects: Callable | None = None, proposer: Proposer | None = None, min_support: int = 5,
                  min_precision: float = 0.9, retire_below: float = 0.8, retire_min: int = 5, cap: int = 300,
                  sized: bool = True, delta: float = 0.1, space: int | None = None,
-                 null: str | float = "base", disagree: str = "first", support_on: str = "applied",
+                 null: str | float = "base", disagree: str = "first", support_on: str = "matched",
                  readmit: str = "any", acceptance: str | None = None, confirm: Callable | None = None,
                  ties: str = "earlier", tol: float | None = None, rtol: float | None = None,
                  same: Callable[[Any, Any], bool] | None = None, recent: int | None = None, memo: bool = False,
                  on_fall: str = "retire", reactivate_min: int = 10, suspended_cap: int = 50,
-                 rivals: bool = False, equivalent: Iterable[tuple] | Callable | None = None):
+                 rivals: bool = False, equivalent: Iterable[tuple] | Callable | None = None,
+                 lapse_on_base_change: bool = False, base_version: str | None = None):
         if disagree not in ("first", "abstain"):
             raise ValueError(f"disagree is 'first' or 'abstain', not {disagree!r}")
         if not 0.0 < float(delta) < 1.0:
             raise ValueError("delta is a probability strictly between 0 and 1")
+        if type(lapse_on_base_change) is not bool:
+            raise ValueError("lapse_on_base_change is a boolean")
+        if lapse_on_base_change:
+            self._check_base_version(base_version)
+        elif base_version is not None:
+            raise ValueError("base_version requires lapse_on_base_change=True")
         self.grammar = grammar
-        self.base = base
+        self._base = base
+        self._lapse_on_base_change, self._base_version = lapse_on_base_change, base_version
+        self._base_versions_seen = {base_version} if lapse_on_base_change else set()
+        self._base_operations = 0
         self.apply = apply or _identity
         self.effects = effects or _observed_only
         self.proposer = proposer if proposer is not None else Enumerate()
@@ -1258,6 +1294,7 @@ class LawSet:
         self.memo_hits = 0
         self._memo: dict = {}
         self._memo_at = None
+        self._memo_buffer = None
         self._laws_version = 0
         from ._probes import sameness
         self.same = sameness(tol, same, rtol=rtol)          # None: exact equality
@@ -1277,7 +1314,76 @@ class LawSet:
         self._proposing: tuple | None = None        # (buffer, exclude) `mismatch` proposes on (refinements need it)
         self._seq = 0
         self._last_tested = 0
-        self._base_key = ("base", id(base)) if self._cmp is None else ("base", id(base), self._cmp)
+        self._refresh_base_key()
+
+    @staticmethod
+    def _check_base_version(version):
+        if not isinstance(version, str) or not version.strip():
+            raise ValueError("base_version is a nonempty immutable revision string")
+
+    @property
+    def lapse_on_base_change(self) -> bool:
+        """Whether every law in this set is an exception bound to the declared base revision."""
+        return self._lapse_on_base_change
+
+    @property
+    def base_version(self) -> str | None:
+        return self._base_version
+
+    @property
+    def base(self):
+        return self._base
+
+    @base.setter
+    def base(self, value):
+        if self.lapse_on_base_change:
+            raise ValueError("bound exceptions require set_base(..., version=...)")
+        self.set_base(value)
+
+    def _refresh_base_key(self):
+        self._base_key = ("base", id(self.base)) if self._cmp is None else ("base", id(self.base), self._cmp)
+        if self.base_version is not None:
+            self._base_key += ("base_version", self.base_version)
+
+    def set_base(self, base: Callable | None, *, version: str | None = None) -> list[Law]:
+        """Replace the fallback; opt-in exceptions lapse on a new declared revision.
+
+        Default sets contain absolute laws: changing their base preserves laws.
+        With lapse_on_base_change=True every active/suspended law belongs to
+        base_version; a new, never-reused version retires it before the new base
+        can serve. The old laws and evidence remain in retired. Re-admit a new
+        Candidate using fresh evidence; reactivation is not re-validation.
+
+        Tokens are owner declarations, not automatic detection of mutable code,
+        closures or tables. Update the version even when the callable is the
+        same object. A repeated current version is a no-op only for the same
+        callable. Direct base assignment and per-prediction overrides are
+        refused for bound sets. Admission/error budgets are never reset here.
+        """
+        if base is not None and not callable(base):
+            raise ValueError("base is callable or None")
+        if self.lapse_on_base_change:
+            self._check_base_version(version)
+            if version == self.base_version:
+                if base is not self.base:
+                    raise ValueError("a different base requires a new revision token")
+                return []
+            if self._base_operations:
+                raise ValueError("base revision cannot change during admission or a dry run")
+            if version in self._base_versions_seen:
+                raise ValueError("a base revision token cannot be recycled")
+        elif version is not None:
+            raise ValueError("version requires lapse_on_base_change=True")
+        retired = list(self.laws) + list(self.suspended) if self.lapse_on_base_change else []
+        for law in retired:
+            self.retire(law, why=f"base revision changed: {self.base_version} -> {version}")
+        self._base, self._base_version = base, version
+        if version is not None:
+            self._base_versions_seen.add(version)
+        self._memo, self._memo_at, self._memo_buffer = {}, None, None
+        self._refresh_base_key()
+        self._laws_version += 1
+        return retired
 
     @property
     def version(self) -> int:
@@ -1288,19 +1394,27 @@ class LawSet:
         return self._laws_version
 
     def __getstate__(self):
-        """Pickled without the score memo (keyed by the buffer's `id()`); the `id()`-based cache keys are rebuilt
+        """Pickled without the score memo or its weak buffer identity reference; `id()`-based cache keys are rebuilt
         on unpickle from the objects the set holds then."""
         state = self.__dict__.copy()
-        state["_memo"], state["_memo_at"] = {}, None
+        state["_memo"], state["_memo_at"], state["_memo_buffer"] = {}, None, None
+        state["_base_operations"] = 0
         return state
 
     def __setstate__(self, state):
+        state = dict(state)
+        if "_base" not in state:
+            state["_base"] = state.pop("base", None)
+        state.setdefault("_lapse_on_base_change", False)
+        state.setdefault("_base_version", None)
+        state.setdefault("_base_versions_seen", set())
+        state["_base_operations"] = 0
         self.__dict__.update(state)
-        self._memo, self._memo_at = {}, None
+        self._memo, self._memo_at, self._memo_buffer = {}, None, None
         cmp = self._cmp
         if cmp is not None and cmp[0] == "same":
             self._cmp = ("same", id(self.same))
-        self._base_key = ("base", id(self.base)) if self._cmp is None else ("base", id(self.base), self._cmp)
+        self._refresh_base_key()
 
     @property
     def proposals(self):
@@ -1338,16 +1452,44 @@ class LawSet:
         k = _key(action)
         return [law for law in self.laws if _key(law.action) == k and law.holds(true)]
 
-    def conflict(self, state, action) -> Undetermined | None:
-        """Where the matching laws that are not exceptions of one another disagree → Undetermined, else None. Of the
-        matching laws only the maximal ones count — those whose condition no other matching law's condition strictly
-        contains (a law with a larger condition is an exception that was tested where the wider one applied); when
-        these predict different observations here, nothing in the evidence says which one speaks."""
+    def maximal(self, state, action) -> list[Law]:
+        """Matching active laws with no strictly more specific matching exception.
+
+        Equal-length siblings are all retained, in serving order. A matching
+        default remains only when no stricter matching condition overrides it.
+        """
         ms = self.matching(state, action)
-        if len(ms) < 2:
-            return None
         sets = [set(law.condition) for law in ms]
-        top = [law for law, c in zip(ms, sets) if not any(o > c for o in sets)]
+        return [law for law, condition in zip(ms, sets) if not any(other > condition for other in sets)]
+
+    def predictions(self, state, action, *, maximal: bool = False) -> list[tuple]:
+        """All (Law, predicted observation) pairs, in serving order; no base fallback.
+
+        For checking observations, use maximal=True (exceptions override their
+        ancestors, while equal-specificity siblings must all agree), or
+        violations(). This reader does not change predict's serving tie policy.
+        """
+        laws = self.maximal(state, action) if maximal else self.matching(state, action)
+        return [(law, self.apply(law.effect, state)) for law in laws]
+
+    def violations(self, state, action, observed) -> list[Law]:
+        """Every maximal matching law disagreeing with observed, using agrees().
+
+        Unlike applied()/predict(), this checks every applicable sibling. Retired
+        and suspended laws are excluded; no law means no checked constraint.
+        """
+        return [law for law, prediction in self.predictions(state, action, maximal=True)
+                if not self.agrees(prediction, observed)]
+
+    def conflict(self, state, action) -> Undetermined | None:
+        """Where maximal matching laws disagree, return Undetermined, else None.
+
+        A strictly more specific matching exception overrides its ancestor;
+        equal-specificity siblings all count.
+        """
+        top = self.maximal(state, action)
+        if len(top) < 2:
+            return None
         preds = [self.apply(law.effect, state) for law in top]
         if self.same is None:
             if len({_key(p) for p in preds}) < 2:
@@ -1366,6 +1508,8 @@ class LawSet:
 
         A version space in miniature: two laws that both passed their test and neither of which is an exception of
         the other cover this state and say different things — the order between them is a tie-break, not evidence."""
+        if self.lapse_on_base_change and base is not None and base is not self.base:
+            raise ValueError("bound exceptions require set_base(..., version=...), not a base override")
         mode = disagree or self.disagree
         if mode not in ("first", "abstain"):
             raise ValueError(f"disagree is 'first' or 'abstain', not {mode!r}")
@@ -1412,10 +1556,13 @@ class LawSet:
     def hypothesis(self, candidate: Candidate) -> Callable:
         """The predictor this set would be with `candidate` accepted (nothing is changed): for the probe planner."""
         extra = Law(id="?", action=candidate.action, condition=tuple(candidate.condition), effect=candidate.effect,
-                    seq=self._seq + 1)
+                    seq=self._seq + 1, base_version=self.base_version)
         laws = sorted(self.laws + [extra], key=self._order)
+        bound_to = self.base_version
 
         def predict(state, action):
+            if bound_to is not None and self.base_version != bound_to:
+                raise ValueError("hypothesis belongs to an older base revision")
             true = set(self.grammar.true(state, action))
             for law in laws:
                 if _key(law.action) == _key(action) and law.holds(true):
@@ -1575,14 +1722,14 @@ class LawSet:
 
     def score(self, candidate: Candidate, buffer: Buffer, exclude=None, _view=None) -> tuple[int, int, int]:
         """(support, hits, net) of a candidate on the held-out rows (every group but `exclude`): the rows it is counted
-        on — where it would be the applied law (support_on="applied", the default), or every row its condition matches
+        on — where it would be the applied law (support_on="applied", opt-in), or every row its condition matches
         ("matched") — those of them its effect predicts right, and the errors it removes minus the errors it adds where
         it would be the applied law. memo=True: kept until the buffer (a row added or dropped) or the active laws
         change; a repeated score on the same state is a lookup (`memo_hits`)."""
         if self.memo:
             at = (id(buffer), buffer.version, self._laws_version, _key(exclude))
-            if at != self._memo_at:
-                self._memo, self._memo_at = {}, at
+            if at != self._memo_at or self._memo_buffer is None or self._memo_buffer() is not buffer:
+                self._memo, self._memo_at, self._memo_buffer = {}, at, weakref.ref(buffer)
             k = (_key(candidate.action), tuple(candidate.condition), _key(candidate.effect))
             got = self._memo.get(k)
             if got is not None:
@@ -1671,6 +1818,7 @@ class LawSet:
             cache[k] = self.base_rate(buffer, c.action, c.effect, exclude)
         return cache[k]
 
+    @_stable_base
     def test(self, candidates: Iterable[Candidate], buffer: Buffer, exclude=None, accept: int = 1) -> list[Law]:
         """Accept up to `accept` candidates (default one: the best) that pass on the held-out rows of every group but
         `exclude` (the proposing transition's): `passes(support, hits, N)` — support ≥ min_support, precision ≥
@@ -1776,6 +1924,7 @@ class LawSet:
             for law in laws:
                 self._retired_at[(_key(law.action), law.condition, _key(law.effect))] = size
 
+    @_stable_base
     def add(self, candidate: Candidate, *, born=None) -> Law:
         """Put a law in without the test (a person's law, a written rule, a test fixture) → the law."""
         law = self._accept(candidate, born=born)
@@ -1783,6 +1932,7 @@ class LawSet:
         return law
 
     # ----------------------------------------------------------------------------------- admission by probes
+    @_stable_base
     def admit_by_probes(self, candidates: Iterable[Candidate], ask: Callable[[Any, Any], Any], *,
                         probes: Iterable[tuple[Any, Any]], safe: Callable[[Any, Any], bool] | None = None,
                         budget: int = 8, buffer: Buffer | None = None, exclude=None,
@@ -1792,7 +1942,7 @@ class LawSet:
                         rtol: float | None = None, coverage: str = "warn", max_new: int | None = None,
                         noise: float | None = None, level: float = 0.95, fit_level: float | None = 0.01,
                         fit_support: int = 1, commit: bool = True, siblings: str = "shortest",
-                        coverage_on: Buffer | Iterable[Buffer] | None = None, falsify: str | None = None
+                        coverage_on: Buffer | Iterable[Buffer] | None = None, falsify: str | None = "auto"
                         ) -> Admission:
         """Admit one of `candidates` by asking the world where they disagree (CEGIS-style), not by a random held-out
         sample. ask(state, action) → the observation (the environment, or an exact model of it); probes: the (state,
@@ -1910,7 +2060,8 @@ class LawSet:
         one asked about: the answer refutes nothing and supports nothing, the probe counts as spent (budget,
         `cost["probes"]`) and is listed in `Admission.unknown`, not in `asked`.
 
-        falsify="leftover" (opt-in, experimental; None, the default, leaves the admission as it was): the split phase
+        falsify="leftover" (experimental; selected by the default "auto" on supported modes; explicit None
+        disables it): the split phase
         stops once one class is left and leaves the rest of the budget unspent, so when the grammar cannot express the
         true law the accepted survivor is the shortest wrong law and no probe has tried to refute it where it fires.
         With "leftover", once the admission would accept, the safe pool probes not yet asked where the accepted law
@@ -1954,10 +2105,15 @@ class LawSet:
         environment. Two pre-registered runs of one stand: the first run's reproduction gate was sized below the
         ≈ 6 % wrong this method documents on a two-law cell, failed there, and was revised — disclosed — before the
         second run; the numbers above are the second run's, and the first run's agree (2 wrong against 120 at budget
-        20; sound 254 against 242). Default off: one synthetic world, two runs, no effect at a small budget and a cost
-        in asks on every right law."""
+        20; sound 254 against 242). These measurements concern one synthetic world, two runs.
+        falsify="auto" (default) uses "leftover" for exact answers and max_new=None or 1; noisy answers
+        and max_new=2 retain their separate admission procedures without leftover falsification. Explicit None
+        disables this check; explicit "leftover" still rejects incompatible modes. The default can spend the whole
+        budget even on a right law; finite pool falsification is not a statistical guarantee."""
+        if falsify == "auto":
+            falsify = None if noise is not None or max_new == 2 else "leftover"
         if falsify not in (None, "leftover"):
-            raise ValueError(f"falsify is None or 'leftover', not {falsify!r}")
+            raise ValueError(f"falsify is None, 'auto' or 'leftover', not {falsify!r}")
         if falsify is not None and (noise is not None or max_new == 2):
             raise ValueError("falsify='leftover' takes noise=None and max_new=None or 1")
         if not commit:
@@ -2364,8 +2520,9 @@ class LawSet:
         for x, status, why in marks:
             x.status, x.why = status, why
         self._seq, self._laws_version, self.cost["accepted"] = seq, version, accepted
-        self._memo, self._memo_at = {}, None
+        self._memo, self._memo_at, self._memo_buffer = {}, None, None
 
+    @_stable_base
     def _dry_run(self, run):
         """Run an admission and put the set back as it was before; the admitted laws get status "proposed"."""
         snap = self._snapshot()
@@ -2389,7 +2546,7 @@ class LawSet:
         law = Law(id=f"law-{self._seq}", action=c.action, condition=tuple(c.condition), effect=c.effect,
                   support=support, hits=hits, precision=(hits / support) if support else None, net=net, born=born,
                   proposer=c.proposer, sources=sources, seq=self._seq,
-                  aliases=tuple(getattr(self, "_aliases", {}).get(self._ck(c), ())))
+                  aliases=tuple(getattr(self, "_aliases", {}).get(self._ck(c), ())), base_version=self.base_version)
         self.laws.append(law)
         self.laws.sort(key=self._order)
         self._laws_version += 1
@@ -2489,6 +2646,8 @@ class LawSet:
 
     def reactivate(self, law: Law):
         """Put a suspended law back in use, its running counts reset (judged from here on)."""
+        if self.lapse_on_base_change and law.base_version != self.base_version:
+            raise ValueError("an old base revision needs fresh admission, not reactivation")
         if law not in self.suspended:
             return
         self.suspended.remove(law)
@@ -2623,7 +2782,9 @@ class LawSet:
         indistinguishable rival, `rival_of`; "rival" in the result names its condition). tested: the
         N `test` would score it at (this candidate counted when it is new to the buffer); need: the support a law right
         on every row needs at that N (min_support when not sized); short: rows short of `need` for the support tests,
-        hits short of min_precision · support for "min_precision", else 0."""
+        hits short of min_precision · support for "min_precision", else 0. A net refusal may also give
+        "covered_by" (active, syntactically narrower same-action/effect law IDs matching some held-out rows)
+        and a "hint"; this does not establish coverage or correctness on unseen inputs."""
         c = candidate
         k = (_key(c.action), tuple(c.condition), _key(c.effect))
         N = max(1, buffer.tested + buffer._new_test(k))
@@ -2651,6 +2812,16 @@ class LawSet:
         if len(self.laws) >= self.cap:
             return fail("cap", f"the set already holds cap={self.cap} active laws")
         if net <= 0:
+            condition = set(c.condition)
+            allowed = buffer.allowed(c.action, exclude)
+            covered = [law.id for law in self.laws
+                       if law.status == "active" and _key(law.action) == _key(c.action)
+                       and _key(law.effect) == _key(c.effect) and condition < set(law.condition)
+                       and buffer.match(c.action, law.condition) & allowed]
+            if covered:
+                out["covered_by"] = covered
+                out["hint"] = (f"{len(covered)} active narrower law(s) with the same action and effect match some "
+                               "held-out rows of this candidate; this does not establish coverage on unseen inputs")
             return fail("net", f"net {net}: where it would be the applied law it removes no more errors than it adds "
                                f"({hits} of {sup} rows right)")
         if self.acceptance == "exact":
@@ -2747,6 +2918,8 @@ class LawSet:
         source "outcome" (the environment answered), by "laws:<proposer>", evidence = support, hits, precision, net,
         the birth group and the ids of the held-out transitions it was accepted on. A retired law is retire()d in the
         store with its reason. Idempotent: a law already there as it is writes nothing. → law id → item id."""
+        if self.lapse_on_base_change:
+            raise ValueError("knowledge export does not preserve base-revision dependencies")
         from ...core.knowledge.store import item_id, plain_json
         out = {}
         for law in self.all():

@@ -29,7 +29,7 @@ AXIS = "#595959"
 # categorical colours, each ≥ 3:1 against the white background (checked by contrast())
 PALETTE = ["#1f5fa8", "#c2410c", "#15803d", "#7c3aed", "#be185d", "#0f766e", "#a16207", "#475569"]
 NV = "n/v"                     # the mark of a proposed value that did not verify (its <title> says so)
-_SCALE_SHORT = {"": "", "thousand": "k", "million": "m", "billion": "bn"}
+_SCALE_SHORT = {"": "", "thousand": "k", "million": "m", "billion": "bn", "trillion": "tn"}
 _SYMBOL = {"USD": "$", "EUR": "€", "GBP": "£", "JPY": "¥"}
 
 
@@ -127,7 +127,7 @@ def unit_caption(unit, scale, label=""):
         return ""
     if label and not (unit in _SYMBOL or unit == "RUB"):
         unit = label
-    return ", ".join(x for x in (unit, {"thousand": "thousands", "million": "millions", "billion": "billions"}.get(scale, "")) if x)
+    return ", ".join(x for x in (unit, {"thousand": "thousands", "million": "millions", "billion": "billions", "trillion": "trillions"}.get(scale, "")) if x)
 
 
 @dataclass

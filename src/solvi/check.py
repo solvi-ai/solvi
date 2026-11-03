@@ -52,7 +52,8 @@ Warnings:
   unused_part           a part no question's flow uses (a question without a rule, fit or `uses` uses everything computable:
                         those are the candidate features of the head it will be fitted with)
   then_on_soft_check    `then=` on a check that is not hard: it is ignored
-  question_as_fact      a rule reads a question's name: answers are not facts, so it must be given in the input
+  question_as_fact      a rule, part or check's `then` function reads a question's name: answers are not facts,
+                        so it must be given in the input (error for hard checks)
   reader_types_differ   typed readers of a given fact, or alternative producers of a fact, that no value can satisfy both
   dead_option           an option the constraints rule out whatever the other answers are
   constraint_raises     a constraint that raises on some combination of answers (it counts as broken)
@@ -375,6 +376,16 @@ def _questions(cat, questions, heads, given, rep, planner):
     from .core.catalog import PRIMITIVES
     from .core.plan.strategist import PlanError
     flows, counted = {}, {}
+    for name, part in cat.parts.items():
+        readers = [(a.name, a.inputs, a.kind == "check" and a.hard) for a in part.alternatives or [part]]
+        readers += [(tp.name, tp.inputs, part.kind == "check" and part.hard)
+                    for tp in (part.then_parts or {}).values()]
+        for where, inputs, hard in readers:
+            asked = [x for x in inputs if x in questions and x not in cat.parts]
+            if asked:
+                rep.add("error" if hard else "warning", "question_as_fact", where,
+                        f"reads {', '.join(asked)} as input facts, but these names are questions: "
+                        "answers are not facts; give these inputs explicitly or compute them with catalog parts")
     for name, q in questions.items():
         try:
             flow = planner([q], given)

@@ -756,3 +756,44 @@ def test_versions_and_replay_take_the_lock():
         assert th.is_alive() and not got                  # blocked while the lock is held
     th.join(timeout=10)
     assert got and got[0][0]["version"] == 0
+
+
+def test_resident_versions_include_candidate_and_protected_rows_beyond_soft_target():
+    """A version reference inventory differs from served/retired retention counts."""
+    models = [_Model('candidate1', 0.7), _Model('candidate2', 0.8), _Model('candidate3', 0.9)]
+    policy = _plain(first=10 ** 9, min_novel=10 ** 9, stale=10 ** 6, trial=10 ** 6)
+    policy.budget.max_versions_kept = 1
+    loop = AdapterLoop(_Hand(models), question='q', initial=_Model('base', 0.6),
+                       policy=policy, secret=KEY, max_risk=0.05, additive=False, wait=True, clock=lambda: 0.0,
+                       promise_options={'grid': [0.5]}, monitor=None)
+    import math
+    data = iter(_fake(29, 12000))
+    def certify_and_promote():
+        for _ in range(4000):
+            x = next(data)
+            loop.step(x, lambda: x[0])
+            if math.isfinite(loop._joint(loop.candidate)):
+                break
+        assert math.isfinite(loop._joint(loop.candidate))
+        loop.promote(force=True)  # skips scheduling only; the real certificate is present
+    assert loop.status()['resident_versions'] == [{'version': 0, 'state': 'served'}]
+    assert loop.train_now(wait=True).state == 'done'
+    assert loop.status()['versions_kept'] == 1
+    assert loop.status()['resident_versions'] == [
+        {'version': 0, 'state': 'served'}, {'version': 1, 'state': 'candidate'}]
+    certify_and_promote()
+    assert loop.train_now(wait=True).state == 'done'
+    certify_and_promote()
+    status = loop.status()
+    assert status['versions_kept'] == 3 > policy.budget.max_versions_kept
+    assert status['resident_versions'] == [
+        {'version': 0, 'state': 'retired'}, {'version': 1, 'state': 'retired'},
+        {'version': 2, 'state': 'served'}]
+    # A third promotion makes v1 eligible for eviction; its model reference disappears.
+    assert loop.train_now(wait=True).state == 'done'
+    certify_and_promote()
+    assert loop._vs[1]['model'] is None
+    assert loop.status()['resident_versions'] == [
+        {'version': 0, 'state': 'retired'}, {'version': 2, 'state': 'retired'},
+        {'version': 3, 'state': 'served'}]
+    loop.close()

@@ -25,7 +25,9 @@ for the statement and the records.
 
 What the policy decides, per decision:
 
-- accept(st, x, y, source) — a label at all; refused → `UntrustedLabel` before anything changes. A slow-path source
+- accept(st, x, y, source) — a label at all; refused → `UntrustedLabel` before anything changes.
+  A learner's optional `options` (or its question part's options) is also checked: an out-of-set target raises
+  `ValueError` before state changes; attached lenient dispatch counts it as a refused, missing label. A slow-path source
   ("s2", "verified") taken is recorded as "s2".
 - split(st, key) — "train", "calib" or "holdout" by the input's content key (`key=` of step, else `question|vhash(x)`,
   the change pipeline's `content_key` for a dict input); the loop keeps the first split a key got, so a relabelled key
@@ -115,12 +117,17 @@ every control. A decision of the part that reaches the loop under its own versio
 the same order; the loop never waits for the part's lock while it holds its own (shadow scoring, a swap). The cost:
 while a step runs, the part's own decisions wait for it (with `wait=True`, for the whole training).
 
-Eviction: past `policy.budget.max_versions_kept` versions held (served and retired, version 0 counted), the oldest
-retired ones are evicted after each change of the served version — "evict" events, `Served.release()` called, state
-"evicted", no longer a rollback target; their files stay for replay. The served version, the rollback target (the one
-served before it) and version 0 are never evicted, so up to three can stay above a limit below 3.
+Eviction: `policy.budget.max_versions_kept` is a soft target for served/retired table rows only (version 0
+counted), not a memory or all-model cap. The oldest eligible retired rows are evicted after a served-version change
+("evict", `Served.release()`, state "evicted", model=None); files remain for replay. Version 0, current served and
+the rollback target are protected, so up to three protected rows may exceed a target below 3. Additive "layer"
+rows are outside that count and are bounded separately by max_layers (the active chain, base included); a frozen
+candidate is also resident but outside versions_kept. status()["resident_versions"] lists version-table model
+references across every state, including a candidate or retained layer. It is not bytes, distinct model objects,
+unique tensors, or an accounting of the live learner and an in-flight runner.
 
-Checkpoint (stage 4, `stream.checkpoint`): `save(dir, cancel=False)` writes the whole state — versions and their
+Checkpoint (stage 4, `stream.checkpoint`): additive uses checkpoint.FORMAT_ADDITIVE (currently v4; old additive
+v2/v3 formats are refused), replacement uses checkpoint.FORMAT (v1). `save(dir, cancel=False)` writes the whole state — versions and their
 files, promises and the detector (`dump`), policy, budget, rate, the label store `labels.jsonl`, the records — into a
 new folder, then switches `dir/CURRENT` to it atomically; `AdapterLoop.load(dir, learner, ...)` checks the signed
 manifest and every file's hash, rebuilds the loop, installs the served version and feeds the fresh learner its train
@@ -299,6 +306,10 @@ class _Recorded:
         return self.fp
 
 
+class _InvalidLabel(ValueError):
+    """A target outside the learner's closed answer vocabulary."""
+
+
 class _Counting:
     """The learner during replay: only its label count matters to the protocol."""
 
@@ -394,8 +405,8 @@ class AdapterLoop:
     Needs stream mode and an initial model. Records: owner, layer, zone, path [[v, score, thr in force]], trial_zone,
     answered_by, answer_layer, answer_thr, base, rho_base in the stream record, every reached layer's answer in the
     payload's "path_would" — replay recomputes the routing and the answer from them; status() "zones" (per layer Λ, λ,
-    regime, P̂(Z), realised risk; the composite stream-wide risk, reported). Checkpoint: format v3 with the chain (a
-    replacement loop's stays v1). The guarantee is per zone, at level α (one δ budget over every layer and
+    regime, P̂(Z), realised risk; the composite stream-wide risk, reported). Checkpoint: checkpoint.FORMAT_ADDITIVE (v4) with the chain
+    (a replacement loop uses checkpoint.FORMAT, v1). The guarantee is per zone, at level α (one δ budget over every layer and
     restart). Stream-wide nothing is ≤ α: with max_error= the error among the alone answers is bounded by
     α·(1 + Σ_{k≥1} P(overlap_k) / P(answered)) (overlap_k: rows layer k would answer that an upstream layer took — the
     upstream layer answers first), with max_risk= the joint risk by α·(1 + Σ_{j≥1} P(Z_j)); max_risk=α / max_layers
@@ -1543,6 +1554,13 @@ class AdapterLoop:
             extra = (" (DefaultPolicy takes slow-path labels only with s2_labels=True; recorded as \"s2\")"
                      if src in S2_SOURCES else "")
             raise UntrustedLabel(f"label source {src!r}: the loop's policy does not take it{extra}")
+        # A batch learner only sees these rows at training time; reject an invalid
+        # target before it can enter every future job (or any promise/split state).
+        options = getattr(self.live, "options", None)
+        if options is None:
+            options = getattr(getattr(self.live, "part", None), "options", None)
+        if options is not None and label not in options:
+            raise _InvalidLabel(f"{label!r} is not one of the learner's options")
         return rec
 
     def _split(self, key):
@@ -1580,10 +1598,10 @@ class AdapterLoop:
             if label is not None:
                 try:
                     lsrc = self._check(src, x, label)      # a refused source: nothing has changed yet
-                except UntrustedLabel:
+                except (UntrustedLabel, _InvalidLabel):
                     if not lenient:
                         raise
-                    label, lof = None, None                # attached: a label the policy refuses is a missing one
+                    label, lof = None, None                # attached: a refused source or target is a missing label
                     self._label_refused(src)
                 else:
                     self._refused["run"] = 0
@@ -1600,7 +1618,7 @@ class AdapterLoop:
             self._step_t = None
 
     def _label_refused(self, src):
-        """Attached to a Dispatcher: one more label the policy refused (counted; status()["labels"]["refused"]). After
+        """Attached to a Dispatcher: one more refused source or target (status()["labels"]["refused"]). After
         `warn_refused` of them in a row a UserWarning, once: a loop whose every label is refused learns nothing and
         escalates every decision for ever (S2's run-time check of a slow path's declared `label_source`)."""
         r = self._refused
@@ -2168,10 +2186,33 @@ class AdapterLoop:
         st = self._state()
         k = max(self._vs) + 1
         job = TrainJob(id=f"{k}.-", version=k, trigger=trigger, started=self._now())
+        selection = None
         if self._batch:
             train = [r for r in self._rows if self._split_of[r.key] == "train"]
             self._at("policy.select")
             job.rows = tuple(self.policy.select(st, train))
+            options = getattr(self.live, "options", None)
+            if options is None:
+                options = getattr(getattr(self.live, "part", None), "options", None)
+            if self._fps is not None:
+                recorded = next((e for e in self._replay_selections
+                                 if e.get("decision") == n and e.get("trigger") == trigger), None)
+                if recorded is not None:
+                    self._replay_selections.remove(recorded)
+                    selection = recorded["training_selection"]
+                    excluded = set(selection["excluded_keys"])
+                    job.rows = tuple(r for r in job.rows if r.key not in excluded)
+            elif options is not None:
+                excluded = [r.key for r in job.rows if r.y not in options]
+                if excluded:
+                    selection = {"excluded": len(excluded), "excluded_keys": excluded,
+                                 "reasons": {"outside_learner_options": len(excluded)}}
+                    job.rows = tuple(r for r in job.rows if r.y in options)
+            if selection is not None and not job.rows:
+                job.state, job.why = "refused", "no training rows remain within the learner's options"
+                extra = {"control": True} if trigger == "train_now" else {}
+                return job, [self._event("train", self.served, n, state="refused", why=job.why,
+                                        trigger=trigger, training_selection=selection, **extra)]
             self._at("policy.hyper")
             job.hyper = dict(self.policy.hyper(st))
         self._at("budget")
@@ -2190,6 +2231,8 @@ class AdapterLoop:
         self._job = {"id": job.id, "version": k, "trigger": trigger, "started": job.started, "eta": None,
                      "runner": None, "pid": None, "log": None, "device": None, "last": None, "last_t": None,
                      "state": "running", "started_at": n, "inline": inline}
+        if selection is not None:
+            self._job["training_selection"] = selection
         if self._batch:                                    # what a batch learner's runner reads (stage 3)
             latest = {}
             for r in self._rows:
@@ -2203,6 +2246,8 @@ class AdapterLoop:
                "hist": len(self._history)}
         self._run = run
         extra = {"control": True, "wait": wait} if trigger == "train_now" else {}
+        if selection is not None:
+            extra["training_selection"] = selection
         if gate is not None:
             run["gate"] = extra["gate"] = gate
         ev = [self._event("train_start", self.served, n, job=job.id, trigger=trigger, rows=len(job.rows),
@@ -2484,7 +2529,14 @@ class AdapterLoop:
         records the wait asked and inline=True); True — the call returns when the training is over and its result
         applied (state "done", "failed", "refused" or "stale" with why). A RunnerError stops the loop where the result
         is applied. A train_now refused (paused, a candidate in trial, a training in flight, the budget) writes its
-        control event, a "train" with state "refused"."""
+        control event, a "train" with state "refused".
+
+        This control bypasses scheduling/label floors and the improvement signal,
+        not the budget or post-training freeze/promotion gates. A manual run can
+        therefore consume training time and a training-budget slot, then be
+        discarded at birth for insufficient held-out/calibration data. Inspect
+        policy.why_not_train(loop._state()) before overriding the schedule; manual
+        training neither buys labels nor guarantees a frozen candidate."""
         wait = self.wait if wait is None else bool(wait)
         with self._locked():
             self._refuse_if_stopped()
@@ -2553,7 +2605,7 @@ class AdapterLoop:
         "manifest", "n", "files"}. Writes no record otherwise. The save holds the part's version lock and the loop's lock
         for all its writes (every version's files, each fsynced, included): the part's decisions and the loop's controls
         wait for it; unmeasured."""
-        from .checkpoint import save_loop                  # additive: format v2 with the chain (stream.checkpoint)
+        from .checkpoint import save_loop                  # additive: checkpoint.FORMAT_ADDITIVE (v4), replacement: FORMAT (v1)
         return save_loop(self, dir, cancel=cancel)
 
     @classmethod
@@ -2676,6 +2728,14 @@ class AdapterLoop:
                 out.append(("stream", d["stream"]))
         return out
 
+    def replay_all(self, *, rescore=False) -> dict:
+        """Alias of replay: check the complete recorded protocol log, including freeze/train controls.
+
+        This replays the loop's protocol, not an arbitrary external environment. With rescore=True the saved frozen
+        models also recompute the recorded scores, under replay's existing versions_dir requirements.
+        """
+        return self.replay(rescore=rescore)
+
     def replay(self, rescore=False) -> dict:
         """Re-run the protocol from the records and compare → {"ok", "mismatches": [(n, what, why)], "decisions",
         "versions"}. The policy is the one the loop was built with (a fresh copy), trainings take their recorded
@@ -2692,6 +2752,7 @@ class AdapterLoop:
         fresh._replay_trains = [e for e in stored_ev if e.get("event") == "train"
                                 and (e.get("state") != "refused" or e.get("job") is not None)]
         fresh._replay_trains += [e["train"] for e in stored_ev if e.get("event") == "error" and e.get("train")]
+        fresh._replay_selections = [e for e in stored_ev if "training_selection" in e]
         fresh._replay_installs = [e["install"] for e in stored_ev if "install" in e]
         bad, k = [], 0
 
@@ -2854,7 +2915,7 @@ class AdapterLoop:
         """{"state", "error", "served", "candidate", "n", "labels": {"train", "calib", "holdout", "refused"},
         "trainings",
         "budget": {...}, "job", "paused", "alarms", "mode", "attached", "guarantee", "watch", "delta_spent",
-        "versions_kept"} — and "zones" in additive mode (`_zones`: per layer version, layer, routing_thr Λ, threshold λ,
+        "versions_kept", "resident_versions"} — and "zones" in additive mode (`_zones`: per layer version, layer, routing_thr Λ, threshold λ,
         certified, learning, probation, zone_share P̂(Z_v), owned_share, its counts and realised risk on its own coin
         samples; the chain's deepest, deepest_certified, zone_share, the composite stream-wide joint and selective risk
         — estimates, reported, not promised — beside the joint kind's bound α·(1 + Σ_{j≥1} P̂(Z_j))). labels: the
@@ -2865,6 +2926,12 @@ class AdapterLoop:
         "running". job: the training in flight — id, version, trigger, started (wall clock), started_at (its decision),
         inline, state ("running"; "ready": its result waits for the next decision), and what the runner fills in
         (runner, pid, log, device, eta, last, last_t: a heartbeat line's age says whether it is alive).
+
+        versions_kept counts served/retired rows only, with protected-row exceptions
+        to the soft retention target. resident_versions is a list of {version, state}
+        for every version-table row whose model is not None, including layers and a
+        candidate. Rows may share model storage: this is a reference inventory, not
+        bytes or unique objects/tensors, and excludes the live learner/runner.
 
         Takes no lock: it answers while a step (or an inline training inside it) runs on another thread. Its fields
         are read one by one, so two of them may straddle a decision."""
@@ -2887,6 +2954,8 @@ class AdapterLoop:
                 "delta_spent": self.budget.spent,
                 **({} if self.useful_budget is None else {"delta_use_spent": self.useful_budget.spent}),
                 "versions_kept": sum(1 for ver in list(self._vs.values()) if ver["state"] in KEPT),
+                "resident_versions": [{"version": v, "state": ver["state"]}
+                                      for v, ver in sorted(list(self._vs.items())) if ver["model"] is not None],
                 **({} if not self.additive else {"zones": self._zones()})}
 
     def fed(self, v) -> list:

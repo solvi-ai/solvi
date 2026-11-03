@@ -50,8 +50,8 @@ def test_percents_with_sign_word_and_space():
 
 
 def test_comma_thousands_with_decimals_and_currency():
-    ns = numerals("paid $1,234,567.89 and €2,000; then 12,34 and 1,2345")
-    assert [n.number for n in ns] == [Decimal("1234567.89"), 2000, 12, 34, 1, 2345]
+    ns = numerals("paid $1,234,567.89 and €2,000")
+    assert [n.number for n in ns] == [Decimal("1234567.89"), 2000]
     assert ns[0].unit == "$" and ns[0].surface == "$1,234,567.89"
 
 
@@ -334,3 +334,240 @@ def test_fill_earlier_result_in_exponent_form_is_read_back():
     f = fill("<calc>[1] / [2]%</calc> then <calc>@1 - [3]</calc>", "1,246.3 and 0.1% and 300")
     assert not f.errors, f.errors
     assert [c.value for c in f.calls] == [Decimal("1246300"), Decimal("1246000")]
+
+
+@pytest.mark.parametrize("sign", ["-", "−", "–"])
+@pytest.mark.parametrize("amount", ["369.7", "$369.7 billion", "$1,234.5", "369.7%"])
+def test_unicode_minus_preserved_through_numguard(sign, amount):
+    source = "Net transactions were " + sign + amount + "."
+    n, = numerals(source)
+    assert n.number == (-Decimal("1234.5") if "1,234" in amount else -Decimal("369.7"))
+    assert n.surface == sign + amount
+    assert annotate(source)[0] == "Net transactions were [1]" + sign + amount + "."
+    assert fill("Result [1].", source).text == "Result " + sign + amount + "."
+    assert not check("Result " + amount + ".", source, signed=True).ok
+    assert check("Result " + sign + amount + ".", source, signed=True).ok
+
+
+@pytest.mark.parametrize("measurement", ["4.0 percent", "7.0", "3.0 percent", "4%", "$7", "0 million"])
+def test_default_small_constants_do_not_source_measurements(measurement):
+    assert not check(measurement, "Reported 48.9 percent.").ok
+    assert check(measurement, measurement).ok
+    assert check(measurement, "", results=[Decimal(measurement.split()[0].strip("%$"))]).ok
+
+
+def test_explicit_constants_can_allow_decimal_measurements():
+    assert check("7.0", "", constants={Decimal("7.0")}).ok
+    assert check("4%", "", constants=lambda value: value == 4).ok
+    assert check("7 items and 100 total", "").ok
+
+
+@pytest.mark.parametrize("text", ["$21.87 quadrillion", "3 quintillions", "2 gazillion", "4 тыс.",
+                                  "4 млн", "4 млрд", "4 трлн", "2026,000", "105,6 млрд",
+                                  "12,34", "1,2345", "1,234,56", "$2026,000", "(2026,000)"])
+def test_unsupported_numeric_formats_refuse_instead_of_partial_values(text):
+    for operation in (numerals, annotate, lambda value: fill("Value [1]", value),
+                      lambda value: check(value, "21.87 and 2026"),
+                      lambda value: NumberGuard().run(value, "21.87 and 2026")):
+        with pytest.raises(ValueError, match="unsupported|ambiguous"):
+            operation(text)
+
+
+def test_supported_numeric_formats_and_ordinary_following_words_keep_spans():
+    text = "$1,234.56 trillion; 105 people; 3 млнx; 42%; 12k; 4.2 million; 1,234,567"
+    nums = numerals(text)
+    assert [n.value for n in nums] == [Decimal("1234560000000000"), Decimal(105), Decimal(3),
+                                      Decimal(42), Decimal(12000), Decimal(4200000), Decimal(1234567)]
+    assert all(text[n.start:n.end] == n.surface for n in nums)
+    assert check("$1,234.56 trillion; 42%", text).ok
+
+
+def test_explicit_decimal_comma_contract():
+    text = "Рост −₽136,60; 2,7%; (3,4)% и 1 234,50."
+    ns = numerals(text, decimal=",")
+    assert [n.number for n in ns] == [Decimal('-136.60'), Decimal('2.7'), Decimal('-3.4'), Decimal('1234.50')]
+    assert all(text[n.start:n.end] == n.surface for n in ns)
+    marked, annotated = annotate(text, decimal=",")
+    assert annotated == ns and '[1]' in marked
+    assert not check('Цены 2,7%.', 'Цены 4,9%.', decimal=',').ok
+    assert check('Цены 4,9%.', 'Цены 4,9%.', decimal=',').ok
+    guard = NumberGuard(decimal=',')
+    out = guard.run('Рост [1].', 'Рост 4,9%.')
+    assert out.ok and '4,9%' in out.text
+    assert guard.run('<calc>[1] + [1]</calc>', 'Рост 4,9.').ok
+
+
+@pytest.mark.parametrize('text', ['2,7', '2026,000', '1,23,456'])
+def test_decimal_comma_keeps_protected_default(text):
+    with pytest.raises(ValueError):
+        numerals(text)
+
+
+@pytest.mark.parametrize('text', ['1.5', '.5', '1,234.5', '1,2,3', '1234 000,5', '12 34,5'])
+def test_decimal_comma_rejects_mixed_or_foreign_punctuation(text):
+    with pytest.raises(ValueError):
+        numerals(text, decimal=',')
+
+
+def test_decimal_comma_mode_validation_and_default_grouping():
+    assert numerals('1,234.50')[0].number == Decimal('1234.50')
+    for decimal in ['auto', '', None]:
+        with pytest.raises(ValueError):
+            numerals('3', decimal=decimal)
+
+
+def test_comma_typed_integer_is_measurement():
+    assert not check("4,0", decimal=",").ok
+    assert check("4", decimal=",").ok
+
+
+@pytest.mark.parametrize("operation", ["numerals", "check", "run"])
+def test_text_number_work_scales_without_pairwise_scans(operation):
+    """Count executed Python lines, not wall time; 3x input must not need 9x work."""
+    import sys
+    from solvi.experimental import numguard as ng
+
+    def work(size):
+        source = " ".join(f"Account ${10000 + i}.25 today." for i in range(size))
+        typed = " ".join(f"Value ${10000 + i}.25." for i in reversed(range(size)))
+        reply = " ".join(f"[{i}]" for i in range(1, size + 1))
+        count = 0
+        def trace(frame, event, arg):
+            nonlocal count
+            if event == "line" and frame.f_code.co_filename == ng.__file__:
+                count += 1
+            return trace
+        previous = sys.gettrace()
+        try:
+            sys.settrace(trace)
+            if operation == "numerals":
+                result = ng.numerals(source)
+            elif operation == "check":
+                result = ng.check(typed, source)
+            else:
+                result = ng.NumberGuard(on_fail="report").run(reply, source)
+        finally:
+            sys.settrace(previous)
+        assert len(result) == size if operation == "numerals" else result.ok
+        return count
+
+    small, large = work(80), work(240)
+    assert large < 5 * small, (operation, small, large)
+
+
+def test_indexed_number_matching_preserves_full_scan_ranking():
+    from solvi.experimental import numguard as ng
+    # Exact outranks earlier sign/scale matches; ties retain original source order.
+    entries = [("input", 1, Decimal("-4.2"), Decimal("-4200000")),
+               ("input", 2, Decimal("4200000"), Decimal("4200000")),
+               ("tool", 3, Decimal("4.2"), Decimal("4200000")),
+               ("tool", 4, Decimal("4.2"), Decimal("4200000")),
+               ("input", 5, Decimal("13.63636"), Decimal("13.63636"))]
+    for pool in (entries, entries[::-1]):
+        indexed = ng._NumberPool(pool)
+        for n in ng.numerals("4.2 million; −4.2 million; 4200000; 4.2; 13.64; 999"):
+            for signed in (False, True):
+                for rescale, rounding in ((False, False), (True, False), (False, True), (True, True)):
+                    assert ng._match_number(n, indexed, signed, rescale, rounding) == ng._match_number(
+                        n, pool, signed, rescale, rounding)
+
+
+def test_inserted_sweep_preserves_first_overlap_in_caller_order():
+    from solvi.experimental.numguard import Inserted
+    # Deliberately unsorted, overlapping spans: the first iterable entry wins,
+    # not the leftmost or the shortest. Once expired, the next overlap wins.
+    spans = [Inserted(4, 10, "tool", 9), Inserted(0, 15, "input", 7), Inserted(0, 3, "tool", 1)]
+    verdict = check("101 202 303 404", inserted=spans, constants=frozenset())
+    assert [(n.source, n.index) for n in verdict.numbers] == [
+        ("input", 7), ("tool", 9), ("tool", 9), ("input", 7)]
+
+
+def test_span_index_preserves_dates_ids_and_locale():
+    source = "2024-03-15 A-10457 March 16, 2024 1,234.50; −5.25; (7.5)%"
+    assert [(n.kind, n.surface) for n in numerals(source)] == [
+        ("date", "2024-03-15"), ("id", "A-10457"), ("date", "March 16, 2024"),
+        ("number", "1,234.50"), ("number", "−5.25"), ("number", "(7.5)%")]
+    assert [n.surface for n in numerals("2024-03-15 A-10457 1 234,50", decimal=",")] == [
+        "2024-03-15", "A-10457", "1 234,50"]
+
+
+def test_ru_output_locale_roundtrips_without_inserted_trust():
+    src = 'The goods and services deficit was $105.6 billion; prices rose 3.4 percent. The update begins September 30, 2026.'
+    template = 'Дефицит составил [1], цены выросли на [2], пересмотр начнётся [3].'
+    filled = fill(template, src, locale='ru')
+    assert filled.text == 'Дефицит составил 105,6 млрд долл., цены выросли на 3,4%, пересмотр начнётся 30 сентября 2026 г.'
+    assert check(filled.text, src, locale='ru', constants=frozenset()).ok
+    assert not check(filled.text.replace('105,6', '105,7'), src, locale='ru', inserted=filled.inserted).ok
+    assert NumberGuard(locale='ru').run(template, src).ok
+    assert '$105.6 billion' in fill(template, src).text
+
+
+def test_ru_reader_spans_grouping_aliases_and_locale_validation():
+    text = '1\u00a0400\u00a0000; 2 500,5 млн руб.; 30 сентября 2026 г.'
+    nums = numerals(text, locale='ru')
+    assert [n.value for n in nums[:2]] == [Decimal('1400000'), Decimal('2500500000')]
+    assert nums[1].unit == '₽'
+    assert nums[2].date == dt.date(2026, 9, 30)
+    assert all(text[n.start:n.end] == n.surface for n in nums)
+    for function, args in ((fill, ('[1]', '12.5')), (check, ('12', '12')), (numerals, ('12',))):
+        with pytest.raises(ValueError, match='locale'):
+            function(*args, locale='unknown')
+
+
+def test_ru_source_and_output_punctuation_are_independent_and_calls_checked():
+    assert NumberGuard(locale='ru', decimal='.').run('[1] плюс <calc>[1] + 1</calc>', '12.5').ok
+    assert fill('[1]', '12,5', decimal=',', locale='ru').text == '12,5'
+    with pytest.raises(ValueError):
+        fill('[1]', '12,5', decimal='.', locale='ru')
+    verdict = check('1 400 000; 2,5 млн долл.; 3,4%', '1,400,000; $2.5 million; 3.4 percent', locale='ru')
+    assert verdict.ok and len(verdict.numbers) == 3
+    assert [n.index for n in verdict.numbers] == [1, 2, 3]
+    assert check('30 сентября 2026 г.', 'September 30, 2026', locale='ru').ok
+    assert not check('30 сентября 2027 г.', 'September 30, 2026', locale='ru').ok
+
+
+def test_ru_pointer_preserves_full_precision_and_provenance():
+    source = '$123456789.123456789 million'
+    result = fill('[1]', source, locale='ru', grouping=True)
+    assert result.text == '123\u00a0456\u00a0789,123456789 млн долл.'
+    assert check(result.text, source, locale='ru', constants=frozenset()).ok
+    parsed = numerals(result.text, locale='ru')[0]
+    assert parsed.value == Decimal('123456789123456.789')
+    assert result.inserted[0].source == 'input' and result.inserted[0].index == 1
+    assert result.text[result.inserted[0].start:result.inserted[0].end] == result.text
+
+
+def test_ru_inserted_pointer_keeps_designated_duplicate_provenance():
+    f = fill('[2]', '12.5; 12.5', locale='ru')
+    v = check(f.text, '12.5; 12.5', inserted=f.inserted, locale='ru')
+    assert v.ok
+    assert (v.numbers[0].source, v.numbers[0].index, v.numbers[0].how) == ('input', 2, 'pointer')
+    f = fill('[2]', '11.5; 12.5', locale='ru')
+    # The replacement matches source1, but is no longer what pointer2 meant.
+    v = check('11,5', '11.5; 12.5', inserted=f.inserted, locale='ru')
+    assert not v.ok and v.numbers[0].source == 'unsourced'
+    tool = fill('<calc>[1] + 1</calc>', '12.5', locale='ru')
+    v = check(tool.text, '12.5', results=tool.calls, inserted=tool.inserted, locale='ru')
+    assert v.ok and (v.numbers[0].source, v.numbers[0].index) == ('tool', 1)
+
+
+@pytest.mark.parametrize('text', ['12,5 руб. долларов', '12,5 долл. евро',
+                                  '12,5 млн млрд', '12,5 млн руб. млн', '12,5 тыс. тыс.'])
+def test_ru_rejects_adjacent_currency_and_scale_suffix_chains(text):
+    with pytest.raises(ValueError, match='suffix chain'):
+        numerals(text, locale='ru')
+    with pytest.raises(ValueError, match='suffix chain'):
+        check(text, '$12.5', locale='ru', constants=frozenset())
+
+
+def test_ru_designated_date_and_typed_tool_cells_survive_verification():
+    source = 'September 30, 2026; September 30, 2026'
+    f = fill('[2].', source, locale='ru')
+    v = check(f.text, source, inserted=f.inserted, locale='ru')
+    assert v.ok and v.numbers[0].index == 2 and v.numbers[0].how == 'pointer'
+    table = '| Region | Amount |\n| --- | --- |\n| EU | 12.5 |'
+    f = fill('<table>cell("EU", "Amount")</table>', table, locale='ru')
+    assert not f.errors
+    v = check(f.text, table, f.calls, inserted=f.inserted, locale='ru')
+    assert v.ok and v.numbers[0].source == 'tool' and v.numbers[0].index == 1
+    assert v.numbers[0].how == 'table' and v.numbers[0].cells == f.calls[0].cells
