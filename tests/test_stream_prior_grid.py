@@ -43,9 +43,9 @@ def test_prior_roundtrip_has_no_bets_and_binds_actual_grid():
     assert StreamPromise(max_risk=.1).restore(old).grid_origin is None
 
 
-def calibrated():
+def calibrated(count=200):
     system = _s1()
-    examples = [({"p": .6 + i / 1000}, "billing") for i in range(100)]
+    examples = [({"p": .6 + i / 1000}, "billing") for i in range(count)]
     system.guarantee("intent", examples, max_risk=.1)
     return system
 
@@ -54,7 +54,7 @@ def test_ordinary_calibration_to_dispatcher_uses_first_future_label():
     system = calibrated()
     promise = StreamPromise(max_risk=.1)
     system.guarantee("intent", promise=promise)
-    assert promise.grid_origin["count"] == 100
+    assert promise.grid_origin["count"] == 200
     assert promise.n == promise.seen == promise.dropped == 0 and promise.budget.v == 0
     dispatcher = Dispatcher(system, AskPath(_s2()), audit="adaptive", promise=promise, secret="prior-test")
     dispatcher.ask({"p": .8, "gold": "billing"})
@@ -117,3 +117,47 @@ def test_grouped_ordinary_calibration_does_not_supply_a_prior():
     promise = StreamPromise(max_risk=.1)
     system.guarantee("intent", promise=promise)
     assert promise.grid is None
+
+
+@pytest.mark.parametrize("count,grid_from", [(199, 200), (200, 201), (200, 4097)])
+def test_automatic_prior_never_shrinks_the_requested_pilot(count, grid_from):
+    system = calibrated(count)
+    promise = StreamPromise(max_risk=.1, grid_from=grid_from)
+    system.guarantee("intent", promise=promise)
+    assert promise.grid is None and promise.grid_origin is None
+    assert promise.n == promise.seen == promise.dropped == 0
+    assert promise.budget.v == 0
+
+
+def test_automatic_prior_uses_exact_first_requested_scores_in_original_order():
+    from solvi.core.calibration import ltt_grid
+
+    system = calibrated(300)
+    prior = system.guards["intent"].promise._prior_grid_scores
+    promise = StreamPromise(max_risk=.1, grid_from=200)
+    system.guarantee("intent", promise=promise)
+    expected = sorted(map(float, ltt_grid(prior[:200], promise.grid_size)), reverse=True)
+    all_cached = sorted(map(float, ltt_grid(prior, promise.grid_size)), reverse=True)
+    assert promise.grid == expected and promise.grid != all_cached
+    assert promise.grid_origin["count"] == 200
+
+
+def test_explicit_prime_grid_is_a_deliberate_prior_not_automatic_pilot():
+    promise = StreamPromise(max_risk=.1, grid_from=200)
+    promise.prime_grid([.8], source="explicit one-point fixed prior")
+    assert promise.grid == [.8] and promise.grid_origin["count"] == 1
+    assert promise.v is None and promise.budget.v == 0
+
+
+def test_fold_calibration_cannot_supply_an_automatic_prior(monkeypatch):
+    from solvi.core.guarantees import guarantee
+
+    # Exercise the fold exclusion contract without fitting any real model; row collection and installation are real.
+    monkeypatch.setattr(guarantee, "_fold_heads", lambda system, question, examples, folds, seed: [None] * len(examples))
+    system = _s1()
+    examples = [({"p": .6 + i / 1000}, "billing") for i in range(200)]
+    system.guarantee("intent", examples, max_risk=.1, folds=2)
+    assert not hasattr(system.guards["intent"].promise, "_prior_grid_scores")
+    promise = StreamPromise(max_risk=.1)
+    system.guarantee("intent", promise=promise)
+    assert promise.grid is None and promise.grid_origin is None

@@ -753,9 +753,10 @@ def _guard_question(system, question, examples, *, max_error, max_risk, method, 
         descriptor = getattr(getattr(old, "promise", None), "_prior_grid_descriptor", None)
         if (prior and groups is None and descriptor == prior_descriptor
                 and callable(getattr(promise, "prime_grid", None)) and promise.grid_spec == "auto"
+                and len(prior) >= promise.grid_from and promise.grid_from <= 4096
                 and promise.grid is None and promise.seen == promise.n == promise.dropped == 0
                 and promise.v is None and not promise._buffer):
-            promise.prime_grid(list(prior), source=f"past ordinary calibration: {question}")
+            promise.prime_grid(list(prior[:promise.grid_from]), source=f"past ordinary calibration: {question}")
     if labels is not None:
         promise.report["labels"] = labels
     guard.promise = promise

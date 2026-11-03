@@ -1123,7 +1123,10 @@ remains unchanged. Old dumps without that field retain their earlier evidence in
 
 Ordinary `System.guarantee` calibration without folds/groups privately retains its first 4096 finite scores only.
 Replacing that guard on the same question, exact signal descriptor and answer with a fresh auto StreamPromise
-uses those past scores before the first future bet. No additional inference is performed; the existing installation
+uses exactly the first `grid_from` finite past scores before the first future bet, only when that many are cached.
+A shorter cache or `grid_from > 4096` retains live warmup; the automatic path never silently shrinks the requested
+pilot. The explicit `prime_grid` API is a deliberate fixed-prior choice and accepts any valid non-empty bounded
+list independently of `grid_from`. No additional inference is performed; the existing installation
 signal probes, when requested, still run. Unknown/mismatched cache and grouped/cross-fitted calibration keep the
 normal live warmup fallback; manual or active grids are never reset. `grid_from` continues to govern that fallback.
 
