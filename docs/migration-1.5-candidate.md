@@ -329,3 +329,13 @@ Without an applicable trusted verifier/token, the proxy keeps the escalation unr
 still denies without a token. The proxy never enables the compatibility waiver automatically or manufactures a
 signature from an MCP role. Only `PermissionError` from resolution becomes this structured refusal; unexpected
 resolution errors keep their existing error path.
+
+`Message(..., verified=True)` is now descriptive metadata only. With `message_verifier` configured, authentication
+comes from successful verification of the raw message or opaque context provenance minted by that same Guard.
+The private context stamp binds the exact role/text to the Guard and current verifier identity; copying flags or
+stamp metadata onto changed content does not authenticate it. Changing verifier identity invalidates existing context
+stamps. Preverified context from another Guard does not transfer authentication, even with equal verification keys. Same-Guard
+Session clipping and batch deep copies retain their internal provenance. Sessions verify on entry/add and retain
+that accepted context; they do not promise fresh age verification on every subsequent call. Repeated raw signed
+contexts still pass through the verifier and its existing age checks. This boundary does not defend against hostile
+Python code modifying private in-process Guard state, nor does it establish the truth of authenticated content.

@@ -158,7 +158,8 @@ def messages(context) -> list:
 class Message(tuple):
     """A (role, text) message of a Session's context, with flags: `tainted` — the message, before the session cut it
     to its size cap, carried instruction-like text (the guard treats it as tainted even if the cut kept none);
-    `verified` — a user message whose signature Guard(message_verifier=) accepted (the guard does not ask again)."""
+    `verified` is descriptive metadata, not authentication authority. A Guard internally binds accepted Session
+    context to its own instance; setting this public flag cannot create that binding."""
     tainted = False
     verified = False
 
@@ -167,6 +168,15 @@ class Message(tuple):
         m.tainted = bool(tainted)
         m.verified = bool(verified)
         return m
+
+    def __deepcopy__(self, memo):
+        from copy import deepcopy
+        result = Message(deepcopy(self[0], memo), deepcopy(self[1], memo), self.tainted, self.verified)
+        memo[id(self)] = result
+        # Preserve the opaque instance binding across same-Guard batch preflight, without minting one from flags.
+        if hasattr(self, "_verified_stamp"):
+            result._verified_stamp = self._verified_stamp
+        return result
 
 
 def _kind(kind):
@@ -1661,6 +1671,9 @@ class Guard:
         self.require_effects = bool(require_effects)
         self.user_verifier = user_verifier
         self.message_verifier = message_verifier
+        import secrets
+        self._message_key = secrets.token_bytes(32)
+        self._message_verifier_identity = message_verifier
         self.storage = open_storage(storage)
         self.tools: dict[str, Tool] = {}
         facts = fact_names                   # the names (and types) of the facts the app gives (`facts=` in 0.7); their
@@ -2396,6 +2409,35 @@ class Guard:
         except Exception:  # noqa: BLE001 — a verifier's refusal: the message is not the user's
             return False
 
+    @property
+    def message_verifier(self):
+        return self._message_verifier
+
+    @message_verifier.setter
+    def message_verifier(self, verifier):
+        if getattr(self, "_message_verifier", None) is not verifier and hasattr(self, "_message_key"):
+            import secrets
+            self._message_key = secrets.token_bytes(32)
+            self._message_verifier_identity = verifier
+        self._message_verifier = verifier
+
+    def _message_stamp(self, role, text):
+        import hmac
+        import secrets
+        if self._message_verifier_identity is not self.message_verifier:
+            self._message_key = secrets.token_bytes(32)
+            self._message_verifier_identity = self.message_verifier
+        if not isinstance(role, str) or not isinstance(text, str):
+            return None
+        payload = json.dumps([role, text], ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+        return hmac.digest(self._message_key, payload, "sha256").hex()
+
+    def _message(self, role, text, tainted=False, verified=False):
+        message = Message(role, text, tainted, verified)
+        if verified and role == "user":
+            message._verified_stamp = self._message_stamp(role, text)
+        return message
+
     def _read(self, context):
         """The context as the guard reads it: with Guard(message_verifier=), every user message the verifier does not
         accept becomes a tool output → [Message] (the context itself when no verifier is set)."""
@@ -2404,10 +2446,14 @@ class Guard:
         out = []
         for m in [context] if isinstance(context, str) else context:
             parts = _messages(m if isinstance(m, str) and m is context else [m])
-            ok = isinstance(m, Message) and m.verified or any(r == "user" for r, _, _ in parts) and self._signed(m)
+            import hmac
+            stamp = getattr(m, "_verified_stamp", None) if isinstance(m, Message) else None
+            expected = self._message_stamp(m[0], m[1]) if isinstance(m, Message) else None
+            own_context = isinstance(stamp, str) and expected is not None and hmac.compare_digest(stamp, expected)
+            ok = own_context or any(r == "user" for r, _, _ in parts) and self._signed(m)
             for r, t, tainted in parts:
                 user = r == "user" and ok
-                out.append(Message("tool" if r == "user" and not ok else r, t, tainted, verified=user))
+                out.append(self._message("tool" if r == "user" and not ok else r, t, tainted, verified=user))
         return out
 
     def _state(self, c, context, facts):
@@ -2852,7 +2898,7 @@ class Session:
                 from ...core.deciders.perturb import injection_spans
                 tainted = bool(injection_spans(text))      # on the whole message, before the cut
             text = _clip(text, self.max_chars)
-        self.context.append(Message(role, text, tainted and role == "tool", verified and role == "user"))
+        self.context.append(self.guard._message(role, text, tainted and role == "tool", verified and role == "user"))
         if self.max_messages is not None and len(self.context) > self.max_messages:
             del self.context[:len(self.context) - self.max_messages]
         if self.max_chars is not None:
