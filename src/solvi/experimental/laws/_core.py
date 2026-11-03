@@ -815,14 +815,18 @@ class Enumerate:
     """The default: every condition the grammar builds from the atoms true in the mismatched state, with every effect
     variant of the observation (lawset.effects). Under Grammar(negations="refine") also the grammar's `refinements`
     on the buffer the call gives `mismatch(…, buffer=…, exclude=…)` — `step` passes its own (without the mismatch's
-    group); a direct `mismatch` call without a buffer proposes the positive conditions only, and `admit_by_probes(…,
-    buffer=…)` cannot add them later: its candidates are computed before it sees the buffer."""
+    group). Without that buffer refinement enumeration raises before evaluating atoms or effects: pass the same
+    buffer to `mismatch` and `admit_by_probes`. For intentional positive-only proposals use negations=False."""
     name = "enumerate"
 
     def propose(self, lawset, state, action, observed):
         g = lawset.grammar
         if getattr(g, "negations", False) == "refine":
             buf, exclude = getattr(lawset, "_proposing", None) or (None, None)
+            if buf is None:
+                raise ValueError('Grammar(negations="refine") enumeration requires mismatch(..., buffer=...): '
+                                 'pass the same buffer to mismatch and admit_by_probes; '
+                                 'use negations=False for positive-only enumeration')
             conds = g.candidates(g.true(state, action), buf, action, exclude)
         else:
             conds = g.conditions(g.true(state, action))
@@ -929,11 +933,12 @@ class BudgetedProposer:
         return kept
 
     def propose(self, lawset, state, action, observed):
-        self.last = []
         if self.spent():
+            self.last = []
             return []
+        proposed = list(self.inner.propose(lawset, state, action, observed))
         self.mismatches_seen += 1
-        self.last = self.cut(list(self.inner.propose(lawset, state, action, observed)), lawset.grammar)
+        self.last = self.cut(proposed, lawset.grammar)
         return self.last
 
 
@@ -1652,8 +1657,9 @@ class LawSet:
     def mismatch(self, state, action, observed, buffer: "Buffer | None" = None, exclude=None) -> list[Candidate]:
         """No mismatch (the prediction is the observation) → []; else the proposer's candidates, without the laws
         already active. buffer (with its group `exclude` left out, as `step` leaves the transition's group): the rows
-        the proposer may need — under Grammar(negations="refine") the refinements are computed from it, and without a
-        buffer they are not proposed at all. `admit_by_probes(buffer=…)` does not reach them: its candidates are
+        the proposer may need — under Grammar(negations="refine") default enumeration requires it and raises if
+        absent on a real mismatch. Matching predictions still return [] without a buffer. Custom proposers may
+        supply their own negated candidates without one. `admit_by_probes(buffer=…)` does not reach them: its candidates are
         computed here, before it sees the buffer, so pass the same buffer to this call. A candidate a leftover probe
         falsified on a buffer that has not grown since is not re-proposed (see `admit_by_probes`, falsify="leftover";
         the refusals are counted in `refused_falsified`)."""

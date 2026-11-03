@@ -1085,3 +1085,15 @@ NumberGuard().run(reply, source).text
 - **Missing:** measured once with a prototype of the same protocol (its script is not in the repository) on three open models of 8B to 120B parameters, 100 long synthetic reports and 500 finance questions, with the wider constant set (MEASURED_CONSTANTS; the default is SMALL): numbers without a source fell to 0–0.4 % of the numerals in the reports, against 9–22 % when the model typed its numbers and 3.5–10 % with native tool calling; the price was 4–8 % of numerals pointing at the wrong input number and refusals (6–9 % of questions on the 8B model, 14–20 % of reports on the two smaller ones); it guarantees provenance, not correctness; still missing: a benchmark script in benchmarks/ run with this module, the same check on real documents, and wiring into a System's decisions
 - **Script:** none in the repository (the measurement's stand ran outside it). **Deadline:** a future release.
 - API: [solvi.experimental.numguard](api/numguard.md).
+
+### Refinement proposal buffer contract (1.5)
+
+With `Grammar(negations="refine")`, default `Enumerate` requires the logged buffer at proposal time:
+`candidates = laws.mismatch(state, action, observed, buffer=buffer)` followed by
+`laws.admit_by_probes(candidates, oracle, probes=pool, buffer=buffer)`. A genuine mismatch without that buffer now
+raises an actionable `ValueError` rather than silently offering only positive conditions. This also applies when
+`Enumerate` is wrapped by `RankedProposer` or `BudgetedProposer`; a ranker's scoring buffer is not implicitly the
+proposal buffer. Refusal happens before inner enumeration and budget/scorer accounting. Matching observations still
+return `[]` without a buffer. Custom proposers that supply their own negated candidates remain supported without
+one. For intentional positive-only enumeration, construct `Grammar(..., negations=False)`. This is an intentional
+1.5 migration; passing a buffer only to admission cannot repair candidates that were never proposed.

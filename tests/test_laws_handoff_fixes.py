@@ -108,11 +108,14 @@ def refine_world():
     return states, truth, g, buf
 
 
-def test_mismatch_without_a_buffer_still_proposes_the_positive_conditions_only():
+def test_refining_mismatch_without_a_buffer_refuses_instead_of_silently_proposing_positive_only():
     states, truth, g, buf = refine_world()
     ls = LawSet(g, base=lambda s, a: "idle")
-    plain = ls.mismatch((1, 0, 0, 1, 1), "act", "fire")
-    assert plain and not any("not:" in x for c in plain for x in c.condition)
+    before = (dict(ls.cost), ls.version, ls._proposing)
+    with pytest.raises(ValueError, match="same buffer"):
+        ls.mismatch((1, 0, 0, 1, 1), "act", "fire")
+    assert (dict(ls.cost), ls.version, ls._proposing) == before
+    assert ls.mismatch((0, 0, 0, 1, 1), "act", "idle") == []
 
 
 def test_mismatch_with_the_buffer_proposes_the_refinements_and_admits_the_true_law():
@@ -128,8 +131,16 @@ def test_mismatch_with_the_buffer_proposes_the_refinements_and_admits_the_true_l
 
 
 def test_admit_by_probes_cannot_add_the_refinements_on_its_own():
-    # its buffer= arrives after the candidates were computed: the positive candidates alone stay undetermined
+    # Refine must be explicit at proposal time; admission's later buffer cannot repair a missing proposal.
     states, truth, g, buf = refine_world()
+    ls = LawSet(g, base=lambda s, a: "idle")
+    with pytest.raises(ValueError, match="same buffer"):
+        ls.mismatch((1, 0, 0, 1, 1), "act", "fire")
+    # An intentionally positive-only grammar remains a negative control without weakening its quality bar.
+    g = Grammar([Atom(f"x{i}", lambda s, i=i: s[i] == 1, feature=f"x{i}") for i in range(5)],
+                k=2, negations=False)
+    buf = Buffer(g)
+    buf.extend([Transition(s, "act", truth(s, "act"), group=f"g{i % 4}") for i, s in enumerate(states)])
     ls = LawSet(g, base=lambda s, a: "idle")
     plain = ls.mismatch((1, 0, 0, 1, 1), "act", "fire")
     adm = ls.admit_by_probes(plain, truth, probes=[(s, "act") for s in states], budget=20, buffer=buf)
@@ -190,3 +201,32 @@ def test_a_wrong_formula_within_the_noise_passes_and_the_docstring_says_so():
     assert passed / trials >= 0.90                                                    # the χ² alone is no guarantee (0.961 at 1000)
     assert "0.961" in residual_check.__doc__                                          # the measured number is documented
     assert "dof_sigma" in residual_check.__doc__
+
+
+def test_refine_wrappers_refuse_before_mutating_budget_or_calling_scorer():
+    from solvi.experimental.laws import BudgetedProposer, Enumerate, RankedProposer
+
+    class NeverScore:
+        def score(self, *args, **kw):
+            raise AssertionError("scorer called before missing-buffer refusal")
+
+    _, _, g, buf = refine_world()
+    for proposer in (Enumerate(), BudgetedProposer(Enumerate(), candidates=10),
+                     RankedProposer(Enumerate(), NeverScore(), buf),
+                     BudgetedProposer(RankedProposer(Enumerate(), NeverScore(), buf), candidates=10)):
+        ls = LawSet(g, base=lambda s, a: "idle", proposer=proposer)
+        before = dict(proposer.__dict__)
+        with pytest.raises(ValueError, match="same buffer"):
+            ls.mismatch((1, 0, 0, 1, 1), "act", "fire")
+        assert proposer.__dict__ == before
+        assert ls.cost["candidates"] == 0 and ls._proposing is None
+
+
+def test_custom_proposer_can_supply_refined_candidates_without_a_buffer():
+    from solvi.experimental.laws import CallableProposer
+
+    _, _, g, _ = refine_world()
+    ls = LawSet(g, base=lambda s, a: "idle", proposer=CallableProposer(
+        lambda state, action, observed, true_atoms, grammar: [("not:x2", "x0")]))
+    candidates = ls.mismatch((1, 0, 0, 1, 1), "act", "fire")
+    assert [candidate.condition for candidate in candidates] == [("not:x2", "x0")]
