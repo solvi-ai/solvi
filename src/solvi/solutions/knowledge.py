@@ -75,7 +75,7 @@ class Knowledge:
     (now=)); None: `usable` reads status and staleness only."""
 
     def __init__(self, path=None, *, vocabulary=None, write_gate=None, actions=None, failures=None, severity=1.0,
-                 writers=None, now=None):
+                 writers=None, reassert_writers=(), now=None):
         from ..core.knowledge import Agenda, ConservativeActionModel, FailureMemory, KnowledgeStore, Vocabulary
         from ..core.knowledge.gates import default_gates
         if vocabulary is not None and actions is not None:
@@ -85,7 +85,7 @@ class Knowledge:
         if write_gate is not None:
             extra = list(write_gate) if isinstance(write_gate, (list, tuple)) else [write_gate]
             gates = default_gates() + extra
-        self.store = KnowledgeStore(path, gates=gates, writers=writers, now=now)
+        self.store = KnowledgeStore(path, gates=gates, writers=writers, reassert_writers=reassert_writers, now=now)
         self.agenda = Agenda(self.store)
         if vocabulary is not None:
             if isinstance(vocabulary, dict):
@@ -108,7 +108,7 @@ class Knowledge:
 
     # ------------------------------------------------------------------------------------------------ writing
     def tell(self, fact, *, source, by=None, of=None, scope=None, derived_from=(), evidence=None, valid=None,
-             consulted=(), inferred=False):
+             consulted=(), inferred=False, reassert=False):
         """Write a fact — {"s", "r", "o"} or (s, r, o) — from a person, an outcome, a written spec, or a verified System 2
         answer (`of=` its stored decision). It goes through the source check and the write gates; a contradiction of
         equal rank becomes a person question (`store.disputes()`). → the item's id, or None when a gate refused it (the
@@ -116,12 +116,13 @@ class Knowledge:
         one marks this fact for review (see KnowledgeStore.add). inferred: the fact is computed from `derived_from` (a
         rule applied to facts), not observed — it competes by rank and follows its premises (KnowledgeStore.add). A
         fact with `derived_from` and no `valid` holds where its premises hold together (refused when they never do)."""
+        # reassert is an opt-in, exact own-claim waiver; see the 1.5 migration guide.
         if isinstance(fact, (tuple, list)) and len(fact) == 3:
             fact = {"s": fact[0], "r": fact[1], "o": fact[2]}
         if not (isinstance(fact, dict) and {"s", "r", "o"} <= set(fact)):
             raise ValueError("a fact is {'s': subject, 'r': relation, 'o': value} or (subject, relation, value)")
         return self.store.add("fact", fact, scope, source=source, by=by, of=of, derived_from=derived_from,
-                              evidence=evidence, valid=valid, consulted=consulted, inferred=inferred)
+                              evidence=evidence, valid=valid, consulted=consulted, inferred=inferred, reassert=reassert)
 
     def retract(self, item, why=None, *, by=None, storage=None, decide=None, only_from=None, assertion=None):
         """Take an item back with everything derived from it (nothing is deleted: the journal keeps it). → {"status":

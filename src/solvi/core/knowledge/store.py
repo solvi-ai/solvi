@@ -423,12 +423,15 @@ class KnowledgeStore:
     (or an item derived from it) is not usable with no `valid_at` given. None (default): as before — `usable(id)`
     with no `valid_at` reads status and staleness only."""
 
-    def __init__(self, storage=None, *, gates=None, defaults=None, writers=None, now=None, _replay=True):
+    def __init__(self, storage=None, *, gates=None, defaults=None, writers=None, reassert_writers=(), now=None, _replay=True):
         from ..store import open_storage
         self.storage = open_storage(storage)
         self.gates = with_source_gate(gates if gates is not None else default_gates())
         if writers is not None:
             self.gates.insert(1, WriterGate(writers))       # right after the source check
+        self.reassert_writers = frozenset(str(w) for w in reassert_writers)
+        if self.reassert_writers and (writers is None or not self.reassert_writers <= set(map(str, writers))):
+            raise ValueError("reassert_writers must be registered writers")
         self.defaults = dict(RECONFIRM_DEFAULTS if defaults is None else defaults)
         self.now = now                                   # a world clock for usable() with no valid_at (see usable)
         self._lock = threading.RLock()
@@ -509,6 +512,8 @@ class KnowledgeStore:
     def _apply(self, r):
         """Apply one journal entry to the raw data (rebuild and replay: no new entry is written)."""
         op, t = r["op"], r["n"]
+        if op == "assert" and r.get("reassert_proof"):
+            self._validate_reassert_record(r, t)
         self.clock = r.get("clock", self.clock)
         if op == "assert":
             self._raw_assert(r, t)
@@ -583,7 +588,37 @@ class KnowledgeStore:
         if not self._batch:
             self._flush()
 
+    def _validate_reassert_record(self, r, t):
+        iid = r["item"]
+        it = self.items.get(iid)
+        if it is None:
+            raise ValueError("invalid reassert: no earlier item")
+        if r.get("reassert_proof"):
+            proof = r["reassert_proof"]
+            prop = {"id": iid, "kind": r["item_kind"], "by": r.get("by"), "source": r["source"],
+                    "valid": r.get("valid"), "derived_from": r.get("just", ()),
+                    "consulted": r.get("consulted", ()), "inferred": r.get("inferred", False)}
+            if proof != self._reassert_proof(prop, check_capability=False):
+                raise ValueError("invalid reassert proof: incomplete withdrawal history")
+            expected = {"writer": r.get("by"), "source": r["source"], "valid": r.get("valid"),
+                        "cuts": proof.get("cuts")}
+            if proof != expected or r.get("just") or not proof["cuts"]:
+                raise ValueError("invalid reassert proof")
+            for c in proof["cuts"]:
+                old = next((e for e in self.journal if e["n"] == c["withdrawal"]), None)
+                if (old is None or old["n"] >= t or old["op"] != "retract_assertions"
+                        or old.get("by") != proof["writer"] or old.get("assertions") != c["assertions"]
+                        or old.get("item") != iid or c.get("actor") != proof["writer"]):
+                    raise ValueError("invalid reassert withdrawal proof")
+                for n in c["assertions"]:
+                    prior = next((a for a in it.asserts if a["t"] == n), None)
+                    if (prior is None or prior["by"] != proof["writer"] or prior["source"] != proof["source"]
+                            or prior.get("valid") != proof["valid"] or prior["just"]):
+                        raise ValueError("invalid exact reassert assertion proof")
+
     def _raw_assert(self, r, t):
+        if r.get("reassert_proof"):
+            self._validate_reassert_record(r, t)
         iid = r["item"]
         it = self.items.get(iid)
         if it is None:
@@ -607,7 +642,8 @@ class KnowledgeStore:
                            "just": tuple(r.get("just") or ()), "supersedes": r.get("supersedes"),
                            "evidence": r.get("evidence"), "valid": r.get("valid"), "level": r.get("level"),
                            "of": r.get("of"), "inferred": bool(r.get("inferred")),
-                           "consulted": tuple(r.get("consulted") or ())})
+                           "consulted": tuple(r.get("consulted") or ()),
+                           "reassert_proof": r.get("reassert_proof")})
         for p in it.asserts[-1]["just"] + it.asserts[-1]["consulted"]:     # a consulted item's change re-resolves it
             self.dependents[p].add(iid)
         if it.reconfirm_after:                          # this assertion's clock is a possible last support: past
@@ -636,7 +672,7 @@ class KnowledgeStore:
                 "consulted": consulted}
 
     def add(self, kind, body, scope=None, *, source, by=None, evidence=None, derived_from=(), supersedes=None,
-            reconfirm_after=None, valid=None, level=None, of=None, shadow=None, inferred=False, consulted=()):
+            reconfirm_after=None, valid=None, level=None, of=None, shadow=None, inferred=False, consulted=(), reassert=False):
         """Propose an item → its id, or None when a gate refused it (a "refused" entry in the journal says why).
 
         kind: one of KINDS; body: plain JSON (a fact: {"s", "r", "o"}); scope: a dict (a question, an environment);
@@ -655,6 +691,8 @@ class KnowledgeStore:
 
         A fact or an episode the gates admit is present at once; a rule, skill or action the gates admit is promoted (its
         verdicts recorded); one a later gate holds stays a hypothesis (a "held" entry says why)."""
+        if reassert and (derived_from or inferred or consulted):
+            raise ValueError("reassert requires a direct assertion")
         with self._lock:
             if valid is None and derived_from:              # a derived item holds where all its premises hold
                 valid, why = self._derived_valid(derived_from)
@@ -672,12 +710,15 @@ class KnowledgeStore:
                           "support — retracting an outside premise of the loop taints every item in it",
                           stacklevel=2)
         with self._lock:
+            proof = self._reassert_proof(prop) if reassert else None
             verdicts = []
             for g in self.gates:
                 v = g.admit(self, prop, shadow)
                 v.gate = v.gate or getattr(g, "name", type(g).__name__)
                 verdicts.append(v)
                 if not v.admit and (v.gate in ("source", "writers", "consistency") or kind not in NEEDS_PROMOTION):
+                    if reassert:
+                        raise ValueError(f"reassert {v.gate}: {v.reason}")
                     self._write("refused", item=prop["id"], item_kind=kind, source=source, by=prop["by"],
                                 why=f"{v.gate}: {v.reason}")
                     return None
@@ -685,6 +726,7 @@ class KnowledgeStore:
                               source=source, by=prop["by"], evidence=prop["evidence"], just=prop["derived_from"],
                               supersedes=supersedes, reconfirm_after=prop["reconfirm_after"], valid=prop["valid"],
                               level=level, of=prop["of"], **({"inferred": True} if inferred else {}),
+                              **({"reassert_proof": proof} if proof else {}),
                               **({"consulted": prop["consulted"]} if prop["consulted"] else {}))
             with self.batch():
                 self._raw_assert(rec, rec["n"])
@@ -698,6 +740,32 @@ class KnowledgeStore:
                     else:
                         self.promote(prop["id"], measured=[v.to_dict() for v in verdicts])
             return prop["id"]
+
+    def _reassert_proof(self, prop, *, check_capability=True):
+        """An exact own assertion withdrawal waiver; never an item-wide re-test."""
+        if ((check_capability and prop["by"] not in self.reassert_writers) or prop["kind"] != "fact"
+                or prop["valid"] is None or prop["derived_from"] or prop["consulted"] or prop["inferred"]):
+            raise ValueError("reassert requires a registered capable writer and a direct exact-validity fact")
+        it = self.items.get(prop["id"])
+        if it is None:
+            raise ValueError("reassert requires an earlier exact assertion")
+        exact = {a["t"] for a in it.asserts if a["by"] == prop["by"] and a["source"] == prop["source"]
+                 and a.get("valid") == prop["valid"] and not a["just"]}
+        cuts = []
+        for r in self.journal:
+            if r.get("item") != prop["id"]:
+                continue
+            if r["op"] in ("retract", "retract_assertions"):
+                ns = r.get("assertions", [])
+                if (r["op"] != "retract_assertions" or r.get("by") != prop["by"]
+                        or not ns or not set(ns) <= exact):
+                    raise ValueError("reassert cannot waive external, global or non-exact withdrawals")
+                cuts.append({"withdrawal": r["n"], "assertions": ns, "actor": r["by"]})
+            if r["op"] in ("flag", "retire"):
+                raise ValueError("reassert cannot waive a flag or retirement")
+        if any(self._flag_covers(t, prop["id"], ignore_age=True) for t in self._pending_flags()) or not cuts:
+            raise ValueError("reassert needs an exact own withdrawal and no flags")
+        return {"writer": prop["by"], "source": prop["source"], "valid": prop["valid"], "cuts": cuts}
 
     def _derived_valid(self, premises):
         """The validity of an item derived from `premises` that gives none of its own: the intersection of the premises'
@@ -1681,6 +1749,9 @@ def _taint(items, iid, memo, deferred=None):
             via.append(max(tas))
         seen += [tp for p in a.get("consulted", ()) if (tp := _taint(items, p, memo, deferred))
                  not in (None, _IN_PROGRESS) and tp > a["t"]]
+    if cut is not None and any(a.get("reassert_proof") and
+                               cut in {c["withdrawal"] for c in a["reassert_proof"]["cuts"]} for a in live):
+        cut = None  # this direct claim vouches only after its exact own withdrawal
     if cut is not None and live and all(a.get("inferred") for a in live):
         cut = None                                      # recomputed from premises: their own cuts decide (above)
     # a consulted item (an alternative's evidence) cut after the assertion: any one marks it for review
@@ -1855,6 +1926,9 @@ def _guard(items, ids, cache=None):
                 if vj_j == gi.vj and tc < a["t"] and _overlap(ivb, iv) \
                         and not any(tc < tp <= a["t"] for tp in clears.get((vj_j, since), ())):
                     w.append((tc, by))
+            if a.get("reassert_proof"):
+                waived = {c["withdrawal"] for c in a["reassert_proof"]["cuts"]}
+                w = [(tc, by) for tc, by in w if tc not in waived]
             if not w or any(tp > a["t"] for tp in clears.get((gi.vj, sk), ())):
                 clean.append((i, a))
             else:
