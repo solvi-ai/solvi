@@ -23,6 +23,7 @@ from .state import _is_text, _single, _text, jsonable, state_text
 from .wire import Logits, _respan
 from .backends import LONG_CPU_TOKENS, SECTION_TOKENS
 from .adapt import ADAPTERS, _Spec, lora_key
+from .identity import part_operation, safe_finish, calibration_operation
 from .gate import Facts, GroupBy, _group_guard, _group_promise, _shown, _threshold, _vkey, confidence_source, group_record, guard_promise, guard_rule, no_separation, one_source
 
 
@@ -213,6 +214,7 @@ class DecisionPart:
         lk = _VERSION_LOCKS.get(self)
         return contextlib.nullcontext() if lk is None else lk
 
+    @part_operation
     def __call__(self, *args, **kw):
         with self._one_version():
             vals = dict(zip(self.__signature__.parameters, args))
@@ -274,6 +276,7 @@ class DecisionPart:
         d.evidence = [dataclasses.replace(e, source=f) for e in d.evidence]
         return d
 
+    @part_operation
     def in_pass(self, siblings, args, names=None):
         """Called by the runtime for a part in a shared pass (flow.batches): score every sibling's question about the same
         input in one forward pass (cached, so the siblings read it) and return this part's decision; the decision's extra
@@ -281,6 +284,7 @@ class DecisionPart:
         with self._one_version():
             return self._in_pass(siblings, args, names)
 
+    @part_operation
     def _in_pass(self, siblings, args, names=None):
         text = self.text_of(args)
         ctx = self._ctx(text, vals=args)
@@ -314,6 +318,7 @@ class DecisionPart:
         node = node_of(path, self.groups["nodes"])
         return path, node, self.groups["nodes"][node]
 
+    @safe_finish
     def _finish(self, d, act, threshold=None, ctx=None):
         """Act or escalate. threshold: a combination's shared threshold (solvi.core.deciders.combine) in place of this part's own
         act_threshold / escalate_below — on the part's signal (see _signal); −inf applies only the other safeguards.
@@ -650,6 +655,7 @@ class DecisionPart:
         return [float(d.probs.get("yes", 0.0)) for d in ds]
 
     # the model's methods for this decision
+    @part_operation
     def decide(self, text):
         """An input (a text, a state, or facts by name: `from solvi.core.deciders import Facts`,
         Facts(contract=..., hypothesis=...)) → Decision; a list of inputs → a list."""
@@ -852,6 +858,7 @@ class DecisionPart:
                                                 for f in self.facts + extra])
 
     @_deprecate.removed_kwargs(error="max_error")
+    @calibration_operation
     def calibrate_for(self, examples, *, max_error=0.05, signal="auto", method="empirical", delta=0.10, label_check=False):
         """Choose the escalation threshold for a target error rate among the answers given alone, on labelled examples
         [(input, correct)]. method="empirical": the lowest threshold at which the calibration decisions it lets through
@@ -907,6 +914,7 @@ class DecisionPart:
         return out
 
     @_deprecate.removed_kwargs(risk="max_risk")
+    @calibration_operation
     def act_guard(self, examples, *, max_risk=0.10, signal="auto", groups=None, min_group=100, delta=0.10,
                   label_check=False):
         """Answer alone only as far as a guarantee allows (conformal risk control), from labelled examples of your own
@@ -1011,6 +1019,7 @@ class DecisionPart:
                 out.setdefault("warnings", []).append(lw)
         return out
 
+    @calibration_operation
     def conformal(self, examples, coverage=0.90):
         """Conformal answer sets from labelled examples [(input, correct)]: afterwards every decision carries
         `extra["candidates"]` — the answers that cannot be ruled out, which contain the right one with probability
@@ -1076,6 +1085,8 @@ class DecisionPart:
         return self.lora
 
     def _apply_calibration(self, rec, grp, path):
+        # File bindings cannot prove the live lease's deployment namespace.
+        self._identity_binding = None
         """Set the thresholds a calibration file holds (solvi.core.calibfile.load has checked it)."""
         if grp is not None:
             grp["signal"] = rec["groups"].get("signal")

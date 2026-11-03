@@ -27,6 +27,7 @@ from .backends import BlockUnsupported, LongInputWarning, OnnxScorer, SharedQues
 from .adapt import Adaptation, _Spec, _basis, _fit_shift, _fit_temperature, _from_type, _given, _is_type, _sig, _softmax, _usable, lora_key
 from .gate import Facts, act_features
 from .part import DecisionPart
+from .identity import IdentityGuard, guarded, abstain
 
 _SHADOW = threading.local()      # per thread: {(id(model), lora_key): adapter or None} — solvi.experimental.lora.scoring
 #                                  and .adapt: {(id(model), adaptation key): Adaptation or None} — the version's own
@@ -169,7 +170,7 @@ class DecideModel:
     canary = None                           # an identity canary (solvi.core.guarantees.canary) watching a remote model
 
     def __init__(self, scorer, meta=None, model_id=None, path=None, backend=None, cache_size=4096, multi_question=None,
-                 act=None, max_len_long=None):
+                 act=None, max_len_long=None, identity_safe=False, identity_lease=None):
         self.scorer = scorer
         self.meta = dict(meta or {})
         self.model_id = model_id or getattr(scorer, "model_id", None) or type(scorer).__name__
@@ -212,6 +213,7 @@ class DecideModel:
         self._block_failed = False
         self._wfp = None
         self.passes = 0                     # sequences the network encoded (a shared pass counts once)
+        self.identity_guard = IdentityGuard(self, identity_lease) if identity_safe else None
 
     # --- loading and identity
     @classmethod
@@ -817,6 +819,8 @@ class DecideModel:
         """Calibrated logits → Decision. Questions of solvi 0.5 without "not stated" decide exactly as before; span, rank and
         number questions and those allowing "not stated" (from an answer-primitives checkpoint's outputs) go through _decision_v3; a
         question asking for evidence gets the pointer's quotes."""
+        if self.identity_guard is not None and not getattr(self.identity_guard.local, "active", False):
+            return abstain(self.identity_guard)
         u, ptr = getattr(z, "unknown", None), getattr(z, "pointer", None)
         if sp.kind == "span":
             d = self._span_decision(sp, ptr, getattr(z, "escalate", None))
@@ -1007,6 +1011,7 @@ class DecideModel:
 
     @_deprecate.removed_kwargs(escalate_below="min_confidence")
     @_spec_names
+    @guarded
     def decide(self, text, task, options, descriptions=None, multi=False, other=None, kind=None, min_confidence=None,
                **spec):
         """→ Decision(value, probs) (a list of them for a list of inputs). The value is always one of the options; a text
@@ -1040,6 +1045,7 @@ class DecideModel:
         d = self.decide(text, task, options, descriptions, multi, other, kind, **spec)
         return d.probs if isinstance(d, Decision) else [x.probs for x in d]
 
+    @guarded
     def decide_pass(self, text, parts, names=None):
         """Several decision parts about one input, scored together → [Decision] (one forward pass when the checkpoint
         supports it, else one per question). What the runtime does for parts grouped in `flow.batches`."""

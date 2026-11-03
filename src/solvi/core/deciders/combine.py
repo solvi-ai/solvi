@@ -42,6 +42,7 @@ from ... import _deprecate
 from ..catalog import Decision, Quote, Unknown, gone_in_1_0
 from . import DecisionPart, Facts, GroupBy, _group_info, _group_promise, _single, group_record, guard_promise, guard_rule, no_separation, one_source
 from ..provenance import ESCALATED, code_fingerprint, digest
+from .identity import combination_guard
 from ..runtime import RECORD_KEYS          # what a replay compares with the recomputed (defined there; re-exported)
 
 # guarantee["signal"]: a name, as a part's ("act", "confidence"): one threshold shared by every part, on each part's
@@ -533,6 +534,7 @@ class Combination:
         d = self.decide(text)
         return d.probs if isinstance(d, Decision) else [x.probs for x in d]
 
+    @combination_guard
     def _decide(self, src):
         st = self.state(src)
         d = self.final(st, None)

@@ -100,6 +100,8 @@ def record(part):
            "fingerprint": base_fingerprint(part), "models": _models(part)}
     out.update(part._calibration_thresholds())
     out.update(guarantee=part.guarantee, conformal=part.conformal_set, groups=_groups_record(part.groups))
+    if getattr(part, "_identity_binding", None) is not None:
+        out["provider_identity_binding"] = list(part._identity_binding)
     ad = part._calibration_adapter()
     if ad is not None:                              # the adapter it was calibrated with, in a file beside it
         out[ad.kind] = {"hash": ad.fingerprint()}
