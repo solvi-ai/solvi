@@ -112,7 +112,7 @@ def test_a_stream_promise_restored_from_its_dump_continues_exactly(bets):
     for _ in range(400):
         s = r.random()
         a.observe(s)
-        a.learn(s, "x", "x" if r.random() < 0.97 else "y")
+        a.learn(s, "x", "x" if r.random() < 0.97 else "y", sampling_policy='complete')
     d = json.loads(json.dumps(a.dump()))
     b = StreamPromise(max_risk=0.1, delta=0.05, bets=bets, grid_from=50).restore(d)
     assert b.state() == a.state() and b.events == a.events
@@ -120,7 +120,7 @@ def test_a_stream_promise_restored_from_its_dump_continues_exactly(bets):
         s = r.random()
         for p in (a, b):
             p.observe(s)
-            p.learn(s, "x", "x" if s > 0.2 else "y")
+            p.learn(s, "x", "x" if s > 0.2 else "y", sampling_policy='complete')
     assert b.state() == a.state() and b.threshold == a.threshold
     with pytest.raises(ValueError, match="another configuration"):
         StreamPromise(max_risk=0.2, delta=0.05, bets=bets, grid_from=50).restore(d)

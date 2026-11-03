@@ -46,14 +46,14 @@ def test_a_fresh_promise_certifies_after_85_clean_samples_then_116_after_a_resta
     sp = StreamPromise(max_risk=0.05, grid=[0.0], budget=budget)
     k = 0
     while math.isinf(sp.threshold):
-        sp.learn(1.0, "a", "a")
+        sp.learn(1.0, "a", "a", sampling_policy='complete')
         k += 1
     assert k == 85 and sp.threshold == 0.0 and [e["event"] for e in sp.events] == ["grid", "certified"]
     # lazy δ charge (stage B4): the restart's index is taken at its first sample, not by restart()
     assert sp.restart("alarm") == (None, None) and math.isinf(sp.threshold) and sp.n == 0 and budget.v == 1
     k = 0
     while math.isinf(sp.threshold):
-        sp.learn(1.0, "a", "a")
+        sp.learn(1.0, "a", "a", sampling_policy='complete')
         k += 1
     assert k == 116 and sp.events[-2]["event"] == "recertify" and sp.events[-2]["why"] == "alarm" and sp.v == 2
     assert budget.spent == pytest.approx(budget.delta_at(1) + budget.delta_at(2))
@@ -95,7 +95,7 @@ def test_a_threshold_whose_risk_is_above_alpha_is_rarely_ever_in_force(kind):
         last = INF
         for _ in range(n):
             s, wrong = _toy(kind, rng)
-            sp.learn(s, "x", "y" if wrong else "x")
+            sp.learn(s, "x", "y" if wrong else "x", sampling_policy='complete')
             assert sp.threshold <= last                       # only loosens
             last = sp.threshold
         bad += _risk(kind, sp.threshold) > alpha
@@ -111,7 +111,7 @@ def test_shuffled_labels_never_certify():
         sp.observe(rng.random())
     assert sp.grid is not None and len(sp.grid) == 32
     for _ in range(10_000):
-        sp.learn(rng.random(), rng.choice("ab"), rng.choice("ab"))
+        sp.learn(rng.random(), rng.choice("ab"), rng.choice("ab"), sampling_policy='complete')
     assert math.isinf(sp.threshold) and sp.state()["certified"] == 0
 
 
@@ -124,8 +124,8 @@ def test_missing_labels_never_certify_more_than_full_labels():
         for _ in range(3000):
             s, wrong = _toy(kind, rng)
             label = "y" if wrong else "x"
-            full.learn(s, "x", label)
-            part.learn(s, "x", None if rng.random() < 0.2 else label)
+            full.learn(s, "x", label, sampling_policy='complete')
+            part.learn(s, "x", None if rng.random() < 0.2 else label, sampling_policy='complete')
             assert part.threshold >= full.threshold
         assert part.missing > 0 and not math.isinf(full.threshold)
 
@@ -133,7 +133,7 @@ def test_missing_labels_never_certify_more_than_full_labels():
 # --- the grid
 def test_the_auto_grid_is_fixed_from_unlabelled_scores_and_earlier_samples_are_not_read():
     sp = StreamPromise(max_risk=0.05, grid_from=50)
-    sp.learn(0.9, "a", "a")
+    sp.learn(0.9, "a", "a", sampling_policy='complete')
     assert sp.dropped == 1 and sp.grid is None and sp.n == 0
     for i in range(50):
         sp.observe(i / 50)
@@ -173,12 +173,12 @@ def test_the_same_samples_give_the_same_state_and_a_pickle_continues_identically
         a.observe(s)
         b.observe(s)
     for s, w in rows[100:250]:
-        a.learn(s, "x", "y" if w else "x")
-        b.learn(s, "x", "y" if w else "x")
+        a.learn(s, "x", "y" if w else "x", sampling_policy='complete')
+        b.learn(s, "x", "y" if w else "x", sampling_policy='complete')
     assert a.state() == b.state()
     c = pickle.loads(pickle.dumps(a))
     for s, w in rows[250:]:
-        assert a.learn(s, "x", "y" if w else "x") == c.learn(s, "x", "y" if w else "x")
+        assert a.learn(s, "x", "y" if w else "x", sampling_policy='complete') == c.learn(s, "x", "y" if w else "x", sampling_policy='complete')
     assert a.fingerprint() == c.fingerprint() == b.fingerprint()
 
 
@@ -191,7 +191,7 @@ def test_it_has_the_promise_interface():
     assert sp.report["threshold"] is None and isinstance(sp.fingerprint(), str)
     fp = sp.fingerprint()
     for _ in range(100):
-        sp.learn(1.0, "a", "a")
+        sp.learn(1.0, "a", "a", sampling_policy='complete')
     assert sp.threshold == 0.5 and sp.allows(0.5) and not sp.allows(0.49)
     assert sp.fingerprint() == fp                             # the configuration, not the state
 
@@ -218,7 +218,7 @@ def test_installed_on_a_system_it_records_its_state_and_a_replay_rebuilds_it():
         results.append(r)
         log.append(("observe", p))
         if t >= 30:                                           # every later decision labelled, all right
-            sp.learn(p, "billing", "billing")
+            sp.learn(p, "billing", "billing", sampling_policy='complete')
             log.append(("learn", p))
     assert sp.seen == 140 and not math.isinf(sp.threshold)
     first = next(x for x in results[0].trace.records if x.name == "guard:intent")
@@ -236,5 +236,5 @@ def test_installed_on_a_system_it_records_its_state_and_a_replay_rebuilds_it():
             assert fresh.state() == next(recorded)
             fresh.observe(p)
         else:
-            fresh.learn(p, "billing", "billing")
+            fresh.learn(p, "billing", "billing", sampling_policy='complete')
     assert fresh.state() == sp.state()

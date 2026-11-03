@@ -97,7 +97,7 @@ def test_pointwise_certifies_a_loose_point_before_a_strict_one_that_no_sample_re
     fx = StreamPromise(max_error=0.5, grid=[0.9, 0.5], delta=0.05)
     for _ in range(60):
         for p in (pw, fx):
-            p.learn(0.6, "a", "a")                     # alone at 0.5 only, always right
+            p.learn(0.6, "a", "a", sampling_policy='complete')                     # alone at 0.5 only, always right
     assert pw.certified_at(0.5) and not pw.certified_at(0.9) and pw.threshold == 0.5
     assert math.isinf(fx.threshold)                    # the fixed sequence starves on 0.9
     assert pw.level_now == pytest.approx(math.log(2 / pw.delta_v), abs=1e-9)
@@ -117,7 +117,7 @@ def test_pointwise_is_named_in_state_dump_and_fingerprint_and_fixed_is_unchanged
     with pytest.raises(ValueError, match="procedure"):
         StreamPromise(max_error=0.5, procedure="bonferroni")
     for _ in range(40):
-        pw.learn(0.97, "a", "a")
+        pw.learn(0.97, "a", "a", sampling_policy='complete')
     back = StreamPromise(max_error=0.5, grid=GRID, procedure="pointwise").restore(pw.dump())
     assert back.state() == pw.state() and back.threshold == pw.threshold
 

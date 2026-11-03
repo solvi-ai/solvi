@@ -221,3 +221,11 @@ Calibration now follows the final joint selection: the selected candidate's path
 Platt map, then independent fact and text-entry bounds are applied. The old answer's calibrated confidence is not
 replaced by an uncalibrated class probability. Existing systems using joint repair should refit and revalidate their
 calibration/guarantee under the new runtime; retain the old environment to replay old confidence values exactly.
+
+## Required sampling declaration
+
+`StreamPromise.learn(signal, answer, label, floor=None, *, sampling_policy)` now requires a sampling declaration on every call. Omission raises `TypeError` before the certificate reads or changes anything. Restoring a checkpoint does not supply a sampling policy for subsequent calls.
+
+Use `sampling_policy="uniform"` only for an input-independent audit coin whose rate can depend on the past. Use `sampling_policy="complete"` when every decision in the certificate's population is labelled. Missing labels still count as losses. Input-dependent sampling is rejected before any evidence or delta budget changes; this certificate has no IPW/DR support. Separate per-slice certificates need independent uniform sampling within each slice and separately allocated delta budgets.
+
+Dispatcher and StreamLoop supply declarations for the sampling paths they own. Manual callers must establish their actual sampling design; adding the word `uniform` does not make a slice-dependent coin valid. This API validates a declaration, cannot detect a dishonest caller, and does not solve adversarial re-probing (S334). Grid construction, statistical thresholds and label floors are unchanged.

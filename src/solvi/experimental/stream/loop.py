@@ -1189,17 +1189,19 @@ class AdapterLoop:
                 continue
             if not n > ver["frozen_at"]:                   # cannot happen: a version is frozen at the end of a step
                 raise RuntimeError(f"decision {n} would calibrate version {v} frozen at {ver['frozen_at']}")
-            ver["promise"].learn(score, would, label, floor=floor)
+            ver["promise"].learn(score, would, label, floor=floor,
+                                   sampling_policy="uniform" if base_of[v] else "complete")
             if ver.get("useful") is not None:
-                ver["useful"].learn(score, would, label, floor=floor)
+                ver["useful"].learn(score, would, label, floor=floor,
+                                   sampling_policy="uniform" if base_of[v] else "complete")
             ver["fed"].append(n)
         if route["zone"]:
             ver = self._vs[c]
             if not n > ver["frozen_at"]:
                 raise RuntimeError(f"decision {n} would calibrate version {c} frozen at {ver['frozen_at']}")
-            ver["promise"].learn(score_k, would_k, label)
+            ver["promise"].learn(score_k, would_k, label, sampling_policy="complete")
             if ver.get("useful") is not None:
-                ver["useful"].learn(score_k, would_k, label)
+                ver["useful"].learn(score_k, would_k, label, sampling_policy="complete")
             ver["fed"].append(n)
             ver["samples"].append((score_k, score_o, label is None or would_k != label,
                                    label is None or would_o != label, key in ver["keys"]))
@@ -1664,10 +1666,10 @@ class AdapterLoop:
                     ver = self._vs[v]
                     if not n > ver["frozen_at"]:           # cannot happen: a version is frozen at the end of a step
                         raise RuntimeError(f"decision {n} would calibrate version {v} frozen at {ver['frozen_at']}")
-                    ver["promise"].learn(score, would, label)
+                    ver["promise"].learn(score, would, label, sampling_policy="uniform")
                     ver["fed"].append(n)
                 if cmp is not None:
-                    cmp.learn(score_s, would_s, label)
+                    cmp.learn(score_s, would_s, label, sampling_policy="uniform")
                 if c is not None:
                     self._vs[c]["samples"].append((score_k, score_s, label is None or would_k != label,
                                                    label is None or would_s != label, key in self._vs[c]["keys"]))

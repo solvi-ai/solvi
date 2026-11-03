@@ -216,7 +216,7 @@ def _missing_run(seed, m, how, kind="joint", T=1500):
         r = rng.random()
         miss = {"mcar": r < m, "wrong": wrong and r < min(1.0, m / p_wrong),
                 "right": (not wrong) and r < min(1.0, m / (1 - p_wrong))}[how]
-        sp.learn(s, "a", None if miss else ("b" if wrong else "a"))
+        sp.learn(s, "a", None if miss else ("b" if wrong else "a"), sampling_policy='complete')
         bad = bad or _bad(sp)
     return bad, 0.0 if math.isinf(sp.threshold) else 1.0 - sp.threshold
 
@@ -249,8 +249,8 @@ def test_missing_exactly_when_wrong_reads_as_the_full_labels(kind):
     for _ in range(800):
         s = rng.random()
         wrong = rng.random() < C * (1 - s)
-        a.learn(s, "a", "b" if wrong else "a")
-        b.learn(s, "a", None if wrong else "a")
+        a.learn(s, "a", "b" if wrong else "a", sampling_policy='complete')
+        b.learn(s, "a", None if wrong else "a", sampling_policy='complete')
         sa, sb = a.state(), b.state()
         assert sa["evidence_fp"] == sb["evidence_fp"] and sa["threshold"] == sb["threshold"]
 
@@ -262,8 +262,8 @@ def test_a_missing_label_never_certifies_more_than_the_full_label():
     for _ in range(1500):
         s = rng.random()
         y = "b" if rng.random() < C * (1 - s) else "a"
-        full.learn(s, "a", y)
-        part.learn(s, "a", None if rng.random() < 0.3 else y)
+        full.learn(s, "a", y, sampling_policy='complete')
+        part.learn(s, "a", None if rng.random() < 0.3 else y, sampling_policy='complete')
         assert part.threshold >= full.threshold
 
 

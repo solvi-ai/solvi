@@ -16,7 +16,7 @@ def test_rejected_sampling_declaration_is_atomic(grid, existing, policy):
     promise = StreamPromise(max_risk=.05, delta=.05, grid=grid)
     if existing:
         promise.observe(.9)
-        promise.learn(.9, 'a', 'a')
+        promise.learn(.9, 'a', 'a', sampling_policy='complete')
     before = copy.deepcopy(promise.dump())
     budget = copy.deepcopy(promise.budget.state())
     with pytest.raises(ValueError, match='sampling'):
@@ -25,7 +25,7 @@ def test_rejected_sampling_declaration_is_atomic(grid, existing, policy):
     assert promise.budget.state() == budget
 
 
-def test_legacy_uniform_and_complete_have_identical_state():
+def test_explicit_uniform_and_complete_have_identical_state():
     promises = [StreamPromise(max_risk=.05, delta=.05, grid=[.8, .5]) for _ in range(3)]
     for n in range(600):
         score = .9 if n % 3 else .6
@@ -33,7 +33,7 @@ def test_legacy_uniform_and_complete_have_identical_state():
         floor = .8 if n % 4 == 0 else None
         for promise in promises:
             promise.observe(score)
-        states = [promises[0].learn(score, 'a', label, floor),
+        states = [promises[0].learn(score, 'a', label, floor, sampling_policy='complete'),
                   promises[1].learn(score, 'a', label, floor, sampling_policy='uniform'),
                   promises[2].learn(score, 'a', label, floor, sampling_policy='complete')]
         assert states[0] == states[1] == states[2]

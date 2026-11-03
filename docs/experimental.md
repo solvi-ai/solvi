@@ -493,7 +493,8 @@ from solvi.experimental.stream import StreamPromise
 sp = StreamPromise(max_risk=0.05, delta=0.05)          # or max_error= (the error among the answers given alone)
 system.guarantee("intent", promise=sp, signal="act")    # installed as OpenSetGate is; the signal is probed once —
                                                        # an unreadable one ("act" with no act head) refuses the install
-sp.learn(score, would_be_answer, label)                 # one labelled sample; label None: missing, counted as a loss
+# Only for a coin independent of the current input and label:
+sp.learn(score, would_be_answer, label, sampling_policy="uniform")                 # one labelled sample; label None: missing, counted as a loss
 sp.restart("alarm")                                     # uncertified again; the next δ_v at its first sample
 ```
 

@@ -182,7 +182,7 @@ class StreamDriver:
         """One sample read: the promise learns it, the detector gets its deployed loss → (events, drift or None)."""
         p, det = self.promise, self.detector
         alarm, why = None, None
-        p.learn(score, would, label)
+        p.learn(score, would, label, sampling_policy="uniform")
         if det is not None and in_force is not None and not prob:
             wrong = label is None or would != label
             if lost:

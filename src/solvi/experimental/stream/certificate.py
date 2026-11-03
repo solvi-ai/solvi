@@ -267,7 +267,7 @@ class StreamPromise:
                     self._set_grid(pts)
         return self.state()
 
-    def learn(self, signal, answer, label, floor=None, *, sampling_policy="uniform") -> dict:
+    def learn(self, signal, answer, label, floor=None, *, sampling_policy) -> dict:
         """One labelled sample: the decision's score, the answer it would give alone, its label (None: missing — a loss
         wherever it would have been answered alone). Before the grid is fixed the sample is not read (`dropped`).
         floor: grid points below it do not bet on this sample (no wealth or peak change; `n` counts the sample once) —
@@ -276,7 +276,7 @@ class StreamPromise:
         sampling_policy declares how the caller selected this sample: "uniform" means a coin independent of the
         current input and label (its rate may depend on the past); "complete" means every decision is labelled.
         Known "input_dependent" sampling is refused: this unweighted certificate does not implement IPW or DR.
-        This checks the caller's declaration only. The default does NOT detect a hidden slice-dependent coin;
+        The required declaration checks caller intent only; it does NOT detect a hidden slice-dependent coin;
         the certificate's guarantee still requires the declared sampling assumption to hold. Dispatcher already
         enforces an input-independent coin and a rate determined from the past in its own sampling path.
         Invalid declarations are refused before any state change or delta-budget charge."""

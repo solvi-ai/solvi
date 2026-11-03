@@ -24,14 +24,14 @@ def test_a_promise_takes_its_index_at_its_first_bet_not_when_built():
     assert sp.v is None and sp.delta_v is None and budget.v == 0 and math.isinf(sp.threshold)
     for i in range(10):                                    # before the grid: observed, a label is dropped, no bet
         sp.observe(i / 10)
-        sp.learn(i / 10, "a", "a")
+        sp.learn(i / 10, "a", "a", sampling_policy='complete')
     assert sp.v is None and budget.v == 0 and sp.dropped == 10 and sp.state()["v_index"] is None
     for i in range(10):
         sp.observe(0.5 + i / 30)
     assert sp.grid is not None and sp.v is None            # the grid alone spends nothing
-    sp.learn(0.9, "a", "a")                                # the first bet: the index first
+    sp.learn(0.9, "a", "a", sampling_policy='complete')                                # the first bet: the index first
     assert (sp.v, sp.delta_v) == (1, budget.delta_at(1)) and budget.v == 1 and sp.n == 1
-    sp.learn(0.9, "a", "a")
+    sp.learn(0.9, "a", "a", sampling_policy='complete')
     assert sp.v == 1 and budget.v == 1                     # once per certification
 
 
@@ -39,13 +39,13 @@ def test_the_index_order_is_the_order_of_first_bets_and_a_restart_that_never_bet
     budget = DeltaBudget(0.05)
     a = StreamPromise(max_risk=0.05, grid=[0.0], budget=budget)
     b = StreamPromise(max_risk=0.05, grid=[0.0], budget=budget)
-    b.learn(1.0, "a", "a")
-    a.learn(1.0, "a", "a")
+    b.learn(1.0, "a", "a", sampling_policy='complete')
+    a.learn(1.0, "a", "a", sampling_policy='complete')
     assert (b.v, a.v) == (1, 2)                            # issue order, not construction order
     assert a.restart("alarm") == (None, None) and a.v is None and math.isinf(a.threshold)
     a.restart("again")                                     # re-alarmed before its first post-alarm sample
     assert budget.v == 2
-    a.learn(1.0, "a", "a")
+    a.learn(1.0, "a", "a", sampling_policy='complete')
     assert a.v == 3 and budget.v == 3 and budget.spent == pytest.approx(sum(budget.delta_at(v) for v in (1, 2, 3)))
     assert [e["event"] for e in a.events] == ["grid", "recertify", "recertify"]
     assert [e["v_index"] for e in a.events] == [None, None, None]
@@ -56,13 +56,13 @@ def test_certification_still_takes_85_then_116_clean_samples():
     sp = StreamPromise(max_risk=0.05, grid=[0.0], budget=budget)
     k = 0
     while math.isinf(sp.threshold):
-        sp.learn(1.0, "a", "a")
+        sp.learn(1.0, "a", "a", sampling_policy='complete')
         k += 1
     assert k == 85 and sp.v == 1
     sp.restart("alarm")
     k = 0
     while math.isinf(sp.threshold):
-        sp.learn(1.0, "a", "a")
+        sp.learn(1.0, "a", "a", sampling_policy='complete')
         k += 1
     assert k == 116 and sp.v == 2
 
@@ -88,7 +88,7 @@ def test_an_uncharged_dump_is_format_v2_and_restores_a_charged_one_stays_v1():
     with pytest.raises(ValueError, match="no δ index"):
         StreamPromise(max_risk=0.05, grid=[0.5, 0.0], budget=budget).restore(bad)
     for _ in range(30):
-        sp.learn(0.7, "a", "a")
+        sp.learn(0.7, "a", "a", sampling_policy='complete')
     d = sp.dump()
     assert d["format"] == "solvi stream promise v1" and d["v"] == 1
     back = StreamPromise(max_risk=0.05, grid=[0.5, 0.0], budget=budget).restore(d)
@@ -101,18 +101,18 @@ def test_peak_at_follows_the_first_uncertified_point():
     sp = StreamPromise(max_risk=0.05, grid=[0.5, 0.0], budget=DeltaBudget(0.05))
     assert sp.peak_at() == 0
     for _ in range(20):
-        sp.learn(0.3, "a", "a")                            # both points gain (joint: no loss at either)
+        sp.learn(0.3, "a", "a", sampling_policy='complete')                            # both points gain (joint: no loss at either)
     assert sp.peak_at() == 20
     for _ in range(5):
-        sp.learn(0.3, "a", "b")                            # wrong, alone at 0.0 only: point 0.5 still gains
+        sp.learn(0.3, "a", "b", sampling_policy='complete')                            # wrong, alone at 0.0 only: point 0.5 still gains
     assert sp.peak_at() == 25 and sp._peak[1][1] == 20     # the first open point (0.5) climbs; 0.0 fell
     while math.isinf(sp.threshold):
-        sp.learn(0.3, "a", "a")
+        sp.learn(0.3, "a", "a", sampling_policy='complete')
     assert sp.threshold == 0.5                             # point 0.5 certified: point 0.0 is the first open one
     assert sp.peak_at() == sp._peak[1][1] <= sp.n
     sp2 = StreamPromise(max_risk=0.05, grid=[0.0], budget=DeltaBudget(0.05))
     while math.isinf(sp2.threshold):
-        sp2.learn(1.0, "a", "a")
+        sp2.learn(1.0, "a", "a", sampling_policy='complete')
     assert sp2.peak_at() is None                           # every point certified
 
 

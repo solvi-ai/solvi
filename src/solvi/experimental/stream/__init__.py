@@ -5,7 +5,8 @@ the sampling inside the Dispatcher, the agent as the oracle and the closed learn
 
     sp = StreamPromise(max_risk=0.05, delta=0.05)            # joint: P(answered alone and wrong) ≤ 5 %
     system.guarantee("intent", promise=sp, signal="act")      # installed as OpenSetGate is; +inf until certified
-    sp.learn(score, would_be_answer, label)                   # one labelled sample (label None: missing, a loss)
+    # Only for a coin independent of the current input and label:
+    sp.learn(score, would_be_answer, label, sampling_policy="uniform")                   # one labelled sample (label None: missing, a loss)
     sp.threshold                                              # the loosest certified grid point (only loosens)
     sp.restart("alarm")                                       # uncertified again; next (v, δ_v) at its first sample
 

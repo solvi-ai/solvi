@@ -172,7 +172,7 @@ def test_an_alarm_is_on_the_promise_events_with_its_statistic():
     i = 0
     while math.isinf(sp.threshold):
         sp.observe(0.9)
-        sp.learn(0.9, "a", "a")                                  # clean labels until a threshold certifies
+        sp.learn(0.9, "a", "a", sampling_policy="complete")                                  # clean labels until a threshold certifies
         i += 1
         assert i < 5000
     for _ in range(20):                                          # then wrong labelled samples: the detector fires

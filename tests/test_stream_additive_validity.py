@@ -304,7 +304,8 @@ def _run_upstream(seed, n=8000):
     ctrl = StreamPromise(max_risk=ALPHA_U, budget=DeltaBudget(DELTA_U), grid=GRID)
     for k, d in loop.log:
         if k == "loop" and d["stream"]["owner"] == 0 and d["stream"]["sampled"]:
-            ctrl.learn(d["stream"]["score"], d["loop"]["path_would"][0], d["loop"]["label"])
+            # Deliberate uniform lie: preserve the historical biased-owner negative control, not supported use.
+            ctrl.learn(d["stream"]["score"], d["loop"]["path_would"][0], d["loop"]["label"], sampling_policy='uniform')
     lam0 = loop._route.get(0)
     return {"layered": len(loop._layers) == 2, "lam0": lam0, "index": p0.v, "delta_v": p0.delta_v,
             "false": _false_below(p0, p0.v), "false_before_attach": bool(before),

@@ -300,13 +300,14 @@ def _worst_risk(seed, escalations_only, T=3000):
         wrong = rng.random() < 1 - s
         if escalations_only and s >= sp.threshold:
             continue                                         # answered alone: never sampled (the bug)
-        sp.learn(s, "a", "b" if wrong else "a")
+        # Deliberate false declaration in the biased negative control: the API cannot detect caller lies.
+        sp.learn(s, "a", "b" if wrong else "a", sampling_policy='uniform')
         if not math.isinf(sp.threshold):
             worst = max(worst, (1 - sp.threshold) ** 2 / 2)
     return worst
 
 
-def test_calibrating_on_escalations_only_breaks_the_promise():
+def test_false_uniform_declaration_on_escalations_breaks_the_promise():
     right = [_worst_risk(s, False) for s in range(12)]
     bug = [_worst_risk(s, True) for s in range(12)]
     assert sum(w > 0.05 for w in right) == 0                 # the coin over every decision: the promise holds
