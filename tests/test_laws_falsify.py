@@ -110,8 +110,9 @@ def test_an_invalid_value_raises(bad):
         run(wrong_world, STATES, falsify=bad)
 
 
-def test_noise_and_two_laws_refuse_it():
+def test_noise_refuses_exact_falsification_and_two_law_mode_supports_it():
     with pytest.raises(ValueError):
         run(wrong_world, STATES, falsify="leftover", noise=0.1)
-    with pytest.raises(ValueError):
-        run(wrong_world, STATES, falsify="leftover", max_new=2)
+    ls, result = run(wrong_world, STATES, falsify="leftover", max_new=2)
+    assert result.status == "undetermined" and not ls.laws
+    assert "falsified by probe" in result.why

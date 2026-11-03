@@ -2,6 +2,8 @@
 import itertools
 import warnings
 
+import pytest
+
 with warnings.catch_warnings():
     warnings.simplefilter("ignore")
     from solvi.experimental.laws import Atom, Buffer, Candidate, Grammar, LawSet, Transition
@@ -37,11 +39,18 @@ def test_default_falsifies_a_single_survivor_on_unused_probes():
     assert "falsified by probe" in default.why
 
 
-def test_auto_preserves_explicit_noise_and_two_law_paths():
-    for kw in ({"noise": .1}, {"max_new": 2}):
-        auto = admission(**kw)
-        old = admission(falsify=None, **kw)
-        assert (auto.status, auto.why, len(auto.asked)) == (old.status, old.why, len(old.asked))
+def test_auto_requires_explicit_noisy_closed_family_opt_in():
+    with pytest.raises(ValueError, match="explicit falsify=None"):
+        admission(noise=.1)
+    assert admission(noise=.1, falsify=None).status in ("accepted", "undetermined")
+
+
+def test_auto_falsifies_the_original_wrong_admission_with_two_law_mode():
+    legacy = admission(max_new=2, falsify=None)
+    auto = admission(max_new=2)
+    assert legacy.status == "accepted"
+    assert auto.status == "undetermined" and auto.law is None
+    assert "falsified by probe" in auto.why
 
 
 def test_all_predictions_include_equal_specificity_shadowed_laws_and_defaults():
@@ -96,3 +105,75 @@ def test_matching_checker_respects_exceptions_and_custom_effect_equality():
     module = load_module(ls.to_module())
     assert module.predictions(state, 'do', apply=ls.apply, maximal=True) == [(exception.id, 12)]
     assert module.violations(state, 'do', 12.05, apply=ls.apply, agrees=ls.agrees) == []
+
+
+def test_noisy_auto_refuses_before_iterating_inputs_or_calling_the_oracle():
+    g = Grammar([Atom("x", lambda s: bool(s))], k=1)
+    ls = LawSet(g)
+    before = (ls.version, dict(ls.cost), dict(ls._falsified_at))
+
+    def forbidden():
+        raise AssertionError("input consumed")
+        yield
+
+    def ask(*args):
+        raise AssertionError("oracle called")
+
+    with pytest.raises(ValueError, match="explicit falsify=None"):
+        ls.admit_by_probes(forbidden(), ask, probes=forbidden(), noise=.1)
+    assert (ls.version, dict(ls.cost), dict(ls._falsified_at)) == before
+    with pytest.raises(ValueError, match="noise=None"):
+        ls.admit_by_probes(forbidden(), ask, probes=forbidden(), noise=.1, falsify="leftover")
+
+
+def pair_case(ask, **kw):
+    g = Grammar([Atom(f"x{i}", lambda s, i=i: bool(s[i])) for i in range(3)], k=1)
+    ls = LawSet(g, base=lambda s, a: False)
+    buf = Buffer(g)
+    buf.extend([Transition((1, 0, 0), "do", True), Transition((0, 1, 0), "do", True)])
+    result = ls.admit_by_probes([Candidate("do", ("x0",), True), Candidate("do", ("x1",), True)], ask,
+                                probes=[((1, 1, 0), "do"), ((1, 1, 1), "do")], buffer=buf,
+                                budget=2, max_new=2, **kw)
+    return ls, result
+
+
+def test_pair_falsification_compares_the_whole_hypothesis_and_does_not_blacklist_members():
+    ls, result = pair_case(lambda s, a: not bool(s[2]))
+    assert result.status == "undetermined" and not ls.laws
+    assert "falsified by probe" in result.why
+    assert any(row.id.startswith("falsify-") for row in result.asked)
+    assert ls.cost["probes"] == len(result.asked) + len(result.unknown) <= 2
+    assert not ls._falsified_at
+
+
+def test_pair_leftover_unknown_safe_and_dry_run_controls():
+    from solvi.experimental.laws import Unknown
+
+    ls, result = pair_case(lambda s, a: Unknown)
+    assert result.status == "accepted" and len(result.laws) == 2
+    assert len(result.unknown) == ls.cost["probes"] == 2
+    assert not result.asked
+    ls, result = pair_case(lambda s, a: True, commit=False)
+    assert result.status == "accepted" and len(result.laws) == 2 and not ls.laws
+    assert len(result.asked) == ls.cost["probes"] == 2
+    calls = []
+    ls, result = pair_case(lambda s, a: calls.append(s) or True, safe=lambda s, a: not s[2])
+    assert result.status == "accepted" and calls == [(1, 1, 0)]
+    assert ls.cost["probes"] == 1
+
+
+def test_pair_leftover_respects_more_specific_active_law_shadowing():
+    g = Grammar([Atom(f"x{i}", lambda s, i=i: bool(s[i])) for i in range(3)], k=2)
+    ls = LawSet(g, base=lambda s, a: False)
+    active = ls.add(Candidate("do", ("x0", "x2"), False))
+    buf = Buffer(g)
+    buf.extend([Transition((1, 0, 0), "do", True), Transition((0, 1, 0), "do", True)])
+    calls = []
+    result = ls.admit_by_probes([Candidate("do", ("x0",), True), Candidate("do", ("x1",), True)],
+                                lambda s, a: calls.append(s) or not bool(s[2]),
+                                probes=[((1, 1, 0), "do"), ((1, 1, 1), "do")], buffer=buf,
+                                max_new=2, budget=2)
+    assert result.status == "accepted" and len(result.laws) == 2
+    assert active in ls.laws and ls.predict((1, 1, 1), "do") is False
+    assert calls == [(1, 1, 0)]
+    assert ls.cost["probes"] == 1

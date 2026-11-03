@@ -1097,3 +1097,17 @@ proposal buffer. Refusal happens before inner enumeration and budget/scorer acco
 return `[]` without a buffer. Custom proposers that supply their own negated candidates remain supported without
 one. For intentional positive-only enumeration, construct `Grammar(..., negations=False)`. This is an intentional
 1.5 migration; passing a buffer only to admission cannot repair candidates that were never proposed.
+
+### Exact probe falsification and noisy opt-in (1.5)
+
+`LawSet.admit_by_probes(falsify="auto")` now always uses leftover falsification for exact answers, including
+`max_new=2`. Unused safe pool points where any chosen new law applies are sampled with `seed`, within the remaining
+budget. The complete proposed law set is compared to each known answer before any new law commits; a contradiction
+returns `undetermined`. This rejects the combined hypothesis without blacklisting both individual candidates.
+Unknown answers consume budget but do not refute. This finite-pool check is not a general correctness guarantee.
+
+Passing `noise=` now requires explicit `falsify=None`: noisy likelihood selection compares the offered closed family
+and has no exact counterexample falsification. The default rejects before consuming candidate/probe iterables or
+asking the oracle. Explicit `falsify="leftover"` also rejects noise. Existing noisy callers must opt in explicitly;
+this is an intentional 1.5 behavior change, not a stronger noisy guarantee. Explicit `falsify=None` retains the prior
+family-selection procedure for both exact pairs and noisy hypotheses.

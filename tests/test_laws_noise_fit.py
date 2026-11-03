@@ -51,7 +51,7 @@ def setup(offer_truth, noise_world=0.0, seed=0):
 def admit(ls, cands, ask, pool, **kw):
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        return ls.admit_by_probes(cands, ask, probes=pool, noise=0.05, **kw)
+        return ls.admit_by_probes(cands, ask, probes=pool, noise=0.05, falsify=None, **kw)
 
 
 def right(adm):

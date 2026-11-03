@@ -2078,8 +2078,9 @@ class LawSet:
         the rows before the falsification probes) and the reason says how many of the eligible pool probes were asked.
         The falsification probes are spent: they are in `asked` (ids "falsify-…"; an `Unknown` answer in `unknown`)
         and in `cost["probes"]`, never above `budget`. No probe is held back from the split phase (a reserve was
-        measured too costly at a small budget). noise= and max_new=2 raise ValueError with it (under noise one answer
-        refutes nothing).
+        measured too costly at a small budget). max_new=2 checks the full chosen hypothesis before committing
+        either law; a failed pair does not blacklist its individual members. noise= raises ValueError with it
+        (under noise one answer refutes nothing).
 
         The falsified law is remembered in the set: a candidate refuted where it applies by a leftover probe is not
         re-proposed (`mismatch(…, buffer=…)` drops it) and not offered here again until the buffer grows past the size
@@ -2112,16 +2113,19 @@ class LawSet:
         ≈ 6 % wrong this method documents on a two-law cell, failed there, and was revised — disclosed — before the
         second run; the numbers above are the second run's, and the first run's agree (2 wrong against 120 at budget
         20; sound 254 against 242). These measurements concern one synthetic world, two runs.
-        falsify="auto" (default) uses "leftover" for exact answers and max_new=None or 1; noisy answers
-        and max_new=2 retain their separate admission procedures without leftover falsification. Explicit None
-        disables this check; explicit "leftover" still rejects incompatible modes. The default can spend the whole
+        falsify="auto" (default) uses "leftover" for exact answers, including max_new=2 (the whole selected
+        hypothesis is checked before any law commits). noise= requires explicit falsify=None acknowledging
+        closed-family selection without exact falsification. Explicit "leftover" rejects noise=. The default can spend the whole
         budget even on a right law; finite pool falsification is not a statistical guarantee."""
         if falsify == "auto":
-            falsify = None if noise is not None or max_new == 2 else "leftover"
+            if noise is not None:
+                raise ValueError("noise= requires explicit falsify=None: closed-family selection has no exact "
+                                 "counterexample falsification")
+            falsify = "leftover"
         if falsify not in (None, "leftover"):
             raise ValueError(f"falsify is None, 'auto' or 'leftover', not {falsify!r}")
-        if falsify is not None and (noise is not None or max_new == 2):
-            raise ValueError("falsify='leftover' takes noise=None and max_new=None or 1")
+        if falsify is not None and noise is not None:
+            raise ValueError("falsify='leftover' takes noise=None; noisy closed-family selection requires falsify=None")
         if not commit:
             kw = {k: v for k, v in locals().items() if k not in ("self", "candidates", "ask", "commit")}
             return self._dry_run(lambda: self.admit_by_probes(candidates, ask, **kw))
@@ -2194,7 +2198,8 @@ class LawSet:
         if max_new == 2:
             from ._versions import admit_up_to_two
             return admit_up_to_two(self, cands, ask, pool=pool, safe=safe, budget=budget, buffer=buffer,
-                                   exclude=exclude, read_only=read_only, cost=cost, eq=eq)
+                                   exclude=exclude, read_only=read_only, cost=cost, eq=eq,
+                                   falsify=falsify, seed=seed)
 
         def info(x, a):
             ms = self.matching(x, a)

@@ -97,7 +97,7 @@ def run(seed, noise_world, noise_arg, budget, level=0.95):
     pool = [(s, "do") for s in STATES]
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        adm = ls.admit_by_probes(cands, ask, probes=pool, budget=budget, noise=noise_arg, level=level)
+        adm = ls.admit_by_probes(cands, ask, probes=pool, budget=budget, noise=noise_arg, level=level, falsify=None)
     if adm.status != "accepted":
         return "undetermined", len(adm.asked)
     ok = all(holds(adm.law.condition, s) == holds(truth, s) for s in STATES)
@@ -126,16 +126,16 @@ def test_noise_arguments_are_checked():
     ls = LawSet(grammar(), base=lambda s, a: "off")
     pool = [(s, "do") for s in STATES]
     with pytest.raises(ValueError):
-        ls.admit_by_probes([], lambda s, a: "off", probes=pool, noise=0.6)
+        ls.admit_by_probes([], lambda s, a: "off", probes=pool, noise=0.6, falsify=None)
     with pytest.raises(ValueError):
-        ls.admit_by_probes([], lambda s, a: "off", probes=pool, noise=0.1, level=1.0)
+        ls.admit_by_probes([], lambda s, a: "off", probes=pool, noise=0.1, level=1.0, falsify=None)
     with pytest.raises(ValueError):
-        ls.admit_by_probes([], lambda s, a: "off", probes=pool, noise=0.1, max_new=2)
+        ls.admit_by_probes([], lambda s, a: "off", probes=pool, noise=0.1, max_new=2, falsify=None)
 
 
 def test_an_answer_no_hypothesis_predicts_moves_nothing():
     truth, s0 = world(3)
     ls = LawSet(grammar(), base=lambda s, a: "off")
     cands = Enumerate().propose(ls, s0, "do", "on")
-    adm = ls.admit_by_probes(cands, lambda s, a: "???", probes=[(s, "do") for s in STATES], budget=5, noise=0.1)
+    adm = ls.admit_by_probes(cands, lambda s, a: "???", probes=[(s, "do") for s in STATES], budget=5, noise=0.1, falsify=None)
     assert adm.status == "undetermined" and len(adm.asked) == 5

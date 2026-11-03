@@ -26,7 +26,7 @@ __all__ = ["admit_up_to_two"]
 
 
 def admit_up_to_two(ls, cands: list[Candidate], ask: Callable[[Any, Any], Any], *, pool: list, safe, budget: int,
-                    buffer, exclude, read_only, cost, eq) -> Admission:
+                    buffer, exclude, read_only, cost, eq, falsify=None, seed=0) -> Admission:
     from ._probes import groups_of, split
     E = eq or (lambda u, v: u == v)
     kf = _key if eq is None else (lambda x: x)
@@ -277,6 +277,29 @@ def admit_up_to_two(ls, cands: list[Candidate], ask: Callable[[Any, Any], Any], 
     if len(ls.laws) + len(h) > ls.cap:
         ls.capped += 1
         return undetermined("the cap of active laws is reached")
+    if falsify == "leftover":
+        import random
+
+        left = max(0, int(budget) - len(asked) - len(unknown))
+        eligible = [i for i in range(len(pool)) if i not in done and ok_safe(i)
+                    and any(ppc[i][m][0] for m in h)]
+        selected = random.Random(seed).sample(eligible, min(left, len(eligible)))
+        count = 0
+        for i in selected:
+            x, a = pool[i]
+            observed = ask(x, a)
+            count += 1
+            ls.cost["probes"] += 1
+            if observed is Unknown:
+                unknown.append(Transition(x, a, observed, group="probe", id=f"unknown-{len(unknown) + 1}-{i}"))
+                continue
+            asked.append(Transition(x, a, observed, group="probe", id=f"falsify-{count}-{i}"))
+            if not E(predict(h, ppc[i], pinf[i][1]), observed):
+                # A counterexample rejects this combined hypothesis, not every individual member.
+                return undetermined(f"falsified by probe {i} ({observed!r}): selected hypothesis predicts wrong "
+                                    f"({count} of {len(eligible)} eligible pool probes asked)")
+        why = (f"{why or 'one class left'}; falsify: {count} of {len(eligible)} eligible pool probes asked "
+               f"(leftover {left}), none refuted")
     rows = list(asked)
     if buffer is not None:
         rows = [r for a in acts.values() for r in buffer.rows(a, exclude)] + rows

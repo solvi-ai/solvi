@@ -193,5 +193,5 @@ def test_a_dry_run_of_two_laws_and_with_noise():
     g = grammar(k=1)
     ls = LawSet(g, base=off)
     adm = ls.admit_by_probes([Candidate("do", ("x0",), "on"), Candidate("do", ("x1",), "on")], world,
-                             probes=[(s, "do") for s in ALL], budget=20, noise=0.05, commit=False)
+                             probes=[(s, "do") for s in ALL], budget=20, noise=0.05, falsify=None, commit=False)
     assert adm.status == "accepted" and adm.law.condition == ("x0",) and ls.laws == [] and ls.version == 0
