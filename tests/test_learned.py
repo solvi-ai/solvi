@@ -72,8 +72,10 @@ def test_learned_order_gives_identical_answers_on_random_catalogs():
     n_cases = n_multi = 0
     for c in range(40):
         cat, qs = random_system(rng)
-        sys_default = System(cat, qs)
-        sys_learned = System(cat, qs, order="learned")
+        # This legacy random-order parity fixture deliberately includes orphan checks.
+        # Keep its original catalogs/seeds and explicitly opt into diagnostic compatibility.
+        sys_default = System(cat, qs, allow_unreachable_hard_checks=True)
+        sys_learned = System(cat, qs, order="learned", allow_unreachable_hard_checks=True)
         for i in range(40):
             state = {f"x{j}": rng.randint(0, 9) for j in range(5)}
             names = None if rng.random() < 0.6 else rng.sample([q.name for q in qs], rng.randint(1, len(qs)))
