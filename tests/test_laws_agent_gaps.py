@@ -101,7 +101,7 @@ def test_unknown_with_noise_and_with_two_laws():
     g = grammar(k=1)
     ls = LawSet(g, base=off)
     adm = ls.admit_by_probes([Candidate("do", ("x0",), "on"), Candidate("do", ("x1",), "on")],
-                             lambda s, a: Unknown, probes=[(s, "do") for s in ALL], budget=6, noise=0.05)
+                             lambda s, a: Unknown, probes=[(s, "do") for s in ALL], budget=6, noise=0.05, falsify=None)
     assert adm.status == "undetermined" and len(adm.unknown) == 6 and adm.asked == [] and ls.cost["probes"] == 6
     g2 = Grammar([Atom(f"x{i}", (lambda s, i=i: s[i] == 1), feature=f"f{i}") for i in range(3)], k=1)
     ls = LawSet(g2, base=lambda s, a: False)
@@ -145,9 +145,9 @@ def test_siblings_of_another_length_do_not_refuse():
 
 def test_siblings_with_noise_and_validation():
     g, cands, probes = twin_setup()
-    adm = LawSet(g, base=off).admit_by_probes(cands, world, probes=probes, budget=20, noise=0.05)
+    adm = LawSet(g, base=off).admit_by_probes(cands, world, probes=probes, budget=20, noise=0.05, falsify=None)
     assert adm.status == "accepted" and adm.law.condition == ("x0",)
-    adm = LawSet(g, base=off).admit_by_probes(cands, world, probes=probes, budget=20, noise=0.05,
+    adm = LawSet(g, base=off).admit_by_probes(cands, world, probes=probes, budget=20, noise=0.05, falsify=None,
                                               siblings="undetermined")
     assert adm.status == "undetermined" and "cannot tell apart" in adm.why
     with pytest.raises(ValueError):
