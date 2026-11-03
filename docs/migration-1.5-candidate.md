@@ -261,3 +261,50 @@ sampling and label availability. This guard does not prove detection of every co
 labelled deployed risk unchanged can still evade the reference re-take. The existing confidence thresholds and
 false-alarm calibration are unchanged. This is a bounded composition guard, not closure of the historical CLINC
 false-alarm/shift benchmark.
+
+
+## Measured build violations and hard-check reachability
+
+`solvi.build` now defaults to `strict=True`: a violation reported by its own dispatcher calibration raises
+`ValueError`. Explicit `strict=False` produces an uncertified diagnostic build, with automatic answering latched
+off and requests sent to a person. The original measured report is retained. Editing that report does not enable
+automatic answering; construct a fresh successfully calibrated build.
+
+`System` rejects known unreachable hard checks by default. Declare the scope through `Question(..., requires=...)`
+or `check(..., then=...)`. For computed-fact checks, request-specific missing dependencies are checked before
+callbacks and cache hits. Explicit `allow_unreachable_hard_checks=True` preserves the legacy skip with a warning and
+lint error; it is a diagnostic waiver, not evidence that a check executed.
+
+## Law admission and numeric grounding
+
+Automatic exact falsification now also checks the full chosen pair on unused probes before committing it. Noisy
+law admission requires an explicit `falsify=None` acknowledgement of its conditional assumptions; the default no
+longer silently selects that weaker path. Every attempted oracle call is charged, including calls that raise.
+Refinement that needs negated proposals requires a buffered mismatch, and fails before proposal counters change
+when that evidence is absent.
+
+Ambiguous repeated numeric source occurrences now abstain instead of selecting the first matching number. Unique
+label support can distinguish an occurrence, including an immediately following line; unrelated units and labels
+are not borrowed from elsewhere in the document. This establishes source provenance, not general extraction accuracy.
+
+## Past grids, acquisition and availability
+
+`StreamPromise.prime_grid(scores, source=...)` fixes a bounded grid from past finite scores on a fresh automatic
+promise, without transferring labels, bets or delta spending. Supported ordinary calibration can supply this past
+grid to a subsequent dispatcher; insufficient or unsupported calibration keeps the existing warmup. Requested
+pilot sizes and evidence floors are preserved.
+
+The synchronous stream loop offers explicit bounded acquisition through `DefaultPolicy(acquisition=...)`. Its
+extra-label budget and stopping conditions are recorded and replayed. Unsupported asynchronous acquisition is
+rejected before queries. This changes acquisition effort, not the training, calibration or holdout floors.
+
+`Dispatcher.availability()` reports observed and missing labels separately. `replay_stream()` now includes an
+additional `availability` field: update exact dictionary expectations accordingly. Missing-label handling in the
+certificate remains conservative; the conditional observed error rate is not a population risk guarantee.
+
+## Domain-supplied check correlations
+
+`CorrelationAwareCombiner` accepts `rho_by_domain`, `domain_counts` and `domain_shrinkage`, with an explicit `domain=`
+at combination time. Positive shrinkage requires supported domain counts. Unknown domains are refused; omission
+with configured domains warns before using the global matrix. Likelihood fitting remains pooled. Domain matrices
+are supplied by the caller and must not use the current answer's truth to select a domain.

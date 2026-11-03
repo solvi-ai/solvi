@@ -1,4 +1,4 @@
-"""A hard check that no question's flow reaches warns at System() and is a `solvi check` error; a hard check reached
+"""A hard check that no question's flow reaches fails at System() by default (an explicit waiver warns); a hard check reached
 through `requires=` that fails without a `then=` answer keeps its Fail reason in `why`."""
 import warnings
 
