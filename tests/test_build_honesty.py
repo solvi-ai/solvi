@@ -70,3 +70,55 @@ def test_a_kept_dispatcher_promise_does_not_warn():
                          split="shuffle")
     assert not ds.calibration["dispatch"].get("why")
     assert not [x for x in w if "break the promise" in str(x.message)]
+
+
+def test_diagnostic_latch_overrides_a_forced_hard_check_and_report_mutation():
+    cat = _cat()
+
+    @cat.check(hard=True, then={"lab": "b"})
+    def normal_range(x):
+        return x >= -10
+
+    with pytest.warns(GuaranteeWarning, match="automatic answers disabled"):
+        ds = solvi.build(Q, _examples(600, 0), catalog=cat, max_risk=.02, slow=_teacher,
+                         min_slice=1, seed=0, strict=False)
+    config = ds.dispatcher.config()
+    ds.calibration["dispatch"]["certified"] = True  # a mutable report cannot clear the private routing latch
+    result = ds.ask({"x": -20.})
+    assert result.s1["lab"].status == "forced"
+    assert result.by == "human" and result.answer is None and result.action == "human"
+    assert ds.dispatcher.config() == config
+    assert ds.replay(result)["ok"]
+
+
+def test_diagnostic_build_disables_every_actual_openset_threshold(monkeypatch):
+    import math
+
+    from solvi.core.guarantees.openset import OpenSetGate
+    from solvi.solutions import decisions
+
+    gate = OpenSetGate.calibrate([.2, .8] * 50, [True] * 100, [.01] * 100, max_error=.02, track=())
+    gate.thresholds = dict.fromkeys(gate.thresholds, .3)  # deterministic over-permissive fixture, caught by own dispatch
+    gate.cut = -1.  # no unrelated distribution-shift alarm can hide the deliberately permissive threshold
+    gate.h = 1e100
+
+    def fake_open_set(system, question, examples, outside, signal, correct, level, delta, seed):
+        return gate, {"known": len(examples), "novel": len(outside), "given": len(outside)}
+
+    monkeypatch.setattr(decisions, "_open_set_real", fake_open_set)
+    catalog = _cat()
+
+    @catalog.constraint
+    def only_a(lab):
+        return lab == "a"  # an actual non-openset handover slice keeps dispatcher calibration in this build path
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        ds = solvi.build(Q, _examples(600, 0, near=.3, far=.3), catalog=catalog, max_risk=.02, slow=_teacher,
+                         min_slice=1, seed=0, strict=False, signal="margin", novel=[{"x": -.1}] * 100)
+    assert ds.calibration.get("dispatch", {}).get("certified") is False, ds.calibration
+    assert ds.gate is gate and all(math.isinf(x) for x in gate.thresholds.values())
+    result = ds.ask({"x": .99})
+    assert result.by == "human" and result.answer is None
+    assert ds.dispatcher._diagnostic_human_only
+    assert ds.replay(result)["ok"]

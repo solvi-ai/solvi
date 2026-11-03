@@ -904,6 +904,7 @@ class Dispatcher:
         self._runs = [0, 0.0, 0, 0.0, False]  # slow-path runs so far: count, dollars, calls, ms, a run without a price
         self.counts = {p: 0 for p in PATHS}
         self.drift = None
+        self._diagnostic_human_only = False  # build's private failed-calibration routing latch
         self.policy = None                # calibrate(): who answers on each slice System 1 hands over
         self._lock = threading.Lock()
         self._stream = self._stream0 = None
@@ -960,6 +961,7 @@ class Dispatcher:
         pr = code_fingerprint(self.price) if callable(self.price) else self.price
         return digest("Dispatcher", self.question, self.wake, sorted(self.agreement.items()), self.supervise, self.seed,
                       self.think_policy, self.on_disagree, self.unknown,
+                      *([("diagnostic_human_only", True)] if getattr(self, "_diagnostic_human_only", False) else []),
                       *([("on_drift", self.on_drift)] if self.on_drift != "human" else []),
                       *([("audit", self.audit)] if self.audit else []),
                       *([("allow_reference_retake", True)] if self.allow_reference_retake else []),
@@ -1048,6 +1050,8 @@ class Dispatcher:
         (System 1 answers nothing alone: a think) and sampled (the calibration coin came up: an answer System 1 gives
         alone is checked by the slow path, whatever `wake` says). hold: with an adapter loop, why its rule does not
         answer alone here (System 1 answers nothing alone: a think, as in probation)."""
+        if getattr(self, "_diagnostic_human_only", False):
+            return "human", ["uncertified diagnostic build: automatic answers disabled"]
         sig = self.signals(res)
         if drift and not any(s == "drift" for s, _ in sig):
             sig.append(("drift", drift))
@@ -1500,7 +1504,7 @@ class Dispatcher:
 
     def _outcome(self, action, r1, would1, th, reasons, sl=None):
         """(answer, by) from the action and the two paths' answers; appends why a person gets it."""
-        if action == "human":
+        if getattr(self, "_diagnostic_human_only", False) or action == "human":
             return None, "human"
         if action == "accept":
             return r1.answer, "s1"

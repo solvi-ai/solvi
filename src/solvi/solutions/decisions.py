@@ -755,6 +755,9 @@ def build(question, examples, *, catalog=None, learner=None, slow=None, reads=No
             # Explicit diagnostic fallback: the measured violation must never retain an automatic S1 route.
             installed = system.guards[qname].promise
             installed.threshold = math.inf
+            if isinstance(getattr(installed, "thresholds", None), dict):
+                installed.thresholds = {level: math.inf for level in installed.thresholds}
+            d._diagnostic_human_only = True
             if getattr(installed, "nodes", None) is not None:
                 for node in installed.nodes.values():
                     node["threshold"] = math.inf
@@ -763,6 +766,9 @@ def build(question, examples, *, catalog=None, learner=None, slow=None, reads=No
             choices["guarantee"]["promise"] = "UNCERTIFIED — no automatic-answer guarantee is advertised"
             choices["guarantee"]["how"] = "The dispatcher's own calibration measured a violation; human fallback."
             choices["dispatch_promise"] = "UNCERTIFIED: " + msg
+            if choices.get("novel"):
+                choices["uncertified_previous_novel"] = choices["novel"]
+                choices["novel"] = "UNCERTIFIED open-set gate; automatic answers disabled"
             rep["certified"] = False
             rep["fallback"] = "human"
             from ..core.guarantees.guarantee import GuaranteeWarning

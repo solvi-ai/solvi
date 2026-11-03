@@ -6266,3 +6266,8 @@ retains the measured violation and records `certified=False, fallback="human"`; 
 and `explain()` explicitly show the uncertified status. This is an intentional 1.5 behavior change from warning
 while retaining System 1's automatic route. It does not resolve CRC selection correction, selection-biased labels,
 or establish historical workload risk/coverage results.
+
+The diagnostic fallback is additionally latched in the Dispatcher's routing, before both forced hard-check
+answers and ordinary S1/S2 decisions. Its fingerprint records the latch, and replay derives the same human route.
+All effective OpenSetGate thresholds are disabled as well. Changing a calibration report or policy dictionary does
+not clear the latch; construct a fresh successfully calibrated build to enable automatic answering again.
