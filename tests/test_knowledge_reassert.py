@@ -123,3 +123,16 @@ def test_wrong_source_writer_derivation_or_scope_is_atomic(extra):
     with pytest.raises(ValueError, match='reassert'):
         k.tell(FACT, **args)
     assert (k.store.journal, k.store.fingerprint()) == before
+
+
+@pytest.mark.parametrize('field,value', [('body', {'s': 'changed', 'r': 'P35', 'o': 'Hollande'}),
+                                        ('scope', {'changed': True}), ('item_kind', 'rule')])
+def test_replay_cannot_substitute_claim_identity(field, value):
+    k, _ = setup()
+    k.tell(FACT, source='outcome', by='wikidata', valid=VALID, reassert=True)
+    rec = copy.deepcopy(k.store.journal[-1])
+    rec[field] = value
+    before = copy.deepcopy(k.store.journal), k.store.fingerprint()
+    with pytest.raises(ValueError, match='reassert'):
+        k.store._apply(rec)
+    assert (k.store.journal, k.store.fingerprint()) == before

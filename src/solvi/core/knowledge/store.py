@@ -591,8 +591,9 @@ class KnowledgeStore:
     def _validate_reassert_record(self, r, t):
         iid = r["item"]
         it = self.items.get(iid)
-        if it is None:
-            raise ValueError("invalid reassert: no earlier item")
+        if (it is None or r.get("body") != it.body or r.get("scope") != it.scope
+                or r.get("item_kind") != it.kind or item_id(r["item_kind"], r["body"], r["scope"]) != iid):
+            raise ValueError("invalid reassert: no exact earlier item")
         if r.get("reassert_proof"):
             proof = r["reassert_proof"]
             prop = {"id": iid, "kind": r["item_kind"], "by": r.get("by"), "source": r["source"],
@@ -750,7 +751,8 @@ class KnowledgeStore:
         if it is None:
             raise ValueError("reassert requires an earlier exact assertion")
         exact = {a["t"] for a in it.asserts if a["by"] == prop["by"] and a["source"] == prop["source"]
-                 and a.get("valid") == prop["valid"] and not a["just"]}
+                 and a.get("valid") == prop["valid"] and not a["just"]
+                 and not a.get("inferred") and not a.get("consulted")}
         cuts = []
         for r in self.journal:
             if r.get("item") != prop["id"]:
