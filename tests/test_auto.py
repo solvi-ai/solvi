@@ -240,6 +240,8 @@ def test_the_example_runs_and_says_who_takes_the_slice_it_hands_over(capsys):
     assert to_slow != to_person
     s2 = int(re.search(r"'s2': (\d+)", out).group(1))
     assert (s2 > 0) == to_slow
+    if to_person:
+        assert "'s1': 0, 's2': 0, 'human': 500" in out
 
 
 # ------------------------------------------------------------------------------------------------ groups: a split by source

@@ -225,7 +225,9 @@ def auto_built():
 
     def slow(state):
         return "yes" if state["amount"] < 300 or state["days"] > 6 else "no"
-    return build(Question("ok", "OK?", Answer.yes_no()), _examples(400), catalog=cat, max_risk=0.05, slow=slow)
+    # This historical catalog deliberately fails dispatch calibration; retain its fingerprint as a diagnostic build.
+    return build(Question("ok", "OK?", Answer.yes_no()), _examples(400), catalog=cat, max_risk=0.05, slow=slow,
+                 strict=False)
 
 
 SYSTEMS = {"typed_rules": typed_rules, "decisions": decisions, "llm_decider": llm_decider, "head": head,
