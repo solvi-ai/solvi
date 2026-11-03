@@ -235,7 +235,8 @@ def test_end_to_end_with_the_gold_label_as_the_slow_path(tmp_path):
     # replay: every decision on its own, and the whole stream rebuilt from the records
     assert d.replay_all() == []
     rep = d.replay_stream()
-    assert rep == {"ok": True, "mismatches": [], "coin": "verified", "decisions": 1700}
+    assert rep == {"ok": True, "mismatches": [], "coin": "verified", "decisions": 1700,
+                   "availability": d.availability()}
     # a fresh dispatcher with the same secret rebuilds it too; without the secret the coin is unverified
     fresh, _, _ = _dispatcher(storage=store)
     assert fresh.replay_stream()["ok"]
