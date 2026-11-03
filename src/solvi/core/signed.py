@@ -13,6 +13,8 @@ import math
 import os
 from threading import RLock
 
+__all__ = ["HmacScheme", "Record", "SignatureCache", "SignedVerdict", "Verifier", "sign"]
+
 
 def _finite(value, name):
     value = float(value)
