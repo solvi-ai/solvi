@@ -6283,3 +6283,10 @@ structural check is repeated rather than trusting a stale construction-time resu
 Explicit `allow_unreachable_hard_checks=True` is a diagnostic compatibility waiver (strict bool). It preserves the
 warning and lint error and permits the old skip; it does **not** claim that the check ran. Variants preserve an
 explicit waiver. Valid reachable checks and unrelated lint behavior remain governed by their existing contracts.
+
+For a check on computed facts with mixed dependencies, the actual request's input shape matters too. If its
+computed fact is in the requested flow but another check input is missing or not plan-resolvable, answering now
+refuses before callbacks or cache hits with the missing input names. Supplying that input preserves normal check
+execution; explicitly requiring the check can instead make the missing prerequisite an ordinary abstention.
+This validation uses the requested questions and current input keys on synchronous and asynchronous paths, rather
+than trusting a catalog-only validation result from a different request shape.

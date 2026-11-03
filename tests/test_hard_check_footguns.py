@@ -142,3 +142,36 @@ def test_transitive_dependencies_and_automatic_computed_fact_checks_remain_valid
     result = system.ask({"price": -1}, store=False)
     assert result["answer"].status == "abstain"
     assert result.values["positive"] is False
+
+
+def test_computed_fact_check_missing_mixed_input_refuses_before_callbacks_and_cache_hits():
+    calls = []
+    catalog = Catalog()
+
+    @catalog.fn
+    def amount(x):
+        calls.append("amount")
+        return x
+
+    @catalog.check(hard=True)
+    def stop(amount, permission):
+        calls.append("stop")
+        return False
+
+    @catalog.rule("q")
+    def answer(amount):
+        calls.append("answer")
+        return "yes"
+
+    system = System(catalog, [Question("q", "?", Answer.yes_no())], cache=2)
+    # The same legitimate mixed-dependency check is reachable when its given input is present.
+    assert system.ask({"x": -1, "permission": True}, store=False)["q"].status == "abstain"
+    assert "stop" in calls
+    calls.clear()
+    with pytest.raises(ValueError, match="missing inputs.*permission"):
+        system.ask({"x": -1}, store=False)
+    assert calls == []
+    import asyncio
+    with pytest.raises(ValueError, match="missing inputs.*permission"):
+        asyncio.run(system.aask({"x": -1}, store=False))
+    assert calls == []

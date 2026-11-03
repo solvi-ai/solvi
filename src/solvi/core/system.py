@@ -443,15 +443,32 @@ class System:
         return response_schema(self)
 
     # --- answers
-    @_deprecate.removed_kwargs(names="questions")
-    def _validate_hard_checks(self):
+    def _validate_hard_checks(self, init_state=None, names=None):
         """Only the known unreachable-hard-check footgun; never executes a check or infers its scope."""
         idle = _idle_hard_checks(self.catalog, self.questions.values(), self.heads)
+        missing = {}
+        if isinstance(init_state, dict):
+            keys = set(init_state)
+            qs = [self.questions[name] for name in self._names(names)]
+            flow = self._plan(qs, keys)
+            boundary = set(getattr(self.catalog, "_boundary_given_aliases", ()))
+            for facts in flow.per_question.values():
+                have = set(facts) | keys
+                for part in self.catalog.parts.values():
+                    if part.kind != "check" or not part.hard or part.name in facts or part.then:
+                        continue
+                    touches = set(part.inputs) & (set(facts) - keys - boundary)
+                    absent = set(part.inputs) - have
+                    if touches and absent:
+                        missing[part.name] = sorted(absent)
+            idle = list(dict.fromkeys([*idle, *missing]))
         if not idle:
             return
         message = (f"hard {'check' if len(idle) == 1 else 'checks'} {', '.join(idle)}: no `then=` and no "
                    "question of this system requires it, so it never runs and never stops an answer — add "
                    f"requires=[{idle[0]!r}] to the questions it guards, or then={{question: answer}}")
+        if missing:
+            message += "; missing inputs for checks on computed facts: " + repr(missing)
         if not self.allow_unreachable_hard_checks:
             raise ValueError(message + "; allow_unreachable_hard_checks=True is an explicit diagnostic waiver")
         if tuple(idle) != self._warned_idle_hard_checks:
@@ -459,6 +476,7 @@ class System:
             warnings.warn(message, stacklevel=3)
             self._warned_idle_hard_checks = tuple(idle)
 
+    @_deprecate.removed_kwargs(names="questions")
     def ask(self, init_state, questions=None, *, workers=None, order=None, store=True, early_exit=None):
         """init_state: a dict of given facts, or a pydantic BaseModel instance (its fields). questions: the questions to
         ask — a name or a list of names (None: all; an unknown name raises KeyError; `names=`, its 0.7
@@ -470,7 +488,7 @@ class System:
         `res.values` and the trace hold every fact and rule value of a decision a hard check forced (and every part
         listed in `requires`); the trace records it (`res.trace.early_exit`), and replay checks no step is missing.
         An `async def` part is awaited in an event loop of its own, one call at a time: use `aask` for such catalogs."""
-        self._validate_hard_checks()
+        self._validate_hard_checks(init_state, questions)
         if workers is not None and (not isinstance(workers, int) or isinstance(workers, bool) or workers < 1):
             raise ValueError(f"workers must be a positive int, not {workers!r}")
         t0 = now_ms()
@@ -765,7 +783,7 @@ class System:
         and be cancelled). Cancelling `aask` itself cancels every pending call. Under a learned order speculate=True is
         ignored, with a UserWarning (the hard checks run one at a time in that order). An `async def` part is awaited
         whatever `blocking` says. early_exit: as for `ask` (False: every step runs, whatever the hard checks say)."""
-        self._validate_hard_checks()
+        self._validate_hard_checks(init_state, questions)
         from .runtime import aexecute
         t0 = now_ms()
         key = None
@@ -808,6 +826,7 @@ class System:
                 known = {k: t for k, t in ft.items() if k in init_state}   # rejected fields are not in init_state
         else:
             rejected = None
+        self._validate_hard_checks(init_state, names)
         if _PROBE_MARKER in init_state:
             raise ValueError("the hypothetical probe marker is reserved for System.probe")
         clash = sorted(k for k in init_state if k in self.catalog.parts)
