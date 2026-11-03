@@ -626,3 +626,16 @@ def test_acquisition_reserves_once_and_persists_and_stops_at_distinct_floors():
     assert p.acquisition_status()["ready"]
     p = DefaultPolicy(acquisition=dict(floor=.8, max_extra=100, until_decision=1))
     assert p.sampling_rate(dataclasses.replace(st, n=1), .1) == .1
+
+
+def test_acquisition_stops_at_floors_despite_improvement_block_or_first_training():
+    cfg = dict(floor=.8, max_extra=100, until_decision=2000)
+    p = DefaultPolicy(acquisition=cfg)
+    st = _state(labels=dict(train=300, calib=73, holdout=100),
+                keys=dict(train=300, calib=73, holdout=100), holdout=((True, False),) * 100)
+    assert not p.want_train(st)  # insufficient improvement is not an acquisition reason
+    assert p.sampling_rate(st, .1) == .1
+    assert p.acquisition_status()["ready"]
+    p = DefaultPolicy(acquisition=cfg)
+    assert p.sampling_rate(_state(trainings=({"n": 1},)), .1) == .1
+    assert p.acquisition_status()["reserved"] == 0

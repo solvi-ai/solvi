@@ -622,9 +622,9 @@ class DefaultPolicy(LoopPolicy):
         distinct = st.labels if st.keys is None else st.keys
         top = max((v.n_train for v in st.versions), default=0)
         need = max(self.first, math.ceil(self.growth * top))
-        if (distinct.get("train", 0) >= need
+        if (st.trainings or (distinct.get("train", 0) >= need
                 and (not self.pre_freeze or (distinct.get("holdout", 0) >= self.min_holdout
-                     and distinct.get("calib", 0) >= self.calib_floor(st.alpha)))):
+                     and distinct.get("calib", 0) >= self.calib_floor(st.alpha))))):
             self._acquisition_done = True
         boost = (not self._acquisition_done and n <= cfg["until_decision"]
                  and self._acquisition_reserved < cfg["max_extra"] and base_rate < cfg["floor"])

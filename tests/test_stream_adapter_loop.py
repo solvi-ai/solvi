@@ -822,3 +822,51 @@ def test_acquisition_common_coin_hook_and_real_training_unchanged_floors():
     assert loop._state().keys["calib"] >= 73
     assert loop.status()["acquisition"]["remaining"] >= 0
     assert loop.replay()["ok"]
+
+
+def test_acquisition_additive_resume_missing_duplicate_refused_and_current_input_independence(tmp_path):
+    from solvi.core.sources import UntrustedLabel
+
+    def make():
+        return AdapterLoop(_Hand([]), question="q", max_risk=.05, secret=KEY,
+                           initial=_Model("initial", 1), additive=True, probation=0,
+                           monitor=None, clock=lambda: 0.,
+                           promise_options={"grid": [.95]},
+                           policy=DefaultPolicy(first=10 ** 6, mature_patience=None,
+                               acquisition=dict(floor=.8, max_extra=1000, until_decision=2000)))
+
+    a = make()
+    # Repeated accepted labels cannot satisfy distinct-key floors.
+    for i in range(200):
+        a.step(("a", .1), lambda: "a", key="duplicate")
+    assert sum(a._state().keys.values()) == 1
+    assert not a.policy._acquisition_done
+    before = a._state().keys
+    reserved = a.policy.acquisition_status()["reserved"]
+    assert reserved > 0  # exercised boosted additive base/owner paths, not just full-rate startup
+    with pytest.raises(UntrustedLabel):
+        a.step(("a", .1), lambda: "a", source="model", key="refused")
+    assert a._state().keys == before
+    # Refused attempts do not advance n; repeated preview uses the same reservation.
+    a._draw(a.n + 1, .95, .95)
+    a._draw(a.n + 1, .05, .95)
+    assert a.policy.acquisition_status()["reserved"] <= reserved + 1
+    a.save(tmp_path / "acquisition")
+    b = AdapterLoop.load(tmp_path / "acquisition", _Hand([]), secret=KEY,
+                         initial=_Model("initial", 1), clock=lambda: 0.)
+    assert a.status()["acquisition"] == b.status()["acquisition"]
+    # Different current inputs and unavailable outcomes, with identical past counts,
+    # cannot change the declared uniform rate or the shared independent coin.
+    for i in range(20):
+        ra = a.step(("a", .1), lambda: None, key=f"missing{i}")
+        rb = b.step(("b", .99), lambda: None, key=f"other{i}")
+        assert ra["sampled"] == rb["sampled"]
+        logs_a = [d for k, d in a._items() if k == "loop"]
+        logs_b = [d for k, d in b._items() if k == "loop"]
+        sa, sb = logs_a[-1]["stream"], logs_b[-1]["stream"]
+        assert sa["rho"] == sb["rho"]
+        assert sa["rho_base"] == sb["rho_base"]
+        assert a.status()["acquisition"] == b.status()["acquisition"]
+    assert a._state().keys == before == b._state().keys
+    assert not a.policy._acquisition_done
+    assert a.replay()["ok"] and b.replay()["ok"]

@@ -216,7 +216,8 @@ this decision's input, label, score, owner or split. The same independent coin i
 used, and additive base and owner paths share this hook.
 
 The controller stops boosting permanently once accepted distinct counts meet the
-initial training/growth and unchanged calibration/holdout floors. It never changes
+initial training/growth and unchanged calibration/holdout floors, or after the
+first training. Readiness does not wait for an improvement signal. It never changes
 key roles, freeze or promotion gates. A missing/refused/repeated label cannot
 complete a distinct-key floor. Horizon or budget exhaustion leaves an open gap.
 
