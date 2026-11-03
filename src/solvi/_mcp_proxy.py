@@ -226,7 +226,12 @@ class Proxy:
             answer = ask(d)
             if answer is not None:
                 g._save(d)
-                d = g.resolve(d, approve=bool(answer), reviewer="mcp elicitation", execute=False)
+                try:
+                    d = g.resolve(d, approve=bool(answer), reviewer="mcp elicitation", execute=False)
+                except PermissionError as exc:
+                    # Elicitation's accepted bool is not an authenticated identity or a call-bound approval token.
+                    # Keep the escalation open and use the ordinary structured denied/escalated result below.
+                    d.reasons.append(f"approval refused: {exc}")
         self.session.decisions.append(d)
         if d.outcome != "allow":
             g._save(d)

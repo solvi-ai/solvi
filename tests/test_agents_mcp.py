@@ -35,9 +35,11 @@ def call(id_, name, **args):
     return rpc(id_, "tools/call", {"name": name, "arguments": args})
 
 
-def guard(tmp_path):
+def guard(tmp_path, *, allow_unverified_approvals=False):
     ns = {}
-    exec(CATALOG, ns)
+    source = CATALOG.replace("guard = Guard()", "guard = Guard(allow_unverified_approvals=True)") \
+        if allow_unverified_approvals else CATALOG
+    exec(source, ns)
     g = ns["guard"]
     from solvi.core.store import open_storage
     g.storage = open_storage(tmp_path / "calls.jsonl")
@@ -81,7 +83,8 @@ def test_proxy_lists_declared_tools_and_guards_each_call(tmp_path):
 
 
 def test_escalation_asks_the_user_by_elicitation(tmp_path):
-    g = guard(tmp_path)
+    # This fixture explicitly simulates a trusted legacy callback; a plain MCP bool is not an identity token.
+    g = guard(tmp_path, allow_unverified_approvals=True)
     init = rpc(1, "initialize", {"protocolVersion": "2025-06-18", "capabilities": {"elicitation": {}}})
     yes = json.dumps({"jsonrpc": "2.0", "id": "solvi-elicit-1", "result": {"action": "accept", "content": {"approve": True}}})
     no = json.dumps({"jsonrpc": "2.0", "id": "solvi-elicit-2", "result": {"action": "decline"}})

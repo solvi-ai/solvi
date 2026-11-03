@@ -322,3 +322,10 @@ marks the returned reasons and stores `approval_verification="unverified-explici
 authentication and never bypasses a configured verifier. Rejections still need no token. Normal checks, calls and
 batch policies are unchanged. Message-role authentication remains a separate boundary; this change does not close
 all of S157 or establish the truth of authenticated messages.
+
+MCP elicitation's plain `accept`/`approve: true` response supplies no authenticated identity or approval token.
+Without an applicable trusted verifier/token, the proxy keeps the escalation unresolved and returns structured
+`isError`/`solvi` decision content with `approval refused`; it does not call upstream. A negative elicitation response
+still denies without a token. The proxy never enables the compatibility waiver automatically or manufactures a
+signature from an MCP role. Only `PermissionError` from resolution becomes this structured refusal; unexpected
+resolution errors keep their existing error path.

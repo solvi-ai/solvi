@@ -203,7 +203,8 @@ def test_mcp_elicitation_approves_only_true(tmp_path, content, approved):
 
     from solvi.serve import run_proxy
     upstream = f"{sys.executable} {Path(__file__).parent / 'mcp_upstream.py'}"
-    g = Guard()
+    # This legacy bool-filter fixture simulates an explicitly trusted in-process callback, not MCP identity.
+    g = Guard(allow_unverified_approvals=True)
     g.declare("write_file")
 
     @g.policy("write_file", on_fail="escalate")
@@ -296,3 +297,75 @@ def test_the_approval_key_binds_the_call_its_arguments_and_reasons():
 
 
 # ==================================================================================== frameworks
+
+
+def approval_proxy(guard):
+    from solvi.serve import Proxy, Upstream
+
+    class FakeUpstream(Upstream):
+        def __init__(self):
+            self.calls = []
+
+        def tools(self):
+            return [{"name": "write_file", "inputSchema": {"type": "object", "properties": {
+                "path": {"type": "string"}, "content": {"type": "string"}}, "required": ["path", "content"]}}]
+
+        def request(self, method, params):
+            self.calls.append((method, params))
+            return {"content": [{"type": "text", "text": "written"}]}
+
+    guard.declare("write_file")
+
+    @guard.policy("write_file", on_fail="escalate")
+    def editors_write(role: str) -> bool:
+        return role == "editor"
+
+    upstream = FakeUpstream()
+    return Proxy(guard, upstream, facts={"role": "viewer"}), upstream
+
+
+@pytest.mark.parametrize("accepted,outcome", [(True, "escalate"), (False, "deny")])
+def test_mcp_default_plain_bool_cannot_authenticate_an_approval(tmp_path, accepted, outcome):
+    guard = Guard(storage=tmp_path / "calls.jsonl")
+    proxy, upstream = approval_proxy(guard)
+    result = proxy.call({"name": "write_file", "arguments": {"path": "/work/a", "content": "v"}},
+                        ask=lambda decision: accepted)
+    assert result["isError"] and result["structuredContent"]["solvi"]["outcome"] == outcome
+    assert not upstream.calls
+    decision = proxy.session.decisions[-1]
+    if accepted:
+        assert not decision.resolved and not guard.storage.corrections()
+        assert any("approval refused:" in reason for reason in result["structuredContent"]["solvi"]["reasons"])
+    else:
+        assert decision.resolved
+
+
+def test_mcp_plain_bool_cannot_bypass_a_configured_verifier(tmp_path):
+    calls = []
+
+    def verifier(token, decision):
+        calls.append(token)
+        return False
+
+    guard = Guard(storage=tmp_path / "calls.jsonl", user_verifier=verifier)
+    proxy, upstream = approval_proxy(guard)
+    result = proxy.call({"name": "write_file", "arguments": {"path": "/work/a", "content": "v"}},
+                        ask=lambda decision: True)
+    assert result["isError"] and result["structuredContent"]["solvi"]["outcome"] == "escalate"
+    assert any("approval refused:" in reason for reason in result["structuredContent"]["solvi"]["reasons"])
+    assert not upstream.calls and not proxy.session.decisions[-1].resolved
+    assert not calls and not guard.storage.corrections()  # the proxy did not invent a token from the role or bool
+
+
+def test_mcp_does_not_hide_unexpected_resolution_errors(monkeypatch):
+    guard = Guard()
+    proxy, upstream = approval_proxy(guard)
+
+    def broken(*args, **kw):
+        raise RuntimeError("unexpected resolution failure")
+
+    monkeypatch.setattr(guard, "resolve", broken)
+    with pytest.raises(RuntimeError, match="unexpected resolution failure"):
+        proxy.call({"name": "write_file", "arguments": {"path": "/work/a", "content": "v"}},
+                   ask=lambda decision: True)
+    assert not upstream.calls
