@@ -160,7 +160,8 @@ def test_boundary_alias_keeps_given_check_selection(cost):
         return False
     strategy = CostStrategist() if cost else None
     with pytest.warns(UserWarning, match='idle|never runs'):
-        sys = System(cat, [Question('go', 'Go?')], strategist=strategy)
+        # This legacy boundary-selection fixture deliberately leaves the hard check unwired.
+        sys = System(cat, [Question('go', 'Go?')], strategist=strategy, allow_unreachable_hard_checks=True)
     with pytest.warns(UserWarning, match='idle|never runs'):
         renamed = sys.rename(inputs={'x': 'external_x'})
     original = sys.ask({'x': 1})

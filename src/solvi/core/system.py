@@ -2273,6 +2273,7 @@ def _idle_hard_checks(catalog, questions, heads=None):
     part (a hard check enters a question's flow only through one of these) → [names], in catalog order."""
     questions = list(questions)
     reachable = set()
+    boundary = set(getattr(catalog, '_boundary_given_aliases', ()))
     for question in questions:
         rule = catalog.rules.get(question.name)
         head = (heads or {}).get(question.name)
@@ -2293,7 +2294,7 @@ def _idle_hard_checks(catalog, questions, heads=None):
         while changed:
             changed = False
             for part in catalog.parts.values():
-                if part.kind == "check" and set(part.inputs) & computed and part.name not in computed:
+                if part.kind == "check" and set(part.inputs) & (computed - boundary) and part.name not in computed:
                     pending = [part.name]
                     while pending:
                         name = pending.pop()

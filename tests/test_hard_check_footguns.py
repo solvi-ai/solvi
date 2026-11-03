@@ -175,3 +175,20 @@ def test_computed_fact_check_missing_mixed_input_refuses_before_callbacks_and_ca
     with pytest.raises(ValueError, match="missing inputs.*permission"):
         asyncio.run(system.aask({"x": -1}, store=False))
     assert calls == []
+
+
+def test_input_rename_cannot_make_a_late_orphan_check_look_reachable():
+    catalog = Catalog()
+
+    @catalog.rule('go')
+    def go(x: int) -> bool:
+        return x > 0
+
+    system = System(catalog, [Question('go', 'Go?')])
+
+    @catalog.check(hard=True)
+    def safe(x: int) -> bool:
+        return False
+
+    with pytest.raises(ValueError, match='safe.*never runs'):
+        system.rename(inputs={'x': 'external_x'})
