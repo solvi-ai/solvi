@@ -72,6 +72,7 @@ nav:
       - Examples: examples.md
       - Gallery: gallery.md
   - Development migration notes: migration-1.5-candidate.md
+  - Provider identity leases: provider_identity_leases.md
   - Reference guide (all chapters): guide/index.md
   - API reference:
       - api/index.md
