@@ -241,3 +241,23 @@ This claim-scoped journal proof does not call retest, promote old claims, clear 
 `DecideModel(provider, identity_safe=True, identity_lease=provider.lease)` requires a provider-owned context manager that pins the entire deployment/router generation for the whole operation, including cache hits. It must yield a nonnegative monotonically increasing integer. No built-in remote adapter currently supplies this contract; an application must implement and authenticate it at the provider boundary.
 
 Unknown, changed, invalid or unavailable identity fails closed and invalidates cached decisions and adaptations. Persisted calibration bindings are audit provenance and require fresh lease-bound Part calibration. Checkpoint-level calibrated metadata never recovers through Part calibration: start from an uncalibrated scorer. Unsupported model/Part mutation APIs reject before scoring or writing; combinations abstain at decide/call and reject state/final/fitting/calibration APIs. Direct public dictionary or attribute mutation is outside the contract. See [Provider identity leases](provider_identity_leases.md) for the exact supported boundaries. Default behavior remains unchanged; this does not establish detection of hidden provider swaps outside the lease contract or global sensitivity of fixed probes.
+
+## Adaptive certificate reference re-takes
+
+`Dispatcher(promise=..., monitor=...)` now requires an independent labelled-risk `detector=` when the monitor
+provides `adapted()`. Certification, loosening and restart re-take that monitor's reference because routing changes
+its share answered alone. A simultaneous confidence/distribution shift can enter the new reference and escape that
+monitor. The constructor rejects this composition before the first decision when no label detector is provided.
+
+For legacy applications that explicitly accept this blind spot, pass `allow_reference_retake=True`. Only actual
+`bool` values are accepted; strings such as `"false"` and integers are rejected before constructor work. The enabled
+waiver is included in the dispatch configuration fingerprint; the default False adds no fingerprint field, keeping
+the earlier configuration format. Reconstruct an opted-out dispatcher with the same explicit True setting for
+matching configuration fingerprints during audit/replay.
+
+A `RiskDetector` continues across certificate threshold moves and monitors sampled deployed risk using accepted
+slow-path labels. Its expected false-alarm run length is not a per-horizon probability, and its delay depends on
+sampling and label availability. This guard does not prove detection of every confidence shift: a shift that leaves
+labelled deployed risk unchanged can still evade the reference re-take. The existing confidence thresholds and
+false-alarm calibration are unchanged. This is a bounded composition guard, not closure of the historical CLINC
+false-alarm/shift benchmark.

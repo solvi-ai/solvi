@@ -818,6 +818,9 @@ class Dispatcher:
                  store_responses=True, asked=None, same=None, unknown="answer", on_drift="human", audit=0.0,
                  secret: bytes | str | None = None, promise=None, detector=None, probation=None, sampling=None,
                  loop=None, allow_reference_retake=False):
+        if type(allow_reference_retake) is not bool:
+            raise TypeError("allow_reference_retake must be a bool")
+        self.allow_reference_retake = allow_reference_retake
         if question is None:
             if len(system.questions) != 1:
                 raise ValueError(f"the System asks {sorted(system.questions)}: say which with question=")
@@ -959,6 +962,7 @@ class Dispatcher:
                       self.think_policy, self.on_disagree, self.unknown,
                       *([("on_drift", self.on_drift)] if self.on_drift != "human" else []),
                       *([("audit", self.audit)] if self.audit else []),
+                      *([("allow_reference_retake", True)] if self.allow_reference_retake else []),
                       code_fingerprint(self.same) if self.same is not None else None,
                       None if self.budget is None else self.budget.to_dict(),
                       None if self.total is None else self.total.to_dict(), pr,
