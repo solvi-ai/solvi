@@ -206,3 +206,25 @@ mode's paired Wilson sign test (safe only together with the held-out gate), the 
 signal, the fewest calib labels a calib threshold needs.
 
 ::: solvi.experimental.stream.gates
+
+### Bounded initial acquisition
+
+`DefaultPolicy(acquisition={"floor": 0.8, "max_extra": 600, "until_decision": 2400})`
+opts into a predictable uniform audit floor. `None` preserves the existing rate.
+The hook `LoopPolicy.sampling_rate(state, base_rate)` sees past state only, never
+this decision's input, label, score, owner or split. The same independent coin is
+used, and additive base and owner paths share this hook.
+
+The controller stops boosting permanently once accepted distinct counts meet the
+initial training/growth and unchanged calibration/holdout floors. It never changes
+key roles, freeze or promotion gates. A missing/refused/repeated label cannot
+complete a distinct-key floor. Horizon or budget exhaustion leaves an open gap.
+
+`status()["acquisition"]` reports `reserved` and `remaining`: one potential extra
+oracle call is reserved per boosted decision, even if the coin misses or another
+path would already have called the oracle. Repeated previews of the same decision
+share that reservation. A base rate already equal to one needs no reservation.
+These are conservative potential extras, not actual paid calls. Configuration and
+reservations survive checkpoint pickle; replay starts from the frozen initial
+policy. Extra acquisition spends additional oracle budget and does not establish
+that the original S315 500-label quality/cost requirement has been fixed.

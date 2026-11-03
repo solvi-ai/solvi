@@ -595,3 +595,34 @@ def test_the_watch_rule_is_the_e_process_and_the_margin():
     assert LoopPolicy.watch(DefaultPolicy(), None, hi) is False
     assert DefaultPolicy().watch(None, hi) is True and DefaultPolicy(watch=False).watch(None, hi) is False
     assert DefaultPolicy(watch_min=10 ** 5).watch(None, hi) is False
+
+
+@pytest.mark.parametrize("config", [True, {}, {"floor": float("nan"), "max_extra": 1, "until_decision": 2},
+    {"floor": True, "max_extra": 1, "until_decision": 2},
+    {"floor": .5, "max_extra": True, "until_decision": 2},
+    {"floor": .5, "max_extra": 1, "until_decision": 0}])
+def test_acquisition_rejects_invalid_configuration(config):
+    with pytest.raises(ValueError):
+        DefaultPolicy(acquisition=config)
+
+
+def test_acquisition_reserves_once_and_persists_and_stops_at_distinct_floors():
+    p = DefaultPolicy(acquisition=dict(floor=.8, max_extra=2, until_decision=10))
+    st = _state(n=0, labels=dict(train=358, calib=66, holdout=76))
+    assert not p.want_train(st)  # original 500-row witness remains blocked
+    assert p.sampling_rate(st, .1) == .8
+    assert p.sampling_rate(st, .1) == .8
+    assert p.acquisition_status()["remaining"] == 1
+    p = pickle.loads(pickle.dumps(p))
+    assert p.sampling_rate(st, .1) == .8
+    assert p.sampling_rate(dataclasses.replace(st, n=1), 1) == 1
+    assert p.acquisition_status()["remaining"] == 1
+    assert p.sampling_rate(dataclasses.replace(st, n=2), .1) == .8
+    assert p.sampling_rate(dataclasses.replace(st, n=3), .1) == .1
+    p = DefaultPolicy(acquisition=dict(floor=.8, max_extra=100, until_decision=10))
+    ready = dataclasses.replace(st, keys=dict(train=300, calib=73, holdout=100))
+    assert p.sampling_rate(ready, .1) == .1
+    assert p.sampling_rate(dataclasses.replace(st, n=1), .1) == .1
+    assert p.acquisition_status()["ready"]
+    p = DefaultPolicy(acquisition=dict(floor=.8, max_extra=100, until_decision=1))
+    assert p.sampling_rate(dataclasses.replace(st, n=1), .1) == .1

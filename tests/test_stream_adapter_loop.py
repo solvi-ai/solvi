@@ -797,3 +797,28 @@ def test_resident_versions_include_candidate_and_protected_rows_beyond_soft_targ
         {'version': 0, 'state': 'retired'}, {'version': 2, 'state': 'retired'},
         {'version': 3, 'state': 'served'}]
     loop.close()
+
+
+def test_acquisition_common_coin_hook_and_real_training_unchanged_floors():
+    hand = _Hand([_Model("trained", .95)] * 5)
+    policy = DefaultPolicy(Budget(min_interval_s=0, per_day=10 ** 6), mature_patience=None,
+                           acquisition=dict(floor=1, max_extra=1200, until_decision=1200))
+    loop = AdapterLoop(hand, question="q", wait=True, max_risk=.05, secret=KEY,
+                       key=lambda x: f"acq{x[2]}", policy=policy, additive=False,
+                       promise_options={"grid": [.95, .5]})
+    r = random.Random(83)
+    for kid in range(1000):
+        before = loop._state()
+        x = (r.choice("ab"), r.random(), kid)
+        loop.step(x, lambda x=x: x[0])
+        if hand.jobs:
+            assert before.keys["train"] >= 299  # this decision may complete the floor
+            break
+    assert hand.jobs, "the actual batch learner must receive a training job"
+    job = hand.jobs[0]
+    assert len({row.key for row in job.rows}) >= 300
+    done = [e for e in _events(loop, "train") if e.get("state") == "done"]
+    assert done[0]["report"]["n_holdout"] >= 100
+    assert loop._state().keys["calib"] >= 73
+    assert loop.status()["acquisition"]["remaining"] >= 0
+    assert loop.replay()["ok"]

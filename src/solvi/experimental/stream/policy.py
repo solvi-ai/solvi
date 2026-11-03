@@ -454,6 +454,10 @@ class LoopPolicy(abc.ABC):
             raise TypeError(f"budget is a Budget, not {type(budget).__name__}")
         self._budget = budget if budget is not None else Budget()
 
+    def sampling_rate(self, st: LoopState, base_rate: float) -> float:
+        """Predictable uniform coin rate from past state only; legacy default unchanged."""
+        return base_rate
+
     # --- collecting
     @abc.abstractmethod
     def accept(self, st: LoopState, x, y, source: str) -> bool:
@@ -535,7 +539,24 @@ class DefaultPolicy(LoopPolicy):
                  probe_min: int = 30, stale: int = 3000, trial: int = 3000, probation: int = 300, r: int = 8,
                  lr: float = 3e-4, min_updates: int = 200, max_updates: int = 3000, refreeze=None, probe: bool = True,
                  pre_freeze: bool = True, novel_risk: bool = True, min_calib: int | None = None, watch: bool = True,
-                 watch_min: int = 100, novel_only: bool = True, mature_patience="auto", backlog_max: int | None = None):
+                 watch_min: int = 100, novel_only: bool = True, mature_patience="auto", backlog_max: int | None = None,
+                 acquisition: dict | None = None):
+        if acquisition is not None:
+            if not isinstance(acquisition, dict) or set(acquisition) != {"floor", "max_extra", "until_decision"}:
+                raise ValueError("acquisition requires floor, max_extra and until_decision")
+            floor = acquisition["floor"]
+            if isinstance(floor, bool) or not isinstance(floor, (int, float)) or not 0 < floor <= 1:
+                raise ValueError("acquisition floor must be finite in (0, 1]")
+            for name in ("max_extra", "until_decision"):
+                value = acquisition[name]
+                if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+                    raise ValueError(f"acquisition {name} must be a positive integer")
+            acquisition = dict(acquisition)
+        self.acquisition = acquisition
+        self._acquisition_reserved = 0
+        self._acquisition_done = False
+        self._acquisition_n = None
+        self._acquisition_boost = False
         super().__init__(budget)
         gates.split("", calib=calib, holdout=holdout)                     # the shares, checked once
         for name, v in (("first", first), ("window", window), ("min_holdout", min_holdout), ("min_novel", min_novel),
@@ -579,6 +600,38 @@ class DefaultPolicy(LoopPolicy):
                                         or backlog_max < 1):
             raise ValueError(f"backlog_max is a number of labels ≥ 1 or None, not {backlog_max!r}")
         self.mature_patience, self.backlog_max = mature_patience, backlog_max
+
+    def acquisition_status(self) -> dict | None:
+        """Conservative worst-case extra oracle reservations; refused/duplicate labels still cost a reservation."""
+        cfg = getattr(self, "acquisition", None)
+        if cfg is None:
+            return None
+        used = self._acquisition_reserved
+        return {**cfg, "reserved": used, "remaining": cfg["max_extra"] - used,
+                "ready": self._acquisition_done}
+
+    def sampling_rate(self, st, base_rate) -> float:
+        cfg = getattr(self, "acquisition", None)
+        if cfg is None or base_rate >= 1:
+            return base_rate
+        n = st.n + 1
+        # A dispatcher can preview a decision repeatedly, and additive base/owner
+        # paths share one reservation. No current input, score or split is visible.
+        if self._acquisition_n == n:
+            return max(base_rate, cfg["floor"]) if self._acquisition_boost else base_rate
+        distinct = st.labels if st.keys is None else st.keys
+        top = max((v.n_train for v in st.versions), default=0)
+        need = max(self.first, math.ceil(self.growth * top))
+        if (distinct.get("train", 0) >= need
+                and (not self.pre_freeze or (distinct.get("holdout", 0) >= self.min_holdout
+                     and distinct.get("calib", 0) >= self.calib_floor(st.alpha)))):
+            self._acquisition_done = True
+        boost = (not self._acquisition_done and n <= cfg["until_decision"]
+                 and self._acquisition_reserved < cfg["max_extra"] and base_rate < cfg["floor"])
+        self._acquisition_n, self._acquisition_boost = n, boost
+        if boost:
+            self._acquisition_reserved += 1
+        return max(base_rate, cfg["floor"]) if boost else base_rate
 
     # --- collecting
     def accept(self, st, x, y, source) -> bool:

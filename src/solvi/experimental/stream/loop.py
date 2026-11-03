@@ -886,7 +886,7 @@ class AdapterLoop:
         `_answer_of`) and the base coin ("base": coin(n) below the shared base rate "rho_base", the base-regime layers'
         learning event — equal to "sampled" when the owner's ρ is the base rate) — from the state before it."""
         route = dict(route, thr=self._route_thr(route["path"]))
-        rb = self.rate.rate(full=False)
+        rb = self._sampling_rate(self.rate.rate(full=False))
         return dict(route, answer=self._answer_of(route), base=self._coin(n) < rb, rho_base=rb)
 
     @staticmethod
@@ -1533,13 +1533,19 @@ class AdapterLoop:
                 if loaded:
                     self._release(srv)
 
+    def _sampling_rate(self, base_rate):
+        rho = self.policy.sampling_rate(self._state(), base_rate)
+        if isinstance(rho, bool) or not isinstance(rho, (int, float)) or not base_rate <= rho <= 1:
+            raise ValueError("policy.sampling_rate must return a finite rate in [base_rate, 1]")
+        return rho
+
     def _draw(self, n, score_s, thr_s, prob=None):
         """Decision n's (probation, rate, sampled, alone) from the state before it (no state change). Label mode: no
         coin and nothing alone — every call is a label. prob: the owner's probation (additive mode; None: the loop's)."""
         if self.mode == "label":
             return False, 0.0, False, False
         prob = self.left > 0 if prob is None else bool(prob)
-        rho = self.rate.rate(full=math.isinf(thr_s) or prob)
+        rho = self._sampling_rate(self.rate.rate(full=math.isinf(thr_s) or prob))
         sampled = self._coin(n) < rho
         alone = not prob and score_s is not None and math.isfinite(thr_s) and score_s >= thr_s
         return prob, rho, sampled, alone
@@ -2942,7 +2948,8 @@ class AdapterLoop:
                  else "training" if job is not None else "paused" if self.paused else "running")
         host = self.host
         attached = (None if host is None else "dispatcher" if hasattr(host, "slow") else "system")
-        return {"state": state, "error": None if err is None else dict(err), "served": self.served,
+        return {"acquisition": (self.policy.acquisition_status() if isinstance(self.policy, DefaultPolicy) else None),
+                "state": state, "error": None if err is None else dict(err), "served": self.served,
                 "candidate": self.candidate, "n": self.n, "labels": {**self._split_n, "refused": self._refused["n"]},
                 "trainings": len(self._trainings),
                 "budget": {"max_trainings": b.max_trainings, "per_day": b.per_day,
