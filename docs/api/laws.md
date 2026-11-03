@@ -31,9 +31,21 @@ tolerance set from the measurement error alone ignores the error of the fitted c
 rows it should pass. Before trusting an accepted numeric law, check its residuals as a whole: a `confirm=` closure over
 the held-out rows that refits the constants and runs, for example, a χ² or a sign test on the residuals. Widen the
 tolerance by the fitted constants' uncertainty. The χ² after a refit is built in as an opt-in,
-`residual_check(refit, level=0.995)`, used with `tol=math.inf` (see its docstring and
+`residual_check(refit, level=0.995, dof_sigma=None)`, used with `tol=math.inf` (see its docstring and
 [best practices](../best_practices.md) for the measurement and its cautions); the widened tolerance and the sign test
 are not shipped.
+
+For an independently estimated measurement variance, `dof_sigma=nu` uses the upper bound
+`(n-k) * F.ppf(level, n-k, nu)` instead of the known-variance chi-square bound. Its exact reference requires both
+`RSS / sigma**2 ~ chi2(n-k)` and an independent `nu * sigma_hat**2 / sigma**2 ~ chi2(nu)`; for example, a
+correctly specified Gaussian linear refit with an appropriate fixed variance model and an independent variance
+estimate. Five independent groups of three repeated measurements provide ten variance degrees of freedom.
+The caller supplies and justifies this model: `nu` alone does not establish independence. In particular,
+estimating `sigma_hat**2 = RSS/(n-k)` from the identical residuals makes their standardized sum of squares
+identically `n-k`, so the F reference is invalid. Shared rows require a justified independent decomposition.
+Nonlinear fits, random relative-error normalization, non-Gaussian noise and selecting a model on the same data
+do not automatically give an exact F test. This option does not supply a model-selection correction or a
+guarantee against accepting a wrong formula. Threshold formulas and runtime behavior are unchanged.
 
 
 ## Exceptions tied to a base revision

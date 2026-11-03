@@ -23,12 +23,20 @@ def residual_check(refit: Callable[[Any], Any], level: float = 0.995,
     None is a refusal. level: in (0, 1); 0.995 is 1 − α/2 at α = 0.01, the level measured.
 
     σ must be known for that rule: with an estimated σ̂ (residuals in units of σ̂, σ̂² carrying ν degrees of freedom —
-    e.g. ν = 10 from 15 repetitions of 3) the plain χ² quantile refuses the true law far above the nominal level: on
+    e.g. ν = 10 from five independent groups of three repeated measurements, 15 observations in total) the plain
+    χ² quantile refuses the true law far above the nominal level: on
     the true law y = 2x at σ = 1 % with σ̂ from 15 reps the refusal rate was 0.2315 against a nominal 0.005 (2,000
     trials; tests/test_laws_handoff_fixes.py re-measures the three rates). Pass dof_sigma=ν: the check is then
     Σ r² ≤ (n − k) · F_level(n − k, ν) — the F quantile, of which the known-σ rule is the ν → ∞ limit (dof_sigma=None,
-    the default, changes nothing). σ̂ must be independent of the residuals; when the same rows gave both, ν counts
-    what the refit left them.
+    the default, changes nothing). The exact F reference requires RSS/σ² to have a χ²(n − k) distribution and
+    ν·σ̂²/σ² to have an independent χ²(ν) distribution. A correctly specified Gaussian linear refit with the
+    appropriate fixed variance model supplies the numerator assumption; arbitrary refits do not establish it.
+    Common rows can be used only when the two statistics have a justified independent decomposition. Merely
+    counting leftover degrees of freedom does not justify independence: if σ̂² = RSS/(n − k) from the identical
+    residuals, their standardized sum of squares is identically n − k, not an F-distributed statistic.
+    Nonlinear fitting, random relative-error normalization, non-Gaussian noise and selecting the model on the same
+    data do not automatically retain the exact reference distribution. The caller must justify these assumptions;
+    dof_sigma supplies a degree count, not a check of them or a correction for model selection.
 
     Use it with `tol=math.inf`: the row band is then off (every held-out row is a hit), `min_support` and net > 0 still
     apply, and the χ² decides. Under `tol=math.inf` the sized bound is vacuous — with every row a hit it no longer
