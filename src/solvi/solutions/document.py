@@ -33,7 +33,8 @@ The scheme it sets up (all of it existing low-level blocks, wired):
   read grounds to the TOTAL line, not to the digits' first occurrence); without a label, with no such line or
   several, a unique occurrence is required. A label-only preceding line also supports its numeric line.
   For fields whose name supplies a label, ambiguous repeated numbers abstain with an explicit grounding
-  diagnostic rather than assert first offsets. Unlabelled one-letter fields keep their existing quote contract.
+  diagnostic rather than assert first offsets. One-letter names supply no label; their numbers also require
+  a unique compatible occurrence.
 - numbers: a `Span[float]` (int, Decimal) is read from what was quoted, as the document writes it, into a fact
   `<field>_value` (the rule's `why` shows it next to the quote). One scale rule — a scale is never multiplied, the
   number is kept in the document's own unit ("1,250 million", "$1.2bn", "1.2M", "3k" → 1250, 1.2, 1.2, 3); the
@@ -500,8 +501,22 @@ def _label_ground(value, doc, words):
         k = doc.find(value, k + 1)
     if len(labelled) == 1:
         return labelled[0]
-    if not labelled and len(hits) == 1:
-        return hits[0]
+    if not labelled:
+        # Percent and amount tokens are distinct quantities, as in _ground. A bare amount quote must not
+        # become ambiguous merely because the same digits also occur as a percentage.
+        core = _NUM_CORE.search(value)
+        if core is not None:
+            qp = _token(value, core.start(), core.end(), quote=True)[0]
+            compatible = [k for k in hits if ("percent" in _token(doc, k + core.start(),
+                           k + core.end())[0]) == ("percent" in qp)]
+            if compatible:
+                hits = compatible
+            exact = [k for k in hits if all(_token(doc, k + core.start(), k + core.end())[0].get(unit) == qp[unit]
+                     for unit in ("currency", "scale") if unit in qp)]
+            if exact:
+                hits = exact
+        if len(hits) == 1:
+            return hits[0]
     return None
 
 
@@ -543,6 +558,7 @@ class _LabelGrounded:
         if not isinstance(d, Decision) or not isinstance(text, str):
             return d
         moved = {}
+        ambiguous = []
 
         def fix(q):
             if not (isinstance(q, Quote) and isinstance(q.value, str) and q.value and q.source == self._part.facts[0]
@@ -550,7 +566,19 @@ class _LabelGrounded:
                 return q
             k = _label_ground(q.value, text, self._words)
             if k is None:
-                d.escalate = "ambiguous number grounding: no unique occurrence supports the field"
+                d.escalate = (_left_out(q.value, text) or
+                              "ambiguous number grounding: no unique occurrence supports the field")
+                ambiguous.append(True)
+                return q.value
+            # The numeric reader currently infers omitted units across the document. Do not publish a
+            # selected line whose units disagree with that inference (e.g. TOTAL digits followed by %).
+            line_start = text.rfind("\n", 0, k) + 1
+            line_end = text.find("\n", k)
+            local_why, local_units = _ground(q.value, text[line_start:len(text) if line_end < 0 else line_end])
+            global_why, global_units = _ground(q.value, text)
+            if local_why or (not global_why and local_units != global_units):
+                d.escalate = local_why or "ambiguous number grounding: selected occurrence has different units"
+                ambiguous.append(True)
                 return q.value
             if k == q.start:
                 return q
@@ -560,7 +588,7 @@ class _LabelGrounded:
         if isinstance(d.value, Quote):
             d.value = fix(d.value)
         d.evidence = [fix(e) for e in d.evidence or []]
-        if d.escalate and d.escalate.startswith("ambiguous number grounding"):
+        if ambiguous:
             d.evidence = []
             d.extra = dict(d.extra or {})
             d.extra["grounding"] = {"status": "ambiguous", "reason": d.escalate}
@@ -950,7 +978,7 @@ def document(schema, model, *, task=None, text="doc", compute=None, answer=None,
         q = f"{task.rstrip()} {desc}" if task else desc
         part = model.decision(name, q, text, options=opts, type=t, state_keys=reads_with, **args)
         words = _label_words(name) if _is_number(fi) and getattr(part, "facts", None) else None
-        cat.fn(_LabelGrounded(part, words) if words else part)   # S309: a labelled number grounds on its label's line
+        cat.fn(_LabelGrounded(part, words) if _is_number(fi) and getattr(part, "facts", None) else part)   # S309: a labelled number grounds on its label's line
         readers[name] = _value_reader(fi)
 
     from decimal import Decimal as _Dec

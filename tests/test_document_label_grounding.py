@@ -55,10 +55,10 @@ def test_the_sub_total_field_grounds_to_its_own_line():
 
 
 def test_a_one_letter_field_name_is_no_label():
-    """"x" is not a label the text carries: the first occurrence stands, as before the fix."""
+    """A one-letter name supplies no label and cannot select among duplicate amounts."""
     res = totals(One).ask({"doc": DOC})
-    (f,) = res.facts
-    assert (f.start, f.end) == (10, 16)
+    assert res["answer"].status == "abstain"
+    assert not res.facts
 
 
 def test_two_labelled_lines_abstain_instead_of_claiming_the_first_occurrence():
@@ -128,9 +128,9 @@ def test_the_records_quote_note_moves_with_the_fact_and_it_replays(tmp_path):
     assert JSONLStorage(path).replay_all(totals().system) == []         # a fresh same recipe replays it clean
 
 
-def test_only_labelled_number_fields_are_wrapped():
-    """A number field with a label registers the grounding wrapper; anything else the decision itself, and the
-    wrapper stands in for the decision attribute by attribute (name, model, question)."""
+def test_all_number_fields_are_wrapped_and_one_letter_names_cannot_guess_offsets():
+    """All numeric spans require unambiguous provenance; usable names additionally select their label.
+    The wrapper preserves the decision metadata (name, model, question)."""
     s = totals()
     part = s.system.catalog.parts["total"].func
     assert part.__class__.__name__ == "_LabelGrounded" and part.__name__ == "total"
@@ -138,10 +138,10 @@ def test_only_labelled_number_fields_are_wrapped():
 
     from test_document_recipe import ops_system                       # a / b: one-letter names, no label
     plain = ops_system(Server(lambda m, b: ("$1,250", 0.9)))
-    assert plain.system.catalog.parts["a"].func.__class__.__name__ == "DecisionPart"
+    assert plain.system.catalog.parts["a"].func.__class__.__name__ == "_LabelGrounded"
     res = plain.ask({"doc": "Case 1. Revenue was $1,250 and cost was $1,250. Other figure: 77.", "op": "diff"})
-    assert res["answer"].status == "ok" and res.facts[0].name == "a"
-    assert (res.facts[0].start, res.facts[0].end) == (20, 26)
+    assert res["answer"].status == "abstain"
+    assert not res.facts
 
 
 def test_a_reads_with_recipe_grounds_the_labelled_field_too():
@@ -203,3 +203,16 @@ def test_ambiguous_decision_keeps_the_reading_but_removes_unsupported_offsets():
     assert result.evidence == []
     assert result.extra["grounding"]["status"] == "ambiguous"
     assert "quote" not in result.extra["llm"]
+
+
+def test_selected_percent_line_cannot_borrow_units_from_another_amount():
+    res = totals().ask({"doc": "SUB TOTAL 28,000\nTOTAL 28,000%\n"})
+    assert res["answer"].status == "abstain"
+    assert not res.facts
+
+
+def test_one_letter_unique_amount_is_distinct_from_a_percent():
+    res = totals(One).ask({"doc": "Amount 28,000. Margin 28,000%."})
+    assert res["answer"].status == "ok"
+    (fact,) = res.facts
+    assert (fact.start, fact.end) == (7, 13)
