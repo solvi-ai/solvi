@@ -3106,16 +3106,18 @@ def sign_message(content, sender, key, *, now=None) -> str:
     return f"{sender}.{t}.{hmac.new(k, f'{words}|{sender}|{t}'.encode(), hashlib.sha256).hexdigest()}"
 
 
-def signed_messages(keys, *, max_age=None, clock=None):
+def signed_messages(keys, *, max_age=None, clock=None, cache=None):
     """A message_verifier over sign_message signatures: keys {sender: secret}; a user message verifies when its
     "signature" names a sender with a key, its HMAC matches the message's words, and (with max_age, in seconds; None:
     no limit, a conversation keeps its old turns) it is not older than that (clock(): default time.time) → the sender;
-    else PermissionError saying why (the guard reads the message as a tool output)."""
-    import hashlib
-    import hmac
+    else PermissionError saying why (the guard reads the message as a tool output).
+    Optional core.signed.SignatureCache caches only the MAC check; age is checked on
+    every call. Repeated history remains allowed, with no replay state here."""
     import time
+    from solvi.core.signed import HmacScheme
     clock = clock or time.time
     keys = {str(r): (k.encode() if isinstance(k, str) else bytes(k)) for r, k in dict(keys).items()}
+    scheme = HmacScheme(keys)
 
     def verify(message):
         sig = None if isinstance(message, (str, tuple, list)) else _signature_of(message)
@@ -3125,8 +3127,12 @@ def signed_messages(keys, *, max_age=None, clock=None):
         who, t, got = parts[0], int(parts[1]), parts[2]
         if who not in keys:
             raise PermissionError(f"the message names an unknown sender {who!r}")
-        want = hmac.new(keys[who], f"{_user_words(message)}|{who}|{t}".encode(), hashlib.sha256).hexdigest()
-        if not hmac.compare_digest(want, got):
+        try:
+            tag = bytes.fromhex(got) if got == got.lower() else b""
+        except ValueError:
+            tag = b""
+        if len(got) != 64 or not scheme.verify_cached(
+                who, f"{_user_words(message)}|{who}|{t}".encode(), tag, cache):
             raise PermissionError(f"the signature does not match the message's words (or {who!r}'s key)")
         age = clock() - t
         if max_age is not None and age > max_age:

@@ -171,7 +171,7 @@ LOW_TIERS = {
     "kernel": "_deprecate _loader _migrate _rpc core stat",                  # solvi.core.* unless listed below
     "parts": "core.deciders core.extract core.plan core._inputs",
     "guarantees": "core.guarantees",
-    "records": "core.store core.response core.specialist",
+    "records": "core.store core.response core.specialist core.signed",
     "system": "core.system",
     "deliberate": "core.slow core.dispatch core.versions core.explain",   # versions: Fail; explain: search's pinning
     "knowledge": "core.knowledge",

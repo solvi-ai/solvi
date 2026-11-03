@@ -120,6 +120,7 @@ nav:
           - solvi.core.guarantees.drift: api/drift.md
           - solvi.core.guarantees.monitor: api/monitor.md
           - solvi.core.store: api/storage.md
+          - solvi.core.signed: api/signed.md
           - solvi.core.store.calls: api/calls.md
           - Unrecorded decisions: api/unrecorded-decisions.md
           - solvi.core.store.audit: api/audit.md

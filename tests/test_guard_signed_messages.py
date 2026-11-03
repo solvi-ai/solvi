@@ -110,3 +110,35 @@ def test_a_verifier_that_raises_or_returns_nothing_refuses():
 
 def test_message_flags():
     assert not Message("user", "x").verified and Message("user", "x", verified=True).verified
+
+
+def test_mac_cache_preserves_age_and_repeated_history(monkeypatch):
+    from solvi.core.signed import HmacScheme, SignatureCache
+    now = [1000.0]
+    message = signed("pay 50 to Bob", now=1000)
+    calls = []
+    original = HmacScheme.verify
+
+    def counted(self, *args):
+        calls.append(args)
+        return original(self, *args)
+
+    monkeypatch.setattr(HmacScheme, "verify", counted)
+    verifier = signed_messages(KEYS, max_age=60, clock=lambda: now[0], cache=SignatureCache())
+    assert verifier(message) == verifier(message) == "alice"
+    assert len(calls) == 1
+    now[0] = 1061
+    with pytest.raises(PermissionError, match="old"):
+        verifier(message)
+    assert len(calls) == 1
+    now[0] = 969
+    with pytest.raises(PermissionError, match="future"):
+        verifier(message)
+
+
+@pytest.mark.parametrize("tag", ["я" * 64, "A" * 64, "-" * 64, "00"])
+def test_malformed_tag_refuses_without_crashing(tag):
+    message = signed("hello", now=1000)
+    message["signature"] = "alice.1000." + tag
+    with pytest.raises(PermissionError):
+        signed_messages(KEYS, clock=lambda: 1000)(message)

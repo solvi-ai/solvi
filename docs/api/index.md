@@ -72,6 +72,7 @@ one reference per extension point and describes the stability policy and planned
 | [`solvi.core.guarantees.drift`](drift.md) | drift: has the stream moved away from the one the thresholds were calibrated on? |
 | [`solvi.core.guarantees.monitor`](monitor.md) | the `Monitor` protocol: a watcher of the decision stream |
 | [`solvi.core.store`](storage.md) | TraceStorage: JSONL, SQLite, PostgreSQL and DuckDB stores, queries, replay |
+| [`solvi.core.signed`](signed.md) | signed JSON snapshots, bounded shared MAC cache, freshness and local replay checks |
 | [`solvi.core.store.audit`](audit.md) | `res.audit()`: what each answer rests on and which safeguards fired; `to_dict()` as JSON-ready data |
 | [`solvi.core.store.report`](report.md) | reports of one decision or a period of stored decisions (Markdown, HTML, data) |
 | [`solvi.core.store.sysreport`](sysreport.md) | the system report: who answered, the cost, the promise against the stored labels, drift — from the store alone |
