@@ -44,7 +44,8 @@ INVOICES = {"INV-7": f"INV-7 from ACME GmbH, IBAN {ACME}, 250.00 EUR, due 2026-1
 PAID = []
 
 store = Path(tempfile.mkdtemp()) / "calls.db"
-guard = Guard(storage=store, fact_names={"role": str, "spent_today": float})
+# This offline demo simulates a trusted in-process reviewer. Production approvals should configure user_verifier.
+guard = Guard(storage=store, fact_names={"role": str, "spent_today": float}, allow_unverified_approvals=True)
 
 
 # ------------------------------------------------------------------------------------------------ the catalog of tools

@@ -273,7 +273,7 @@ def test_middle_mode_per_tool_and_validation():
 
 
 def test_middle_mode_escalation_is_resolved_by_a_person_once():
-    g, made = pay_guard(tool_values="escalate", storage=None)
+    g, made = pay_guard(tool_values="escalate", storage=None, allow_unverified_approvals=True)
     c = ctx("Pay the invoice, 50.", f"Invoice: {IBAN_T}")
     d = g.call(pay_call(IBAN_T), c)
     assert d.outcome == "escalate" and not made

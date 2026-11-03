@@ -308,3 +308,17 @@ certificate remains conservative; the conditional observed error rate is not a p
 at combination time. Positive shrinkage requires supported domain counts. Unknown domains are refused; omission
 with configured domains warns before using the global matrix. Likelihood fitting remains pooled. Domain matrices
 are supplied by the caller and must not use the current answer's truth to select a domain.
+
+### Guard approvals require a trusted verifier
+
+`Guard.resolve(..., approve=True)` now refuses with `PermissionError` when `user_verifier` is absent. It leaves the
+escalation unresolved, writes no correction and executes no tool, including with `execute=False`. Configure an
+existing `approval_verifier(keys)` and supply `sign_approval(...)` tokens, or your own trusted verifier callable.
+Token validation and its binding to the exact call remain mandatory whenever a verifier is configured.
+
+For a trusted in-process legacy reviewer callback only, explicit keyword-only `allow_unverified_approvals=True`
+retains the old programmatic path. The flag requires an actual bool, emits an `UNVERIFIED` warning when used,
+marks the returned reasons and stores `approval_verification="unverified-explicit-waiver"`. It supplies no identity
+authentication and never bypasses a configured verifier. Rejections still need no token. Normal checks, calls and
+batch policies are unchanged. Message-role authentication remains a separate boundary; this change does not close
+all of S157 or establish the truth of authenticated messages.

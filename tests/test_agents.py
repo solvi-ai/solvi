@@ -193,7 +193,7 @@ def test_call_shapes_and_messages():
 
 
 def test_store_replay_tamper_and_human_resolution(tmp_path):
-    g, paid = make(storage=tmp_path / "calls.db")
+    g, paid = make(storage=tmp_path / "calls.db", allow_unverified_approvals=True)
     a = g.call(pay(), CTX, facts={"spent_today": 0.0})
     e = g.call(pay(amount=1_900), CTX, facts={"spent_today": 400.0})
     n = g.call({"name": "nope", "arguments": {}}, CTX)

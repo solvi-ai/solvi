@@ -8,8 +8,8 @@ import pytest
 from solvi.solutions.guard import Guard
 
 
-def guard(storage=None):
-    g = Guard(storage=storage)
+def guard(storage=None, **kw):
+    g = Guard(storage=storage, **kw)
     made = []
 
     @g.tool
@@ -63,7 +63,7 @@ def test_async_and_session_calls_are_paused_too():
 
 
 def test_an_escalation_is_not_approved_while_paused(tmp_path):
-    g, made = guard(tmp_path / "g.jsonl")
+    g, made = guard(tmp_path / "g.jsonl", allow_unverified_approvals=True)
     e = g.call({"name": "send", "arguments": {"to": "eve@x.example"}})
     assert e.outcome == "escalate"
     g.pause("stop", by="ops")

@@ -1627,7 +1627,9 @@ class Guard:
     user_verifier: binds a person's approval to who gave it and to this very call — `user_verifier(approval,
     decision)` → the verified identity (raise PermissionError, or return a falsy value, to refuse); `resolve(...,
     approve=True)` then needs `approval=` (a token) that verifies, and the store records the verified identity. None
-    (default): any truthy approve with any reviewer name is taken, as before. `approval_verifier(keys)` is a verifier
+    (default): approve=True raises PermissionError before resolution or side effects. Explicit strict-bool
+    allow_unverified_approvals=True permits legacy programmatic approval with an UNVERIFIED diagnostic; it never
+    bypasses a configured verifier. `approval_verifier(keys)` is a verifier
     over HMAC tokens from `sign_approval(decision, reviewer, key)`, bound to the decision's approval_key.
     message_verifier: the other half — who wrote a «user» message. `message_verifier(message)` → the verified sender
     (raise, or return a falsy value, to refuse), called with each user message as given (a dict, a message object, a
@@ -1646,8 +1648,12 @@ class Guard:
 
     @_deprecate.removed_kwargs(facts="fact_names")
     def __init__(self, storage=None, authorizer=None, fact_names=None, lang="en", scan_user=False, tool_values="deny",
-                 knowledge=None, user_verifier=None, message_verifier=None, require_effects=False):
+                 knowledge=None, user_verifier=None, message_verifier=None, require_effects=False, *,
+                 allow_unverified_approvals=False):
         from ...core.store import open_storage
+        if type(allow_unverified_approvals) is not bool:
+            raise TypeError("allow_unverified_approvals must be a bool")
+        self.allow_unverified_approvals = allow_unverified_approvals
         if user_verifier is not None and not callable(user_verifier):
             raise TypeError("user_verifier is a function (approval, decision) → the verified identity, or None")
         if message_verifier is not None and not callable(message_verifier):
@@ -2544,11 +2550,16 @@ class Guard:
         An escalation is resolved once: a second resolve of the same decision (or, with a store, of a stored decision
         that already has a resolution) raises ValueError — so an approved call is never made twice.
 
-        With Guard(user_verifier=) an approval needs `approval` (a token, e.g. from sign_approval) that the verifier
+        By default approval requires Guard(user_verifier=); without one PermissionError leaves the escalation open.
+        Explicit allow_unverified_approvals=True is a diagnostic legacy waiver, recorded as unverified. With a
+        configured verifier an approval needs `approval` (a token, e.g. from sign_approval) that the verifier
         accepts for this decision: else PermissionError and the escalation stays open. The verified identity is the
         reviewer (a different `reviewer` name raises) and is recorded (meta "verified"). A rejection needs no token."""
         if decision.outcome != "escalate":
             raise ValueError(f"only an escalated call is resolved by a person; this one is {decision.outcome!r}")
+        if approve and self.user_verifier is None and not self.allow_unverified_approvals:
+            raise PermissionError("approval requires a trusted user_verifier; configure one or explicitly use "
+                                  "allow_unverified_approvals=True for diagnostic legacy approvals")
         if decision.resolved or (self.storage is not None and decision.stored_id is not None and any(
                 c["question"] == "verdict" and c["of"] == decision.stored_id for c in self.storage.corrections())):
             raise ValueError(f"this escalation of {decision.tool} was already resolved"
@@ -2557,6 +2568,11 @@ class Guard:
         if approve and pause is not None:
             raise PermissionError(f"the guard is paused{_by(pause['by'])}: {pause['reason']} — approvals wait for "
                                   "resume()")
+        unverified = bool(approve and self.user_verifier is None)
+        if unverified:
+            import warnings
+            warnings.warn("UNVERIFIED approval accepted under explicit allow_unverified_approvals compatibility waiver",
+                          UserWarning, stacklevel=2)
         verified = None
         if approve and self.user_verifier is not None:
             if approval is None:
@@ -2573,12 +2589,16 @@ class Guard:
                                 reasons=list(decision.reasons) + ([f"approved by {reviewer or 'a person'}"] if approve
                                                                   else [f"rejected by {reviewer or 'a person'}"]
                                                                   + ([note] if note else [])))
+        if unverified:
+            d.reasons.append("UNVERIFIED approval: explicit allow_unverified_approvals compatibility waiver")
         if approve and execute:
             self._run(d)
         if self.storage is not None:
             meta = {"tool": d.tool, "reviewer": reviewer, "note": note, "of": decision.stored_id, "executed": d.executed}
             if verified is not None:
                 meta["verified"] = verified
+            if unverified:
+                meta["approval_verification"] = "unverified-explicit-waiver"
             meta.update(_outcome_meta(d))
             self.storage.save_correction("verdict", decision.response.trace.init, d.outcome, meta={"guard": meta},
                                          by=reviewer, of=decision.stored_id)

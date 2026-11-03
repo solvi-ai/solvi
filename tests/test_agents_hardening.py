@@ -213,7 +213,7 @@ def test_proxy_context_is_capped_and_long_outputs_keep_their_instructions(tmp_pa
 
 
 def test_an_escalation_is_resolved_once(tmp_path):
-    g, paid = payments(storage=tmp_path / "calls.db")
+    g, paid = payments(storage=tmp_path / "calls.db", allow_unverified_approvals=True)
 
     @g.policy("pay", on_fail="escalate")
     def small(amount: float) -> bool:

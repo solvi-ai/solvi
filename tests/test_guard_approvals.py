@@ -8,8 +8,8 @@ from solvi.solutions.guard import Guard, approval_verifier, sign_approval
 KEYS = {"alice": b"alice-secret", "bob": b"bob-secret"}
 
 
-def guard(tmp_path, verifier):
-    g = Guard(storage=tmp_path / "calls.jsonl", user_verifier=verifier)
+def guard(tmp_path, verifier, **kw):
+    g = Guard(storage=tmp_path / "calls.jsonl", user_verifier=verifier, **kw)
     paid = []
 
     @g.tool
@@ -56,9 +56,62 @@ def test_an_approval_needs_a_valid_token_for_this_call(tmp_path):
     assert r.outcome == "deny"
 
 
-def test_without_a_verifier_resolve_is_as_before(tmp_path):
-    g, paid = guard(tmp_path, None)
+def test_explicit_unverified_waiver_preserves_legacy_with_diagnostics(tmp_path):
+    g, paid = guard(tmp_path, None, allow_unverified_approvals=True)
     e = esc(g)
-    assert g.resolve(e, approve=True, reviewer="alice").approved_by == "alice" and paid == [("Bob", 500)]
+    with pytest.warns(UserWarning, match="UNVERIFIED approval"):
+        result = g.resolve(e, approve=True, reviewer="alice")
+    assert result.approved_by == "alice" and paid == [("Bob", 500)]
+    assert any("UNVERIFIED" in reason for reason in result.reasons)
+    correction = g.storage.corrections()[-1]
+    meta = g.storage.record(correction["id"])["meta"]["guard"]
+    assert meta["approval_verification"] == "unverified-explicit-waiver" and "verified" not in meta
     with pytest.raises(TypeError):
         Guard(user_verifier="alice")
+
+
+@pytest.mark.parametrize("execute", [True, False])
+def test_default_unverified_approval_refuses_before_resolution_storage_or_execution(tmp_path, execute):
+    g, paid = guard(tmp_path, None)
+    decision = esc(g)
+    before = (tmp_path / "calls.jsonl").read_bytes()
+    with pytest.raises(PermissionError, match="user_verifier"):
+        g.resolve(decision, approve=True, reviewer="claimed alice", execute=execute)
+    assert paid == [] and not decision.resolved
+    assert (tmp_path / "calls.jsonl").read_bytes() == before
+    assert g.storage.corrections() == []
+
+
+@pytest.mark.parametrize("flag", [None, 0, 1, "yes", []])
+def test_unverified_approval_waiver_is_strict_bool(flag):
+    with pytest.raises(TypeError, match="must be a bool"):
+        Guard(allow_unverified_approvals=flag)
+
+
+def test_waiver_never_bypasses_a_configured_verifier_and_rejection_needs_no_token(tmp_path):
+    g, paid = guard(tmp_path, approval_verifier(KEYS), allow_unverified_approvals=True)
+    decision = esc(g)
+    with pytest.raises(PermissionError, match="approval"):
+        g.resolve(decision, approve=True)
+    assert not decision.resolved and not paid
+    assert g.resolve(decision, approve=False).outcome == "deny"
+
+
+def test_rejection_without_a_verifier_still_needs_no_token(tmp_path):
+    g, paid = guard(tmp_path, None)
+    decision = esc(g)
+    result = g.resolve(decision, approve=False, reviewer="reviewer")
+    assert result.outcome == "deny" and not paid and decision.resolved
+
+
+def test_default_approval_refuses_before_reading_stored_resolutions(tmp_path, monkeypatch):
+    g, paid = guard(tmp_path, None)
+    decision = esc(g)
+
+    def forbidden():
+        raise AssertionError("storage consulted before default authentication refusal")
+
+    monkeypatch.setattr(g.storage, "corrections", forbidden)
+    with pytest.raises(PermissionError, match="user_verifier"):
+        g.resolve(decision, approve=True)
+    assert not decision.resolved and not paid
