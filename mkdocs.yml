@@ -110,6 +110,7 @@ nav:
           - solvi.core.sets: api/sets.md
           - solvi.core.plan.strategist: api/strategist.md
           - solvi.core.plan.cost: api/strategy.md
+          - solvi.core.plan.answer_policy: api/answer_policy.md
           - solvi.core.costs: api/costs.md
           - solvi.stat: api/stat.md
           - solvi.core.calibration: api/calibration.md

@@ -62,6 +62,7 @@ one reference per extension point and describes the stability policy and planned
 | [`solvi.core.sets`](sets.md) | decisions over a set: answers of many items made consistent under at-most / exactly-one / capacity constraints |
 | [`solvi.core.plan.strategist`](strategist.md) | the strategist: a flow per request (`Flow`, `PlanError`), the learned order of hard checks and producer policy |
 | [`solvi.core.plan.cost`](strategy.md) | the code strategist (`CostStrategist`): dead ends dropped, the cheapest verified plan |
+| [`solvi.core.plan.answer_policy`](answer_policy.md) | conditional candidate reliability, expected-utility planning, stored-answer replay and check budgets |
 | [`solvi.core.costs`](costs.md) | measured run times (`CostBook`), the dollars of recorded model calls (`price_of`), `Budget` and `Cost` |
 | [`solvi.stat`](stat.md) | bounded-mean e-processes, reusable checkpoint state, delta budgets, e-BH and sequential e-LOND |
 | [`solvi.core.calibration`](calibration.md) | reliability, expected calibration error, coverage at a target accuracy |
