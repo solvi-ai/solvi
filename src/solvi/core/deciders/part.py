@@ -23,7 +23,7 @@ from .state import _is_text, _single, _text, jsonable, state_text
 from .wire import Logits, _respan
 from .backends import LONG_CPU_TOKENS, SECTION_TOKENS
 from .adapt import ADAPTERS, _Spec, lora_key
-from .identity import part_operation, safe_finish, calibration_operation
+from .identity import part_operation, safe_finish, calibration_operation, reject_mutation
 from .gate import Facts, GroupBy, _group_guard, _group_promise, _shown, _threshold, _vkey, confidence_source, group_record, guard_promise, guard_rule, no_separation, one_source
 
 
@@ -693,6 +693,7 @@ class DecisionPart:
 
     # adapt / fit / teach are fitted on the logits the part decides on (self._read: every option order averaged with
     # option_order="average", a long input's retrieved window), not on the model's single-order logits of the whole text
+    @reject_mutation
     def adapt(self, texts):
         """Label-bias correction from unlabelled inputs of the domain (see DecideModel.adapt)."""
         ts = [self._input_text(t) for t in texts]
@@ -700,17 +701,20 @@ class DecisionPart:
             return self.model.adapt(ts, **self._kw())             # raises the model's error
         return self.model.adapt(ts, logits=[z for z, _ in self._read(ts)], **self._kw())
 
+    @reject_mutation
     def fit(self, examples, lam=1.0, folds=4):
         """Few-shot "S" from [(input, correct)] (see DecideModel.fit)."""
         ex = [(self._input_text(t), self.spec.label(y)) for t, y in examples if y is not Unknown]
         return self.model.fit(ex, lam=lam, folds=folds, logits=[z for z, _ in self._read([t for t, _ in ex])],
                               **self._kw())
 
+    @reject_mutation
     def teach(self, text, correct):
         """One correction, absorbed at once (see DecideModel.teach). → ms."""
         t = self._input_text(text)
         return self.model.teach(t, self.spec.label(correct), logits=self._read([t])[0][0], **self._kw())
 
+    @reject_mutation
     def reset(self):
         self.model.reset(**self._kw())
 
@@ -742,6 +746,7 @@ class DecisionPart:
         self._load_adapter("lora", path, strict)
         return self
 
+    @reject_mutation
     def _load_adapter(self, kind, path, strict=True, expect=None):
         """Read an adapter file of `kind` into this question's adapter slot (expect: the hash a calibration file names).
         The module that reads that kind is looked up by name (ADAPTERS), so solvi.core.deciders imports no adapter module."""

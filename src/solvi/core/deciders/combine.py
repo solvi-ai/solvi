@@ -42,7 +42,7 @@ from ... import _deprecate
 from ..catalog import Decision, Quote, Unknown, gone_in_1_0
 from . import DecisionPart, Facts, GroupBy, _group_info, _group_promise, _single, group_record, guard_promise, guard_rule, no_separation, one_source
 from ..provenance import ESCALATED, code_fingerprint, digest
-from .identity import combination_guard
+from .identity import combination_guard, unsupported_combination
 from ..runtime import RECORD_KEYS          # what a replay compares with the recomputed (defined there; re-exported)
 
 # guarantee["signal"]: a name, as a part's ("act", "confidence"): one threshold shared by every part, on each part's
@@ -207,6 +207,7 @@ class _Leaf:
         p = self.part
         return p.text_of(src.vals) if src.vals is not None else p.model.text(src.raw)
 
+    @unsupported_combination
     def state(self, src, pre=None):
         p = self.part
         text = self.text(src)
@@ -234,6 +235,7 @@ class _Leaf:
         return (auto, np.full(G, st.key, dtype=object), np.full(G, sig), {st.key: st.hard.value},
                 np.full(G, self.cost), np.ones(G))
 
+    @unsupported_combination
     def final(self, st, t, rk=None):
         """The part's decision at threshold t (None: its own thresholds; on the rank scale with rk, as in vec)."""
         if t is None:
@@ -658,6 +660,7 @@ class Combination:
         return label_issues(probs, labels)
 
     @_deprecate.removed_kwargs(risk="max_risk")
+    @unsupported_combination
     def act_guard(self, examples, *, max_risk=0.10, signal="auto", groups=None, min_group=100, delta=0.10,
                   label_check=False, scale="raw"):
         """Answer alone only as far as a guarantee allows, for the combination as a whole: on labelled examples of your
@@ -821,6 +824,7 @@ class Combination:
         return srcs, gold, states, ranks, rk, grid, loss, auto_all, cost, calls, who
 
     @_deprecate.removed_kwargs(error="max_error")
+    @unsupported_combination
     def calibrate_for(self, examples, *, max_error=0.05, signal="auto", method="empirical", delta=0.10, label_check=False,
                       scale="raw"):
         """Choose the shared threshold for a target error rate among the answers the combination gives alone, on
@@ -936,12 +940,14 @@ class Combination:
         from ..calibfile import save
         return save(self, path)
 
+    @unsupported_combination
     def load_calibration(self, path, groups=None, strict=True):
         """Apply a file written by save_calibration / `solvi calibrate`; refuses one made for other members or another
         question (strict=False loads it anyway). → self."""
         from ..calibfile import load
         return load(self, path, groups, strict)
 
+    @unsupported_combination
     def conformal(self, examples, coverage=0.90):
         """Conformal answer sets for the combination's decisions (the probabilities it answers with: the answering
         stage's for a cascade, the mean of the parts' for a vote), from labelled examples at its current threshold —
@@ -990,10 +996,12 @@ class Combination:
             yield lf.part, (lf.text(_Src(vals=dict(x))) if isinstance(x, Facts) else x)
 
     @_deprecate.removed_kwargs(x="text")
+    @unsupported_combination
     def teach(self, text, correct):
         """One correction, absorbed by every part at once (an input, or Facts by name) → total ms."""
         return sum(p.teach(t, correct) for p, t in self._each(text))
 
+    @unsupported_combination
     def fit(self, examples, lam=1.0, folds=4):
         """Few-shot "S" for every part (see DecisionPart.fit) → [Adaptation]."""
         ex = list(examples)
@@ -1001,12 +1009,14 @@ class Combination:
                 for lf in self.leaves()]
 
     @_deprecate.removed_kwargs(inputs="texts")
+    @unsupported_combination
     def adapt(self, texts):
         """Label-bias correction for every part (see DecisionPart.adapt) → [per part]."""
         xs = list(texts)
         return [lf.part.adapt([lf.text(_Src(vals=dict(x))) if isinstance(x, Facts) else x for x in xs])
                 for lf in self.leaves()]
 
+    @unsupported_combination
     def reset(self):
         """Every member part's reset() (their adaptations and calibrations)."""
         for lf in self.leaves():
@@ -1030,6 +1040,7 @@ class Combination:
         """Not for a combination (raises NotImplementedError): an adapter file holds one part's adapter."""
         self._one_part("save_lora()", "an adapter file holds one part's adapter")
 
+    @unsupported_combination
     def load_lora(self, path, strict=True):
         """Not for a combination (raises NotImplementedError): an adapter file holds one part's adapter."""
         self._one_part("load_lora()", "an adapter file holds one part's adapter")
@@ -1096,6 +1107,7 @@ class Cascade(Combination):
     def _sep(self):
         return " → "
 
+    @unsupported_combination
     def state(self, src):
         return _State(self.members, src)
 
@@ -1126,6 +1138,7 @@ class Cascade(Combination):
             who = np.where((who < 0) & a, i, who)
         return who
 
+    @unsupported_combination
     def final(self, st, t, rk=None):
         te, rk = self._t(t, st.src, rk)
         stages, ds, by = [], [], None
@@ -1210,6 +1223,7 @@ class Vote(Combination):
     def _describe(self):
         return {"rule": self.rule}
 
+    @unsupported_combination
     def state(self, src):
         pre, groups = {}, {}
         for i, m in enumerate(self.members):          # parts of one model: their questions in one forward pass
@@ -1236,6 +1250,7 @@ class Vote(Combination):
             vals.update(o[3])
         return auto, vk, sig, vals, sum(o[4] for o in outs), sum(o[5] for o in outs)
 
+    @unsupported_combination
     def final(self, st, t, rk=None):
         te, rk = self._t(t, st.src, rk)
         ds = [m.final(st.get(i), te, rk) for i, m in enumerate(self.members)]
@@ -1338,12 +1353,14 @@ class Route(Combination):
                 return i
         return len(self.keys)
 
+    @unsupported_combination
     def state(self, src):
         return _State(self.members, src, pick=self.pick(src))
 
     def vec(self, st, ts, rk=None):
         return self.members[st.pick].vec(st.get(st.pick), *self._vt(ts, st.src, rk))
 
+    @unsupported_combination
     def final(self, st, t, rk=None):
         i, m = st.pick, self.members[st.pick]
         s = st.get(i)

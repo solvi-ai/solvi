@@ -221,3 +221,28 @@ def combination_guard(fn):
             return fn(self, *args, **kwargs)
         return abstain(guard)
     return call
+
+
+def reject_mutation(fn):
+    """Reject unsupported mutations before even consuming user inputs."""
+    @functools.wraps(fn)
+    def call(self, *args, **kwargs):
+        model = getattr(self, "model", self)
+        if getattr(model, "identity_guard", None) is not None:
+            raise ValueError(f"{fn.__name__} is unsupported with identity_safe=True")
+        return fn(self, *args, **kwargs)
+    return call
+
+
+def unsupported_combination(fn):
+    @functools.wraps(fn)
+    def call(self, *args, **kwargs):
+        def opted(node):
+            part = getattr(node, "part", None)
+            if part is not None:
+                return getattr(part.model, "identity_guard", None) is not None
+            return any(opted(member) for member in getattr(node, "members", ()))
+        if opted(self):
+            raise ValueError(f"combination {fn.__name__} is unsupported with identity_safe=True")
+        return fn(self, *args, **kwargs)
+    return call

@@ -27,7 +27,7 @@ from .backends import BlockUnsupported, LongInputWarning, OnnxScorer, SharedQues
 from .adapt import Adaptation, _Spec, _basis, _fit_shift, _fit_temperature, _from_type, _given, _is_type, _sig, _softmax, _usable, lora_key
 from .gate import Facts, act_features
 from .part import DecisionPart
-from .identity import IdentityGuard, guarded, abstain
+from .identity import IdentityGuard, guarded, abstain, reject_mutation
 
 _SHADOW = threading.local()      # per thread: {(id(model), lora_key): adapter or None} — solvi.experimental.lora.scoring
 #                                  and .adapt: {(id(model), adaptation key): Adaptation or None} — the version's own
@@ -1074,6 +1074,8 @@ class DecideModel:
         """The Adaptation of one question (None when it has none; `create=True` makes an empty one). `spec` as for
         adapt / fit / teach (not_stated=, evidence=, ...): a question asking for evidence has its own key, so its
         adaptation is found only with the same spec."""
+        if create and self.identity_guard is not None:
+            raise ValueError("adaptation(create=True) is unsupported with identity_safe=True")
         sp = _Spec.owned(spec.pop("owner", None), task, options, descriptions, multi, other, kind, **spec)
         k = self._akey(sp, write=create)
         if create and k not in self.adaptations:
@@ -1081,6 +1083,7 @@ class DecideModel:
         return self.adaptations.get(k)
 
     @_spec_names
+    @reject_mutation
     def adapt(self, texts, task, options, descriptions=None, multi=False, other=None, kind=None, logits=None, **spec):
         """Label-bias correction without labels: the mean logit of each option over unlabelled inputs of the domain
         (centered over the options) is subtracted before the softmax / sigmoid. → the Adaptation. A later fit is kept
@@ -1102,6 +1105,7 @@ class DecideModel:
         return a
 
     @_spec_names
+    @reject_mutation
     def fit(self, examples, task, options, descriptions=None, multi=False, other=None, lam=1.0, folds=4, kind=None,
             logits=None, **spec):
         """Few-shot adaptation "S" from labelled examples [(input, correct)]: a shift and a shared scale on the
@@ -1122,6 +1126,7 @@ class DecideModel:
         return a
 
     @_spec_names
+    @reject_mutation
     def teach(self, text, correct, task, options, descriptions=None, multi=False, other=None, lam=1.0, kind=None,
               logits=None, **spec):
         """One labelled example, absorbed at once: the shift / scale is refitted from the kept examples (warm start, K + 1
@@ -1193,6 +1198,7 @@ class DecideModel:
             a.other_threshold = min((t for acc, t in accs if acc >= top - 1e-12), key=lambda t: abs(t - self.other_threshold))
 
     @_spec_names
+    @reject_mutation
     def reset(self, task=None, options=None, descriptions=None, multi=False, other=None, kind=None, **spec):
         """Forget the adaptation of one question, or every adaptation."""
         if task is None:
@@ -1208,6 +1214,7 @@ class DecideModel:
         with open(path, "w") as fh:
             json.dump(data, fh, ensure_ascii=False, indent=1, default=_json_default)
 
+    @reject_mutation
     def load_adaptations(self, path, strict=True):
         """Read adaptations written by save_adaptations. strict: refuse them if the checkpoint differs (the bias and shift
         were fitted on another model's logits)."""

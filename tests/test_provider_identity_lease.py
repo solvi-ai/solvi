@@ -234,7 +234,49 @@ def test_preloaded_checkpoint_calibration_never_silently_binds():
 def test_preloaded_adaptation_is_discarded_and_requires_new_calibration():
     p = Provider()
     m, part = part_model(p)
-    m.adaptation("Q", ["yes", "no"], create=True)
+    # Simulate state restored by legacy code before opt-in construction/serving.
+    from solvi.core.deciders.adapt import Adaptation
+    m.adaptations[("old",)] = Adaptation()
     assert part.decide("x").value is None and not m.adaptations
     part.calibrate_for([("x", "yes"), ("y", "yes")], max_error=0.)
     assert part.decide("x").value == "yes"
+
+
+def test_public_mutations_reject_before_scoring_or_consuming_inputs():
+    import pytest
+    p = Provider()
+    m, part = part_model(p)
+    rows = [("x", "yes"), ("y", "yes")]
+    part.calibrate_for(rows, max_error=0.)
+    binding, threshold, calls = part._identity_binding, part.escalate_below, p.calls
+    def unread():
+        raise AssertionError("unsupported mutation consumed inputs")
+        yield "x"
+    operations = [lambda: part.adapt(unread()), lambda: part.fit(unread()), lambda: part.teach("x", "yes"),
+                  part.reset, lambda: m.adapt(unread(), "Q", ["yes", "no"]),
+                  lambda: m.fit(unread(), "Q", ["yes", "no"]),
+                  lambda: m.teach("x", "yes", "Q", ["yes", "no"]), m.reset,
+                  lambda: m.load_adaptations("missing.json", strict=False),
+                  lambda: m.adaptation("Q", ["yes", "no"], create=True),
+                  lambda: part.load_lora("missing.safetensors")]
+    for operation in operations:
+        with pytest.raises(ValueError, match="unsupported"):
+            operation()
+        assert p.calls == calls and part._identity_binding == binding and part.escalate_below == threshold
+    assert m.adaptation("Q", ["yes", "no"], create=False) is None
+
+
+def test_combination_lowlevel_and_calibration_reject_before_scoring():
+    import pytest
+    from solvi.core.deciders.combine import Cascade, Vote
+    p = Provider()
+    m, part = part_model(p)
+    for combo in (Cascade([part]), Vote([part])):
+        operations = [lambda: combo.state(None), lambda: combo.final(None, None),
+                      lambda: combo.calibrate_for([]), lambda: combo.act_guard([]),
+                      lambda: combo.conformal([]), lambda: combo.fit([]), lambda: combo.adapt([]), combo.reset,
+                      lambda: combo.load_calibration("missing.json", strict=False)]
+        for operation in operations:
+            with pytest.raises(ValueError, match="unsupported"):
+                operation()
+        assert combo.decide("x").value is None and p.calls == 0
