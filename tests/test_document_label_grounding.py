@@ -2,8 +2,8 @@
 span answer grounds at the first occurrence of its digits — "SUB TOTAL 28,000" above "TOTAL 28,000" grounded the
 TOTAL read to the SUB TOTAL line (the value right, the provenance the wrong line). A field whose name is a label
 ("total", "sub_total"; a one-letter name is no label) grounds on the one occurrence of the quoted digits on a line
-that starts with the label; no label, no such line, several of them, or the value under its label on the next line
-keep the first occurrence — grounding never guesses. Fake server, no network; records still verify and replay."""
+that starts with the label, or its immediate numeric continuation. Repeated numbers without a unique supported
+location abstain instead of asserting the first occurrence. Fake server, no network; records still verify and replay."""
 import json
 import os
 import sys
@@ -61,19 +61,19 @@ def test_a_one_letter_field_name_is_no_label():
     assert (f.start, f.end) == (10, 16)
 
 
-def test_two_labelled_lines_keep_the_first_occurrence():
+def test_two_labelled_lines_abstain_instead_of_claiming_the_first_occurrence():
     """The same digits under two TOTAL labels: which one the field means, the text does not say."""
     doc = "TOTAL 28,000\nTOTAL 28,000\n"
     res = totals().ask({"doc": doc})
-    (f,) = res.facts
-    assert (f.start, f.end) == (6, 12)                                 # the first occurrence, as locate finds it
+    assert res["answer"].status == "abstain"
+    assert not res.facts
 
 
-def test_a_label_nowhere_or_under_its_label_on_the_next_line_keeps_the_first():
-    """No line starts with the label, or the value sits under the label on the next line (the rule reads the
-    label's own line only — the documented residual gap): the first occurrence stands."""
+def test_missing_label_is_ambiguous_and_does_not_jump_across_another_label():
+    """Repeated missing-label digits abstain; a preceding label cannot cross another label."""
     res = totals().ask({"doc": "Amount due 28,000; elsewhere 28,000."})
-    assert (res.facts[0].start, res.facts[0].end) == (11, 17)
+    assert res["answer"].status == "abstain"
+    assert not res.facts
     gap = "TOTAL\nSUB TOTAL 28,000\n"
     res = totals().ask({"doc": gap})
     assert (res.facts[0].start, res.facts[0].end) == (16, 22)          # the SUB TOTAL line: not reached by the label
@@ -141,7 +141,7 @@ def test_only_labelled_number_fields_are_wrapped():
     assert plain.system.catalog.parts["a"].func.__class__.__name__ == "DecisionPart"
     res = plain.ask({"doc": "Case 1. Revenue was $1,250 and cost was $1,250. Other figure: 77.", "op": "diff"})
     assert res["answer"].status == "ok" and res.facts[0].name == "a"
-    assert (res.facts[0].start, res.facts[0].end) == (20, 26)           # the first occurrence, as before
+    assert (res.facts[0].start, res.facts[0].end) == (20, 26)
 
 
 def test_a_reads_with_recipe_grounds_the_labelled_field_too():
@@ -166,7 +166,40 @@ def test_label_words_and_grounding_places():
     assert _label_ground("28,000", DOC, ("sub", "total")) == 10
     assert _label_ground("28,000", "TOTAL 28,000\nTOTAL 28,000\n", ("total",)) is None      # two: not said
     assert _label_ground("28,000", "Amount 28,000; elsewhere 28,000.", ("total",)) is None  # no label line
-    assert _label_ground("28,000", "TOTAL\n28,000\n", ("total",)) is None                  # next line: the gap
-    assert _label_ground("28,000", "TOTALS 28,000\n", ("total",)) is None                  # another label ("totals")
+    assert _label_ground("28,000", "TOTAL\n28,000\n", ("total",)) == 6                  # numeric continuation
+    assert _label_ground("28,000", "TOTALS 28,000\n", ("total",)) == 7                  # another label ("totals")
     assert _label_ground("28,000", "TOTAL 128,000\n", ("total",)) is None                  # cuts a longer number
     assert _label_ground("28,000", "  Total (2025) 28,000\n", ("total",)) == 15            # indent + words between
+
+
+def test_multiline_label_selects_the_numeric_line_without_crossing_other_labels():
+    doc = "SUB TOTAL 28,000\nTOTAL:\n28,000\n"
+    res = totals().ask({"doc": doc})
+    assert res["answer"].status == "ok" and res["answer"].answer == 28000.0
+    (fact,) = res.facts
+    assert fact.start == doc.rfind("28,000")
+    assert fact.quote == doc[fact.start:fact.end] == "28,000"
+
+
+def test_unlabelled_unique_number_remains_grounded():
+    res = totals().ask({"doc": "Amount due 28,000."})
+    assert res["answer"].status == "ok"
+    assert res.facts[0].start == 11
+
+
+def test_ambiguous_decision_keeps_the_reading_but_removes_unsupported_offsets():
+    from types import SimpleNamespace
+
+    from solvi.core.catalog import Decision, Quote
+    from solvi.solutions.document import _LabelGrounded
+
+    doc = "TOTAL 28,000\nTOTAL 28,000\n"
+    quote = Quote("28,000", 6, 12, "doc")
+    decision = Decision(quote, confidence=0.9, evidence=[quote],
+                        extra={"llm": {"quote": ["28,000", 6, 12]}})
+    result = _LabelGrounded(SimpleNamespace(facts=["doc"]), ("total",))._grounded(decision, doc)
+    assert result.value == "28,000"
+    assert result.escalate.startswith("ambiguous number grounding")
+    assert result.evidence == []
+    assert result.extra["grounding"]["status"] == "ambiguous"
+    assert "quote" not in result.extra["llm"]

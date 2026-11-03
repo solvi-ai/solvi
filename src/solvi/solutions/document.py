@@ -31,8 +31,9 @@ The scheme it sets up (all of it existing low-level blocks, wired):
   the text carries it: the field's name ("total", "sub_total" — every word of two letters or more) starting the
   line of exactly one occurrence of the quoted digits ("TOTAL 28,000" under a "SUB TOTAL 28,000" line: the TOTAL
   read grounds to the TOTAL line, not to the digits' first occurrence); without a label, with no such line or
-  several, or with the value written under its label on the next line, the first occurrence stands (grounding
-  never guesses — the label rule reads the label's own line only).
+  several, a unique occurrence is required. A label-only preceding line also supports its numeric line.
+  For fields whose name supplies a label, ambiguous repeated numbers abstain with an explicit grounding
+  diagnostic rather than assert first offsets. Unlabelled one-letter fields keep their existing quote contract.
 - numbers: a `Span[float]` (int, Decimal) is read from what was quoted, as the document writes it, into a fact
   `<field>_value` (the rule's `why` shows it next to the quote). One scale rule — a scale is never multiplied, the
   number is kept in the document's own unit ("1,250 million", "$1.2bn", "1.2M", "3k" → 1250, 1.2, 1.2, 3); the
@@ -476,18 +477,32 @@ def _label_ground(value, doc, words):
     number of its own (cuts_number) — the quote's value is the text's own substring, so the place it already has
     is always among them."""
     from ..core.catalog import cuts_number
-    hit = None
+    hits, labelled = [], []
     k = doc.find(value)
     while k >= 0:
         e = k + len(value)
         ls = doc.rfind("\n", 0, k) + 1
         le = doc.find("\n", k)
-        if not cuts_number(doc, k, e) and 0 <= _label_end(doc, ls, len(doc) if le < 0 else le, words) <= k:
-            if hit is not None:
-                return None
-            hit = k
+        le = len(doc) if le < 0 else le
+        if not cuts_number(doc, k, e):
+            hits.append(k)
+            end = _label_end(doc, ls, le, words) if words else -1
+            supported = 0 <= end <= k
+            # A label-only preceding line can support the immediately following numeric line.
+            # Do not jump across another label (TOTAL\nSUB TOTAL ...).
+            if not supported and words and not doc[ls:k].strip() and ls:
+                prev_end = ls - 1
+                prev_start = doc.rfind("\n", 0, prev_end) + 1
+                end = _label_end(doc, prev_start, prev_end, words)
+                supported = end >= 0 and not doc[end:prev_end].strip(" \t\r:")
+            if supported:
+                labelled.append(k)
         k = doc.find(value, k + 1)
-    return hit
+    if len(labelled) == 1:
+        return labelled[0]
+    if not labelled and len(hits) == 1:
+        return hits[0]
+    return None
 
 
 class _LabelGrounded:
@@ -498,9 +513,9 @@ class _LabelGrounded:
     quote (and its evidence, and the recorded quote note extra["llm"]["quote"]) is moved to the one occurrence of
     the quoted digits on a line that starts with the field's label — the field's name, its words of two letters or
     more (_label_words: "total" matches "TOTAL 28,000" and "Total: 28,000", not "SUB TOTAL 28,000"; "sub_total"
-    matches the SUB TOTAL line). No label, no such line, several of them, or the value written under its label on
-    the next line (the rule reads the label's own line only): the first occurrence stands — grounding never
-    guesses. Everything else is the decision it wraps (model, thresholds, options, shared passes), which this
+    matches the SUB TOTAL line). A label-only preceding line also supports its numeric line. With no unique
+    supported occurrence, repeated numbers abstain and discard their unsupported quote offsets. Everything else
+    is the decision it wraps (model, thresholds, options, shared passes), which this
     object stands in for attribute by attribute."""
 
     def __init__(self, part, words):
@@ -534,7 +549,10 @@ class _LabelGrounded:
                     and 0 <= q.start <= q.end <= len(text)):
                 return q
             k = _label_ground(q.value, text, self._words)
-            if k is None or k == q.start:
+            if k is None:
+                d.escalate = "ambiguous number grounding: no unique occurrence supports the field"
+                return q.value
+            if k == q.start:
                 return q
             moved[(q.start, q.end)] = (k, k + len(q.value))
             return dataclasses.replace(q, start=k, end=k + len(q.value))
@@ -542,6 +560,13 @@ class _LabelGrounded:
         if isinstance(d.value, Quote):
             d.value = fix(d.value)
         d.evidence = [fix(e) for e in d.evidence or []]
+        if d.escalate and d.escalate.startswith("ambiguous number grounding"):
+            d.evidence = []
+            d.extra = dict(d.extra or {})
+            d.extra["grounding"] = {"status": "ambiguous", "reason": d.escalate}
+            if isinstance(d.extra.get("llm"), dict):
+                d.extra["llm"] = dict(d.extra["llm"])
+                d.extra["llm"].pop("quote", None)
         note = (d.extra or {}).get("llm")
         q = note.get("quote") if isinstance(note, dict) else None
         if isinstance(q, list) and len(q) == 3 and (q[1], q[2]) in moved:
