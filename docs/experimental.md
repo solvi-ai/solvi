@@ -1111,3 +1111,23 @@ and has no exact counterexample falsification. The default rejects before consum
 asking the oracle. Explicit `falsify="leftover"` also rejects noise. Existing noisy callers must opt in explicitly;
 this is an intentional 1.5 behavior change, not a stronger noisy guarantee. Explicit `falsify=None` retains the prior
 family-selection procedure for both exact pairs and noisy hypotheses.
+
+### Past-score grids without live warmup (1.5)
+
+`StreamPromise.prime_grid(scores, source="independent pilot")` fixes a fresh auto grid from a non-empty explicit
+list or tuple of at most 4096 finite non-boolean numbers, using `ltt_grid(..., grid_size)`. Call it before any
+observation or label: a configured/active grid, prior warmup observations, buffered scores or a delta allocation
+are refused. It imports no labels, wealth, certification or delta spending. `dump()` records source, count and
+score digest in optional `grid_origin`; its state evidence binds the actual grid while configuration fingerprint
+remains unchanged. Old dumps without that field retain their earlier evidence interpretation.
+
+Ordinary `System.guarantee` calibration without folds/groups privately retains its first 4096 finite scores only.
+Replacing that guard on the same question, exact signal descriptor and answer with a fresh auto StreamPromise
+uses those past scores before the first future bet. No additional inference is performed; the existing installation
+signal probes, when requested, still run. Unknown/mismatched cache and grouped/cross-fitted calibration keep the
+normal live warmup fallback; manual or active grids are never reset. `grid_from` continues to govern that fallback.
+
+Prior scores may come from another model: this changes grid utility, not validity of a grid fixed before future
+bets. No old evidence or labels are reused for certification. Future model-stability and input-independent sampling
+assumptions remain required. This removes paid warmup only where a prior is available; it does not establish the
+original workload's full cost/quality result.

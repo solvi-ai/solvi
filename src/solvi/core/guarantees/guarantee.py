@@ -685,6 +685,8 @@ def _guard_question(system, question, examples, *, max_error, max_risk, method, 
     if old is not None:                            # a guarantee set before: its required parts go with it
         _drop_checkpoints(system, old)
     guard = QuestionGuard(question, None, signal, answer, groups)
+    from ..provenance import code_fingerprint
+    prior_descriptor = (question, {"fn": code_fingerprint(signal)} if callable(signal) else signal, answer)
     _add_checkpoints(system, guard)               # the signal's and the groups' facts are computed in every flow
     labels = None
     if corrections is not None:
@@ -734,6 +736,10 @@ def _guard_question(system, question, examples, *, max_error, max_risk, method, 
                 promise.report["warnings"].append(
                     "the label check ran on in-sample probabilities (a fast head fitted on these examples has seen their "
                     "labels, so it lists fewer issues): pass folds=k to score each example by a head fitted without it")
+        if not folds and groups is None:
+            from itertools import islice
+            promise._prior_grid_scores = tuple(islice((float(x) for x in sig if math.isfinite(float(x))), 4096))
+            promise._prior_grid_descriptor = prior_descriptor
         if groups is not None:
             promise.by = "answer" if groups == "answer" else guard._by.label()
         if folds:
@@ -743,6 +749,13 @@ def _guard_question(system, question, examples, *, max_error, max_risk, method, 
                                               "is approximate")
     else:
         _probe_promise_signal(system, question, guard, examples)    # S279: an unreadable signal is a dead install
+        prior = getattr(getattr(old, "promise", None), "_prior_grid_scores", ())
+        descriptor = getattr(getattr(old, "promise", None), "_prior_grid_descriptor", None)
+        if (prior and groups is None and descriptor == prior_descriptor
+                and callable(getattr(promise, "prime_grid", None)) and promise.grid_spec == "auto"
+                and promise.grid is None and promise.seen == promise.n == promise.dropped == 0
+                and promise.v is None and not promise._buffer):
+            promise.prime_grid(list(prior), source=f"past ordinary calibration: {question}")
     if labels is not None:
         promise.report["labels"] = labels
     guard.promise = promise

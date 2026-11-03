@@ -142,6 +142,7 @@ class StreamPromise:
                 raise ValueError("a grid is a non-empty sequence of finite thresholds")
             self.grid_spec = list(pts)
         self.grid = None
+        self.grid_origin = None
         self._buffer = []                                  # the scores the auto grid is read from
         self.seen = 0
         self.events = []                                   # state changes: grid, certified, loosened, recertify
@@ -215,6 +216,35 @@ class StreamPromise:
         self._cert = [False] * len(self.grid)
         self._peak = [[0.0, 0] for _ in self.grid]
         self._event("grid", why=f"{len(self.grid)} points")
+
+    def prime_grid(self, scores, *, source):
+        """Fix a fresh auto grid from bounded past scores, without labels, bets or a delta charge.
+
+        Past scores need not come from the future model: their scale affects utility, not validity of the fixed
+        future grid. No past labels, wealth or certification evidence are imported.
+        """
+        import numbers
+
+        from ...core.calibration import ltt_grid
+        if (self.grid_spec != "auto" or self.grid is not None or self.seen or self.n or self.dropped
+                or self.v is not None or self._buffer):
+            raise ValueError("prime_grid requires a fresh, untouched auto-grid promise")
+        if not isinstance(source, str) or not source.strip():
+            raise ValueError("source must be a non-empty description of the past scores")
+        if not isinstance(scores, (list, tuple)) or not 0 < len(scores) <= 4096:
+            raise ValueError("scores must be a non-empty list or tuple of at most 4096 finite numbers")
+        if any(isinstance(x, bool) or not isinstance(x, numbers.Number) for x in scores):
+            raise ValueError("scores must be finite non-boolean numbers")
+        try:
+            values = [float(x) for x in scores]
+        except (ValueError, TypeError, OverflowError):
+            raise ValueError("scores must be finite non-boolean numbers") from None
+        if not all(math.isfinite(x) for x in values):
+            raise ValueError("scores must be finite non-boolean numbers")
+        points = sorted((float(x) for x in ltt_grid(values, self.grid_size)), reverse=True)
+        self.grid_origin = {"source": source, "count": len(values), "digest": _sha(values), "points": len(points)}
+        self._set_grid(points)
+        return self
 
     def _event(self, event, why=None, **fields):
         """One state change on the event list; extra fields ride along (the detector's alarm adds its R and sample
@@ -349,7 +379,7 @@ class StreamPromise:
                "threshold": None if math.isinf(self.threshold) else self.threshold,
                "n": self.n, "seen": self.seen, "missing": self.missing, "dropped": self.dropped,
                "certified": 0 if self._cert is None else sum(self._cert),
-               "evidence_fp": _sha([ev, self._cert])[:16],
+               "evidence_fp": _sha([self.grid, ev, self._cert] if self.grid_origin is not None else [ev, self._cert])[:16],
                "grid_fp": None if self.grid is None else _sha(self.grid)[:16]}
         if self.procedure != "fixed":                      # a fixed-sequence promise's state is as before
             out["procedure"] = self.procedure
@@ -364,6 +394,7 @@ class StreamPromise:
         # older library refuses by its format instead of failing on the missing index
         return {"format": "solvi stream promise v1" if self.v is not None else "solvi stream promise v2",
                 "config": self.fingerprint(), "v": self.v, "delta_v": self.delta_v,
+                "grid_origin": None if self.grid_origin is None else dict(self.grid_origin),
                 "grid": None if self.grid is None else list(self.grid), "buffer": list(self._buffer), "seen": self.seen,
                 "n": self.n, "missing": self.missing, "dropped": self.dropped,
                 "threshold": None if math.isinf(self.threshold) else self.threshold,
@@ -392,6 +423,7 @@ class StreamPromise:
             self.v, self.delta_v = int(d["v"]), float(d["delta_v"])
             if abs(self.budget.delta_at(self.v) - self.delta_v) > 1e-15:
                 raise ValueError(f"the dump's delta_v {self.delta_v} is not the budget's for v={self.v}")
+        self.grid_origin = None if d.get("grid_origin") is None else dict(d["grid_origin"])
         self.grid = None if d["grid"] is None else [float(x) for x in d["grid"]]
         self._buffer = [float(x) for x in d["buffer"]]
         self.seen, self.n = int(d["seen"]), int(d["n"])
