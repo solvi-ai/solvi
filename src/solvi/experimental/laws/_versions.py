@@ -242,6 +242,7 @@ def admit_up_to_two(ls, cands: list[Candidate], ask: Callable[[Any, Any], Any], 
         i = pr.state
         done.add(i)
         x, a = pool[i]
+        ls.cost["probes"] += 1
         obs = ask(x, a)
         if obs is Unknown:                               # spent; refutes and supports nothing
             unknown.append(Transition(x, a, obs, group="probe", id=f"unknown-{len(unknown) + 1}-{i}"))
@@ -250,7 +251,6 @@ def admit_up_to_two(ls, cands: list[Candidate], ask: Callable[[Any, Any], Any], 
         see(x, a, obs, pinf[i])
         if phase == 2:
             expand()                                     # new witnesses may form new pairs
-    ls.cost["probes"] += len(asked) + len(unknown)
     if phase == 1:                                       # the budget ran out among the singles
         expand()
         best = best_of()
@@ -287,9 +287,9 @@ def admit_up_to_two(ls, cands: list[Candidate], ask: Callable[[Any, Any], Any], 
         count = 0
         for i in selected:
             x, a = pool[i]
+            ls.cost["probes"] += 1
             observed = ask(x, a)
             count += 1
-            ls.cost["probes"] += 1
             if observed is Unknown:
                 unknown.append(Transition(x, a, observed, group="probe", id=f"unknown-{len(unknown) + 1}-{i}"))
                 continue

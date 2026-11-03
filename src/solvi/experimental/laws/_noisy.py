@@ -110,8 +110,8 @@ def admit_noisy(ls, cands, ask: Callable[[Any, Any], Any], *, pool: list, safe, 
             break
         i = best[1]
         x, a = pool[i]
-        obs = ask(x, a)
         ls.cost["probes"] += 1
+        obs = ask(x, a)
         if obs is Unknown:                                # spent; refutes and supports nothing
             unknown.append(Transition(x, a, obs, group="probe", id=f"unknown-{len(unknown) + 1}"))
             continue

@@ -2064,7 +2064,9 @@ class LawSet:
 
         ask may return `Unknown` (from solvi.experimental.laws) when the probe's situation turned out not to be the
         one asked about: the answer refutes nothing and supports nothing, the probe counts as spent (budget,
-        `cost["probes"]`) and is listed in `Admission.unknown`, not in `asked`.
+        `cost["probes"]`) and is listed in `Admission.unknown`, not in `asked`. Every actual oracle attempt is
+        charged immediately before the call, including a callback that raises; errors propagate without committing
+        a proposed law, and commit=False still retains that real attempt cost.
 
         falsify="leftover" (experimental; selected by the default "auto" on supported modes; explicit None
         disables it): the split phase
@@ -2397,13 +2399,13 @@ class LawSet:
                 i = pr.state
             done.add(i)
             x, a = pool[i]
+            self.cost["probes"] += 1
             obs = ask(x, a)
             if obs is Unknown:
                 unknown.append(Transition(x, a, obs, group="probe", id=f"unknown-{len(unknown) + 1}-{i}"))
                 continue
             asked.append(Transition(x, a, obs, group="probe", id=f"probe-{len(asked) + 1}-{i}"))
             see(x, a, obs, pinfo(i))
-        self.cost["probes"] += len(asked) + len(unknown)
         order_key = (lambda j: (len(cands[j].condition), j))
         cls = sorted((sorted(g, key=order_key) for g in classes_of(alive)), key=lambda g: order_key(g[0]))
         classes = [[cands[j] for j in g] for g in cls]
@@ -2490,6 +2492,7 @@ class LawSet:
             hit = None
             for i in pick:
                 x, a = pool[i]
+                self.cost["probes"] += 1
                 obs = ask(x, a)
                 n_fals += 1
                 if obs is Unknown:
@@ -2499,7 +2502,6 @@ class LawSet:
                 if not E(self.apply(c.effect, x), obs):
                     hit = (i, obs)
                     break
-            self.cost["probes"] += n_fals
             if hit is not None:
                 self._falsified_at[self._ck(c)] = self._clock(buffer) if buffer is not None else -1
                 return undetermined(f"falsified by probe {hit[0]} ({hit[1]!r}): the accepted law {c.condition} is "
