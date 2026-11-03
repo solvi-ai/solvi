@@ -97,7 +97,7 @@ def test_unbound_thresholds_and_promises_abstain():
     part.guarantee = {"promise": "old"}
     part.conformal_set = {"coverage": .9, "q": .1}
     # Gate checks bindings even if a shortcut supplied a plausible decision.
-    from solvi.core.deciders.identity import part_gate
+    from solvi.core.deciders._identity import part_gate
     from solvi.core.catalog import Decision
     with m.identity_guard.operation():
         d = part_gate(part, Decision("yes", {"yes": 1.}, extra={"guarantee": part.guarantee}))
@@ -189,7 +189,7 @@ def test_calibration_exit_exception_never_commits_binding():
     m = DecideModel(p, identity_safe=True, identity_lease=broken)
     part = m.decision("answer", "Q", "text", ["yes", "no"])
     import pytest
-    from solvi.core.deciders.identity import IdentityUnavailable
+    from solvi.core.deciders._identity import IdentityUnavailable
     with pytest.raises(IdentityUnavailable):
         part.calibrate_for([("x", "yes"), ("y", "yes")], max_error=0.)
     assert part._identity_binding is None and m.identity_guard.stale

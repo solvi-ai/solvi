@@ -10,6 +10,8 @@ are audit provenance only: a fresh successful calibration is required. Checkpoin
 metadata calibration is unsupported in this opt-in mode. Combinations fail closed
 until their own binding/lease transaction is implemented.
 """
+__all__ = []
+
 import contextlib
 import functools
 import threading

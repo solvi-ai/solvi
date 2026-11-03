@@ -42,7 +42,7 @@ from ... import _deprecate
 from ..catalog import Decision, Quote, Unknown, gone_in_1_0
 from . import DecisionPart, Facts, GroupBy, _group_info, _group_promise, _single, group_record, guard_promise, guard_rule, no_separation, one_source
 from ..provenance import ESCALATED, code_fingerprint, digest
-from .identity import combination_guard, unsupported_combination
+from ._identity import combination_guard, unsupported_combination
 from ..runtime import RECORD_KEYS          # what a replay compares with the recomputed (defined there; re-exported)
 
 # guarantee["signal"]: a name, as a part's ("act", "confidence"): one threshold shared by every part, on each part's

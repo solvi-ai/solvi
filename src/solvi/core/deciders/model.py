@@ -27,7 +27,7 @@ from .backends import BlockUnsupported, LongInputWarning, OnnxScorer, SharedQues
 from .adapt import Adaptation, _Spec, _basis, _fit_shift, _fit_temperature, _from_type, _given, _is_type, _sig, _softmax, _usable, lora_key
 from .gate import Facts, act_features
 from .part import DecisionPart
-from .identity import IdentityGuard, guarded, abstain, reject_mutation
+from ._identity import IdentityGuard, guarded, abstain, reject_mutation
 
 _SHADOW = threading.local()      # per thread: {(id(model), lora_key): adapter or None} — solvi.experimental.lora.scoring
 #                                  and .adapt: {(id(model), adaptation key): Adaptation or None} — the version's own

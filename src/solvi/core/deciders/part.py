@@ -23,7 +23,7 @@ from .state import _is_text, _single, _text, jsonable, state_text
 from .wire import Logits, _respan
 from .backends import LONG_CPU_TOKENS, SECTION_TOKENS
 from .adapt import ADAPTERS, _Spec, lora_key
-from .identity import part_operation, safe_finish, calibration_operation, reject_mutation
+from ._identity import part_operation, safe_finish, calibration_operation, reject_mutation
 from .gate import Facts, GroupBy, _group_guard, _group_promise, _shown, _threshold, _vkey, confidence_source, group_record, guard_promise, guard_rule, no_separation, one_source
 
 
