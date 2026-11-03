@@ -109,6 +109,24 @@ class StreamDriver:
         self._seen_events = len(promise.events)
         self._open = set()                                 # numbers of sampled decisions issued and not completed
         self._held = {}                                    # n → a completed sample waiting for an earlier open one
+        self._availability = self._empty_availability(False)
+
+    @staticmethod
+    def _empty_availability(unknown_prefix):
+        return dict(unknown_prefix=unknown_prefix, resolved_samples=0, observed_labels=0,
+                    missing_labels=0, observed_deployed=0, observed_deployed_wrong=0)
+
+    def availability(self) -> dict:
+        """FIFO-consumed label availability and observed deployed error, not a risk certificate.
+
+        Missing outcomes keep their original worst-case losses in the certificate and detector.
+        The observed error is conditional on receiving a label and may be selection-biased.
+        A legacy pickled driver without these counters has an unknown historical prefix.
+        """
+        counters = dict(getattr(self, "_availability", self._empty_availability(True)))
+        n, observed = counters["resolved_samples"], counters["observed_deployed"]
+        return {**counters, "missing_rate": counters["missing_labels"] / n if n else None,
+                "observed_error_rate": counters["observed_deployed_wrong"] / observed if observed else None}
 
     def config(self) -> list:
         return [self.promise.fingerprint(), None if self.detector is None else self.detector.fingerprint(),
@@ -183,6 +201,17 @@ class StreamDriver:
         p, det = self.promise, self.detector
         alarm, why = None, None
         p.learn(score, would, label, sampling_policy="uniform")
+        if not hasattr(self, "_availability"):
+            self._availability = self._empty_availability(True)
+        counts = self._availability
+        counts["resolved_samples"] += 1
+        if lost or label is None:
+            counts["missing_labels"] += 1
+        else:
+            counts["observed_labels"] += 1
+            if alone:
+                counts["observed_deployed"] += 1
+                counts["observed_deployed_wrong"] += int(would != label)
         if det is not None and in_force is not None and not prob:
             wrong = label is None or would != label
             if lost:

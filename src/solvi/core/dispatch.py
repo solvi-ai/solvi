@@ -1338,6 +1338,15 @@ class Dispatcher:
                           f"{self._stream.probation} decisions and until it is certified again", GuaranteeWarning,
                           stacklevel=3)
 
+    def availability(self):
+        """Stream label availability diagnostics, or None without a stream certificate.
+
+        Observed error is conditional on received labels. It is not a certificate of latent risk;
+        expired and missing outcomes retain their original worst-case loss accounting.
+        """
+        read = getattr(self._stream, "availability", None)
+        return read() if callable(read) else None
+
     def replay_stream(self, stored=None):
         """Rebuild the stream certificate, its detector and its rate from the stored decisions in order and compare at
         every decision → {"ok", "mismatches": [(n, what, why)], "coin": "verified" | "unverified ...", "decisions"}.
@@ -1351,7 +1360,8 @@ class Dispatcher:
         if self._stream is None:
             raise ValueError('replay_stream needs a dispatcher with a stream certificate (promise=, audit="adaptive")')
         items = self._stored_items() if stored is None else [("dispatch", d, None) for d in stored]
-        bad, events, unverified, k, _ = self._rebuild_stream(copy.deepcopy(self._stream0), items)
+        driver = copy.deepcopy(self._stream0)
+        bad, events, unverified, k, _ = self._rebuild_stream(driver, items)
         if stored is None and self.storage is not None:
             got = [s.data.get("stream") for s in self.storage.iter(kind="stream")]
             got = [e for e in got if (e or {}).get("question") == self.question]
@@ -1359,7 +1369,9 @@ class Dispatcher:
                 bad.append((None, "stream records", f"{len(got)} stored, {len(events)} rebuilt, or they differ"))
         coin = "verified" if not unverified else (f"unverified on {unverified} keyed decision(s): this dispatcher has "
                                                   "no secret")
-        return {"ok": not bad, "mismatches": bad, "coin": coin, "decisions": k}
+        read_availability = getattr(driver, "availability", None)
+        return {"ok": not bad, "mismatches": bad, "coin": coin, "decisions": k,
+                "availability": read_availability() if callable(read_availability) else None}
 
     def _stored_items(self):
         """This question's decisions and tickets in the store's order → [("dispatch", Dispatched, None) |

@@ -33,6 +33,14 @@ per-decision step the Dispatcher runs.
 
 ::: solvi.experimental.stream.sampling
 
+`Dispatcher.availability()` (also `StreamDriver.availability()`) reports FIFO-consumed samples,
+received and missing labels, and errors among the deployed answers whose labels arrived. This
+observed error rate is conditional on receiving a label and may be selection-biased. It is a
+diagnostic, never a replacement for the certificate or an estimate of latent risk under arbitrary
+missingness. Expired outcomes retain their worst-case loss of one in the detector. An old pickled
+driver without these counters reports an unknown historical prefix; new counters cover only its
+subsequent samples. `replay_stream()` reconstructs these diagnostics from the recorded outcomes.
+
 ## `solvi.experimental.stream.tickets`
 
 ::: solvi.experimental.stream.tickets
