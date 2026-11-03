@@ -3,7 +3,10 @@ the default split is unchanged."""
 import random
 from typing import Literal
 
+import pytest
+
 import solvi
+from solvi.core.guarantees.guarantee import GuaranteeWarning
 from solvi import Answer, Catalog, Question
 from solvi.core.costs import Cost
 
@@ -51,7 +54,11 @@ def test_split_with_no_dispatcher_share_calibrates_system_1_on_every_example():
 
 
 def test_the_default_split_with_a_slow_path_calibrates_the_dispatcher():
-    ds = solvi.build(Q, _examples(600, 0), catalog=_cat(), max_risk=0.05, slow=_teacher, min_slice=1)
+    # This split fixture measures an actual violation; request the explicit diagnostic fallback to inspect it.
+    with pytest.warns(GuaranteeWarning, match="automatic answers disabled"):
+        ds = solvi.build(Q, _examples(600, 0), catalog=_cat(), max_risk=0.05, slow=_teacher, min_slice=1,
+                         strict=False)
+    assert ds.calibration["dispatch"]["certified"] is False
     sp = ds.choices["split"]
     assert 170 <= sp["to calibrate the dispatcher"] <= 230 and ds.dispatcher.policy is not None     # ~1/3, by hash
     shuffled = solvi.build(Q, _examples(600, 0), catalog=_cat(), max_risk=0.05, slow=_teacher, min_slice=1,

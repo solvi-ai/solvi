@@ -141,6 +141,8 @@ class DecisionSystem:
         lines.append(f"Its signal: {c['signal']}.")
         g = c["guarantee"]
         lines.append(f"Its promise: {g['promise']}. {g['how']}")
+        if c.get("certification_status"):
+            lines.append(f"Certification status: {c['certification_status']}.")
         if c.get("novel"):
             lines.append(f"New kinds of input: {c['novel']}.")
         if self.slow is None:
@@ -382,7 +384,7 @@ def _slow_path(slow, q, reads, novel_on, writer, inputs):
 # ------------------------------------------------------------------------------------------------ build
 def build(question, examples, *, catalog=None, learner=None, slow=None, reads=None, max_risk=None, max_error=None,
           signal=None, correct=None, novel="auto", budget=None, total=None, price=None, storage=None, split=None,
-          seed=0, delta=0.10, min_slice=20, writer=None, inputs=None, knowledge=None, groups=None, strict=False,
+          seed=0, delta=0.10, min_slice=20, writer=None, inputs=None, knowledge=None, groups=None, strict=True,
           monitor="auto"):
     """Fit System 1, calibrate its guarantee and the dispatcher, wire the store → a DecisionSystem (see the module docs).
 
@@ -412,8 +414,9 @@ def build(question, examples, *, catalog=None, learner=None, slow=None, reads=No
     group (module docs) — a key of the state, a function state → group, or a list with one group per example; every
     share then holds whole groups (at least two groups); None: example by example. strict: when the dispatcher's
     calibration measures System 1's own answers breaking the promise on its examples (every slice then goes to a
-    person, but System 1 still answers alone above its threshold), raise a ValueError instead of the default
-    GuaranteeWarning. monitor: "auto" (default since 1.2): a DriftMonitor whose reference is System 1's responses on the
+    person, but System 1 would still answer alone above its threshold), raise a ValueError by default.
+    strict=False explicitly returns an uncertified diagnostic build with automatic answers disabled and a
+    GuaranteeWarning; its measured calibration result remains recorded. monitor: "auto" (default since 1.2): a DriftMonitor whose reference is System 1's responses on the
     guarantee's calibration examples, when there are at least MONITOR_MIN_REFERENCE of them (a shorter reference raises
     false flags on a stream that has not changed; the measurement is in docs/guide.md); below that no monitor — nothing
     is watched or flagged, and only explain() says so ("Drift: none: ..."). True: the same monitor at any size (take the
@@ -749,8 +752,21 @@ def build(question, examples, *, catalog=None, learner=None, slow=None, reads=No
                    "another split")
             if strict:
                 raise ValueError(msg + " (strict=True)")
+            # Explicit diagnostic fallback: the measured violation must never retain an automatic S1 route.
+            installed = system.guards[qname].promise
+            installed.threshold = math.inf
+            if getattr(installed, "nodes", None) is not None:
+                for node in installed.nodes.values():
+                    node["threshold"] = math.inf
+            system.guards[qname]._fp = None  # the ordinary guard's threshold configuration changed
+            choices["certification_status"] = "uncertified; automatic answers disabled"
+            choices["guarantee"]["promise"] = "UNCERTIFIED — no automatic-answer guarantee is advertised"
+            choices["guarantee"]["how"] = "The dispatcher's own calibration measured a violation; human fallback."
+            choices["dispatch_promise"] = "UNCERTIFIED: " + msg
+            rep["certified"] = False
+            rep["fallback"] = "human"
             from ..core.guarantees.guarantee import GuaranteeWarning
-            warnings.warn(msg, GuaranteeWarning, stacklevel=2)
+            warnings.warn(msg + "; automatic answers disabled (strict=False)", GuaranteeWarning, stacklevel=2)
     return DecisionSystem(qname, system, d, gate, slow_path, choices, calib, knowledge=snap_of)
 
 

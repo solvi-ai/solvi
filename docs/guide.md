@@ -6253,3 +6253,16 @@ Every update is recorded (kind `"update"`, in the labels' store) with its gates,
 the state to roll back to; `target.restore(version)` brings back any recorded version, also in another process.
 Measured: on streams of one kind of decision the loop these gates came from gave no measurable gain, which is why it
 is no longer a module of its own (the changelog, 1.1 "Removed").
+
+### Build-time measured violations (1.5)
+
+`solvi.build(..., strict=True)` is now the default. If the dispatcher's own calibration reports that System 1
+breaks the requested promise, construction raises `ValueError`. Valid calibration proceeds with its existing bars.
+This prevents returning an automatic-answer system after its own measured contract has failed.
+
+For diagnostics, explicit `strict=False` returns an **uncertified** build and emits `GuaranteeWarning`. Automatic
+System 1 answers are disabled; the failed dispatcher policy sends requests to a person. `calibration["dispatch"]`
+retains the measured violation and records `certified=False, fallback="human"`; `choices["certification_status"]`
+and `explain()` explicitly show the uncertified status. This is an intentional 1.5 behavior change from warning
+while retaining System 1's automatic route. It does not resolve CRC selection correction, selection-biased labels,
+or establish historical workload risk/coverage results.

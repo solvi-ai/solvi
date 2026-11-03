@@ -1,5 +1,4 @@
-"""build says when a promise is not kept: a dispatcher calibration that measures System 1 breaking the promise warns
-(or refuses with strict=True)."""
+"""A measured dispatcher violation fails closed by default; explicit diagnostic builds cannot answer alone."""
 import random
 import warnings
 from typing import Literal
@@ -44,15 +43,23 @@ def _examples(n, seed, near=0.3, far=0.03):
 
 def test_build_warns_when_the_dispatcher_measures_system_1_breaking_the_promise():
     with pytest.warns(GuaranteeWarning, match="break the promise"):
-        ds = solvi.build(Q, _examples(600, 0), catalog=_cat(), max_risk=0.02, slow=_teacher, min_slice=1, seed=0)
+        ds = solvi.build(Q, _examples(600, 0), catalog=_cat(), max_risk=0.02, slow=_teacher, min_slice=1, seed=0,
+                         strict=False)
     assert ds.calibration["dispatch"].get("why")
     assert "break the promise" in ds.explain()
+    assert ds.calibration["dispatch"]["certified"] is False
+    assert ds.calibration["dispatch"]["fallback"] == "human"
+    assert "UNCERTIFIED" in ds.explain()
+    for x in (.01, .49, .51, .99):
+        assert ds.ask({"x": x}).by == "human"
 
 
 def test_build_strict_refuses_a_measured_broken_promise():
     with pytest.raises(ValueError, match="break the promise"):
         solvi.build(Q, _examples(600, 0), catalog=_cat(), max_risk=0.02, slow=_teacher, min_slice=1, seed=0,
                     strict=True)
+    with pytest.raises(ValueError, match="break the promise"):
+        solvi.build(Q, _examples(600, 0), catalog=_cat(), max_risk=0.02, slow=_teacher, min_slice=1, seed=0)
 
 
 def test_a_kept_dispatcher_promise_does_not_warn():
