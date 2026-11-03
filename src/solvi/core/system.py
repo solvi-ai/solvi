@@ -244,7 +244,7 @@ class System:
     def __init__(self, catalog: Catalog, questions, *, workers: int = 1, order: str = "default",
                  producers: str = "declared", learn: bool | None = None, input_model=None, strategist=None, storage=None,
                  timeout: float | None = None, cost_policy="declared", lang: str = "en", early_exit: bool = True,
-                 cache: int | None = None):
+                 cache: int | None = None, allow_unreachable_hard_checks: bool = False):
         """order: "default" (hard checks and their inputs first, all together) or "learned" (hard checks one at a time, most
         expected saving first — see learn_order). producers: "declared" (alternative producers of a fact are tried in
         declaration order) or "learned" (a policy picks the order per input and learns from outcomes). learn: after every
@@ -289,6 +289,10 @@ class System:
         from . import _i18n as i18n
         from .costs import CostBook
         self.lang = i18n.check(lang)
+        if type(allow_unreachable_hard_checks) is not bool:
+            raise TypeError("allow_unreachable_hard_checks must be a bool")
+        self.allow_unreachable_hard_checks = allow_unreachable_hard_checks
+        self._warned_idle_hard_checks = None
         self.catalog = catalog
         for fact, name, lost in catalog.unreadable_validates():
             raise ValueError(f"validate of {name} reads {lost}, which no producer of {fact} takes as an input: validate "
@@ -376,13 +380,7 @@ class System:
                           "this system and an argument of a part or rule: answers are not facts, so it is read from the "
                           "given facts, never from the answer — give it in the input, or compute it with a part "
                           "(cat.fn) of that name", stacklevel=2)
-        idle = _idle_hard_checks(catalog, self.questions.values())
-        if idle:                                      # a hard check no question's flow can reach never runs: an answer
-            import warnings                           # it should have stopped would be given without a word
-            warnings.warn(f"hard {'check' if len(idle) == 1 else 'checks'} {', '.join(idle)}: no `then=` and no "
-                          "question of this system requires it, so it never runs and never stops an answer — add "
-                          f"requires=[{idle[0]!r}] to the questions it guards, or then={{question: answer}}",
-                          stacklevel=2)
+        self._validate_hard_checks()
         if self.strategist is not None:
             self._then_wired()
         self._cache = None
@@ -446,6 +444,21 @@ class System:
 
     # --- answers
     @_deprecate.removed_kwargs(names="questions")
+    def _validate_hard_checks(self):
+        """Only the known unreachable-hard-check footgun; never executes a check or infers its scope."""
+        idle = _idle_hard_checks(self.catalog, self.questions.values(), self.heads)
+        if not idle:
+            return
+        message = (f"hard {'check' if len(idle) == 1 else 'checks'} {', '.join(idle)}: no `then=` and no "
+                   "question of this system requires it, so it never runs and never stops an answer — add "
+                   f"requires=[{idle[0]!r}] to the questions it guards, or then={{question: answer}}")
+        if not self.allow_unreachable_hard_checks:
+            raise ValueError(message + "; allow_unreachable_hard_checks=True is an explicit diagnostic waiver")
+        if tuple(idle) != self._warned_idle_hard_checks:
+            import warnings
+            warnings.warn(message, stacklevel=3)
+            self._warned_idle_hard_checks = tuple(idle)
+
     def ask(self, init_state, questions=None, *, workers=None, order=None, store=True, early_exit=None):
         """init_state: a dict of given facts, or a pydantic BaseModel instance (its fields). questions: the questions to
         ask — a name or a list of names (None: all; an unknown name raises KeyError; `names=`, its 0.7
@@ -457,6 +470,7 @@ class System:
         `res.values` and the trace hold every fact and rule value of a decision a hard check forced (and every part
         listed in `requires`); the trace records it (`res.trace.early_exit`), and replay checks no step is missing.
         An `async def` part is awaited in an event loop of its own, one call at a time: use `aask` for such catalogs."""
+        self._validate_hard_checks()
         if workers is not None and (not isinstance(workers, int) or isinstance(workers, bool) or workers < 1):
             raise ValueError(f"workers must be a positive int, not {workers!r}")
         t0 = now_ms()
@@ -698,6 +712,7 @@ class System:
         When the entry point escalates, nothing runs: the likely questions abstain (guard "escalated"). A required field the
         text does not state is not guessed: the question abstains for lack of it. `res.read` is the TextRead
         (`res.read.missing`, `res.read.clarify()`; `res.read` in 0.7). early_exit: as for `ask`."""
+        self._validate_hard_checks()
         read = self._read(text, decider, textin, question)
         t0 = now_ms()
         key, memo = self._text_key(read, order, early_exit)
@@ -716,6 +731,7 @@ class System:
     async def aask_text(self, text, decider=None, *, textin=None, question=None, store=True, timeout=None,
                         speculate=False, order=None, early_exit=None):
         """ask_text with aask (async parts awaited)."""
+        self._validate_hard_checks()
         read = self._read(text, decider, textin, question)
         t0 = now_ms()
         key, _ = self._text_key(read, order, early_exit)
@@ -749,6 +765,7 @@ class System:
         and be cancelled). Cancelling `aask` itself cancels every pending call. Under a learned order speculate=True is
         ignored, with a UserWarning (the hard checks run one at a time in that order). An `async def` part is awaited
         whatever `blocking` says. early_exit: as for `ask` (False: every step runs, whatever the hard checks say)."""
+        self._validate_hard_checks()
         from .runtime import aexecute
         t0 = now_ms()
         key = None
@@ -780,6 +797,7 @@ class System:
 
     def _prepare(self, init_state, names, order):
         """What ask and aask share before running: the given facts, the questions, the flow, the order and the policy."""
+        self._validate_hard_checks()
         known = None
         if self.input_model is not None or type(init_state) is not dict:
             from .types import field_types, is_model
@@ -2231,13 +2249,43 @@ def _then_answer(catalog, check, q, trace, vals, flow, said, *, record_only=Fals
                   provenance="computed", source=check.name, guard="hard_check")
 
 
-def _idle_hard_checks(catalog, questions):
+def _idle_hard_checks(catalog, questions, heads=None):
     """Hard checks that no question of a system can reach: no `then=`, required by none of its questions and read by no
     part (a hard check enters a question's flow only through one of these) → [names], in catalog order."""
     questions = list(questions)
-    read = {x for p in list(catalog.parts.values()) + list(catalog.rules.values()) for x in p.inputs}
-    return [p.name for p in catalog.parts.values() if p.kind == "check" and p.hard and not p.then
-            and p.name not in read and not any(p.name in q.requires for q in questions)]
+    reachable = set()
+    for question in questions:
+        rule = catalog.rules.get(question.name)
+        head = (heads or {}).get(question.name)
+        roots = list(rule.inputs if rule is not None else head.features if head is not None
+                     else question.uses or catalog.parts)
+        roots.extend(question.requires)
+        roots.extend(p.name for p in catalog.parts.values() if question.name in (p.then or {}))
+        pending = list(roots)
+        computed = set()
+        while pending:
+            name = pending.pop()
+            if name in computed or name not in catalog.parts:
+                continue
+            computed.add(name)
+            pending.extend(catalog.parts[name].inputs)
+        # The planner also runs checks on computed facts, even without an explicit requires/then edge.
+        changed = True
+        while changed:
+            changed = False
+            for part in catalog.parts.values():
+                if part.kind == "check" and set(part.inputs) & computed and part.name not in computed:
+                    pending = [part.name]
+                    while pending:
+                        name = pending.pop()
+                        if name in computed or name not in catalog.parts:
+                            continue
+                        computed.add(name)
+                        pending.extend(catalog.parts[name].inputs)
+                    changed = True
+        reachable.update(computed)
+    return [part.name for part in catalog.parts.values()
+            if part.kind == "check" and part.hard and not part.then and part.name not in reachable]
 
 
 def governs(part, question):
@@ -2493,7 +2541,8 @@ def _rename_system(system, *, inputs=None, answers=None):
     result = System(cat, questions, workers=system.workers, order=system.order,
                     producers=system.producers, learn=system.learn, input_model=input_model,
                     strategist=system.strategist, timeout=system.timeout, lang=system.lang,
-                    early_exit=system.early_exit)
+                    early_exit=system.early_exit,
+                    allow_unreachable_hard_checks=system.allow_unreachable_hard_checks)
     for attr in ('heads', 'calib', 'shift_watch', 'guards', 'learned_rules'):
         setattr(result, attr, {question(q): value for q, value in getattr(system, attr).items()})
     from copy import copy

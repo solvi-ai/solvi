@@ -6271,3 +6271,15 @@ The diagnostic fallback is additionally latched in the Dispatcher's routing, bef
 answers and ordinary S1/S2 decisions. Its fingerprint records the latch, and replay derives the same human route.
 All effective OpenSetGate thresholds are disabled as well. Changing a calibration report or policy dictionary does
 not clear the latch; construct a fresh successfully calibrated build to enable automatic answering again.
+
+### Unreachable hard checks fail closed (1.5)
+
+`System` now refuses a known hard check that no question can reach through `requires`, `then`, dependencies or
+computed-fact checking. It does not execute an unknown-scope check automatically. Wire its scope explicitly using
+`Question(..., requires=["check_name"])` or the check's `then={question: answer}`. Catalog additions are checked again
+before answering, including cached and asynchronous paths. No catalog version counter is available, so this narrow
+structural check is repeated rather than trusting a stale construction-time result.
+
+Explicit `allow_unreachable_hard_checks=True` is a diagnostic compatibility waiver (strict bool). It preserves the
+warning and lint error and permits the old skip; it does **not** claim that the check ran. Variants preserve an
+explicit waiver. Valid reachable checks and unrelated lint behavior remain governed by their existing contracts.
