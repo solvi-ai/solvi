@@ -947,3 +947,50 @@ def test_acquisition_invalid_teacher_target_stops_boost_and_valid_labels_continu
     restored.step(("a", .1), lambda: "a", key="another")
     assert restored.n == 202
     assert loop.replay()["ok"] and restored.replay()["ok"]
+
+
+@pytest.mark.parametrize("reserved", [-1, True, 1.0, 11, 4, 1])
+def test_acquisition_stop_rejects_malformed_budget_before_mutation(reserved):
+    import pickle
+    loop = AdapterLoop(_Hand([]), question="q", max_risk=.05, secret=KEY, additive=False,
+                       policy=DefaultPolicy(acquisition=dict(floor=1, max_extra=10, until_decision=100)))
+    loop.policy._acquisition_reserved = 2
+    before, logs = pickle.dumps(loop.policy), list(loop.log)
+    with pytest.raises(ValueError, match="reserved"):
+        loop._acquisition_stop("failed", reserved)
+    assert pickle.dumps(loop.policy) == before and loop.log == logs and loop.error is None
+
+
+@pytest.mark.parametrize("reason", [None, False, "", "  ", 2])
+def test_acquisition_stop_rejects_malformed_reason_before_mutation(reason):
+    import pickle
+    loop = AdapterLoop(_Hand([]), question="q", max_risk=.05, secret=KEY, additive=False,
+                       policy=DefaultPolicy(acquisition=dict(floor=1, max_extra=10, until_decision=100)))
+    before = pickle.dumps(loop.policy)
+    with pytest.raises(ValueError, match="reason"):
+        loop._acquisition_stop(reason, 0)
+    assert pickle.dumps(loop.policy) == before and not loop.log
+
+
+def test_acquisition_stop_rejects_duplicate_and_unconfigured_controls_and_replay_tamper():
+    import pickle
+    loop = AdapterLoop(_Hand([]), question="q", max_risk=.05, secret=KEY, additive=False,
+                       policy=DefaultPolicy(acquisition=dict(floor=1, max_extra=10, until_decision=100)))
+    loop._acquisition_stop("failed", 0)
+    before, logs = pickle.dumps(loop.policy), list(loop.log)
+    with pytest.raises(ValueError, match="already"):
+        loop._acquisition_stop("failed", 0)
+    assert pickle.dumps(loop.policy) == before and loop.log == logs
+    assert loop.replay()["ok"]
+    kind, control = loop.log[-1]
+    for reserved in (-100, True, .5, 11, 2):
+        loop.log[-1] = (kind, {**control, "reserved": reserved})
+        assert not loop.replay()["ok"]
+    loop.log[-1] = (kind, control)
+    loop.log.append((kind, dict(control)))
+    assert not loop.replay()["ok"]
+    legacy = AdapterLoop(_Hand([]), question="q", max_risk=.05, secret=KEY, additive=False)
+    before = pickle.dumps(legacy.policy)
+    with pytest.raises(ValueError, match="configured"):
+        legacy._acquisition_stop("failed", 0)
+    assert pickle.dumps(legacy.policy) == before and not legacy.log

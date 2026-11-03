@@ -823,10 +823,22 @@ class AdapterLoop:
                 return self._step(x, oracle, source=source, key=key)
             except Exception as exc:
                 if not getattr(self.policy, "_acquisition_stop_reason", None):
-                    self._acquisition_stop(str(exc), self.policy._acquisition_reserved)
+                    self._acquisition_stop(str(exc) or type(exc).__name__, self.policy._acquisition_reserved)
                 raise
 
     def _acquisition_stop(self, reason, reserved):
+        # A failed synchronous attempt can spend at most one reservation not yet
+        # represented by a durable decision. Validate journal controls before mutation.
+        if not self._bounded_acquisition():
+            raise ValueError("acquisition_stop requires configured bounded acquisition")
+        if getattr(self.policy, "_acquisition_stop_reason", None) is not None:
+            raise ValueError("acquisition_stop already recorded")
+        current, cap = self.policy._acquisition_reserved, self.policy.acquisition["max_extra"]
+        if (isinstance(reserved, bool) or not isinstance(reserved, int)
+                or not 0 <= reserved <= cap or not current <= reserved <= current + 1):
+            raise ValueError("acquisition_stop reserved must be a bounded monotonic integer with delta at most one")
+        if not isinstance(reason, str) or not reason.strip():
+            raise ValueError("acquisition_stop requires a nonempty reason string")
         self.policy._acquisition_done = True
         self.policy._acquisition_boost = False
         self.policy._acquisition_n = None
