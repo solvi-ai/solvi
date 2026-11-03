@@ -231,20 +231,27 @@ class EvaluatorLock:
 
     def seeds(self, purpose, *, by=None):
         """The held-out seeds — for the pre-registered evaluation only. Refused in a locked-out process; verified;
-        every call is an access record."""
+        Granted reads and locked-out attempts are access records. Verification
+        errors before a read are not counted as completed accesses."""
         if self.locked_out():
+            if self.access_log is not None:
+                self.access_log._append({"v": FORMAT, "kind": "eval_access", "experimental": True,
+                                         "purpose": str(purpose), "by": by, "pid": os.getpid(),
+                                         "granted": False, "reason": "locked_out"})
             raise EvalLocked("this process is locked out (a proposer or search process): the held-out seeds are not "
                              "available")
         self.verify()
         seeds = json.loads(self.seeds_file.read_text())["seeds"]
         if self.access_log is not None:
             self.access_log._append({"v": FORMAT, "kind": "eval_access", "experimental": True, "purpose": str(purpose),
-                                     "by": by, "argv": list(sys.argv), "pid": os.getpid(), "seeds_sha256": self.pinned})
+                                     "by": by, "argv": list(sys.argv), "pid": os.getpid(), "seeds_sha256": self.pinned,
+                                     "granted": True})
         return seeds
 
     def access_count(self):
         """How many times the seeds were handed out (the access log's records; "evaluate once" = 1)."""
-        return 0 if self.access_log is None else sum(1 for _ in self.access_log.iter("eval_access"))
+        return (0 if self.access_log is None else
+                sum(1 for record in self.access_log.iter("eval_access") if record.data.get("granted", True) is not False))
 
     def leak_scan(self, paths, max_bytes=200 * 2 ** 20):
         """Files under `paths` that mention a held-out seed (journals, prompt caches, candidate sources) →
