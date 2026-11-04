@@ -20,6 +20,10 @@ even if an existing exception would hide them under `support_on="applied"`.
 In particular, a candidate with condition `()` must pass on every held-out row of
 its action. No claim is made about historical multi-seed quality results.
 
+The condition is canonicalized by `Grammar.check` before selecting subsumed laws
+or spending candidate budget: duplicate atoms collapse, invalid atoms, feature
+combinations and condition lengths raise `ValueError`.
+
 The transaction uses a private trial book with the proposed subsumed laws removed.
 It forces matched support for this candidate and uses ordinary `test()` gates:
 grammar, readmission, cap, positive counterfactual net, minimum support,
@@ -33,9 +37,14 @@ Before committing, every previously correct allowed held-out row must remain
 correct, the replacement must remain active, and every other active law must
 survive. This prevents an overlapping contrary rule from silently making the
 replacement lose correct predictions when priorities change. Rejection or a
-confirmation exception changes no active or retired laws. Callbacks have their
-usual external side effects; those cannot be rolled back. Failed committed
-attempts may update test accounting, as ordinary attempted admission does.
+confirmation exception changes no active or retired laws. Confirmation is a
+read-only predicate: writes to this owning set's book containers, counters and
+existing Law fields are rolled back on False, exception and True. Nested
+`consolidate` calls from confirmation are refused. External callback effects,
+grammar/buffer mutations and writes inside shared action/effect/group payload
+objects cannot be sandboxed and are outside this rollback scope. Callbacks must
+not mutate those objects. Failed committed attempts, including callback exceptions,
+still update candidate and test-cost accounting as ordinary attempted admission does.
 
 On success the same original Law objects become retired with reason
 `subsumed by <replacement-id>`. The replacement's `admitted` is

@@ -143,3 +143,52 @@ def test_indistinguishable_rival_still_blocks_consolidation():
     rival = ls.add(Candidate("do", ("pulse",), "yes"))
     assert ls.consolidate(c, b) is None
     assert set(ls.laws) == set(old + [rival])
+
+
+def test_condition_is_canonicalized_before_subsumption_and_accounting():
+    ls, b, old, c = world()
+    law = ls.consolidate(Candidate("do", ("leap",) * 3, "yes"), b)
+    assert law.condition == ("leap",) and len(law.condition) <= ls.grammar.k
+    assert ls.consolidate(c, b) is None and b.tested == 1
+    ls, b, old, c = world()
+    for condition in (("unknown",), ("on", "off"), ("leap", "on", "off")):
+        with pytest.raises(ValueError):
+            ls.consolidate(Candidate("do", condition, "yes"), b)
+    assert b.tested == 0 and ls.laws == old
+
+
+@pytest.mark.parametrize("outcome", ["no", "raise", "yes"])
+def test_callback_owner_book_writes_are_scoped_even_on_success(outcome):
+    ls, b, old, c = world()
+    version = ls.version
+    def confirm(candidate):
+        ls.retire(old[0], why="callback side effect")
+        old[1].support = 99999
+        ls.add(Candidate("other", (), "unrelated"))
+        if outcome == "raise":
+            raise RuntimeError("callback failure")
+        return outcome == "yes"
+    ls.confirm = confirm
+    if outcome == "raise":
+        with pytest.raises(RuntimeError, match="callback failure"):
+            ls.consolidate(c, b)
+        law = None
+    else:
+        law = ls.consolidate(c, b)
+    assert b.tested == ls.cost["tests"] == 1
+    assert old[1].support == 0 and ls._seq == (3 if law else 2)
+    if law:
+        assert ls.laws == [law] and ls.retired == old
+        assert all(x.why == f"subsumed by {law.id}" for x in old)
+    else:
+        assert ls.laws == old and ls.retired == [] and ls.version == version
+        assert all(x.status == "active" for x in old)
+
+
+def test_callback_cannot_reenter_consolidation():
+    ls, b, old, c = world()
+    ls.confirm = lambda candidate: ls.consolidate(candidate, b)
+    with pytest.raises(RuntimeError, match="re-entered"):
+        ls.consolidate(c, b)
+    assert ls.laws == old and ls.retired == []
+    assert b.tested == ls.cost["tests"] == 1

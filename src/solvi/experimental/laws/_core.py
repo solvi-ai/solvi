@@ -1914,6 +1914,9 @@ class LawSet:
         evidence is not a domain guarantee. In particular, a broader default must pass on all its matched rows.
         `commit=False` returns a proposed law, without confirmation callbacks, book changes or spending buffer N.
         Rejections and callback exceptions leave the book unchanged; attempted committed tests still spend N.
+        Confirmation is a read-only predicate: writes to this set's book containers, counters and existing Law
+        fields are rolled back even when it returns True; reentrant consolidation is refused. External effects,
+        grammar/buffer writes and mutation inside shared action/effect/group payload objects are outside this scope.
         """
         from ._consolidate import consolidate
         return consolidate(self, candidate, buffer, exclude, commit=commit)

@@ -1,13 +1,39 @@
 """Transactional, opt-in LawSet compaction; ordinary admission remains in _core.test."""
 from copy import deepcopy
 
-from ._core import _key
+from ._core import Candidate, _key
+
+
+def _scoped_confirm(owner, confirm, candidate, evidence):
+    """Roll back callback writes to the owning book, including writes through existing Law references.
+
+    World/grammar/buffer side effects remain the callback's responsibility. Confirmation is a read-only
+    predicate, not a second opportunity to edit the book being transactionally replaced.
+    """
+    laws = owner.laws + owner.retired + owner.suspended
+    # Keep adapters and in-flight world objects in place. Only book containers and Law state are owned here.
+    memo = {id(value): value for value in owner.__dict__.values()
+            if not isinstance(value, (dict, list, set))}
+    memo.update({id(law): law for law in laws})
+    memo[id(evidence)] = evidence
+    state = deepcopy(owner.__dict__, memo)
+    payloads = {id(value): value for law in laws for value in (law.action, law.effect, law.born)}
+    law_states = [(law, deepcopy(law.__dict__, payloads.copy())) for law in laws]
+    owner._consolidation_confirming = True
+    try:
+        return confirm(candidate)
+    finally:
+        for law, saved in law_states:
+            law.__dict__.clear()
+            law.__dict__.update(saved)
+        owner.__dict__.clear()
+        owner.__dict__.update(state)
 
 
 def consolidate(owner, candidate, buffer, exclude, *, commit):
-    c = candidate
-    if not owner.grammar.allows(c.condition):
-        return None
+    if getattr(owner, "_consolidation_confirming", False):
+        raise RuntimeError("consolidate cannot be re-entered from confirmation")
+    c = Candidate(candidate.action, owner.grammar.check(candidate.condition), candidate.effect, candidate.proposer)
     key = (_key(c.action), tuple(c.condition), _key(c.effect))
     if any(owner._ck(law) == key for law in owner.laws):
         return None
@@ -38,10 +64,15 @@ def consolidate(owner, candidate, buffer, exclude, *, commit):
         return None
     if not commit:
         trial.confirm = None
-    accepted = trial.test([c], evidence, exclude)
-    if commit:
-        owner.cost["tests"] = trial.cost["tests"]
-        owner._last_tested = trial._last_tested
+    elif owner.confirm is not None:
+        confirm = owner.confirm
+        trial.confirm = lambda candidate: _scoped_confirm(owner, confirm, candidate, evidence)
+    try:
+        accepted = trial.test([c], evidence, exclude)
+    finally:
+        if commit:
+            owner.cost["tests"] = trial.cost["tests"]
+            owner._last_tested = trial._last_tested
     if not accepted:
         return None
     replacement = accepted[0]
