@@ -5,6 +5,12 @@ import hashlib
 import json
 import math
 
+from . import warn_on_import
+
+warn_on_import(__name__)
+
+__all__ = ["RegimeMemory"]
+
 
 def _id(x):
     if not isinstance(x, str) or not x:

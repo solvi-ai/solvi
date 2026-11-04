@@ -1145,3 +1145,13 @@ Prior scores may come from another model: this changes grid utility, not validit
 bets. No old evidence or labels are reused for certification. Future model-stability and input-independent sampling
 assumptions remain required. This removes paid warmup only where a prior is available; it does not establish the
 original workload's full cost/quality result.
+
+## `regime_memory`
+
+Since 1.5. Bounded asynchronous finite-regime filtering with declared transition and likelihood tables,
+issue-time delayed observations and owner-managed LawSet IDs. See [regime memory](regime-memory.md).
+No LawSet is automatically installed or reactivated, and no probe callback runs.
+
+**Missing:** independent evidence of predictive or utility gains; unknown-regime discovery, calibrated recognition and automatic LawSet activation are not provided
+
+**Deadline:** a future release

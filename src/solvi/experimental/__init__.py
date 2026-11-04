@@ -321,6 +321,13 @@ STATUS: dict[str, dict] = {
     "numguard": {"since": "1.4", "what": "exact values through a side channel: the model writes pointers ([k] for the k-th numeral of the input, <calc> / <date> calls computed exactly by code, @k for a call's result), code fills in the values, and a guard names the source of every number left in the text (an input numeral, a call's result, an allowed constant) or marks it unsourced, then refuses, raises or reports; a hook asks the model once more with what failed",
                  "missing": "measured once with a prototype of the same protocol (its script is not in the repository) on three open models of 8B to 120B parameters, 100 long synthetic reports and 500 finance questions, with the wider constant set (MEASURED_CONSTANTS; the default is SMALL): numbers without a source fell to 0–0.4 % of the numerals in the reports, against 9–22 % when the model typed its numbers and 3.5–10 % with native tool calling; the price was 4–8 % of numerals pointing at the wrong input number and refusals (6–9 % of questions on the 8B model, 14–20 % of reports on the two smaller ones); it guarantees provenance, not correctness; still missing: a benchmark script in benchmarks/ run with this module, the same check on real documents, and wiring into a System's decisions", "script": None},
 }
+STATUS["regime_memory"] = {
+    "since": "1.5",
+    "what": "bounded asynchronous finite-regime filtering with owner-declared transitions, likelihoods and LawSet IDs",
+    "missing": "independent evidence of predictive or utility gains; unknown-regime discovery, calibrated recognition and automatic LawSet activation are not provided",
+    "script": None,
+}
+
 for _s in STATUS.values():
     _s["deadline"] = DEADLINE
 del _s
