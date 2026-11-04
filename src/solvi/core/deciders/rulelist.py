@@ -28,7 +28,7 @@ def words(text):
     return out
 
 
-def literals(row, facts):
+def literals(row, facts, ngrams=1):
     out = set()
     for f in facts:
         v = row.get(f)
@@ -39,7 +39,11 @@ def literals(row, facts):
         elif isinstance(v, (int, float)):
             out.add(f"{f} ≈ {round(float(v), 0):g}")
         elif isinstance(v, str):
-            for t in words(v):
+            tokens = words(v)
+            for width in range(2, ngrams + 1):
+                for start in range(len(tokens) - width + 1):
+                    out.add(f"{f} has '{' '.join(tokens[start:start + width])}'")
+            for t in tokens:
                 out.add(f"{f} has '{t}'")
                 if t.isdigit() and len(t) >= 5:
                     out.add(f"{f} has number starting '{t[:2]}'")
@@ -49,7 +53,14 @@ def literals(row, facts):
 
 
 class RuleList:
-    def __init__(self, facts, min_support=3, min_precision=0.8, max_rules=40):
+    def __init__(self, facts, min_support=3, min_precision=0.8, max_rules=40, *, max_literals=1, ngrams=1,
+                 negations=False):
+        for name, value in (("max_literals", max_literals), ("ngrams", ngrams)):
+            if type(value) is not int or not 1 <= value <= 3:
+                raise ValueError(f"{name} must be an integer from 1 to 3")
+        if type(negations) is not bool:
+            raise TypeError("negations must be bool")
+        self.max_literals, self.ngrams, self.negations = max_literals, ngrams, negations
         self.facts, self.min_support, self.min_precision, self.max_rules = facts, min_support, min_precision, max_rules
         self.rules, self.default, self.truncated = [], None, 0
 
@@ -61,7 +72,9 @@ class RuleList:
             raise ValueError(f"a rule list is fitted on examples, one answer for each: got {len(rows)} rows and "
                              f"{len(answers)} answers")
         self.rules, self.default, self.truncated = [], None, 0
-        L = [literals(r, self.facts) for r in rows]
+        L = [literals(r, self.facts, self.ngrams) for r in rows]
+        if self.max_literals > 1 or self.negations or self.ngrams > 1:
+            return self._fit_conditions(L, answers)
         remaining = list(range(len(rows)))
         while remaining:
             best = self._best(L, answers, remaining)
@@ -100,10 +113,66 @@ class RuleList:
                 best = (key, lit, a, k, n)
         return best
 
+    def _fit_conditions(self, rows, answers):
+        """Greedy ordered conjunctions: bounded beam search, not exhaustive CN2/RIPPER."""
+        import warnings
+
+        remaining = set(range(len(rows)))
+        vocabulary = sorted(set().union(*rows))
+        postings = {lit: {i for i, row in enumerate(rows) if lit in row} for lit in vocabulary}
+        terms = [(lit, False) for lit in vocabulary]
+        if self.negations:
+            terms += [(lit, True) for lit in vocabulary]
+        terms.sort()
+        while remaining:
+            beam, best = [((), remaining)], None
+            for depth in range(self.max_literals):
+                candidates = []
+                for condition, covered in beam:
+                    for term in terms:
+                        if condition and term <= condition[-1]:
+                            continue
+                        if any(lit == term[0] for lit, _ in condition):
+                            continue
+                        hit = covered - postings[term[0]] if term[1] else covered & postings[term[0]]
+                        if len(hit) < self.min_support:
+                            continue
+                        counts = Counter(answers[i] for i in sorted(hit))
+                        answer, support = counts.most_common(1)[0]
+                        if support < self.min_support:
+                            continue
+                        cond = condition + (term,)
+                        rank = (-(support + 1) / (len(hit) + 2), -support, len(cond), cond)
+                        candidates.append((rank, cond, hit, answer, support))
+                candidates.sort(key=lambda c: c[0])
+                if not candidates:
+                    break
+                if best is None or candidates[0][0] < best[0]:
+                    best = candidates[0]
+                beam = [(c[1], c[2]) for c in candidates[:32]]
+            if best is None or -best[0][0] < self.min_precision:
+                break
+            if len(self.rules) >= self.max_rules:
+                self.truncated = len(remaining)
+                warnings.warn(f"the rule list stopped at max_rules={self.max_rules} with {self.truncated} examples "
+                              "left while more rules pass min_precision", UserWarning, stacklevel=2)
+                break
+            _, condition, hit, answer, support = best
+            positive = tuple(lit for lit, negative in condition if not negative)
+            negative = tuple(lit for lit, negated in condition if negated)
+            display = " AND ".join(("NOT " if negated else "") + lit for lit, negated in condition)
+            self.rules.append({"if": display, "all": positive, "unless": negative, "then": answer,
+                               "support": support, "covered": len(hit)})
+            remaining -= hit
+        self.default = Counter(answers[i] for i in sorted(remaining)).most_common(1)[0][0] if remaining else Counter(answers).most_common(1)[0][0]
+        return self
+
     def predict(self, row):
-        ls = literals(row, self.facts)
+        ls = literals(row, self.facts, self.ngrams)
         for r in self.rules:
-            if r["if"] in ls:
+            matches = (all(lit in ls for lit in r["all"]) and not any(lit in ls for lit in r["unless"])) \
+                if "all" in r else r["if"] in ls
+            if matches:
                 return r["then"], r
         return self.default, None
 
