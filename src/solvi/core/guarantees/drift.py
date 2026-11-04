@@ -659,6 +659,8 @@ class NumericDrift:
     def __init__(self, *, alpha=0.01, horizon=1000, allowance=0.5, ref_n=50, settle=0, min_sd=1e-9, value=None, seed=0):
         if int(ref_n) < 2:
             raise ValueError("ref_n: a reference has at least two values")
+        if not math.isfinite(float(min_sd)) or float(min_sd) <= 0:
+            raise ValueError("min_sd must be finite and positive")
         if value is not None and not callable(value):
             raise TypeError("value= is a function decision → number")
         self.alpha, self.horizon, self.allowance = float(alpha), int(horizon), float(allowance)
@@ -677,28 +679,34 @@ class NumericDrift:
         """The reference: these values' mean and spread (and their number, for the threshold) → self. A degenerate
         reference — half of its values or more one and the same value (mostly exact zeros with rare spikes) — warns:
         such a stream is far from Gaussian, its spread says little, and an unchanged stream can be flagged far more
-        often than alpha; `degenerate` holds why (None otherwise) and an alarm's `why` repeats it."""
+        often than alpha; `degenerate` holds why (None otherwise) and an alarm's `why` repeats it.
+        Non-finite inputs are skipped; a non-finite mean or spread is refused. If conversion, a warning raised as
+        an error, or calibration fails, the previous reference and detector state are kept."""
         return self._set_reference(values, stacklevel=3)
 
     def _set_reference(self, values, small=True, stacklevel=2):
-        vals = [float(v) for v in values if math.isfinite(float(v))]
+        vals = [x for v in values if math.isfinite(x := float(v))]
         if len(vals) < 2:
             raise ValueError("a reference needs at least two finite values")
+        with np.errstate(over="ignore", invalid="ignore"):
+            mean, sd = float(np.mean(vals)), float(np.std(vals))
+        if not math.isfinite(mean) or not math.isfinite(sd):
+            raise ValueError("reference mean and spread must be finite")
         if small and len(vals) < 20:
             warnings.warn(f"a reference of {len(vals)} values: its spread is too noisy for the false-alarm bound to "
                           "hold (20 or more)", UserWarning, stacklevel=stacklevel)
         top, k = Counter(vals).most_common(1)[0]
-        self.degenerate = None
+        degenerate = None
         if 2 * k >= len(vals):
-            self.degenerate = (f"degenerate reference: {k} of its {len(vals)} values are {top:.4g}, so the values are "
-                               "far from Gaussian and the false-alarm bound does not hold")
-            warnings.warn(f"NumericDrift: {self.degenerate} — an unchanged stream can be flagged far more often than "
+            degenerate = (f"degenerate reference: {k} of its {len(vals)} values are {top:.4g}, so the values are "
+                          "far from Gaussian and the false-alarm bound does not hold")
+            warnings.warn(f"NumericDrift: {degenerate} — an unchanged stream can be flagged far more often than "
                           "alpha; watch a smoother number (an aggregate over a window, or the share of non-zero values "
                           "with DriftMonitor)", UserWarning, stacklevel=stacklevel)
-        self.mean, self.sd, self.n_ref = float(np.mean(vals)), max(self.min_sd, float(np.std(vals))), len(vals)
-        self.cusum = Cusum.calibrate(["up", "down"], alpha=self.alpha, horizon=self.horizon, seed=self.seed,
-                                     ref_n=len(vals), allowance=self.allowance)
-        self.h = self.cusum.h
+        cusum = Cusum.calibrate(["up", "down"], alpha=self.alpha, horizon=self.horizon, seed=self.seed,
+                               ref_n=len(vals), allowance=self.allowance)
+        self.mean, self.sd, self.n_ref, self.degenerate = mean, max(self.min_sd, sd), len(vals), degenerate
+        self.cusum, self.h = cusum, cusum.h
         self._ref = []
         self.reset()
         return self
