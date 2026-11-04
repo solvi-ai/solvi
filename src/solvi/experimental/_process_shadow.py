@@ -142,7 +142,10 @@ class ProcessShadow:
                 self.changed = (self.changed + [copy.deepcopy(index)])[-self.keep:]
         except Exception as exc:  # noqa: BLE001 — a candidate must not replace the served result
             index["error"] = type(exc).__name__
-            index["error_hash"] = digest(str(exc))
+            try:
+                index["error_hash"] = digest(str(exc))
+            except Exception:  # noqa: BLE001 — even a broken exception renderer cannot replace the served result
+                index["error_hash"] = None
             self.stats["errors"] += 1
             self.errors = (self.errors + [copy.deepcopy(index)])[-self.keep:]
         self.last = {"current": current, "candidate": candidate, "comparison": copy.deepcopy(index)}
@@ -152,7 +155,7 @@ class ProcessShadow:
                     self._store = open_storage(self.storage)
                 self._store._append({"v": FORMAT, "kind": "process_shadow", "shadow": index})
             except Exception as exc:  # noqa: BLE001 — index I/O cannot change the served answer
-                error = {"run": current.run, "error": f"comparison journal: {type(exc).__name__}: {exc}"}
+                error = {"run": current.run, "error": f"comparison journal: {type(exc).__name__}"}
                 self.errors = (self.errors + [error])[-self.keep:]
                 self.stats["errors"] += 1
         return current

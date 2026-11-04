@@ -163,3 +163,20 @@ def test_sidecar_alias_and_unknown_store_backend_are_refused_before_runs(tmp_pat
     candidate.storage = object()
     with pytest.raises(ValueError, match="native JSONL"):
         current.shadow(candidate)
+
+
+def test_exception_with_broken_renderer_cannot_replace_served_answer(tmp_path, monkeypatch):
+    current, candidate = pipeline(tmp_path, "live"), pipeline(tmp_path, "candidate")
+
+    class BrokenError(Exception):
+        def __str__(self):
+            raise RuntimeError("cannot render")
+
+    def fail(*args, **kwargs):
+        raise BrokenError()
+
+    monkeypatch.setattr(candidate, "run", fail)
+    shadow = current.shadow(candidate)
+    assert shadow.run({"x": 4}).answer == 8
+    assert shadow.last["comparison"]["error"] == "BrokenError"
+    assert shadow.last["comparison"]["error_hash"] is None
