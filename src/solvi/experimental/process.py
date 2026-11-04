@@ -1949,6 +1949,18 @@ class Process:
 
     # --- reading it
 
+    def shadow(self, candidate, *, storage=None, keep=1000):
+        """Compare complete native-System processes, serving this process's result.
+
+        Each side gets a private copy of the original input. Bindings, guards and
+        journals must be disjoint; candidate human handoff is disabled. External
+        callback/model effects are not sandboxed. See docs/process-shadow.md.
+        """
+        if not isinstance(candidate, Process):
+            raise TypeError("candidate must be a Process")
+        from ._process_shadow import ProcessShadow
+        return ProcessShadow(self, candidate, storage=storage, keep=keep)
+
     def diff(self, other):
         """The changes from this process to `other` (a Process or a spec): see `diff`."""
         return diff(self.spec(), other.spec() if isinstance(other, Process) else other)
