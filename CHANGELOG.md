@@ -2,6 +2,12 @@
 
 ## 1.4.1 — unreleased
 
+- `Knowledge.branch()` and `KnowledgeStore.branch()` create independent writable what-if branches, with
+  parent lineage and optional empty persistent storage. Native agenda/action/failure state is preserved;
+  custom action models and persistent export without verified decision proofs are explicitly refused.
+- Rebuilt knowledge keeps an independent complete journal chain, write policy and assertion positions.
+  Corrupt parent journals and destinations aliasing the parent, including hardlinks, are refused before copying.
+
 - `System(check_policies=...)` executes priced optional soft checks adaptively, with request `check_loss`,
   fixed model snapshots, budgets, skipped unavailable checks and recorded/replayable acquisition decisions.
   `CheckPolicy` is a bounded conditional-table utility surrogate, not a new calibration or false-accept guarantee.

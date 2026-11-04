@@ -104,6 +104,7 @@ touches (premise edges and shared keys); the store has been measured to 10,000 i
 from __future__ import annotations
 
 import datetime as _dt
+import copy
 import json
 import threading
 import warnings
@@ -465,7 +466,8 @@ class KnowledgeStore:
 
     # ------------------------------------------------------------------------------------------------ the journal
     def _write(self, op, **data):
-        body = {"kind": _KNOWLEDGE, "n": len(self.journal), "op": op, "clock": self.clock, **data}
+        body = {"kind": _KNOWLEDGE, "n": self.journal[-1]["n"] + 1 if self.journal else 0,
+                "op": op, "clock": self.clock, **data}
         if self._mem is not None:
             from ..store import _stamp
             rec = self._mem.append(_stamp(body))     # run_context: the in-memory journal carries the run too
@@ -487,27 +489,93 @@ class KnowledgeStore:
     def verify(self):
         """Is the journal's hash chain whole (in memory: its own chain; on a backend: the backend's verify()), and is the
         state the one the journal gives (the store rebuilt from it has the same fingerprint)?"""
-        if self._mem is not None:
-            if not self._mem.verify():
-                return False
-        elif not self.storage.verify()["ok"]:
+        if not self._journal_whole():
             return False
         return self.rebuild().fingerprint() == self.fingerprint()
+
+    def _journal_whole(self):
+        """Validate source records without calling rebuild/verify recursively."""
+        if self._mem is not None:
+            return self._mem.verify() and self.journal == self._mem.entries
+        if not self.storage.verify()["ok"]:
+            return False
+        stored = [dict(s.data) for s in self.storage.iter(_KNOWLEDGE)]
+        return len(stored) >= len(self.journal) and self.journal == stored[:len(self.journal)]
 
     def rebuild(self, upto=None, skip=()):
         """The store the journal gives, in memory: entries applied in order (upto: the first `upto` — the store as it
         was then); `skip`: item ids whose own entries (assertions, promotions, retractions) are left out — the store as if
-        they had never been written. Premises naming a skipped item stay in the entries derived from it (dead)."""
+        they had never been written. Premises naming a skipped item stay in the entries derived from it (dead).
+        The result is independently writable, with its own hash chain, copied journal data, write gates, defaults,
+        world clock and reassert capabilities. Logical entry positions are retained for assertion proofs. Uncopyable
+        policy objects fail before replay. Functions used as callbacks retain their normal Python closure semantics;
+        external state accessed by a callback is not snapshotted. Stored verified decisions are not copied into this
+        in-memory reconstruction: new verified writes still require a decision in the destination TraceStorage."""
         skip = set(skip)
-        ks = KnowledgeStore(None, gates=self.gates, defaults=self.defaults, _replay=False)
-        entries = self.journal if upto is None else self.journal[:upto]
+        with self._lock:
+            if not self._journal_whole():
+                raise ValueError("cannot reconstruct a corrupt knowledge journal")
+            try:
+                gates, defaults, now = copy.deepcopy((self.gates, self.defaults, self.now))
+                if any(a is b for a, b in zip(self.gates, gates)):
+                    raise TypeError("a gate returned itself from deepcopy")
+            except Exception as exc:  # noqa: BLE001 - arbitrary policy deepcopy must fail closed
+                raise TypeError("rebuild requires independently copyable write gates and policy") from exc
+            ks = KnowledgeStore(None, gates=gates, defaults=defaults, now=now, _replay=False)
+            # WriterGate is already present in the copied gate sequence. Preserve
+            # the separate, explicit capability; do not add a second registry.
+            ks.reassert_writers = self.reassert_writers
+            entries = copy.deepcopy(self.journal if upto is None else self.journal[:upto])
         with ks.batch():
             for r in entries:
                 if r.get("item") in skip:
                     continue
-                ks.journal.append(r)
-                ks._apply(r)
+                # Re-chain the retained records, keeping their logical positions:
+                # assertion/reassert proofs refer to n, including after skip.
+                rec = ks._mem.append({k: v for k, v in r.items() if k not in ("hash", "prev")})
+                ks.journal.append(rec)
+                ks._apply(rec)
         return ks
+
+    def branch(self, storage=None, *, upto=None):
+        """Independent writable what-if over a journal prefix; optional empty destination.
+
+        No merge or decision-proof export. Persistent branches refuse inherited verified/of
+        assertions. Reopening uses the normal constructor with the same explicit policy.
+        A lineage note binds the original parent head and selected prefix hash.
+        """
+        from ..store import open_storage
+        from pathlib import Path
+        source_path = getattr(self.storage, "path", None)
+        target_path = storage if isinstance(storage, (str, Path)) else getattr(storage, "path", None)
+        if source_path is not None and target_path is not None:
+            source_path, target_path = Path(source_path), Path(target_path)
+            if (source_path.resolve() == target_path.resolve()
+                    or source_path.exists() and target_path.exists() and source_path.samefile(target_path)):
+                raise ValueError("branch destination must be empty and independent of its parent")
+        if upto is not None and (isinstance(upto, bool) or not isinstance(upto, int) or not 0 <= upto <= len(self.journal)):
+            raise ValueError("upto must be a journal prefix length")
+        with self._lock:
+            child = self.rebuild(upto=upto)
+            lineage = {"parent": copy.deepcopy(self.head()),
+                       "prefix_count": len(child.journal),
+                       "prefix_hash": (self.journal[len(child.journal) - 1]["hash"] if child.journal else "")}
+            if storage is not None and any(r.get("source") == "verified" or r.get("of") is not None
+                                           for r in child.journal):
+                raise ValueError("persistent branch cannot export verified decision proofs")
+        destination = open_storage(storage)
+        if destination is not None:
+            if destination is self.storage or destination.head()["count"]:
+                raise ValueError("branch destination must be empty and independent of its parent")
+            # Backend assigns its own physical chain; logical n and assertion
+            # proof positions are retained. The lineage note binds the source.
+            with destination.batch():
+                records = [destination._append({k: v for k, v in r.items()
+                                               if k not in ("hash", "prev", "seq", "id", "time")})
+                           for r in child.journal]
+            child.storage, child._mem, child.journal = destination, None, records
+        child.note(branch=lineage)
+        return child
 
     def _apply(self, r):
         """Apply one journal entry to the raw data (rebuild and replay: no new entry is written)."""
@@ -937,7 +1005,7 @@ class KnowledgeStore:
             it = self.items.get(iid)
             if it is None:
                 raise KeyError(f"no item {iid!r}")
-            end = len(self.journal) - 1 if at is None else int(at)
+            end = (self.journal[-1]["n"] if self.journal else -1) if at is None else int(at)
             cut0 = max((t for t in it.retracted if t <= end), default=-1)
             out = []
             for a in it.asserts:

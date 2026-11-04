@@ -107,6 +107,30 @@ class Knowledge:
         self._index()
 
     # ------------------------------------------------------------------------------------------------ writing
+    def branch(self, path=None):
+        """A writable what-if at the current state, with independent native components.
+
+        Preserves agenda callbacks, native action model and failure memory. Custom action
+        models are refused before destination writes. Callback external state is not cloned.
+        See KnowledgeStore.branch for persistence, policy reopening and provenance limits.
+        """
+        import copy
+        from ..core.knowledge import ConservativeActionModel
+        if self.actions is not None and type(self.actions) is not ConservativeActionModel:
+            raise TypeError("branch supports the native ConservativeActionModel, not custom actions")
+        # Prepare every runtime object before creating a persistent destination.
+        # The existing store is a memo boundary, never copied with its lock/backend.
+        state = copy.deepcopy(self.__dict__, {id(self.store): self.store})
+        child = object.__new__(type(self))
+        child.__dict__.update(state)
+        child.store = self.store.branch(path)
+        child.agenda.store = child.store
+        if child.actions is not None:
+            child.actions.store = child.store
+        if child.failures is not None:
+            child.failures.store = child.store
+        return child
+
     def tell(self, fact, *, source, by=None, of=None, scope=None, derived_from=(), evidence=None, valid=None,
              consulted=(), inferred=False, reassert=False):
         """Write a fact — {"s", "r", "o"} or (s, r, o) — from a person, an outcome, a written spec, or a verified System 2
