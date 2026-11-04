@@ -448,6 +448,15 @@ class Trace(Serial):
             if vhash(r.body()) != r.hash:
                 bad.append(Mismatch(r.step, r.name, "record modified after execution", "integrity"))
             prev = r.hash
+            if r.kind == "check_policy":
+                if system is None:
+                    bad.append(Mismatch(r.step, r.name, "check policy requires its System", "unavailable"))
+                else:
+                    try:
+                        system._verify_check_policy(r, self)
+                    except (ValueError, KeyError, TypeError) as error:
+                        bad.append(Mismatch(r.step, r.name, str(error), "recompute"))
+                continue
             if r.kind == "answer_ref":
                 if system is None:
                     bad.append(Mismatch(r.step, r.name, "answer reference requires its System", "unavailable"))

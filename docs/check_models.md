@@ -65,5 +65,46 @@ Current scope is structured `ask`/`aask` with scalar choice or yes/no answers.
 Joint constraints, answer-fact composition, `ask_text`, unrecorded `decide` and
 decision caching are refused. Domain selection is not inferred: this bridge uses
 global correlation (`domain=None`); a model with domain-specific matrices retains
-the combiner's warning about global fallback. No online fitting, posterior
-uncertainty intervals or independent calibration guarantee is added by this API.
+the combiner's warning about global fallback. No online fitting or independent calibration guarantee is added by this API.
+For optional purchases instead of executing all modeled requirements, see
+[check acquisition](check_acquisition.md).
+
+
+## Conditional uncertainty
+
+Both native combiners provide `posterior_samples(prior, outcomes, n=1000, seed=0)`
+and `posterior_interval(prior, outcomes, level=.95, n=1000, seed=0)`. Keyword-only
+`domain` selects an explicitly configured correlation domain when supported.
+Sampling is seeded before draws and can be replayed with the same configuration.
+The interval is an equal-tail Monte Carlo summary and includes sampling error.
+
+Likelihood draws follow independent source/class Dirichlet distributions with
+fitted counts plus pooled pseudo-counts. This is conditional empirical Bayes:
+the estimated pooled prior, supplied answer prior and correlation weights are
+fixed. Their uncertainty is excluded. For a correlation-aware combiner the draws
+describe a weighted composite score, not a joint generative posterior. There is
+no frequentist coverage, calibration or false-accept guarantee. Sparse or empty
+source/class calibration produces a warning instead of disabling the check.
+
+Enable reporting in System with:
+
+```python
+system = System(catalog, questions, check_models={"category": model},
+                check_intervals={"category": {"level": .95, "n": 1000,
+                                               "seed": 7, "mode": "report"}})
+```
+
+The same option works with `check_policies`. Settings default to `.95`, `1000`,
+`0` and `"report"`; unknown keys and questions without a configured model are
+rejected. Construction copies settings and includes them in question identity.
+`extra["check_evidence"]["uncertainty"]` records settings, lower/upper bounds,
+the model-conditional interpretation and fixed assumptions.
+
+`mode="report"` retains point confidence. `mode="lower"` passes the lower bound
+through subsequent confidence processing before minimum-confidence abstention;
+a policy action cannot replace it with a higher point score. For ordinary fitted
+models this processing includes existing calibration and guards. Policy questions
+refuse existing calibration, guards and shift monitoring until acquisition-specific
+calibration is available. Forced answers, existing abstentions and requests with
+no executed modeled outcomes receive no interval evidence. Raw answer `probs`
+remain the primary distribution in either mode.

@@ -20,12 +20,12 @@ What the evidence behind each piece is, and its limits, is in each module's docs
 from .actions import MISSING, ActionModel, ConservativeActionModel, Prediction, Vocabulary
 from .agenda import Agenda
 from .failures import FailureMemory
-from .gates import ConsistencyGate, SourceGate, WriteGate, WriterGate
+from .gates import TrustGate, ConsistencyGate, SourceGate, WriteGate, WriterGate
 from .risk import LearnedGate, Protect, RiskBudget, RiskDecision, RiskPolicy
 from .store import KINDS, RECONFIRM_DEFAULTS, SOURCES, KnowledgeStore, Verdict
 from .worldmap import WorldMap
 
-__all__ = ["ActionModel", "Agenda", "ConservativeActionModel", "ConsistencyGate", "FailureMemory", "KINDS",
+__all__ = ["TrustGate", "ActionModel", "Agenda", "ConservativeActionModel", "ConsistencyGate", "FailureMemory", "KINDS",
            "KnowledgeStore", "LearnedGate", "MISSING", "Prediction", "Protect", "RECONFIRM_DEFAULTS", "RiskBudget",
            "RiskDecision", "RiskPolicy", "SourceGate", "SOURCES", "Verdict", "Vocabulary", "WorldMap", "WriteGate",
            "WriterGate"]

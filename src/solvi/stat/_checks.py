@@ -278,7 +278,7 @@ class NaiveCombiner:
             for s in self.sources:
                 if o.get(s) in self.outcomes:
                     self.counts[s][t][o[s]] += 1
-        self.lik, self._log_lik = {}, {}
+        self.lik, self._log_lik, self._log_concentrations = {}, {}, {}
         for c in (0, 1):
             tot = {o: sum(self.counts[s][c][o] for s in self.sources) for o in self.outcomes}
             n = sum(tot.values())
@@ -289,6 +289,9 @@ class NaiveCombiner:
                 logden_s = _logadd(_logcount(ns), logpool)
                 logs = {o: _logadd(_logcount(self.counts[s][c][o]), logpool + logpooled[o]) - logden_s
                         for o in self.outcomes}
+                self._log_concentrations.setdefault(s, {})[c] = {
+                    o: _logadd(_logcount(self.counts[s][c][o]), logpool + logpooled[o])
+                    for o in self.outcomes}
                 self._log_lik.setdefault(s, {})[c] = logs
                 self.lik.setdefault(s, {})[c] = {o: math.exp(value) for o, value in logs.items()}
         self.prior_rate = (sum(y) + 0.5) / (len(y) + 1.0)
@@ -311,6 +314,67 @@ class NaiveCombiner:
     def posterior(self, prior, o) -> float:
         _number(prior, "prior", low=0, high=1)
         return _sig(_logit(prior) + self.log_lr(o))
+
+    def posterior_samples(self, prior, o, *, n=1000, seed=0, domain=None):
+        """Replayable conditional empirical-Bayes uncertainty draws of the score.
+
+        Each source/class likelihood is independently Dirichlet with fitted counts
+        plus the fitted pooled pseudo-counts. The empirical pooled distribution,
+        supplied prior and correlation weights are FIXED, not inferred here.
+        Consequently these are model-conditional draws, not calibrated correctness
+        probabilities, frequentist confidence bounds, or a false-accept certificate.
+        CorrelationAwareCombiner draws its weighted composite score, not a joint
+        generative posterior. Missing checks contribute no evidence.
+        """
+        import warnings
+        import numpy as np
+
+        _number(prior, "prior", low=0, high=1)
+        if not hasattr(self, "_log_concentrations"):
+            raise ValueError("fit before prediction")
+        if type(n) is not int or n <= 0:
+            raise ValueError("n must be a positive integer")
+        if type(seed) is not int or seed < 0:
+            raise ValueError("seed must be a nonnegative integer")
+        observed = self.observed(o)
+        if isinstance(self, CorrelationAwareCombiner):
+            weights = self.weights(observed, domain=domain)
+        else:
+            if domain is not None:
+                raise ValueError("domain is only supported by CorrelationAwareCombiner")
+            weights = {s: 1.0 for s in observed}
+        if any(sum(self.counts[s][c].values()) < 10 for s in observed for c in (0, 1)):
+            warnings.warn("little calibration data: fewer than 10 observations in a source/class; "
+                          "uncertainty is conditional on fitted pooled prior and fixed weights",
+                          UserWarning, stacklevel=2)
+        rng = np.random.default_rng(seed)
+        score = np.full(n, _logit(prior))
+        for s in observed:
+            index = self.outcomes.index(o[s])
+            for c in (0, 1):
+                with np.errstate(over="ignore", under="ignore"):
+                    concentration = np.exp([self._log_concentrations[s][c][v] for v in self.outcomes])
+                if not np.all(np.isfinite(concentration)) or np.any(concentration <= 0):
+                    raise ValueError("Dirichlet concentrations outside numerical sampling range")
+                draws = rng.dirichlet(concentration, size=n)[:, index]
+                if not np.all(np.isfinite(draws)):
+                    raise ValueError("Dirichlet draws outside numerical sampling range")
+                # Gamma sampling can round very small positive probabilities to zero.
+                score += (1 if c else -1) * weights[s] * np.log(np.maximum(draws, np.finfo(float).tiny))
+        return 1.0 / (1.0 + np.exp(-np.clip(score, -40.0, 40.0)))
+
+    def posterior_interval(self, prior, o, *, level=0.95, n=1000, seed=0, domain=None):
+        """Equal-tail Monte Carlo interval of posterior_samples; same conditional limits.
+
+        This interval includes finite-sampling error and has no coverage guarantee.
+        """
+        import numpy as np
+
+        level = _number(level, "level", positive=True)
+        if level >= 1:
+            raise ValueError("level must be below one")
+        draws = self.posterior_samples(prior, o, n=n, seed=seed, domain=domain)
+        return tuple(float(v) for v in np.quantile(draws, [(1 - level) / 2, (1 + level) / 2]))
 
     def freeze(self):
         """Detached fitted prediction snapshot; refitting is disabled.
@@ -353,9 +417,10 @@ class NaiveCombiner:
         import json
 
         model = self.freeze()
-        payload = {"version": 1, "type": type(model).__name__, "sources": model.sources,
+        payload = {"version": 2, "type": type(model).__name__, "sources": model.sources,
                    "outcomes": model.outcomes, "log_likelihoods": model._log_lik,
-                   "counts": model.counts, "pool": model.pool, "alpha": model.alpha,
+                   "counts": model.counts, "log_concentrations": getattr(model, "_log_concentrations", None),
+                   "pool": model.pool, "alpha": model.alpha,
                    "prior_rate": model.prior_rate}
         if isinstance(model, CorrelationAwareCombiner):
             def rows(matrix):

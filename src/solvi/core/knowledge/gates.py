@@ -96,6 +96,58 @@ class SourceGate:
         store.storage._check_vouched(body["r"], body["o"], of)
 
 
+class TrustGate:
+    """Opt-in descriptive source reliability check, never a truth certificate.
+
+    Identity comes exclusively from item.by (or an explicit writer_sources map),
+    never from the item's source rank/category. The caller authenticates writers.
+    SourceGate and WriterGate still govern permission independently. This gate
+    reads a fixed registry; it neither records assertions nor invents labels.
+    An adverse verdict refuses every item kind, including behaviour-changing items.
+    """
+    name = "trust"
+
+    def __init__(self, registry, *, clock, min_reliability, role="all", writer_sources=None):
+        import math
+        from ...stat import SourceTrust
+        if not isinstance(registry, SourceTrust):
+            raise TypeError("registry must be SourceTrust")
+        if not callable(clock):
+            raise TypeError("clock must be callable")
+        if isinstance(min_reliability, bool) or not isinstance(min_reliability, (int, float)) or not math.isfinite(min_reliability) or not 0 <= min_reliability <= 1:
+            raise ValueError("min_reliability must be finite and in [0, 1]")
+        if role not in ("all", "origin", "repeater"):
+            raise ValueError("role must be all, origin or repeater")
+        mapping = None if writer_sources is None else dict(writer_sources)
+        if mapping is not None and any(not isinstance(x, str) or not x for pair in mapping.items() for x in pair):
+            raise ValueError("writer_sources must map nonempty writer IDs to source IDs")
+        self.registry, self.clock = registry, clock
+        self.min_reliability, self.role, self.writer_sources = float(min_reliability), role, mapping
+
+    def admit(self, store, item, shadow=None):
+        writer = item.get("by")
+        measured = {"status": "unknown", "n": 0, "reliability": None,
+                    "role": self.role, "timestamp": None,
+                    "registry_fingerprint": self.registry.fingerprint()}
+        if not isinstance(writer, str) or not writer:
+            return Verdict(False, "an explicit writer identity is required", measured, self.name)
+        source = writer if self.writer_sources is None else self.writer_sources.get(writer)
+        if source is None:
+            return Verdict(False, "writer has no explicit registry source mapping", measured, self.name)
+        try:
+            opinion = self.registry.opinion(source, now=self.clock(), role=self.role)
+        except (ValueError, TypeError, OverflowError) as exc:
+            measured["status"] = "invalid_clock"
+            return Verdict(False, f"invalid trust clock: {exc}", measured, self.name)
+        measured.update(status=opinion.support, n=opinion.n, reliability=opinion.reliability,
+                        timestamp=opinion.now, source=source, pending=opinion.pending,
+                        expired=opinion.expired, staleness=opinion.staleness)
+        if opinion.support != "supported":
+            return Verdict(False, "insufficient recent labeled assertions", measured, self.name)
+        admit = opinion.reliability >= self.min_reliability
+        return Verdict(admit, "" if admit else "descriptive reliability below explicit threshold", measured, self.name)
+
+
 class WriterGate:
     """The writers registry (opt-in, KnowledgeStore(writers=) / Knowledge(writers=)): a source is a rank (who wins a
     contradiction), and without a registry it is whatever the writer declares. With one — {writer: source, ...}, a
@@ -170,4 +222,4 @@ def with_source_gate(gates):
     return gates
 
 
-__all__ = ["ConsistencyGate", "default_gates", "RANK", "SOURCES", "SourceGate", "Verdict", "with_source_gate", "WriteGate"]
+__all__ = ["TrustGate", "ConsistencyGate", "default_gates", "RANK", "SOURCES", "SourceGate", "Verdict", "with_source_gate", "WriteGate"]

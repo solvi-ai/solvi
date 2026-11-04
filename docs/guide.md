@@ -1898,13 +1898,13 @@ res = system.ask(init_state)                   # all questions
 res = system.ask(init_state, ["ship"])         # a subset: questions=["ship"] (or "ship")
 ```
 
-`system.ask(init_state, questions=None, *, workers=None, order=None, store=True, early_exit=None)`; `aask` takes the same
-`questions` and keyword-only `order`, `store`, `timeout`, `speculate`, `early_exit`. (`names=`, the 0.7 spelling of
+`system.ask(init_state, questions=None, *, workers=None, order=None, store=True, early_exit=None, check_loss=None)`; `aask` takes the same
+`questions` and keyword-only `order`, `store`, `timeout`, `speculate`, `early_exit`, `check_loss`. (`names=`, the 0.7 spelling of
 `questions=`, was removed in 0.9.)
 
 `System(catalog, questions, *, workers=1, order="default", producers="declared", learn=None, input_model=None,
 strategist=None, storage=None, timeout=None, cost_policy="declared", lang="en", early_exit=True,
-cache=None, allow_unreachable_hard_checks=False, check_models=None)`; `cache=N`: the opt-in pure-decision cache (see [Compact records](#compact-records-and-rotation)); `learn`: after every ask,
+cache=None, allow_unreachable_hard_checks=False, check_models=None, check_intervals=None, check_policies=None)`; `cache=N`: the opt-in pure-decision cache (see [Compact records](#compact-records-and-rotation)); `learn`: after every ask,
 update the parts' measured costs and the learned order / producer policies from what happened (default: on when
 `order` or `producers` is "learned"); the others are described where they matter. `storage` (a `TraceStorage` or a path) saves every
 response with its whole trace, hash-chained across responses (see [Storing decisions](#storing-decisions-tracestorage)).

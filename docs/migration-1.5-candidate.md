@@ -2,6 +2,24 @@
 
 These changes are local unreleased development work. They do not announce a release or change the package version.
 
+## Conditional checks and source accountability
+
+`System(check_policies=...)` adds opt-in, recorded adaptive acquisition. Each request supplies `check_loss`;
+existing calibration/guards must not be reused for acquisition. `check_intervals` may report conditional
+uncertainty or use a lower score for decision thresholds. These are descriptive model calculations, not new
+coverage or false-accept certificates. See [check acquisition](check_acquisition.md).
+
+Check-combiner fingerprints now include fitted Dirichlet concentration state. Reconstructed Systems therefore
+have new check-model identities. A previously fitted combiner without concentration state still supports point
+prediction; refit it from its calibration observations before requesting uncertainty draws. Frozen snapshots
+cannot be refitted. Recalibrate identities rather than relabeling old traces as decisions of a changed model.
+
+`SourceTrust` and opt-in `TrustGate` provide windowed source accountability without changing SourceGate or
+WriterGate defaults. An explicit trust refusal now refuses facts and behavior-changing items; other custom
+measurement gates retain their existing hold semantics. [Source trust](source_trust.md) describes required
+identity authentication and independent labels. [Failed-world policies](failure_policies.md) add explicit
+environment-failure vetoes without changing the default score-only stage policy.
+
 ## Accepted answers, condition text and external names
 
 An answer head returning nonfinite probabilities now leaves a finite, explicit failure record. Acceptance can be

@@ -172,7 +172,7 @@ LOW_TIERS = {
     "parts": "core.deciders core.extract core.plan core._inputs",
     "guarantees": "core.guarantees",
     "records": "core.store core.response core.specialist core.signed",
-    "system": "core.system",
+    "system": "core.system core._check_acquisition",
     "deliberate": "core.slow core.dispatch core.versions core.explain",   # versions: Fail; explain: search's pinning
     "knowledge": "core.knowledge",
 }
@@ -327,7 +327,7 @@ SURFACES = {
     "solvi.core.knowledge": ["ActionModel", "Agenda", "ConservativeActionModel", "ConsistencyGate", "FailureMemory",
                              "KINDS", "KnowledgeStore", "LearnedGate", "MISSING", "Prediction", "Protect",
                              "RECONFIRM_DEFAULTS", "RiskBudget", "RiskDecision", "RiskPolicy", "SourceGate", "SOURCES",
-                             "Verdict", "Vocabulary", "WorldMap", "WriteGate", "WriterGate"],
+                             "Verdict", "Vocabulary", "WorldMap", "WriteGate", "WriterGate", "TrustGate"],
     "solvi.models": ["cached", "cached_path", "decider", "DecideModel", "kind_of", "llm", "load", "ModelError",
                      "PUBLISHED", "pull", "resolve", "systemone"],
     "solvi.solutions.decisions": ["DecisionSystem", "build"],

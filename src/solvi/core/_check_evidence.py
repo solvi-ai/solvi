@@ -5,6 +5,7 @@ No fitting, independence inference or statistical certification at ask time.
 from __future__ import annotations
 
 import dataclasses
+import math
 
 from .runtime import MISSING
 
@@ -29,6 +30,37 @@ def freeze_models(questions, models):
             raise ValueError("check models require agree/disagree outcomes")
         frozen[name], fingerprints[name] = snapshot, snapshot.fingerprint()
     return frozen, fingerprints
+
+
+def freeze_intervals(questions, models, intervals):
+    """Copy opt-in conditional model interval settings; no coverage promise."""
+    if intervals is None:
+        return {}
+    if not isinstance(intervals, dict) or any(name not in questions for name in intervals):
+        raise ValueError("check_intervals must map declared question names to settings")
+    defaults = {"level": .95, "n": 1000, "seed": 0, "mode": "report"}
+    frozen = {}
+    for name, settings in intervals.items():
+        if name not in models:
+            raise ValueError("check_intervals requires a configured check model")
+        if not hasattr(models[name], "_log_concentrations"):
+            raise ValueError("refit a legacy check model before requesting uncertainty")
+        if not isinstance(settings, dict) or set(settings) - set(defaults):
+            raise ValueError("check_intervals settings allow only level, n, seed, mode")
+        config = {**defaults, **settings}
+        level, n, seed = config["level"], config["n"], config["seed"]
+        if (isinstance(level, bool) or not isinstance(level, (int, float))
+                or not math.isfinite(level) or not 0 < level < 1):
+            raise ValueError("check_intervals level must be finite and between zero and one")
+        if type(n) is not int or n <= 0:
+            raise ValueError("check_intervals n must be a positive integer")
+        if type(seed) is not int or seed < 0:
+            raise ValueError("check_intervals seed must be a nonnegative integer")
+        if config["mode"] not in ("report", "lower"):
+            raise ValueError("check_intervals mode must be report or lower")
+        config["level"] = float(level)
+        frozen[name] = config
+    return frozen
 
 
 def _primary_closure(system, inputs):
@@ -110,6 +142,17 @@ def apply(system, question, result, flow, records):
     posterior = model.posterior(result.confidence, outcomes)
     evidence = {"model": system._check_model_fps[question.name], "prior": result.confidence,
                 "posterior": posterior, "outcomes": outcomes, "domain": None}
-    return dataclasses.replace(result, confidence=posterior,
+    confidence = posterior
+    config = getattr(system, "_check_intervals", {}).get(question.name)
+    if config is not None:
+        lower, upper = model.posterior_interval(
+            result.confidence, outcomes, level=config["level"], n=config["n"], seed=config["seed"])
+        evidence["uncertainty"] = {
+            **config, "lower": lower, "upper": upper, "interpretation": "model_conditional",
+            "fixed": ["pooled_prior", "prior", "correlation_weights"],
+        }
+        if config["mode"] == "lower":
+            confidence = lower
+    return dataclasses.replace(result, confidence=confidence,
                                why=result.why + "; fitted check likelihoods applied",
                                extra={**(result.extra or {}), "check_evidence": evidence})

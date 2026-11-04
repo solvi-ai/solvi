@@ -2,6 +2,17 @@
 
 ## 1.4.1 — unreleased
 
+- `System(check_policies=...)` executes priced optional soft checks adaptively, with request `check_loss`,
+  fixed model snapshots, budgets, skipped unavailable checks and recorded/replayable acquisition decisions.
+  `CheckPolicy` is a bounded conditional-table utility surrogate, not a new calibration or false-accept guarantee.
+- Fitted check combiners expose seeded conditional uncertainty draws and intervals. `check_intervals` can report
+  them or use a lower score before abstention safeguards. Existing fitted point-only snapshots require refitting
+  for uncertainty; check-model fingerprints include the additional fitted state.
+- `SourceTrust` tracks time-local source/repeater accountability under explicitly supplied independent labels.
+  Opt-in `TrustGate` keeps base source/writer authority checks and refuses unsupported writers for all item kinds.
+- `FreshEnvironments` supports explicit observed-failure policies independent of a custom reward score:
+  zero failures, no new paired failures, or a supplied observed-rate cap. Its default policy is unchanged.
+
 - `Knowledge.redecide` explicitly binds each stored input's date to current knowledge, retaining earlier valid
   assertions. It prepares private snapshots before callbacks and distinguishes answer changes from justification changes.
 - `solvi.stat.agreement_diagnostics` reports conditional agreement counts, correlations and matching wrong answers

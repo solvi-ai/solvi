@@ -244,7 +244,8 @@ class System:
     def __init__(self, catalog: Catalog, questions, *, workers: int = 1, order: str = "default",
                  producers: str = "declared", learn: bool | None = None, input_model=None, strategist=None, storage=None,
                  timeout: float | None = None, cost_policy="declared", lang: str = "en", early_exit: bool = True,
-                 cache: int | None = None, allow_unreachable_hard_checks: bool = False, check_models=None):
+                 cache: int | None = None, allow_unreachable_hard_checks: bool = False, check_models=None,
+                 check_intervals=None, check_policies=None):
         """order: "default" (hard checks and their inputs first, all together) or "learned" (hard checks one at a time, most
         expected saving first — see learn_order). producers: "declared" (alternative producers of a fact are tried in
         declaration order) or "learned" (a policy picks the order per input and learns from outcomes). learn: after every
@@ -280,6 +281,10 @@ class System:
         checks in requires, separate from the primary answer's inputs and declared shared calls. No model is fitted
         implicitly. Initially supports structured scalar choice/yes-no asks without joint constraints or answer facts;
         cache, decide and ask_text are refused. See docs/check_models.md for outcome mapping and limitations.
+        check_intervals: optional per-question conditional uncertainty settings (level, n, seed, mode).
+        mode="lower" uses the lower model-conditional quantile before confidence safeguards; it is not a certificate.
+        check_policies: optional {question: CheckPolicy} enabling adaptive priced soft checks for one question per ask.
+        Supply check_loss on each ask/aask. See docs/check_acquisition.md for budgets, replay and supported modes.
         cache: None (default) — every ask runs its flow. N — opt-in pure-decision cache for a catalog without models:
         `ask` serves a decision it made before from a cache of the last N, keyed by the catalog's and questions'
         fingerprints, the questions asked, early_exit and the given facts (their hash, as trace.init_hash). Only for parts
@@ -316,9 +321,13 @@ class System:
             raise ValueError(f"two questions named {', '.join(map(repr, dup))}: question names are unique in a System")
         self.questions = {q.name: self._typed_question(q) for q in questions}
         from ._check_evidence import freeze_models
-        if check_models and cache is not None:
+        if (check_models or check_policies) and cache is not None:
             raise ValueError("cache= is not supported with learned check_models")
         self._check_models, self._check_model_fps = freeze_models(self.questions, check_models)
+        from ._check_acquisition import freeze_policies
+        self._check_policies, self._check_policy_fps = freeze_policies(self, check_policies)
+        from ._check_evidence import freeze_intervals
+        self._check_intervals = freeze_intervals(self.questions, self._check_models, check_intervals)
         for c in catalog.constraints.values():        # argument names are question names: one that is not (a typo) means
             lost = [x for x in c.inputs if x not in self.questions]   # the constraint would never apply, without a word
             if lost:
@@ -488,7 +497,7 @@ class System:
             self._warned_idle_hard_checks = tuple(idle)
 
     @_deprecate.removed_kwargs(names="questions")
-    def ask(self, init_state, questions=None, *, workers=None, order=None, store=True, early_exit=None):
+    def ask(self, init_state, questions=None, *, workers=None, order=None, store=True, early_exit=None, check_loss=None):
         """init_state: a dict of given facts, or a pydantic BaseModel instance (its fields). questions: the questions to
         ask — a name or a list of names (None: all; an unknown name raises KeyError; `names=`, its 0.7
         spelling, was removed in 0.9). Every other option is keyword-only. order: override the system's
@@ -510,6 +519,9 @@ class System:
             if hit is not None:
                 return self._serve(hit, t0, store)
         p = self._prepare(init_state, questions, order)
+        from ._check_acquisition import requested, run_sync
+        if requested(self, p, check_loss):
+            return run_sync(self, p, check_loss, t0, store, workers or self.workers, early_exit)
         if p.flow.answer_stages:
             return self._keep(key, self._ask_answers(p, t0, store, workers=workers or self.workers,
                                                    early_exit=early_exit))
@@ -782,7 +794,7 @@ class System:
 
     @_deprecate.removed_kwargs(names="questions")
     async def aask(self, init_state, questions=None, *, order=None, store=True, timeout=None, speculate=False,
-                   early_exit=None):
+                   early_exit=None, check_loss=None):
         """`ask` on an event loop: `async def` parts (database lookups, HTTP APIs, model servers) are awaited, parts marked
         `blocking=True` run in worker threads (asyncio.to_thread), plain sync parts inline; steps whose inputs are ready run
         concurrently. The answers, records and hashes are those of `ask` on the same input: records are written in flow
@@ -807,6 +819,9 @@ class System:
             if hit is not None:
                 return self._serve(hit, t0, store)
         p = self._prepare(init_state, questions, order)
+        from ._check_acquisition import requested, run_async
+        if requested(self, p, check_loss):
+            return await run_async(self, p, check_loss, t0, store, timeout, early_exit, speculate)
         _speculate_note(speculate, p)
         if p.flow.answer_stages:
             return self._keep(key, await self._aask_answers(p, t0, store, timeout=timeout,
@@ -1052,6 +1067,10 @@ class System:
             violations.extend(problems)
         return self._answer_response(p, context, accepted, feasible, violations, t0, store)
 
+    def _verify_check_policy(self, record, trace):
+        from ._check_acquisition import verify
+        return verify(self, trace, record)
+
     def _verify_answer_ref(self, record, trace, flow, values):
         import copy
         source = self._answer_refs().get(record.name)
@@ -1081,7 +1100,7 @@ class System:
         from .plan.cost import reachable
         return reachable(self.catalog, init_keys)
 
-    def _respond(self, p, trace, vals, t0, store):
+    def _respond(self, p, trace, vals, t0, store, *, record_only=False):
         """What ask and aask share after running: the trace's plan record and fingerprint, costs, answers, safeguards,
         storage."""
         init_state, rejected, qs, flow, policy = p.state, p.rejected, p.questions, p.flow, p.policy
@@ -1098,7 +1117,7 @@ class System:
             self.cost_book.observe(name, ms)
         if self.learn:
             self._observe(trace, init_state, vals, policy)
-        results, feasible, violations = self._results(qs, flow, trace, vals, p.textin)
+        results, feasible, violations = self._results(qs, flow, trace, vals, p.textin, record_only=record_only)
         if self.guards:                               # calibrated thresholds with a promise (solvi.core.guarantees.guarantee)
             from .guarantees.guarantee import apply_guards
             apply_guards(self, results, trace, vals, flow)
@@ -1135,6 +1154,8 @@ class System:
                     continue
             r = self._answer(q, flow, trace, vals, by, hard, pcache, record_only=record_only)
             r = apply_check_evidence(self, q, r, flow, by)
+            from ._check_acquisition import apply as apply_acquisition
+            r = apply_acquisition(self, q, r, trace, flow)
             r.kind = q.answer.kind
             if c is not None and r.status == "ok":
                 r = _contracted(self, c, q, r, flow, trace)
@@ -1181,7 +1202,8 @@ class System:
         import copy
         qs = [self.questions[n] for n in names]
         if flow is None:
-            flow = self._plan(qs, trace.init.keys())
+            from ._check_acquisition import recorded_flow
+            flow = recorded_flow(self, trace, names) or self._plan(qs, trace.init.keys())
         t = copy.copy(trace)
         t.records = list(trace.records)                # an answer head appends its record: to the copy
         vals = dict(trace.init)
@@ -1223,6 +1245,7 @@ class System:
         for q, h in self.heads.items():
             models["answer:" + q] = fingerprint(h)
         models.update({"checks:" + q: fp for q, fp in getattr(self, "_check_model_fps", {}).items()})
+        models.update({"check_policy:" + q: fp for q, fp in getattr(self, "_check_policy_fps", {}).items()})
         return {"catalog": c["fp"], "questions": self._questions_fp(), "parts": dict(c["parts"]), "models": models}
 
     def _questions_fp(self):
@@ -1234,6 +1257,10 @@ class System:
             d = question_data(q)
             if q.name in getattr(self, "_check_model_fps", {}):
                 d["check_model"] = self._check_model_fps[q.name]
+            if q.name in getattr(self, "_check_intervals", {}):
+                d["check_intervals"] = self._check_intervals[q.name]
+            if q.name in getattr(self, "_check_policy_fps", {}):
+                d["check_policy"] = self._check_policy_fps[q.name]
             if plain_json(d):
                 return d
             from .schema import jsonable
@@ -1246,7 +1273,12 @@ class System:
             value = (q.text, ans, tuple(q.requires), tuple(q.uses or ()) if q.uses is not None else None,
                      q.min_confidence, q.require_evidence)
             fp = getattr(self, "_check_model_fps", {}).get(q.name)
-            return value if fp is None else value + (fp,)
+            value = value if fp is None else value + (fp,)
+            interval = getattr(self, "_check_intervals", {}).get(q.name)
+            policy = getattr(self, "_check_policy_fps", {}).get(q.name)
+            if interval is not None or policy is not None:
+                value += (repr(sorted(interval.items())) if interval is not None else None, policy)
+            return value
         key = (tuple((n, content(q)) for n, q in self.questions.items()), tuple(sorted(self.calib.items())),
                tuple(sorted((n, g.fingerprint()) for n, g in self.guards.items())),     # solvi.core.guarantees.guarantee
                tuple(sorted((n, c.fingerprint()) for n, c in (getattr(self.catalog, "contracts", None) or {}).items())),
@@ -2598,6 +2630,12 @@ def _rename_system(system, *, inputs=None, answers=None):
         result._check_models, result._check_model_fps = freeze_models(
             result.questions, {question(q): model for q, model in system._check_models.items()})
         validate(result)
+        from ._check_acquisition import freeze_policies
+        result._check_policies, result._check_policy_fps = freeze_policies(
+            result, {question(q): policy for q, policy in getattr(system, '_check_policies', {}).items()}, existing=True)
+        from ._check_evidence import freeze_intervals
+        result._check_intervals = freeze_intervals(result.questions, result._check_models,
+                                                  {question(q): value for q, value in getattr(system, '_check_intervals', {}).items()})
     from copy import copy
     from .guarantees.guarantee import QuestionGuard
     for name, guard in list(result.guards.items()):

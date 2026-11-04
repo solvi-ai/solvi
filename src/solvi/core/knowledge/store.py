@@ -717,7 +717,7 @@ class KnowledgeStore:
                 v = g.admit(self, prop, shadow)
                 v.gate = v.gate or getattr(g, "name", type(g).__name__)
                 verdicts.append(v)
-                if not v.admit and (v.gate in ("source", "writers", "consistency") or kind not in NEEDS_PROMOTION):
+                if not v.admit and (v.gate in ("source", "writers", "consistency", "trust") or kind not in NEEDS_PROMOTION):
                     if reassert:
                         raise ValueError(f"reassert {v.gate}: {v.reason}")
                     self._write("refused", item=prop["id"], item_kind=kind, source=source, by=prop["by"],

@@ -629,6 +629,13 @@ class FreshEnvironments:
     progress not lower — the upper bound of the paired progress change on `confirm` is ≥ −`progress_tolerance`
     (a rule that makes the agent overcautious is refused). Everything measured is recorded.
 
+    failure_policy (opt-in, default None): an independent veto on BOTH sets, using the environment's
+    info["failed"] convention even with a custom score. "zero_failures" refuses any candidate failure;
+    "no_new_failures" refuses any paired safe-baseline → failed-candidate world; "max_failure_rate" refuses
+    an observed candidate failure share above the explicitly required max_failure_rate in [0, 1]. The latter
+    is a sample cap, not a population or research guarantee. Counts, policy and veto reasons are recorded per set.
+    A cap without "max_failure_rate" is an error. Defaults and score/progress/bootstrap bars are unchanged.
+
     handed_over (opt-in): `handed_over(row)` → bool, a world the candidate handed over (abstained, escalated). When
     progress is the share answered, an honest change that hands over more is "lower progress" and was refused: with
     handed_over, such a world takes the version in force's progress in the progress comparison (a refusal is neither
@@ -638,9 +645,19 @@ class FreshEnvironments:
     def __init__(self, env: Callable, agent: Callable, *, select, confirm, score: Callable | None = None,
                  progress: Callable | None = None, max_steps: int = 200, boot: int = 2000, seed: int = 0,
                  min_lower: float = 0.0, progress_tolerance: float = 0.0, replay: int = 2,
-                 on_episode_start: Callable | None = None, handed_over: Callable | None = None):
+                 on_episode_start: Callable | None = None, handed_over: Callable | None = None,
+                 failure_policy: str | None = None, max_failure_rate: float | None = None):
         if on_episode_start is not None and not callable(on_episode_start):
             raise TypeError("on_episode_start is a function (policy, seed) or None")
+        if failure_policy not in (None, "zero_failures", "no_new_failures", "max_failure_rate"):
+            raise ValueError("unknown failure_policy")
+        if failure_policy == "max_failure_rate":
+            if (isinstance(max_failure_rate, bool) or not isinstance(max_failure_rate, (int, float))
+                    or not 0 <= max_failure_rate <= 1):
+                raise ValueError("max_failure_rate policy requires an explicit finite cap in [0, 1]")
+        elif max_failure_rate is not None:
+            raise ValueError("max_failure_rate cap requires failure_policy='max_failure_rate'")
+        self.failure_policy, self.max_failure_rate = failure_policy, max_failure_rate
         self.env, self.agent, self.select, self.confirm = env, agent, select, confirm
         self.on_episode_start = on_episode_start
         self.score = score or (lambda r: 0.0 if r["failed"] else 1.0)
@@ -648,6 +665,25 @@ class FreshEnvironments:
         self.max_steps, self.boot, self.seed = max_steps, boot, seed
         self.min_lower, self.progress_tolerance, self.replay = min_lower, progress_tolerance, replay
         self.handed_over = handed_over
+
+    def _failure_veto(self, base, cand, measured, phase):
+        if self.failure_policy is None:
+            return None
+        paired = [{"seed": b["seed"], "baseline_failed": bool(b["failed"]),
+                   "candidate_failed": bool(c["failed"])} for b, c in zip(base, cand)]
+        failures = sum(row["candidate_failed"] for row in paired)
+        new = sum(not row["baseline_failed"] and row["candidate_failed"] for row in paired)
+        rate = failures / len(cand)
+        refused = ((self.failure_policy == "zero_failures" and failures > 0)
+                   or (self.failure_policy == "no_new_failures" and new > 0)
+                   or (self.failure_policy == "max_failure_rate" and rate > self.max_failure_rate))
+        reason = (f"failure policy {self.failure_policy} refused {phase} worlds "
+                  f"(candidate failures {failures}/{len(cand)}, new paired failures {new})") if refused else ""
+        measured["failure_policy"] = {"policy": self.failure_policy, "candidate_failures": failures,
+                                      "new_failures": new, "candidate_failure_rate": rate,
+                                      "max_failure_rate": self.max_failure_rate, "paired": paired, "refused": refused,
+                                      "reason": reason}
+        return reason or None
 
     def _progress(self, rb, rc):
         """The paired progress lists; a world the candidate handed over takes the base's progress (with handed_over)."""
@@ -682,10 +718,13 @@ class FreshEnvironments:
                                      seed=self.seed)
         meas = {"select": {"worlds": len(sel), "gain": [m, lo, hi], "failed": [sum(r["failed"] for r in rb),
                                                                               sum(r["failed"] for r in rc)]}}
+        veto = self._failure_veto(rb, rc, meas["select"], "selection")
         errs = sum(r["errors"] for r in rc)
         if errs:
             return StageVerdict.refuse(f"the candidate's rules crashed in {errs} selection world(s): "
                                   f"{next(r['error'] for r in rc if r['errors'])}", meas)
+        if veto:
+            return StageVerdict.refuse(veto, meas)
         if m <= 0:
             return StageVerdict.refuse(f"no gain on the selection worlds (mean {m:+.3f})", meas)
         again = self._play(self.agent(change, ctx), sel[:self.replay])
@@ -703,8 +742,11 @@ class FreshEnvironments:
                            "failed": [sum(r["failed"] for r in cb), sum(r["failed"] for r in cc)]}
         if ho is not None:
             meas["confirm"]["handed_over"] = ho
+        veto = self._failure_veto(cb, cc, meas["confirm"], "confirmation")
         if errs:
             return StageVerdict.refuse(f"the candidate's rules crashed in {errs} confirmation world(s)", meas)
+        if veto:
+            return StageVerdict.refuse(veto, meas)
         if clo <= self.min_lower:
             return StageVerdict.refuse(f"not confirmed: the gain's lower bound {clo:+.3f} ≤ {self.min_lower:+.3f}", meas)
         if phi < -self.progress_tolerance:

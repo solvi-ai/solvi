@@ -62,9 +62,12 @@ nav:
       - Structured rule answers: api/structured-answers.md
       - Hypothetical rule evaluation: api/system-probe.md
       - Fitted check evidence: check_models.md
+      - Adaptive check acquisition: check_acquisition.md
+      - Time-local source trust: source_trust.md
       - Code strategist: strategist.md
   - Experimental:
       - experimental.md
+      - Failed-world policies: failure_policies.md
       - Guide: guide-part:Experimental
   - Evidence:
       - Benchmarks: benchmarks.md
@@ -113,6 +116,7 @@ nav:
           - solvi.core.plan.strategist: api/strategist.md
           - solvi.core.plan.cost: api/strategy.md
           - solvi.core.plan.answer_policy: api/answer_policy.md
+          - solvi.core.plan.check_policy: api/check_policy.md
           - solvi.core.costs: api/costs.md
           - solvi.stat: api/stat.md
           - solvi.core.calibration: api/calibration.md
