@@ -80,10 +80,20 @@ of new checks. A changed policy or incompatible record is rejected by replay.
 
 Use one question per acquisition request, deterministic declared planning,
 `early_exit=True`, and `speculate=False` for async calls. Online learning,
-strategist-driven planning, joint answers, `ask_text`, unrecorded `decide` and
+strategist-driven planning, joint answers, `ask_text`, diagnostic `probe`, unrecorded `decide` and
 caching are outside this bridge. Existing confidence calibration, guards and
 `shift_watch` cannot be reused for a policy question: they require calibration of
 the acquisition process itself and are explicitly refused.
+Static `facts_for`, `fit`, `learn_rule`, `learn_order` and in-place `teach` flows
+are refused before calls on an acquisition-configured System; fit the primary
+model in a separate System first. Static `calibrate` and `guarantee` are also
+refused for the policy question before consuming examples or changing state.
+Recorded-answer recalculation requires an acquisition record; a static trace is
+not reinterpreted as a budgeted policy execution.
+Acquisition responses require full storage records (`sample:1` is also full).
+Compact and partially sampled storage are refused before paid work; `store=False`
+may return a full in-memory response without writing. A legacy compact acquisition
+record cannot be re-derived, and fails before any check is called.
 
 Optional [check intervals](check_models.md#conditional-uncertainty) report a
 model-conditional interval. `mode="lower"` uses its lower bound before

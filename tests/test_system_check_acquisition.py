@@ -112,8 +112,9 @@ def test_invalid_request_loss_fails_before_calls(loss):
 def test_changed_prices_cannot_replay_old_policy_and_rename_keeps_policy():
     system, _ = make()
     response = system.ask({"x": 1, "ok": True}, check_loss=2)
-    changed, _ = make(max_cost=0)
+    changed, changed_calls = make(max_cost=0)
     assert not response.trace.replay(changed)["ok"]
+    assert changed_calls == []
     renamed = system.rename(answers={"q": "new_q"})
     result = renamed.ask({"x": 1, "ok": True}, questions="new_q", check_loss=2)
     assert result["new_q"].answer == "A" and result.trace.replay(renamed)["ok"]
@@ -164,3 +165,118 @@ def test_recalculation_refuses_a_flow_that_drops_mandatory_hard_checks():
     system, _ = make(hard=True)
     response = system.ask({"x": 1, "ok": True, "allowed": False}, check_loss=2)
     assert not response.trace.replay(system, Flow([], {"q": []}, {}, {}))["ok"]
+
+
+def test_probe_cannot_bypass_optional_purchase_budgets():
+    system, calls = make(max_cost=0)
+    with pytest.raises(ValueError, match="probe cannot bypass acquisition"):
+        system.probe("q", {"x": 1, "ok": True})
+    assert calls == []
+
+
+def test_a_static_trace_does_not_claim_an_unrecorded_policy_execution():
+    system, calls = make(max_cost=0)
+    point = System(system.catalog, list(system.questions.values()), check_models={"q": system._check_models["q"]})
+    old = point.ask({"x": 1, "ok": True})
+    calls.clear()
+    assert not old.trace.replay(system)["ok"]
+    assert calls == []
+    with pytest.raises(ValueError, match="execution record is required"):
+        system.answers_of(old.trace, ["q"])
+
+
+@pytest.mark.parametrize("operation", ["facts_for", "fit", "learn_rule", "calibrate", "guarantee", "teach", "learn_order"])
+def test_static_training_and_calibration_refuse_before_inputs_or_calls(operation):
+    system, calls = make(max_cost=0)
+    before = system.fingerprint()
+    state = {"x": 1, "ok": True}
+
+    def examples():
+        calls.append("read examples")
+        yield state, "A"
+
+    operations = {
+        "facts_for": lambda: system.facts_for(state),
+        "fit": lambda: system.fit("q", examples(), features=["x"]),
+        "learn_rule": lambda: system.learn_rule("q", examples(), features=["x"]),
+        "calibrate": lambda: system.calibrate("q", examples()),
+        "guarantee": lambda: system.guarantee("q", examples(), max_risk=.1),
+        "teach": lambda: system.teach("q", state, "A"),
+        "learn_order": lambda: system.learn_order([state], features=["cheap"]),
+    }
+    with pytest.raises(ValueError, match="static training or calibration"):
+        operations[operation]()
+    assert calls == [] and system.fingerprint() == before
+
+
+@pytest.mark.parametrize("mode", ["compact", "sample:2"])
+def test_compact_or_sampled_storage_is_refused_before_paid_work(tmp_path, mode):
+    system, calls = make()
+    system.storage = JSONLStorage(tmp_path / "decisions.jsonl", record=mode, system=system)
+    with pytest.raises(ValueError, match="full storage records"):
+        system.ask({"x": 1, "ok": True}, check_loss=2)
+    assert calls == [] and len(system.storage) == 0
+    result = system.ask({"x": 1, "ok": True}, check_loss=2, store=False)
+    assert result["q"].status == "ok" and len(system.storage) == 0
+
+
+def test_compact_save_and_old_compact_rederive_do_not_bypass_acquisition(tmp_path):
+    from solvi.core.store import CompactRecord, entry
+
+    system, calls = make(max_cost=0)
+    response = system.ask({"x": 1, "ok": True}, check_loss=2)
+    store = JSONLStorage(tmp_path / "decisions.jsonl", system=system)
+    calls.clear()
+    with pytest.raises(ValueError, match="full storage records"):
+        store.save(response, record="compact")
+    assert len(store) == 0 and calls == []
+    # Simulate an existing compact record written before acquisition format checks.
+    old = store._append(entry(response, record="compact"))
+    with pytest.raises(CompactRecord, match="full records are required"):
+        store.rederive(old["id"], system)
+    assert calls == []
+
+
+def test_sample_one_is_full_and_can_store_and_load_without_new_calls(tmp_path):
+    system, calls = make()
+    system.storage = JSONLStorage(tmp_path / "decisions.jsonl", record="sample:1", system=system)
+    response = system.ask({"x": 1, "ok": True}, check_loss=2)
+    before = list(calls)
+    restored = system.storage.rederive(response.stored_id, system)
+    assert restored["q"].answer == "A" and calls == before
+
+
+def test_catalog_only_replay_refuses_before_any_recomputed_calls():
+    system, calls = make()
+    response = system.ask({"x": 1, "ok": True}, check_loss=2)
+    calls.clear()
+    assert not response.trace.replay(system.catalog)["ok"]
+    assert calls == []
+
+
+def test_direct_calibration_helper_cannot_bypass_static_preparation_guard():
+    from solvi.core.guarantees.guarantee import guard_question
+
+    system, calls = make(max_cost=0)
+    with pytest.raises(ValueError, match="acquisition"):
+        guard_question(system, "q", [({"x": 1, "ok": True}, "A")], max_risk=.1)
+    assert calls == []
+
+
+def test_stopped_primary_replay_rejects_unpurchased_checks_before_callbacks():
+    import dataclasses
+
+    from solvi.core.chain import append
+
+    system, calls = make(max_cost=0, hard=True)
+    state = {"x": 1, "ok": True, "allowed": False}
+    genuine = system.ask(state, check_loss=2)
+    policy_record = next(r for r in genuine.trace.records if r.kind == "check_policy")
+    point = System(system.catalog, list(system.questions.values()), check_models={"q": system._check_models["q"]})
+    static = point.ask(state, early_exit=False)
+    assert {"cheap", "expensive"} <= set(calls)
+    append(static.trace, dataclasses.replace(policy_record), len(static.trace.records))
+    calls.clear()
+    result = static.trace.replay(system)
+    assert not result["ok"] and calls == []
+    assert any("unpurchased" in str(m) for m in result["mismatches"])

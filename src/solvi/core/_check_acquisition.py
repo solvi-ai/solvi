@@ -30,7 +30,7 @@ def freeze_policies(system, policies, *, existing=False):
     return frozen, fps
 
 
-def requested(system, prepared, loss):
+def requested(system, prepared, loss, *, store=True):
     selected = [q for q in prepared.questions if q.name in getattr(system, "_check_policies", {})]
     if not selected:
         if loss is not None:
@@ -45,6 +45,9 @@ def requested(system, prepared, loss):
     name = selected[0].name
     if name in system.calib or name in system.guards or name in system.shift_watch:
         raise ValueError("adaptive check policies require their own acquisition calibration; existing guards cannot be reused")
+    mode, every = getattr(system.storage, "record_mode", ("full", None))
+    if store and mode != "full" and not (mode == "sample" and every == 1):
+        raise ValueError("adaptive checks require full storage records; use a full store or store=False")
     return True
 
 
@@ -189,6 +192,11 @@ def verify(system, trace, record):
     prior = _primary(system, q, base, trace, {**trace.init, **{r.name: r.value for r in trace.records if r.value is not MISSING}})
     if prior.confidence != record.extra["prior"] or available != record.extra["available"]:
         raise ValueError("check policy prior or availability differs")
+    actually_run = [r.name for r in trace.records if r.kind == "check" and r.name in policy.sources]
+    if actually_run != record.value:
+        raise ValueError("unpurchased or reordered check execution")
+    if any(r.step >= record.step for r in trace.records if r.kind == "check" and r.name in record.value):
+        raise ValueError("check policy result must follow its purchased checks")
     if prior.status != "ok":
         if record.value != [] or record.extra["decisions"] != [{"kind": "primary_stopped"}]:
             raise ValueError("check policy must not override a stopped primary")
@@ -203,17 +211,14 @@ def verify(system, trace, record):
         outcomes[action.check] = _outcome(trace, action.check)
     if selected != record.value or expected != record.extra["decisions"]:
         raise ValueError("check acquisition decisions differ from recorded evidence")
-    actually_run = [r.name for r in trace.records if r.kind == "check" and r.name in policy.sources]
-    if actually_run != selected:
-        raise ValueError("unpurchased or reordered check execution")
-    if any(r.step >= record.step for r in trace.records if r.kind == "check" and r.name in selected):
-        raise ValueError("check policy result must follow its purchased checks")
     return expected[-1]
 
 
 def apply(system, question, result, trace, flow):
     record = _record(trace, question.name)
     if record is None:
+        if question.name in getattr(system, "_check_policies", {}):
+            raise ValueError("adaptive check execution record is required for this question")
         return result
     action = verify(system, trace, record)
     expected_flow = recorded_flow(system, trace, [question.name])

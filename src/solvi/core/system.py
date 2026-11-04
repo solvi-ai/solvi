@@ -518,9 +518,10 @@ class System:
             hit = None if key is None else self._cache.get(key)
             if hit is not None:
                 return self._serve(hit, t0, store)
-        p = self._prepare(init_state, questions, order)
+        p = (self._prepare(init_state, questions, order, _acquisition=True)
+             if getattr(self, '_check_policies', None) else self._prepare(init_state, questions, order))
         from ._check_acquisition import requested, run_sync
-        if requested(self, p, check_loss):
+        if requested(self, p, check_loss, store=store):
             return run_sync(self, p, check_loss, t0, store, workers or self.workers, early_exit)
         if p.flow.answer_stages:
             return self._keep(key, self._ask_answers(p, t0, store, workers=workers or self.workers,
@@ -541,6 +542,8 @@ class System:
         is bypassed so direct intermediate facts can be supplied; consumers still
         validate their inputs. The result is durably marked hypothetical.
         """
+        if isinstance(question, str) and question in getattr(self, '_check_policies', {}):
+            raise ValueError('adaptive check policies require ask/aask with check_loss; probe cannot bypass acquisition')
         return _probe(self, question, facts, override=override)
 
     def _keep(self, key, resp):
@@ -818,9 +821,10 @@ class System:
             hit = None if key is None else self._cache.get(key)
             if hit is not None:
                 return self._serve(hit, t0, store)
-        p = self._prepare(init_state, questions, order)
+        p = (self._prepare(init_state, questions, order, _acquisition=True)
+             if getattr(self, '_check_policies', None) else self._prepare(init_state, questions, order))
         from ._check_acquisition import requested, run_async
-        if requested(self, p, check_loss):
+        if requested(self, p, check_loss, store=store):
             return await run_async(self, p, check_loss, t0, store, timeout, early_exit, speculate)
         _speculate_note(speculate, p)
         if p.flow.answer_stages:
@@ -842,8 +846,12 @@ class System:
     unfreeze_costs = gone_in_1_0("unfreeze_costs()", 'declared costs (cost= on the parts): cost_policy="measured" was '
                                  "removed (no measured benefit)", "System")
 
-    def _prepare(self, init_state, names, order):
+    def _prepare(self, init_state, names, order, *, _acquisition=False):
         """What ask and aask share before running: the given facts, the questions, the flow, the order and the policy."""
+        if getattr(self, '_check_policies', None) and not _acquisition:
+            names = self._names(names)
+            if set(names) & set(self._check_policies):
+                raise ValueError('adaptive check acquisition requires ask/aask with check_loss; static execution is refused')
         self._validate_hard_checks()
         known = None
         if self.input_model is not None or type(init_state) is not dict:
@@ -1544,6 +1552,12 @@ class System:
                 if o.row is not None:
                     policy.observe(self.catalog.parts[fact], o.row, o.outcomes)
 
+    def _refuse_static_policy_execution(self, question=None):
+        policies = getattr(self, '_check_policies', {})
+        if policies and (question is None or question in policies):
+            raise ValueError('adaptive check policies cannot use static training or calibration flows; '
+                             'fit in a separate System before configuring acquisition')
+
     def learn_order(self, examples=None, features=None):
         """Learn which hard checks tend to fail on which inputs, and switch this system to the learned order.
         examples: [init_state] — each runs only its hard checks and what they read (no early exit), which also measures their
@@ -1552,6 +1566,7 @@ class System:
         learned they are empty and every check counts as failing half the time. From this call on every ask feeds them
         (`self.learn` becomes True).
         features: computed facts to use besides init_state (cheap ones: they are computed before the hard checks)."""
+        self._refuse_static_policy_execution()
         import copy
         if features is not None:
             self.order_model.features = list(features)
@@ -1673,6 +1688,7 @@ class System:
     def facts_for(self, init_state, *, features=None):
         """All computable facts (for head training): a "compute everything" flow without rules, planned by the system's
         strategist (so a fact `ask` computes around a dead-end producer is a feature candidate too)."""
+        self._refuse_static_policy_execution()
         init_state = self._state(init_state)[0]
         q = Question("__all__", "", None)
         flow = self._plan([q], init_state.keys())
@@ -1716,6 +1732,7 @@ class System:
         `head.selection` says what each kept fact did to the error. Before 0.8, fit was a logistic head chosen by
         cross-validated accuracy (+1 point), which kept nothing on imbalanced questions; fit_fast was this without the
         selection (now fit(..., select=False))."""
+        self._refuse_static_policy_execution()
         from .deciders.heads import FastHead, select_features
         import time
         factory = head
@@ -1822,6 +1839,7 @@ class System:
         catalog as a regular rule (deterministic, replayable). examples: [(init_state, answer)], at least one; features: the
         facts the list reads (`facts=` in 0.7) — parts of the catalog or given facts of the examples (a name that is neither raises, and
         nothing is installed)."""
+        self._refuse_static_policy_execution()
         from .deciders.rulelist import RuleList
         q = self.questions[question]
         facts = [features] if isinstance(features, str) else list(features)
@@ -1856,6 +1874,7 @@ class System:
         it is unlike them (few answers of a new regime get it; test batches with `shift_watch[question].shift`), and the
         raw confidence in `extra["out_of_domain"]`. The Platt map is the same with or without
         it. watch=False removes a question's watch; without watch= a watch fitted before is kept."""
+        self._refuse_static_policy_execution(question)
         import numpy as np
         q = self.questions[question]
         examples = list(examples)
@@ -1902,6 +1921,8 @@ class System:
         examples=False removes it. A failed call raises and keeps the guarantee in force before it (with a warning).
         Every attempt is logged in `self.guard_history` (installed, failed, removed). → the
         calibration report. See solvi.core.guarantees.guarantee.guard_question."""
+        if examples is not False:
+            self._refuse_static_policy_execution(question)
         from .guarantees.guarantee import guard_question
         return guard_question(self, question, examples, **kw)
 
@@ -1943,6 +1964,7 @@ class System:
         An unknown question raises KeyError and an answer that is not one of the question's options ValueError, before
         anything is learned or stored; the answer is stored normalized (True → "yes"). When nothing learned at once and
         there is no storage, the correction is lost: a UserWarning says so."""
+        self._refuse_static_policy_execution()
         from .deciders import decision_of
         from .deciders.heads import FastHead
         from .sources import VERIFIED, check_source

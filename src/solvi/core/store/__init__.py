@@ -717,6 +717,9 @@ def rederive(d, system, trust_models=False):
     if not (hasattr(system, "catalog") and hasattr(system, "questions") and hasattr(system, "_prepare")):
         return None, [Mismatch(0, "load", "a compact record is re-run from its input: replay it with the System, not a "
                                           "Catalog", "error")]
+    if set(d.get("answers") or {}) & set(getattr(system, "_check_policies", {})):
+        return None, [Mismatch(0, "checks", "compact acquisition traces cannot be re-derived; full records are required",
+                              "not_kept")]
     c = d["compact"]
     kept = load(Trace, c["trace"], system)
     steps = [tuple(s) for s in d.get("records") or []]
@@ -893,6 +896,9 @@ class TraceStorage(abc.ABC):
         if record is not None and record not in ("full", "compact"):
             raise ValueError(f'record is "full", "compact" or None (the store\'s), not {record!r}')
         mode, n = self.record_mode if record is None else (record, None)
+        adaptive = any(r.kind == "check_policy" for r in response.trace.records)
+        if adaptive and mode != "full" and not (mode == "sample" and n == 1):
+            raise ValueError("adaptive check acquisition requires full storage records")
         if mode == "sample":
             with _SAMPLE_LOCK:
                 k, self._saved = self._saved, self._saved + 1

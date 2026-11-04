@@ -427,6 +427,31 @@ class Trace(Serial):
         heads = system = None
         if hasattr(catalog, "catalog") and hasattr(catalog, "heads"):          # a System: its catalog and answer heads
             system, heads, catalog = catalog, catalog.heads, catalog.catalog
+        policy_records = [r for r in self.records if r.kind == "check_policy"]
+        if policy_records or system is not None and getattr(system, "_check_policies", None):
+            preflight = []
+            named = set(getattr(self, "answers", None) or {}) | set(getattr(flow, "per_question", {}) or {})
+            named.update(r.name[7:] for r in self.records if r.kind in ("rule", "head")
+                         and r.name.startswith("answer:"))
+            recorded = {r.extra.get("question") for r in policy_records if isinstance(r.extra, dict)
+                        and isinstance(r.extra.get("question"), str)}
+            required = named & set(getattr(system, "_check_policies", {}) if system is not None else {})
+            for name in sorted(required - recorded):
+                preflight.append(Mismatch(0, name, "adaptive check execution record is required", "not_kept"))
+            for record in policy_records:
+                if system is None:
+                    preflight.append(Mismatch(record.step, record.name, "check policy requires its System", "unavailable"))
+                    continue
+                try:
+                    system._verify_check_policy(record, self)
+                except (ValueError, KeyError, TypeError) as error:
+                    preflight.append(Mismatch(record.step, record.name, str(error), "recompute"))
+            if preflight:
+                out = {"ok": False, "steps": 0, "mismatches": preflight, "models": [],
+                       "answers": "skipped: acquisition preflight failed"}
+                out.update(_catalog_verdict(self.fingerprint, catalog))
+                out.update(mismatch_summary(preflight, out["catalog"]))
+                return out
         vals = dict(self.init)
         prev = self.init_hash
         bad, models = [], []
