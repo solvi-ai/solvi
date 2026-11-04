@@ -68,6 +68,12 @@ nav:
   - Experimental:
       - experimental.md
       - Failed-world policies: failure_policies.md
+      - Change economics and proposer history: change-economics-history.md
+      - Past-episode prior backoff: episode-priors.md
+      - External agent wrap and priced proposals: external-agent-wrap.md
+      - Numeric Gaussian probes: laws_gaussian_probes.md
+      - Frozen law nulls and diagnostics: laws_frozen_null.md
+      - Asynchronous regime memory: regime-memory.md
       - Guide: guide-part:Experimental
   - Evidence:
       - Benchmarks: benchmarks.md
@@ -188,6 +194,7 @@ nav:
           - solvi.experimental.hooks: api/hooks.md
           - solvi.experimental.charts: api/charts.md
           - solvi.experimental.changes: api/changes.md
+          - solvi.experimental.regime_memory: api/regime_memory.md
           - solvi.experimental.laws: api/laws.md
           - solvi.experimental.skills: api/skills.md
           - solvi.experimental.relations: api/relations.md

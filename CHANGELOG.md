@@ -69,6 +69,25 @@ This release contains breaking changes. See [migration notes](docs/migration-1.5
 - LoRA compute estimates use warm unapplied probes and expose timing diagnostics. This is not a wall-clock
   limit or a claim of uniformly improved forecast accuracy.
 
+### Explicit experimental models and rollout controls
+
+- Opt-in `Economics` stops later change stages when owner-declared gain minus loss and anticipated stage costs is
+  nonpositive. `ProposerHistory` uses independently labelled past outcomes, atomic unique event IDs and explicit
+  cold-start routing; admission history is never truth and good history never bypasses fresh gates.
+- `EpisodePriors` provides capped Beta prior backoff across past episodes by declared context, source type, source
+  and role. Current-episode data is excluded; current `SourceTrust` label requirements are unchanged.
+- `priced_proposal` compares declared losses of acting, refusing and asking, preserves hard defaults and ties, and
+  produces an evidence-backed wrap proposal without executing or authorizing the selected action.
+- `GaussianProbes` supports a declared finite Normal family with bounded floating-point coordinates and explicit
+  refusal outside its numeric domain. Posterior thresholds are conditional model quantities, not confidence certificates.
+- `why_not` warns when a sized base-null comparator uses the same action/effect buffer. This adds explanation only;
+  it does not alter admission thresholds or install an adaptive baseline estimator.
+- Opt-in `StagedTraffic` records stable fixed-cohort assignments before owner execution and validates complete
+  assignment-linked actual outcomes before descriptive phase advance/rollback. Missing labels hold; no deployment
+  callback, anytime test or automatic publication is provided.
+- `RegimeMemory` associates bounded asynchronous finite-regime posteriors with declared LawSet IDs. Delayed outcomes
+  update their issue-time state; snapshots retain bounded history and tickets. No LawSet is automatically activated.
+
 ### Safety and reliability
 
 - Guard batch preflight checks every call and declared caller-state transition before registered tool execution.

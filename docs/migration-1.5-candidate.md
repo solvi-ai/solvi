@@ -449,3 +449,100 @@ actual facts. Typed validation, trace inputs, entry schemas, cache and replay us
 Bindings do not redirect a callable `then` function's own arguments. Model-backed and shared-pass mappings are
 currently refused. Lint can identify declared common given roots; disjoint names do not prove independent
 backends or statistical errors. See [check sources](check_sources.md).
+
+## Change economics, proposer labels and staged traffic
+
+These change-pipeline stages are opt-in; existing defaults and hard stages remain in force:
+
+```python
+from solvi.experimental.changes import Economics, ProposerHistory
+
+economics = Economics(lambda change, ctx: {"gain": 5, "loss": 1},
+                      costs={"fresh_environments": 2}, units="owner utility")
+history = ProposerHistory(window=3600, min_labels=2, unknown="audit")
+# Put these before expensive stages in the declared Pipeline order.
+# After an independently observed outcome, not after a mere admission:
+# history.label(pipe.journal, proposer="stable-author", loss=0,
+#               observed_at=known_time, evidence="external-receipt", event_id="unique-event")
+```
+
+[Economics and history](change-economics-history.md) use explicit owner utility and independent labels. Unknown
+history audits-and-continues by default; optional hold needs external evidence or human ruling. Unique label
+reservation is atomic on native backends, caller-owned batches refuse, identical legacy duplicates count once and
+conflicting labels fail closed. A good history never authorizes a bad fresh candidate.
+
+`StagedTraffic(pipe, promoted_version, rollout_id=..., phases=...)` is a separate single-coordinator opt-in router.
+Each phase predeclares `share`, the complete finite `units` cohort and `max_excess_loss`. `route(unit)` records a
+stable assignment before the owner executes the chosen version. `observe(unit, bounded_loss, by=...)` uses
+`Pipeline.observe`; checkpoints require every cohort label and validate prior assignment/change/version/sequence.
+Missing labels HOLD. Advance/rollback are descriptive fixed-cohort decisions, not confidence certificates;
+recovered assignments and decisions are revalidated. Owner handles deployment/revert and fresh authorization.
+Neither completion nor rollback silently publishes or executes anything.
+
+## Past-episode priors, without reusing the current episode
+
+```python
+from solvi.stat import EpisodePriors, SourceTrust
+
+pool = EpisodePriors(window=100, max_strength=10)
+pool.record("old-label", episode="previous", context="war", source_type="AI",
+            source="player-a", role="origin", loss=0,
+            asserted_at=1, ended_at=2, known_at=3, now=4)
+prior = pool.get(current_episode="current", context="war", source_type="AI",
+                 source="player-a", role="origin", now=4)
+trust = SourceTrust(window=100, prior=prior.prior, min_labels=2)
+```
+
+[EpisodePriors](episode-priors.md) uses explicit source → type → context → base backoff inside context and role,
+not an exact hierarchical posterior or automatic taxonomy. It excludes the current episode and not-yet-known
+labels; assertion-time windows prevent old late labels being rejuvenated. Capped prior strength does not create
+current labels or bypass `TrustGate` support. Persist detached snapshots with owner-managed durable storage.
+Historical sparse-episode ranking failures remain negative; this API establishes no dataset gain.
+
+## Price refusal, action and verification in the same declared units
+
+```python
+from solvi.solutions.wrap import priced_proposal
+
+proposal = priced_proposal(
+    {"action": "refuse", "p_wrong": .8, "wrong_cost": 10},
+    [{"action": "ask", "p_wrong": .1, "wrong_cost": 10,
+      "price": 2, "permitted": True}], evidence=["owner-loss-model-v1"])
+```
+
+The [wrap helper](external-agent-wrap.md) compares `p_wrong * wrong_cost + price`; a strict improvement is required,
+ties keep the default and `hard=True` defaults cannot be challenged. Probabilities, permissions and evidence are
+owner declarations. The helper returns a proposal, learns no counterfactual losses and executes no tool.
+
+## Bounded numeric probes and same-buffer explanations
+
+`GaussianProbes([lambda x, action: x, lambda x, action: 2*x], sigma=1.0)` from `solvi.experimental.laws` declares a
+finite Normal model. Choose a safe probe and call `observe(probe, measured_value)` when its actual observation
+arrives. [Numeric support](laws_gaussian_probes.md) requires absolute standardized mean separations and centered
+observations at most 10,000; unsupported scales refuse before posterior/counter mutation. Approximate information
+and conditional posterior thresholds are not distribution-free guarantees; external measurement effects cannot
+be rolled back. Existing categorical split/discriminate defaults are unchanged.
+
+For sized `null="base"`, [`why_not`](laws_frozen_null.md) now returns `null_warning` when the comparator is estimated
+from the same action/effect buffer, including candidate-matching rows after group exclusion. The warning does not
+change counts, admission or statistical bars, infer a historical shift or install a complement estimator.
+
+## Bounded asynchronous regime memory
+
+```python
+from solvi.experimental.regime_memory import RegimeMemory
+
+memory = RegimeMemory(epoch="unique-epoch", model_id="noise-v1",
+    regimes={"A": "laws-a", "B": "laws-b"}, prior=[.5, .5],
+    transition=[[.9, .1], [.1, .9]],
+    probes={"p": {"yes": [.8, .2], "no": [.2, .8]}}, max_delay=3)
+ticket = memory.issue("unique-ticket", "p")
+memory.advance()
+weights = memory.observe(ticket, "yes")  # (.74, .26): evidence at issue time
+```
+
+[RegimeMemory](regime-memory.md) uses lexicographically sorted regime IDs for vector coordinates, declared
+conditional independence and issue-time measurements. Bounds cover lifetime, delay and pending/total tickets;
+expired tickets remain burned. Snapshot restore validates and recomputes the model. No probe callback runs and
+no native LawSet is automatically installed/reactivated. This point model is not a change alarm, unknown-regime
+discovery, calibrated recognition guarantee or demonstrated loss improvement.
