@@ -214,6 +214,7 @@ nav:
   - Certified trial serving: stream-trial-serving.md
   - Knowledge coexistence: knowledge_coexistence.md
   - Bounded withdrawal protection: knowledge_revival_window.md
+  - Effective-period read cache: knowledge-period-cache.md
   - Changelog: changelog.md
   - Roadmap: roadmap.md
   - Development plan: development-1.4.1.md

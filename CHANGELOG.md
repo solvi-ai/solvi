@@ -46,6 +46,9 @@ This release contains breaking changes. See [migration notes](docs/migration-1.5
   dependencies, repeated claims and other unsupported histories retain the general resolver.
 - Append-witness invalidation uses an epoch instead of traversing unrelated cached keys. Replay with omitted
   premises retains the general resolver and preserves dependency references.
+- Repeated isolated effective-period reads reuse immutable results until settled state changes. Shared snapshot
+  and recursive memos keep their original semantics. Verified independent in-memory prefix copies preserve their
+  existing chain instead of hashing it again; persistent or filtered copies retain rechaining and integrity checks.
 
 ### Learning, streams and evidence
 
