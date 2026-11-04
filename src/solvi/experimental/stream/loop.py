@@ -402,6 +402,11 @@ class AdapterLoop:
     ≥ j ("detach"), layer j−1 becomes the deepest. Attached to a Dispatcher, a decision answered by a layer below L0
     (or, escalated, owned by one) is decided by System 1 with that layer's version installed for the call
     (`serving`).
+    alarm_cascade="downstream" explicitly declares that all later additive layers depend on each upstream
+    routing identity/regime. A non-ignored alarm restarts those dependent certificates and probation too, and
+    discards an active trial before its old-zone evidence can be reused. Frozen routing thresholds of retained
+    layers remain fixed. Default "layer" preserves independent layer-local alarms. This is an observation-driven
+    invalidation policy, not a guarantee of detecting hidden model changes.
     Needs stream mode and an initial model. Records: owner, layer, zone, path [[v, score, thr in force]], trial_zone,
     answered_by, answer_layer, answer_thr, base, rho_base in the stream record, every reached layer's answer in the
     payload's "path_would" — replay recomputes the routing and the answer from them; status() "zones" (per layer Λ, λ,
@@ -417,12 +422,17 @@ class AdapterLoop:
                  promise_options=None, storage=None, versions_dir=None, system=None, feature="text", key=None,
                  served=None, clock=None, wait=False, part=None, mode="stream", warn_refused=200,
                  trace_candidate=False, additive=True, max_layers=3, useful_error="auto", delta_use=None,
+                 alarm_cascade="layer",
                  _detector_alone=False, _batch=None):
         global _warned
         if mode not in MODES:
             raise ValueError(f"mode is 'stream' (decisions through step, a promise per version) or 'label' (labels "
                              f"only, the pre-freeze gates decide), not {mode!r}")
         additive = bool(additive)
+        if alarm_cascade not in ("layer", "downstream"):
+            raise ValueError("alarm_cascade is 'layer' or 'downstream'")
+        if alarm_cascade == "downstream" and not additive:
+            raise ValueError("downstream alarm cascade requires additive routing dependencies")
         if isinstance(max_layers, bool) or int(max_layers) < 2:
             raise ValueError("max_layers is the chain's depth cap, base included: an int ≥ 2")
         if additive and mode == "label":
@@ -469,8 +479,9 @@ class AdapterLoop:
                         probation=probation, source=source, seed=seed, sampling=sampling,
                         promise_options=promise_options, feature=feature, key=key, served=served, wait=wait,
                         mode=mode, warn_refused=warn_refused, trace_candidate=bool(trace_candidate),
-                        additive=additive, max_layers=int(max_layers),
+                        additive=additive, max_layers=int(max_layers), alarm_cascade=alarm_cascade,
                         useful_error=useful_error, delta_use=delta_use)
+        self.alarm_cascade = alarm_cascade
         self.additive, self.max_layers = additive, int(max_layers)
         self.useful_error, self.delta_use = useful_error, delta_use
         self._layers = [0]                                 # additive: the chain L0, L1, … (versions; L0 = served)
@@ -1991,6 +2002,7 @@ class AdapterLoop:
         if mon_rep is not None:
             who_of.setdefault(l0, []).append("monitor")
         ev = []
+        restarted = set()
         for v in sorted(who_of, key=self._layers.index):
             if v not in self._layers:                      # detached by the alarm handled before it
                 continue
@@ -2021,12 +2033,24 @@ class AdapterLoop:
                 (m.adapted if callable(getattr(m, "adapted", None)) else m.reset)()
             if action == "ignore":
                 continue
-            if v == l0:
-                self.left = self.probation
-            else:
-                self._left_of[v] = self.probation
-            ev += self._promise_events()
-            ev += self._restart(v, n)
+            affected = self._layers[j:] if self.alarm_cascade == "downstream" else [v]
+            if self.alarm_cascade == "downstream" and self.candidate is not None:
+                ev.append(self._discard(self.candidate, n, f"upstream alarm on layer {j}: routing dependency"))
+                ev.append(self._unfreeze(n))
+            for dependent in affected:
+                if dependent in restarted:
+                    continue
+                restarted.add(dependent)
+                if dependent == l0:
+                    self.left = self.probation
+                else:
+                    self._left_of[dependent] = self.probation
+                if dependent != v:
+                    detector = self._det_of(dependent)
+                    if detector is not None:
+                        detector.reset()
+                ev += self._promise_events()
+                ev += self._restart(dependent, n, why="alarm" if dependent == v else f"upstream alarm:{v}")
             if target is not None:
                 ev += self._detach_layers(target, n, by="policy", why=f"alarm ({who}) on layer {j}")[1]
         return ev
