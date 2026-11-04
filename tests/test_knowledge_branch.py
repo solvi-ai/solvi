@@ -116,3 +116,38 @@ def test_corrupt_parent_cannot_be_laundered_by_reconstruction(tmp_path, persiste
     assert parent.journal[0]["body"]["o"] == "tampered"
     if path:
         assert path.read_bytes() == before_disk
+
+
+def test_reopened_branch_marks_carried_map_by_logical_position_after_skip(tmp_path):
+    from solvi.core.environment import Outcome
+    vocabulary = {"ready": lambda s, a: s["ready"]}
+    parent = Knowledge(vocabulary=vocabulary)
+    skipped = [parent.tell({"s": str(i), "r": "padding", "o": i}, source="outcome") for i in range(20)]
+    state = {"ready": True}
+    parent._begin("m")
+    parent.observe(state, "exit", Outcome(state), at="p0", to="old", map="m")
+    parent.observe(state, "other", Outcome(state), at="p1", to="carried", map="m")
+    carried_id = parent._edges["m"]["p1"]["other"][0]
+    before = copy.deepcopy(parent.store.journal), parent.store.fingerprint()
+    reconstructed = parent.store.rebuild(skip=skipped)
+    path = tmp_path / "map-branch.jsonl"
+    reconstructed.branch(path)
+    child = Knowledge(path, vocabulary=vocabulary)
+    assert child.store._next_n > len(child.store.journal)
+    child._begin("m")
+    change = child.observe(state, "exit", Outcome(state), at="p0", to="new", map="m")
+    assert change["drift"] is not None
+    assert child.store.status(carried_id) == "hypothesis"
+    new_id = child._edges["m"]["p0"]["exit"][0]
+    assert child.store.usable(new_id)
+    snapshot = child.store.snapshot()
+    assert any(row["id"] == carried_id for row in snapshot["hints"])
+    assert any(row["id"] == new_id for row in snapshot["facts"])
+    assert parent.store.status(carried_id) == "active"
+    assert (parent.store.journal, parent.store.fingerprint()) == before
+    assert child.store.verify() and parent.store.verify()
+
+    child._begin("fresh-map")
+    child.observe(state, "step", Outcome(state), at="p0", to="first", map="fresh-map")
+    same_episode = child.observe(state, "step", Outcome(state), at="p0", to="second", map="fresh-map")
+    assert same_episode["drift"] is None
