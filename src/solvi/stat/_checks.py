@@ -258,6 +258,8 @@ class NaiveCombiner:
         self.alpha = _number(alpha, "alpha", positive=True)
 
     def fit(self, obs, y):
+        if getattr(self, "_readonly", False):
+            raise ValueError("a frozen check model cannot be refitted")
         # Public configuration may have changed since construction.
         self.sources = _names(self.sources)
         self.outcomes = tuple(_names(self.outcomes))
@@ -309,6 +311,60 @@ class NaiveCombiner:
     def posterior(self, prior, o) -> float:
         _number(prior, "prior", low=0, high=1)
         return _sig(_logit(prior) + self.log_lr(o))
+
+    def freeze(self):
+        """Detached fitted prediction snapshot; refitting is disabled.
+
+        Correlation callbacks are resolved to a fixed matrix now. Public configuration
+        of the returned snapshot must not be mutated; fingerprint describes its
+        prediction state. This does not certify calibration or independence.
+        """
+        from copy import deepcopy
+
+        if not hasattr(self, "_log_lik"):
+            raise ValueError("fit before freezing a check model")
+        result = deepcopy(self)
+        result.sources = tuple(_names(self.sources))
+        result.outcomes = tuple(_names(self.outcomes))
+        for source in result.sources:
+            for outcome in result.outcomes:
+                if not math.isfinite(self.llr(source, outcome)):
+                    raise ValueError("fitted log likelihood ratios must be finite")
+        if isinstance(self, CorrelationAwareCombiner):
+            def matrix(rho):
+                values = ({(a, b): float(rho(a, b)) for a in result.sources for b in result.sources}
+                          if callable(rho) else dict(rho))
+                if callable(rho):
+                    _matrix(result.sources, lambda a, b: values[a, b])
+                    # Match the native callback path's symmetry tolerance and pre-projection averaging.
+                    values = {(a, b): 1.0 if a == b else (values[a, b] + values[b, a]) / 2
+                              for a in result.sources for b in result.sources}
+                else:
+                    _matrix(result.sources, values)
+                return values
+            result.rho = matrix(self.rho)
+            result.rho_by_domain = {domain: matrix(rho) for domain, rho in self.rho_by_domain.items()}
+        result._readonly = True
+        return result
+
+    def fingerprint(self):
+        """SHA256 of fitted prediction state, with callbacks snapshotted."""
+        import hashlib
+        import json
+
+        model = self.freeze()
+        payload = {"version": 1, "type": type(model).__name__, "sources": model.sources,
+                   "outcomes": model.outcomes, "log_likelihoods": model._log_lik,
+                   "counts": model.counts, "pool": model.pool, "alpha": model.alpha,
+                   "prior_rate": model.prior_rate}
+        if isinstance(model, CorrelationAwareCombiner):
+            def rows(matrix):
+                return sorted([a, b, value] for (a, b), value in matrix.items())
+            payload.update(rho=rows(model.rho),
+                           rho_by_domain={domain: rows(rho) for domain, rho in model.rho_by_domain.items()},
+                           domain_counts=model.domain_counts, domain_shrinkage=model.domain_shrinkage)
+        raw = json.dumps(payload, sort_keys=True, allow_nan=False, separators=(",", ":")).encode()
+        return hashlib.sha256(raw).hexdigest()
 
 
 class CorrelationAwareCombiner(NaiveCombiner):

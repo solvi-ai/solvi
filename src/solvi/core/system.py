@@ -244,7 +244,7 @@ class System:
     def __init__(self, catalog: Catalog, questions, *, workers: int = 1, order: str = "default",
                  producers: str = "declared", learn: bool | None = None, input_model=None, strategist=None, storage=None,
                  timeout: float | None = None, cost_policy="declared", lang: str = "en", early_exit: bool = True,
-                 cache: int | None = None, allow_unreachable_hard_checks: bool = False):
+                 cache: int | None = None, allow_unreachable_hard_checks: bool = False, check_models=None):
         """order: "default" (hard checks and their inputs first, all together) or "learned" (hard checks one at a time, most
         expected saving first — see learn_order). producers: "declared" (alternative producers of a fact are tried in
         declaration order) or "learned" (a policy picks the order per input and learns from outcomes). learn: after every
@@ -275,6 +275,11 @@ class System:
         (`trace.early_exit` is False). `ask(..., early_exit=...)` overrides it for one ask.
         lang: the language of what solvi renders for people — res.audit(), solvi.show, safeguard_summary() — "en" (default)
         or "ru" (solvi.core._i18n). Only the rendering changes: traces, stored responses, hashes and `why` stay in English.
+        check_models: optional {question: fitted solvi.stat check combiner}. A detached snapshot applies conditional
+        check likelihoods to the selected answer's confidence before calibration and abstention. Sources must be soft
+        checks in requires, separate from the primary answer's inputs and declared shared calls. No model is fitted
+        implicitly. Initially supports structured scalar choice/yes-no asks without joint constraints or answer facts;
+        cache, decide and ask_text are refused. See docs/check_models.md for outcome mapping and limitations.
         cache: None (default) — every ask runs its flow. N — opt-in pure-decision cache for a catalog without models:
         `ask` serves a decision it made before from a cache of the last N, keyed by the catalog's and questions'
         fingerprints, the questions asked, early_exit and the given facts (their hash, as trace.init_hash). Only for parts
@@ -310,6 +315,10 @@ class System:
         if dup:                                       # the last one would silently win
             raise ValueError(f"two questions named {', '.join(map(repr, dup))}: question names are unique in a System")
         self.questions = {q.name: self._typed_question(q) for q in questions}
+        from ._check_evidence import freeze_models
+        if check_models and cache is not None:
+            raise ValueError("cache= is not supported with learned check_models")
+        self._check_models, self._check_model_fps = freeze_models(self.questions, check_models)
         for c in catalog.constraints.values():        # argument names are question names: one that is not (a typo) means
             lost = [x for x in c.inputs if x not in self.questions]   # the constraint would never apply, without a word
             if lost:
@@ -444,7 +453,9 @@ class System:
 
     # --- answers
     def _validate_hard_checks(self, init_state=None, names=None):
-        """Only the known unreachable-hard-check footgun; never executes a check or infers its scope."""
+        """Validate check reachability and learned evidence scope without executing checks."""
+        from ._check_evidence import validate
+        validate(self)
         idle = _idle_hard_checks(self.catalog, self.questions.values(), self.heads)
         missing = {}
         if isinstance(init_state, dict):
@@ -545,7 +556,8 @@ class System:
         """(the cache key of an ask (System(cache=)), the HashMemo that hashed its input) — (None, None) when this ask
         cannot be served from the cache. The memo lends the input's hashes to the run on a miss: hashed once."""
         if (order not in (None, "default") or self.order != "default" or self.learn or self.producers == "learned"
-                or self.heads or self.strategist is not None and type(self.strategist).__module__ != "solvi.core.plan.cost"
+                or self.heads or getattr(self, "_check_models", None)
+                or self.strategist is not None and type(self.strategist).__module__ != "solvi.core.plan.cost"
                 or any(g.promise.stateful for g in self.guards.values())):
             return None, None
         fp = catalog_fingerprint(self.catalog)["fp"]
@@ -592,7 +604,7 @@ class System:
         import inspect
         from .costs import CostBook
         reasons = []
-        for name in ("guards", "heads", "storage", "shift_watch", "learned_rules", "adapter_loop", "_cache", "calib"):
+        for name in ("guards", "heads", "storage", "shift_watch", "learned_rules", "adapter_loop", "_cache", "calib", "_check_models"):
             if getattr(self, name, None):
                 reasons.append(name)
         if self.storage is not None and "storage" not in reasons:
@@ -707,6 +719,8 @@ class System:
         """ask_text's read: the text read by its TextIn, each value re-derived from its quote (a built TextRead is not
         trusted)."""
         from .textin import rederive
+        if getattr(self, "_check_models", None):
+            raise ValueError("check_models currently requires structured ask, not ask_text")
         return rederive(self, self._textin(text, decider, textin, question))
 
     def _prepare_text(self, read, order):
@@ -1103,6 +1117,8 @@ class System:
     def _results(self, qs, flow, trace, vals, textin=None, *, record_only=False):
         """The answers from an executed flow: rules / hard checks / heads, calibration, constraints, the low-confidence
         safeguard → (results, feasible, violations). No side effects besides an answer head's record in the trace."""
+        from ._check_evidence import apply as apply_check_evidence, validate
+        validate(self)
         by = {r.name: r for r in trace.records}
         hard = [(n, p) for n, p in self.catalog.parts.items() if p.kind == "check" and p.hard]   # in catalog order
         pcache = {}                                   # the questions share one walk of path_confidence
@@ -1118,6 +1134,7 @@ class System:
                                                                                      "message": why}]})
                     continue
             r = self._answer(q, flow, trace, vals, by, hard, pcache, record_only=record_only)
+            r = apply_check_evidence(self, q, r, flow, by)
             r.kind = q.answer.kind
             if c is not None and r.status == "ok":
                 r = _contracted(self, c, q, r, flow, trace)
@@ -1205,6 +1222,7 @@ class System:
                     models[n if a is p else f"{n} ({a.name})"] = fingerprint(a.model)
         for q, h in self.heads.items():
             models["answer:" + q] = fingerprint(h)
+        models.update({"checks:" + q: fp for q, fp in getattr(self, "_check_model_fps", {}).items()})
         return {"catalog": c["fp"], "questions": self._questions_fp(), "parts": dict(c["parts"]), "models": models}
 
     def _questions_fp(self):
@@ -1214,6 +1232,8 @@ class System:
 
         def data(q):                                  # as solvi.core.schema.dump(q, "json"); pydantic only for other values
             d = question_data(q)
+            if q.name in getattr(self, "_check_model_fps", {}):
+                d["check_model"] = self._check_model_fps[q.name]
             if plain_json(d):
                 return d
             from .schema import jsonable
@@ -1223,8 +1243,10 @@ class System:
             a = q.answer
             ans = None if a is None else (a.kind, tuple(map(repr, a.options)), repr(sorted(a.descriptions.items(), key=str)),
                                           a.unknown, a.k, tuple(a.bins or ()), a.coverage, a.unit, a.source, repr(a.type))
-            return (q.text, ans, tuple(q.requires), tuple(q.uses or ()) if q.uses is not None else None,
-                    q.min_confidence, q.require_evidence)
+            value = (q.text, ans, tuple(q.requires), tuple(q.uses or ()) if q.uses is not None else None,
+                     q.min_confidence, q.require_evidence)
+            fp = getattr(self, "_check_model_fps", {}).get(q.name)
+            return value if fp is None else value + (fp,)
         key = (tuple((n, content(q)) for n, q in self.questions.items()), tuple(sorted(self.calib.items())),
                tuple(sorted((n, g.fingerprint()) for n, g in self.guards.items())),     # solvi.core.guarantees.guarantee
                tuple(sorted((n, c.fingerprint()) for n, c in (getattr(self.catalog, "contracts", None) or {}).items())),
@@ -2565,6 +2587,11 @@ def _rename_system(system, *, inputs=None, answers=None):
                     allow_unreachable_hard_checks=system.allow_unreachable_hard_checks)
     for attr in ('heads', 'calib', 'shift_watch', 'guards', 'learned_rules'):
         setattr(result, attr, {question(q): value for q, value in getattr(system, attr).items()})
+    if getattr(system, '_check_models', None):
+        from ._check_evidence import freeze_models, validate
+        result._check_models, result._check_model_fps = freeze_models(
+            result.questions, {question(q): model for q, model in system._check_models.items()})
+        validate(result)
     from copy import copy
     from .guarantees.guarantee import QuestionGuard
     for name, guard in list(result.guards.items()):
