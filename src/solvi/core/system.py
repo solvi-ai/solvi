@@ -2522,6 +2522,12 @@ def _rename_system(system, *, inputs=None, answers=None):
             part.question = question(part.question)
             part.name = part_name(part.name)
         part.then = {question(q): v for q, v in part.then.items()}
+        shared = part.shares_call_with
+        if shared is not None:
+            if shared.startswith('answer:'):
+                part.shares_call_with = part_name(shared)
+            elif shared in system.questions and shared not in system.catalog.parts:
+                part.shares_call_with = question(shared)
         if part.then_parts:
             part.then_parts = {question(q): p for q, p in part.then_parts.items()}
     cat.rules = {question(q): p for q, p in cat.rules.items()}

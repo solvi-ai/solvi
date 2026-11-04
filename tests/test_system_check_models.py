@@ -320,3 +320,23 @@ def test_shared_call_through_source_alias_is_not_new_evidence():
 
     with pytest.raises(ValueError, match="self-check"):
         System(cat, [question()], check_models={"q": fitted()})
+
+
+@pytest.mark.parametrize("shared", ["r", "answer:r"])
+def test_question_swap_moves_shared_call_references_with_their_source(shared):
+    cat = catalog()
+    cat.parts["weak"].shares_call_with = shared
+
+    @cat.rule("r")
+    def other(y: int):
+        return Decision("B", {"A": .2, "B": .8})
+
+    qs = [question(), Question("r", "Other", Answer.choice(["A", "B"]))]
+    system = System(cat, qs, check_models={"q": fitted()})
+    response = system.ask({"x": 1, "y": 2, "ok": True})
+    renamed = system.rename(answers={"q": "r", "r": "q"})
+    other_response = renamed.ask({"x": 1, "y": 2, "ok": True})
+    assert renamed.catalog.parts["weak"].shares_call_with == ("q" if shared == "r" else "answer:q")
+    assert other_response["r"].confidence == response["q"].confidence
+    assert other_response.trace.replay(renamed)["ok"]
+    assert system.catalog.parts["weak"].shares_call_with == shared
