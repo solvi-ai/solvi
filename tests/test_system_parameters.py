@@ -153,3 +153,32 @@ def test_process_binding_is_explicitly_unsupported(tmp_path):
     spec = Process('p').node('s', s, end=True).spec()
     with pytest.raises(TypeError, match='parameter views'):
         Process.from_spec(spec, systems={'s': view})
+
+
+def test_nested_caller_inputs_are_private_in_views_and_batches(tmp_path):
+    from pydantic import BaseModel
+
+    cat = Catalog()
+
+    @cat.rule('q')
+    def mutate(payload):
+        payload['items'].append('called')
+        return str(len(payload['items']))
+
+    s = System(cat, [Question('q', 'q', Answer.choice(['1', '2']))])
+    caller = {'payload': {'items': []}}
+    view = s.with_params()
+    assert view.ask(caller)['q'].answer == '1'
+    assert caller == {'payload': {'items': []}}
+    for owner in (s, view):
+        results = owner.ask_many([caller, caller])
+        assert [r['q'].answer for r in results] == ['1', '1']
+        assert caller == {'payload': {'items': []}}
+
+    class Input(BaseModel):
+        payload: dict
+
+    model = Input(payload={'items': []})
+    results = s.ask_many([model, model])
+    assert [r['q'].answer for r in results] == ['1', '1']
+    assert model.payload == {'items': []}

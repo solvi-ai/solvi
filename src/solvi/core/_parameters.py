@@ -1,5 +1,6 @@
 """Private parameter views and bounded sequential batches; execution stays in System."""
 from dataclasses import dataclass
+from copy import deepcopy
 import json
 import math
 
@@ -42,7 +43,7 @@ def _input(system, state):
         raise ValueError(f"given facts cannot replace computed parts: {clashes}")
     if "__solvi_hypothetical_probe__" in state:
         raise ValueError("the hypothetical probe marker is reserved for System.probe")
-    return dict(state)
+    return deepcopy(dict(state))
 
 
 def _ask_many(system, states, questions=None, *, max_items=1000, defaults=None, **options):
@@ -57,7 +58,7 @@ def _ask_many(system, states, questions=None, *, max_items=1000, defaults=None, 
         merged = json.loads(defaults) if defaults is not None else {}
         merged.update(_input(system, state))
         checked = _input(system, merged)
-        inputs.append(state if defaults is None and is_model(state) else checked)
+        inputs.append(deepcopy(state) if defaults is None and is_model(state) else checked)
     names = system._names(questions)
     return [system.ask(state, names, **options) for state in inputs]
 

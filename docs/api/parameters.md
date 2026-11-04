@@ -36,6 +36,14 @@ values are handled by native input validation; defaults are not fallback values
 for rejected overrides. A later catalog edit that turns a default into a computed
 part is rejected on the next request.
 
+View requests also deep-copy caller inputs. Batch preflight deep-copies each
+item independently before any calls, including repeated references to the same
+dictionary or BaseModel (models retain their type). A part mutating a nested
+request value therefore cannot edit the caller's object or a later batch input.
+Custom domain objects follow their Python deepcopy protocol; copying failures
+propagate before execution. Ordinary unbound System.ask keeps its existing input
+ownership semantics.
+
 `agent.fingerprint()` includes the current backend fingerprint and private defaults.
 Different defaults have different view fingerprints; views do not freeze backend
 code or calibration. Response traces retain the actual merged input and normal
