@@ -215,6 +215,7 @@ nav:
   - Knowledge coexistence: knowledge_coexistence.md
   - Bounded withdrawal protection: knowledge_revival_window.md
   - Effective-period read cache: knowledge-period-cache.md
+  - Pending-version continuity: knowledge_pending_continuity.md
   - Changelog: changelog.md
   - Roadmap: roadmap.md
   - Development plan: development-1.4.1.md

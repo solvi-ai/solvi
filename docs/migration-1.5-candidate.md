@@ -2,6 +2,14 @@
 
 Version 1.5 contains breaking changes. These notes describe the prepared package; publication is a separate step.
 
+## A pending later version leaves a gap for its writer
+
+A writer's standing later direct declaration of a different value may become pending after its independent
+support is withdrawn. In that span, its own older direct value no longer reappears as current. The new value
+remains untrusted; an explicit fresh re-test or withdrawal resolves the gap. Independent support from other
+writers and older derived evidence remains eligible. See [pending-version continuity](knowledge_pending_continuity.md).
+Status-only reads without a world time retain their documented meaning; use `valid_at` or a declared world clock.
+
 ## Explicit withdrawal window
 
 `Knowledge(revival_window=N)` opts into [bounded withdrawal protection](knowledge_revival_window.md).
