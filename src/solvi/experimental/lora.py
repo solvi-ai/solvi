@@ -451,7 +451,7 @@ def _warm_update_estimate(loss, zero_grad, *, synchronize=None, clock=None):
 def train(part, rows, *, r=8, alpha=None, epochs=6, lr=3e-4, seed=0, device=None, max_updates=400, notify=None,
           updates=None, log=None):
     """Train an adapter on [(text, label)] (labels as part.spec.label gives them) → LoraAdapter. notify(estimate_seconds,
-    updates, seconds_per_update, device) is called after the first update is timed, before training (it may raise to
+    updates, seconds_per_update, device) is called after warm unapplied probes are timed, before training (it may raise to
     refuse the training). updates: the number of updates (None: from epochs, between 40 and max_updates); log(u,
     updates, loss): called after every update (a heartbeat). Training on the CPU creates no CUDA context, so it works
     beside a GPU that is busy or full."""

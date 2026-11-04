@@ -14,7 +14,7 @@ What a training is: `train(job)` trains an adapter **from the base checkpoint ev
 `warm_start` setting is refused) on `job.rows` only, with the policy's `r`, `lr`, `updates` and `seed`, in the runner
 (`stream.runner`: a subprocess by default — it loads the checkpoint again, `nice` 10, threads capped at
 `budget.cpu_threads`, the device picked by `budget.device`, "auto": a GPU with `free_gpu_mb` free, else the CPU; a GPU
-out of memory falls back to the CPU). Before training it estimates the time from the first update and refuses when the
+out of memory falls back to the CPU). Before training it estimates compute time from warm unapplied probes and refuses when the
 estimate is above `budget.max_train_s` (the loop records the refusal). Then it runs `act_guard` at the loop's α on the
 calib labels (`job.calib`: labels whose keys are never trained on) on a copy of the part with the new adapter, and
 returns a `LoraVersion` whose `act_threshold` is that threshold. The runner writes `train_<job id>.log` (a heartbeat
