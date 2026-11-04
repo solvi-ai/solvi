@@ -25,9 +25,9 @@ task does not load, or the System cannot be made) is "stillborn" and left out of
 A survivor is either a gap in the cases (add one that tells the two apart) or an equivalent mutant (no input can tell
 them apart: a constant nudged inside a range no realistic input reaches) — read it before writing a case.
 
-Supported sites do not cover Python in general: match patterns,
-helper/call-form check registration, multi-statement raise guards and arbitrary returned
-boolean expressions are not mutation operators. No static reachability is inferred;
+Supported sites do not cover Python in general: structural match patterns, None singleton patterns and arbitrary returned
+boolean expressions are not mutation operators. Helper/call-form checks use an explicit
+check_functions=["known", "Rules.check"] manifest: source names only, never helper execution. No static reachability is inferred;
 use functions=["rule", "Rules.decide"] to exclude unrelated helpers explicitly.
 Standard equality __main__ guards and their subtrees are never mutation sites.
 Only identical resulting ASTs (and unchanged ASTs) are removed; semantically equivalent
@@ -91,6 +91,7 @@ class Report:
     seconds: float = 0.0
     baseline_ms: float = 0.0
     integer_parameters: dict | None = None
+    check_functions: list | None = None
 
     def _n(self, st):
         return sum(m.status == st for m in self.mutants)
@@ -131,7 +132,7 @@ class Report:
                 "survived": self.survived, "stillborn": self.stillborn, "seconds": round(self.seconds, 3),
                 "by_kind": self.by_kind(),
                 "score_unit": "declared_integer_equivalence_groups" if self.integer_parameters else "distinct_ASTs",
-                "integer_parameters": self.integer_parameters,
+                "integer_parameters": self.integer_parameters, "check_functions": self.check_functions,
                 "raw_mutations_represented": sum(1 + len(m.equivalent_mutations) for m in self.mutants),
                 "equivalence_groups": [{"line": m.line, "kind": m.kind, "description": m.description,
                     "aliases": m.equivalent_mutations} for m in self.mutants if m.equivalent_mutations],
@@ -194,9 +195,33 @@ def _literal_thresholds(node):
                 yield from _literal_thresholds(value)
 
 
-def _sites(tree, functions=None):
+def _check_names(tree, check_functions):
+    if check_functions is None:
+        return set()
+    if not isinstance(check_functions, (list, tuple)) or any(not isinstance(n, str) or not n for n in check_functions):
+        raise ValueError("check_functions must be a list of qualified function names")
+    names = {}
+    def walk(node, prefix=""):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            name = prefix + node.name
+            if not isinstance(node, ast.ClassDef):
+                names[id(node)] = name
+            prefix = name + "."
+        for child in ast.iter_child_nodes(node):
+            walk(child, prefix)
+    walk(tree)
+    missing = set(check_functions) - set(names.values())
+    if missing:
+        raise ValueError("unknown check function(s): " + ", ".join(sorted(missing)))
+    if any(list(names.values()).count(name) != 1 for name in check_functions):
+        raise ValueError("ambiguous check function declaration")
+    return {node for node, name in names.items() if name in check_functions}
+
+
+def _sites(tree, functions=None, check_functions=None):
     """Supported source sites; a main guard and its whole subtree are excluded."""
     out, upper = [], set()
+    declared_checks = _check_names(tree, check_functions)
     if functions is None:
         for node in tree.body:
             target = (node.targets[0] if isinstance(node, ast.Assign) and len(node.targets) == 1 else
@@ -216,15 +241,22 @@ def _sites(tree, functions=None):
                     upper.add(id(c))
         elif isinstance(node, ast.BoolOp):
             out.append(("flip", node, 0))
+        elif isinstance(node, ast.MatchValue):
+            if _num(node.value):
+                upper.add(id(node.value))
+            elif isinstance(node.value, ast.Constant) and isinstance(node.value.value, str):
+                out.append(("constant", node, 0))
+        elif isinstance(node, ast.MatchSingleton) and type(node.value) is bool:
+            out.append(("flip", node, 0))
         if isinstance(node, (ast.If, ast.While, ast.IfExp)) and not isinstance(node.test, (ast.Compare, ast.Constant)):
             out.append(("flip", node, 0))
         if (isinstance(node, ast.If) and node.orelse) or isinstance(node, ast.IfExp):
             out.append(("branch", node, 0))
-        elif isinstance(node, ast.If) and not node.orelse and len(node.body) == 1 and isinstance(node.body[0], ast.Raise):
+        elif isinstance(node, ast.If) and not node.orelse and node.body and isinstance(node.body[-1], ast.Raise):
             out.append(("drop", node, 0))
         elif isinstance(node, ast.Assert):
             out.append(("drop", node, 0))
-        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and any(map(_check_decorator, node.decorator_list)):
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and (id(node) in declared_checks or any(map(_check_decorator, node.decorator_list))):
             out.append(("drop", node, 0))
     for node in nodes:
         if id(node) in upper:
@@ -254,6 +286,14 @@ def _nudge(v, up):
 
 def _apply(tree, kind, node, k):
     """Mutate `node` (a node of `tree`, a fresh copy) in place → a one-line description of the change."""
+    if kind == "flip" and isinstance(node, ast.MatchSingleton):
+        old = node.value
+        node.value = not old
+        return f"case {old!r} → case {node.value!r}"
+    if kind == "constant" and isinstance(node, ast.MatchValue):
+        old = node.value.value
+        node.value = ast.Constant(old + "__mutant__")
+        return f"case {old!r} → case {node.value.value!r}"
     if kind == "flip" and isinstance(node, ast.BoolOp):
         old = "and" if isinstance(node.op, ast.And) else "or"
         node.op = ast.Or() if old == "and" else ast.And()
@@ -362,7 +402,7 @@ def _integer_fingerprint(tree, declarations):
     return ast.dump(normalized, include_attributes=False)
 
 
-def generate(source, kinds=KINDS, *, functions=None, integer_parameters=None):
+def generate(source, kinds=KINDS, *, functions=None, integer_parameters=None, check_functions=None):
     """One-fault sources in line order, excluding main guards and exact AST duplicates.
 
     functions optionally selects qualified names (e.g. ["rule", "Rules.decide"]),
@@ -370,13 +410,15 @@ def generate(source, kinds=KINDS, *, functions=None, integer_parameters=None):
     This explicit source boundary is not System reachability or code coverage.
     integer_parameters={"rule": ["age"]} opts into grouping under an explicit exact builtin-int
     input contract for unassigned named parameters. No floats, custom int subclasses or domain inference.
+    check_functions is an explicit list of qualified source functions to drop, including checks
+    registered by helper decorators or call form. No catalog discovery or helper execution.
     Equivalent aliases remain in Mutant.equivalent_mutations. Default is AST-only deduplication.
     Different ASTs can still be semantically equivalent and count separately.
     """
     if functions is not None and not isinstance(functions, str):
         functions = tuple(functions)
     tree = ast.parse(source)
-    base = _sites(tree, functions)
+    base = _sites(tree, functions) if check_functions is None else _sites(tree, functions, check_functions)
     if integer_parameters is not None:
         if not isinstance(integer_parameters, dict) or any(not isinstance(k, str) or not isinstance(v, (list, tuple))
                 or any(not isinstance(n, str) for n in v) for k, v in integer_parameters.items()):
@@ -388,7 +430,8 @@ def generate(source, kinds=KINDS, *, functions=None, integer_parameters=None):
         if kind not in kinds:
             continue
         t2 = copy.deepcopy(tree)
-        kind2, node2, _ = _sites(t2, functions)[i]
+        sites = _sites(t2, functions) if check_functions is None else _sites(t2, functions, check_functions)
+        kind2, node2, _ = sites[i]
         desc = _apply(t2, kind2, node2, k)
         fingerprint = fingerprint_of(t2)
         alias = {"kind": kind, "line": getattr(node, "lineno", 0), "description": desc}
@@ -512,7 +555,8 @@ def _worker(req):
     Path(req["result"]).write_text(json.dumps(verdict))
 
 
-def run(path, kinds=KINDS, timeout=5.0, limit=None, isolate=False, progress=None, *, functions=None, integer_parameters=None):
+def run(path, kinds=KINDS, timeout=5.0, limit=None, isolate=False, progress=None, *, functions=None,
+        integer_parameters=None, check_functions=None):
     """Mutants of the task a cases file tests, each run against the cases → Report.
 
     kinds: which faults to make (KINDS); timeout: finite positive wall-clock seconds for each whole
@@ -522,6 +566,7 @@ def run(path, kinds=KINDS, timeout=5.0, limit=None, isolate=False, progress=None
     retained for compatibility and now uses this same bounded worker in both modes.
     limit: positive integer, at most that many mutants, spread evenly over the file;
     functions: optional qualified function names, as in generate(); no reachability inference;
+    check_functions: explicit source-name registration manifest, as in generate();
     integer_parameters: explicit builtin-int domain contract, as in generate(); grouped score
     counts representatives, while to_dict exposes aliases and raw_mutations_represented;
     progress: called with (i, n, mutant) after each one.
@@ -534,13 +579,16 @@ def run(path, kinds=KINDS, timeout=5.0, limit=None, isolate=False, progress=None
     path = Path(path).resolve()
     _, task_path, _ = _read(path)
     task_path = task_path.resolve()
+    if check_functions is not None:
+        _check_names(ast.parse(task_path.read_text()), check_functions)
     started = time.perf_counter()
     roots = (path.parent, task_path.parent)
     status, why = _bounded(path, timeout, roots)
     if status != "survived":
         raise ValueError(f"{path}: the cases fail on the catalog as it is ({why}); fix them before mutating")
     baseline_ms = (time.perf_counter() - started) * 1000
-    ms = generate(task_path.read_text(), kinds, functions=functions, integer_parameters=integer_parameters)
+    ms = generate(task_path.read_text(), kinds, functions=functions, integer_parameters=integer_parameters,
+                  check_functions=check_functions)
     if limit is not None and len(ms) > limit:
         step = len(ms) / limit
         ms = [ms[int(i * step)] for i in range(limit)]
@@ -565,7 +613,8 @@ def run(path, kinds=KINDS, timeout=5.0, limit=None, isolate=False, progress=None
                     progress(i + 1, len(ms), m)
         finally:
             sys.path[:] = saved
-    return Report(path, task_path, ms, time.perf_counter() - started, baseline_ms, integer_parameters)
+    return Report(path, task_path, ms, time.perf_counter() - started, baseline_ms, integer_parameters,
+                  list(check_functions) if check_functions is not None else None)
 
 
 def main(argv=None):
