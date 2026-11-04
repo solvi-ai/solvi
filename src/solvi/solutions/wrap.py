@@ -351,4 +351,65 @@ def select_components(
     return result
 
 
-__all__ = ["wrap", "select_components"]
+def priced_proposal(default, alternatives, *, evidence):
+    """Compare owner-declared expected losses, including refusing and asking.
+
+    Each option has action, p_wrong, wrong_cost and optional price. Alternatives
+    require permitted=True; a hard default is never challenged. Probabilities,
+    prices, permissions and evidence are declarations, not learned certificates.
+    This produces a wrap proposal and executes no action or check.
+    """
+    default, alternatives, evidence = _copy_json(default), _copy_json(alternatives), _copy_json(evidence)
+    if type(default) is not dict or type(alternatives) is not list:
+        raise ValueError('default is an option and alternatives is a list of options')
+    if type(evidence) is not list or not evidence or any(type(e) is not str or not e.strip() for e in evidence):
+        raise ValueError('explicit evidence IDs are required')
+    if type(default.get('hard', False)) is not bool:
+        raise ValueError('hard must be a bool')
+
+    def number(value, name):
+        if type(value) not in (int, float):
+            raise ValueError(f'{name} must be a finite nonnegative number')
+        try:
+            result = float(value)
+        except OverflowError:
+            raise ValueError(f'{name} is not representable') from None
+        if not math.isfinite(result) or result < 0:
+            raise ValueError(f'{name} must be finite and nonnegative')
+        return result
+
+    def price(option, alternative):
+        if type(option) is not dict or not {'action', 'p_wrong', 'wrong_cost'} <= option.keys():
+            raise ValueError('an option needs action, p_wrong and wrong_cost')
+        if alternative and type(option.get('permitted', False)) is not bool:
+            raise ValueError('permitted must be a bool')
+        probability = number(option['p_wrong'], 'p_wrong')
+        if probability > 1:
+            raise ValueError('p_wrong must be in [0, 1]')
+        penalty, fee = number(option['wrong_cost'], 'wrong_cost'), number(option.get('price', 0), 'price')
+        loss = probability * penalty + fee
+        if not math.isfinite(loss):
+            raise ValueError('expected loss overflowed')
+        return {'action': option['action'], 'p_wrong': probability, 'wrong_cost': penalty,
+                'price': fee, 'expected_loss': loss,
+                'permitted': option.get('permitted', False) if alternative else True}
+
+    original = price(default, False)
+    options = [price(option, True) for option in alternatives]
+    if default.get('hard', False):
+        return None
+    best = original
+    for option in options:
+        if json.dumps(option['action'], sort_keys=True) == json.dumps(original['action'], sort_keys=True):
+            continue
+        if option['permitted'] and option['expected_loss'] < best['expected_loss']:
+            best = option
+    if best is original:
+        return None
+    return {'action': best['action'], 'loss': best['expected_loss'],
+            'default_loss': original['expected_loss'], 'evidence': evidence,
+            'pricing': {'default': original, 'alternatives': options,
+                        'basis': 'declared p_wrong * wrong_cost + price'}}
+
+
+__all__ = ["wrap", "select_components", "priced_proposal"]

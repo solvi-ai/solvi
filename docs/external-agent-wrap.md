@@ -77,3 +77,18 @@ paired configurations can be recommended; baseline wins a zero-gain tie. Overflo
 differences are explicitly invalid, not successful improvements. Selection is purely
 descriptive on these training seeds. Holdout data is neither accepted nor touched;
 there is no confidence interval, utility theorem or performance certificate.
+
+## Price refusing, acting and asking symmetrically
+
+`priced_proposal(default, alternatives, evidence=...)` from `solvi.solutions.wrap`
+computes each declared `p_wrong * wrong_cost + price`. Actions may include refusal,
+acting, and asking for verification; for asking, include both its price and the
+declared remaining error loss. Strictly lower loss is required; ties preserve the
+default. Alternatives require `permitted=True`. A default marked `hard=True` is
+never challenged.
+
+The result is an ordinary wrap proposal with all prices retained in the journal.
+Probabilities, losses, permission and evidence IDs come from the application.
+This helper neither learns counterfactual utility nor verifies a declaration or
+executes a tool. Run any chosen tool through its original hard authorization checks.
+No AgentAbstain accuracy improvement is implied by adding this decision option.
