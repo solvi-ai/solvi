@@ -236,6 +236,9 @@ class AnswerPolicy:
             raise ValueError("weights must map observed checks")
         for value in w.values():
             _number(value, "weight")
+        # A disabled check supplies no evidence, including no alternative candidate
+        # or collision multiplicity. Its acquisition remains in state for budgets.
+        state = {k: o for k, o in state.items() if w.get(k, 1.0) > 0}
         groups = {}
         for k, o in state.items():
             if isinstance(o, tuple):
