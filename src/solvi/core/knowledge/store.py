@@ -742,10 +742,13 @@ class KnowledgeStore:
         # versions. Any other write keeps the general component resolver.
         self._append_pair = None
         for parent in it.asserts[-1]["just"] + it.asserts[-1]["consulted"]:
-            self._append_chains.pop(self.items[parent].key, None)
+            premise = self.items.get(parent)  # rebuild(skip=) may deliberately omit this assertion's support
+            if premise is not None:
+                self._append_chains.pop(premise.key, None)
         chain = self._append_chains.pop(it.key, None)
         since, until = _interval(r.get("valid"))
         plain = (fresh and it.kind == "fact" and it.key is not None and not self._touched and not self.flags
+                 and not self.dependents.get(iid)
                  and self.now is None and all(type(g) in (SourceGate, ConsistencyGate) for g in self.gates)
                  and not self.resolves.get(it.key) and since is not None and until is None
                  and not it.reconfirm_after and r.get("by") is not None
