@@ -38,6 +38,42 @@ explicitly after the one base call; an unjournaled override is never returned. T
 chain records input/default/proposal/evidence, method/component and proposer code
 identity; its authentication does not establish that a loss estimate is true.
 
-Selecting components is supported. A training-only paired component-ablation and
-selection helper is a separate next stage; no tuning/test search or historical arena
-utility result is claimed by this adapter.
+Selecting components and the training-only paired comparison below are supported.
+No holdout tuning or historical arena utility result is claimed.
+
+## Training-only component comparison
+
+```python
+from solvi.solutions.wrap import select_components
+
+result = select_components(
+    factory, evaluator, decision_points={"decide": {"doubt": proposer}},
+    seeds=[7, 29, 101], directory="training-comparison-01",
+)
+```
+
+`factory(seed)` constructs a fresh agent with its own seeded state/RNG; the helper
+never clones a baseline or shares one agent between configurations. `evaluator(agent,
+seed)` returns a finite utility. Baseline and each single component use the same
+explicit seeds. Optional `configurations=[("doubt", "calibration")]` declares actual
+combinations to evaluate instead of single components: positive single effects are
+never assumed to combine. Configuration/seed snapshots are frozen before callbacks.
+
+Only preregistered configurations are run. `max_evaluations` caps attempted cells,
+including failed factories/evaluations. Optional `costs={(): 0, ("doubt",): 1}`
+records declared per-cell costs; it neither measures costs nor subtracts them from
+utility. Incorporate an actual utility/cost tradeoff explicitly in the evaluator.
+
+Each cell gets a unique override-journal path. Disabled baseline does not create
+that journal. Manifest and each utility/error record are fsynced incrementally;
+exceptions/nonfinite utility are logged and later cells continue. Reused agent
+objects are rejected before a second evaluation when detectable by identity. A new
+output directory is required: partial results are preserved, not silently resumed
+or overwritten. Objects lacking weak-reference support are retained for identity
+checks, so there is no bounded-memory guarantee for arbitrary factories.
+
+Results expose paired deltas, pair counts and missing/error cells. Only complete
+paired configurations can be recommended; baseline wins a zero-gain tie. Overflowing
+differences are explicitly invalid, not successful improvements. Selection is purely
+descriptive on these training seeds. Holdout data is neither accepted nor touched;
+there is no confidence interval, utility theorem or performance certificate.

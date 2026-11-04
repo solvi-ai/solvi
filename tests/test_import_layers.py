@@ -332,7 +332,7 @@ SURFACES = {
                      "PUBLISHED", "pull", "resolve", "systemone"],
     "solvi.solutions.decisions": ["DecisionSystem", "build"],
     "solvi.solutions.document": ["DocumentSystem", "document"],
-    "solvi.solutions.wrap": ["wrap"],
+    "solvi.solutions.wrap": ["wrap", "select_components"],
     "solvi.solutions.agent": ["Agent", "CHECKS", "QUESTION", "s1_pick", "search_order", "state_key"],
     "solvi.solutions.knowledge": ["Knowledge", "action_key", "split_action"],
     "solvi.solutions.guard": ["action_model_allows", "agenda_allows", "accepted_proposals", "accepts", "INTENTS", "register_intent", "approval_verifier", "sign_approval", "sign_message", "signed_messages", "model_from_json_schema", "arguments_from_user",
