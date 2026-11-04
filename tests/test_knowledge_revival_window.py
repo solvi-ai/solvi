@@ -74,3 +74,28 @@ def test_fresh_window_claim_does_not_clear_old_derived_support_taint():
     assert st.usable(i,valid_at=10)
     assert child in st.pending() and not st.usable(child,valid_at=10)
     assert st.verify()
+
+
+def test_standalone_inferred_already_rejected_and_explicit_premises_get_no_waiver():
+    st=KnowledgeStore(revival_window=1);i=tell(st);st.retract(i);st.tick(2)
+    before=(len(st.journal),st.fingerprint())
+    with pytest.raises(ValueError,match='premises'):
+        tell(st,inferred=True)
+    assert (len(st.journal),st.fingerprint())==before
+    p=st.add('fact',{'s':'premise','r':'v','o':1},source='outcome',by='a')
+    tell(st,inferred=True,derived_from=[p])
+    assert '_revival_cut' not in st.items[i].asserts[-1]
+    assert st.verify()
+
+
+def test_default_resolver_does_not_scan_window_vouches(monkeypatch):
+    import solvi.core.knowledge.store as mod
+    def forbidden(*_):raise AssertionError('disabled policy must not scan live claims')
+    monkeypatch.setattr(mod,'_window_vouched',forbidden)
+    st=KnowledgeStore();i=tell(st);st.retract(i);tell(st)
+    assert i in st.pending() and st._needs_retest(i)
+
+
+def test_local_window_eligibility_consistent_with_needs_retest():
+    st=KnowledgeStore(revival_window=1);i=tell(st);st.retract(i);st.tick(2);tell(st)
+    assert st.usable(i,valid_at=5) and not st._needs_retest(i)

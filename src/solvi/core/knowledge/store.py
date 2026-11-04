@@ -755,7 +755,7 @@ class KnowledgeStore:
         # never waive derived/consulted evidence, retirement or pending flags.
         cut = _cut(it) if self.revival_window is not None else -1
         revival_cut = (cut if cut >= 0 and r.get("valid") is not None
-                       and not r.get("just") and not r.get("consulted")
+                       and not r.get("just") and not r.get("consulted") and not r.get("inferred")
                        and self.clock - self._entry_clocks[cut] > self.revival_window else None)
         it.asserts.append({"t": t, "clock": r.get("clock", 0), "source": r["source"], "by": r.get("by"),
                            "just": tuple(r.get("just") or ()), "supersedes": r.get("supersedes"),
@@ -1109,7 +1109,8 @@ class KnowledgeStore:
         if it is None:
             return False
         t = _taint(self.items, iid, self._taints)
-        return t is not None and not any(p > t for p in it.promoted)
+        return (t is not None and not any(p > t for p in it.promoted)
+                and not (self.revival_window is not None and _window_vouched(it, t)))
 
     def rollback(self, iid, *, by=None, why=None):
         """Supervision undoes an update: retract `iid`; the version it superseded or refuted comes back — as a fact, or
@@ -2210,7 +2211,7 @@ def _resolve(items, comp, by_key, resolves, clock, flagged, max_iter=200, taints
         taints[i] = max((a["t"] for a in _live(items[i])), default=None)   # for the content — it waits for a re-test
     for i in order:
         t = taints.get(i)
-        if t is not None and not any(p > t for p in items[i].promoted) and not _window_vouched(items[i], t):
+        if t is not None and not any(p > t for p in items[i].promoted) and not (revival_window is not None and _window_vouched(items[i], t)):
             retest.add(i)
             why[i] = ("its only support runs through a premise cycle: nothing outside it vouches for the content"
                       if i in deferred else _retest_why(items, i, t, taints))
