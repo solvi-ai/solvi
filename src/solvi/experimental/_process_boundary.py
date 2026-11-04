@@ -2,7 +2,7 @@
 import json
 import math
 
-from ..core._process_declaration import frozen
+from ..core._process_declaration import frozen as frozen
 
 __all__ = []
 
