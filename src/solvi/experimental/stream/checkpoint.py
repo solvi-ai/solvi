@@ -329,7 +329,7 @@ def save_loop(loop, dir, *, cancel=False) -> dict:
                 "config": {k: kw[k] for k in ("max_risk", "max_error", "delta", "probation", "source", "seed",
                                               "sampling", "promise_options", "feature", "wait", "mode",
                                               "warn_refused", "trace_candidate")
-                           + (("additive", "max_layers", "useful_error", "delta_use", "alarm_cascade") if loop.additive else ())},
+                           + (("additive", "max_layers", "useful_error", "delta_use", "alarm_cascade", "trial_serving") if loop.additive else ())},
                 "detector_alone": loop._detector_alone, "batch": loop._batch,
                 "detector": None if loop.detector is None else loop.detector.config(),
                 "system": loop.system is not None, "version0": v0["0"], "keyed": loop._secret is not None,

@@ -407,6 +407,11 @@ class AdapterLoop:
     discards an active trial before its old-zone evidence can be reused. Frozen routing thresholds of retained
     layers remain fixed. Default "layer" preserves independent layer-local alarms. This is an observation-driven
     invalidation policy, not a guarantee of detecting hidden model changes.
+    trial_serving="certified" (opt-in, additive stream only) lets existing certified non-probation layers answer
+    inside a trial's fixed zone at their live thresholds. The candidate still never serves: its promise/usefulness
+    and promotion samples read only the input-independent base coin there, at the recorded rho_base, including
+    missing-label losses. Other escalation labels are not candidate samples. Default "escalate" labels every
+    trial-zone decision. All evidence floors and delta levels stay unchanged; the opt-in can collect fewer samples.
     Needs stream mode and an initial model. Records: owner, layer, zone, path [[v, score, thr in force]], trial_zone,
     answered_by, answer_layer, answer_thr, base, rho_base in the stream record, every reached layer's answer in the
     payload's "path_would" — replay recomputes the routing and the answer from them; status() "zones" (per layer Λ, λ,
@@ -422,13 +427,17 @@ class AdapterLoop:
                  promise_options=None, storage=None, versions_dir=None, system=None, feature="text", key=None,
                  served=None, clock=None, wait=False, part=None, mode="stream", warn_refused=200,
                  trace_candidate=False, additive=True, max_layers=3, useful_error="auto", delta_use=None,
-                 alarm_cascade="layer",
+                 alarm_cascade="layer", trial_serving="escalate",
                  _detector_alone=False, _batch=None):
         global _warned
         if mode not in MODES:
             raise ValueError(f"mode is 'stream' (decisions through step, a promise per version) or 'label' (labels "
                              f"only, the pre-freeze gates decide), not {mode!r}")
         additive = bool(additive)
+        if trial_serving not in ("escalate", "certified"):
+            raise ValueError("trial_serving is 'escalate' or 'certified'")
+        if trial_serving == "certified" and (not additive or mode != "stream"):
+            raise ValueError("certified trial serving requires additive stream mode")
         if alarm_cascade not in ("layer", "downstream"):
             raise ValueError("alarm_cascade is 'layer' or 'downstream'")
         if alarm_cascade == "downstream" and not additive:
@@ -480,8 +489,10 @@ class AdapterLoop:
                         promise_options=promise_options, feature=feature, key=key, served=served, wait=wait,
                         mode=mode, warn_refused=warn_refused, trace_candidate=bool(trace_candidate),
                         additive=additive, max_layers=int(max_layers), alarm_cascade=alarm_cascade,
+                        trial_serving=trial_serving,
                         useful_error=useful_error, delta_use=delta_use)
         self.alarm_cascade = alarm_cascade
+        self.trial_serving = trial_serving
         self.additive, self.max_layers = additive, int(max_layers)
         self.useful_error, self.delta_use = useful_error, delta_use
         self._layers = [0]                                 # additive: the chain L0, L1, … (versions; L0 = served)
@@ -927,8 +938,8 @@ class AdapterLoop:
         return {"path": path, "owner": path[-1][0], "layer": j, "zone": bool(zone), "thr": self._route_thr(path)}
 
     def _route_thr(self, path) -> list:
-        """Additive mode: the thresholds in force at the draw along a routed path — Λ_v for a passed layer, the owner's
-        threshold in force (`_thr_owner`) for the last."""
+        """Additive mode: Λ_v for a passed layer, `_thr_owner`'s capped owner/sampling bound for the last.
+        With certified trial serving that bound can exceed the actual live serving threshold in answer_thr."""
         return [self._route[v] for v, _, _ in path[:-1]] + [self._thr_owner(path[-1][0])]
 
     def _answered(self, n, route) -> dict:
@@ -1126,8 +1137,9 @@ class AdapterLoop:
     def _thr_owner(self, o):
         """The threshold in force for owner o: its live λ_o, never below its routing threshold Λ_o when it has one. The
         cap matters only for the deepest layer with a candidate in trial below it: its λ_o keeps loosening and may sit
-        below Λ_o, and the candidate's zone {score_o < Λ_o} stays escalated in trial; a non-deepest owner's score is
-        ≥ Λ_o anyway."""
+        below Λ_o. Default trials keep the candidate's zone {score_o < Λ_o} escalated. Certified trial serving
+        reads live λ_o separately in `_answer_of`; this bound still controls owner sampling. A non-deepest owner's
+        score is ≥ Λ_o anyway."""
         thr = self._threshold(o)
         lam = self._route.get(o)
         return thr if lam is None else max(thr, lam)
@@ -1146,15 +1158,17 @@ class AdapterLoop:
 
     def _answer_of(self, route):
         """Additive mode: who answers decision `route` alone (decision 21, the top-down walk) → (layer index, version,
-        threshold) or None (escalated). Inside a trial zone nobody answers (every trial-zone decision is labelled: the
-        candidate's read of its whole zone). Elsewhere the first layer on the path, from L0 down, not in probation with
+        threshold) or None (escalated). Default: inside a trial zone nobody answers (every trial-zone decision is
+        labelled). With trial_serving="certified", existing layers may answer there at live λ, including the owner;
+        the candidate's learning is separately gated by the uniform base coin. Elsewhere the first layer on the path,
+        from L0 down, not in probation with
         score ≥ its threshold in force: its live λ_v for a passed layer (the routing stays at Λ_v; λ_v may have
         loosened below it), `_thr_owner` for the owner. Reads only the path's scores and the live thresholds."""
-        if route["zone"]:
+        if route["zone"] and self.trial_serving == "escalate":
             return None
         last = len(route["path"]) - 1
         for j, (v, _, score) in enumerate(route["path"]):
-            thr = self._thr_owner(v) if j == last else self._threshold(v)
+            thr = (self._thr_owner(v) if j == last and not route["zone"] else self._threshold(v))
             if not self._prob(v) and score is not None and math.isfinite(thr) and score >= thr:
                 return j, v, thr
         return None
@@ -1209,8 +1223,10 @@ class AdapterLoop:
         the owned regime learns only on the decisions it owns (all labelled: its rate is full) and, when it is not the
         deepest, bets only at grid points ≥ its Λ (`StreamPromise.learn(floor=)`: its owned rows are a biased sample of
         its zone below Λ); the points below wait at their wealth until it is back in the base regime. The candidate (its
-        zone only) observes and learns on every zone decision — all of them are escalated, so each has its label (a
-        missing one counts as a loss). base_of: version → `_base_regime` at the start of the step (the snapshot
+        zone only) observes every zone score. Default: it learns on every zone decision (all escalated).
+        trial_serving="certified": it learns only on the uniform base-coin samples of its entire fixed zone,
+        irrespective of who answered; incidental unsampled labels are ignored. A missing sampled label is a loss.
+        base_of: version → `_base_regime` at the start of the step (the snapshot
         the step's detectors read too: a promise that re-certifies on this decision changes its regime from the next
         one)."""
         for v, _, score in route["path"]:
@@ -1245,32 +1261,38 @@ class AdapterLoop:
                 ver["useful"].learn(score, would, label, floor=floor,
                                    sampling_policy="uniform" if base_of[v] else "complete")
             ver["fed"].append(n)
-        if route["zone"]:
+        if route["zone"] and (self.trial_serving == "escalate" or route["base"]):
             ver = self._vs[c]
             if not n > ver["frozen_at"]:
                 raise RuntimeError(f"decision {n} would calibrate version {c} frozen at {ver['frozen_at']}")
-            ver["promise"].learn(score_k, would_k, label, sampling_policy="complete")
+            sampling_policy = "complete" if self.trial_serving == "escalate" else "uniform"
+            ver["promise"].learn(score_k, would_k, label, sampling_policy=sampling_policy)
             if ver.get("useful") is not None:
-                ver["useful"].learn(score_k, would_k, label, sampling_policy="complete")
+                ver["useful"].learn(score_k, would_k, label, sampling_policy=sampling_policy)
             ver["fed"].append(n)
             ver["samples"].append((score_k, score_o, label is None or would_k != label,
                                    label is None or would_o != label, key in ver["keys"]))
 
     def _route_record(self, route) -> dict:
         """The record's view of a routed decision: owner, layer, zone (the owner's zone index), path [[v, score, thr]]
-        (Λ_v for a passed layer — the routing — and the owner's threshold in force), trial_zone (in the candidate's
+        (Λ_v for a passed layer — the routing — and the capped owner/sampling threshold), trial_zone (in the candidate's
         zone); who answered it (decision 21): answered_by (version; None: escalated), answer_layer (its index on the
-        path), answer_thr (its threshold in force); base (the coin below the shared base rate rho_base: the
+        path), answer_thr (the actual serving threshold, possibly below the owner's capped path threshold);
+        base (the coin below the shared base rate rho_base: the
         base-regime layers' learning event). Replay recomputes the routing from these path scores
         (`_recorded_path`); the answers are in the payload's "path_would"."""
         path = []
         for (v, _, score), thr in zip(route["path"], route["thr"]):   # the thresholds in force at the draw (a
             path.append([v, _num(score), None if math.isinf(thr) else thr])   # detach in the step drops a Λ)
         ans = route["answer"]
-        return {"owner": route["owner"], "layer": route["layer"], "zone": route["layer"], "path": path,
+        record = {"owner": route["owner"], "layer": route["layer"], "zone": route["layer"], "path": path,
                 "trial_zone": route["zone"], "answered_by": None if ans is None else ans[1],
                 "answer_layer": None if ans is None else ans[0], "answer_thr": None if ans is None else ans[2],
                 "base": route["base"], "rho_base": route["rho_base"]}
+        if self.trial_serving == "certified":
+            record.update(trial_sampled=bool(route["zone"] and route["base"]),
+                          rho_trial=route["rho_base"] if route["zone"] else None)
+        return record
 
     def _trial(self, x, would_k, score_k, route=None):
         """trace_candidate: the candidate's (would, score) on x for the records (the shadow's when the step read it,

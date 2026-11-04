@@ -485,6 +485,9 @@ label). Which mode gives more coverage at the same r is measured by the stand be
 
 ## `stream`
 
+For optional certified-base serving inside a fixed candidate trial zone, with uniform shadow-audit evidence,
+see [trial serving and its sampling contract](stream-trial-serving.md). Default trials still escalate every zone input.
+
 A promise earned on the stream instead of on a fixed calibration set: `StreamPromise` starts at +inf (nothing
 answered alone) and loosens its threshold as labelled samples arrive, with a statement that holds at every point in
 time, not only at the end of a calibration. The certificate, its change detector, the sampling wired into the
