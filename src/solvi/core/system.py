@@ -513,6 +513,28 @@ class System:
             warnings.warn(message, stacklevel=3)
             self._warned_idle_hard_checks = tuple(idle)
 
+    def with_params(self, params=None, **facts):
+        """An immutable parameter view over this shared runtime, not an independent System.
+
+        Finite-JSON external fact defaults are privately copied; keyword facts
+        override the mapping, and each ask's caller facts override the defaults.
+        Catalog, guards/calibration, learning, stats, cache and storage stay shared.
+        These are data defaults, not a security policy. See docs/api/parameters.md.
+        """
+        from ._parameters import _with_params
+        return _with_params(self, params, **facts)
+
+    def ask_many(self, states, questions=None, *, max_items=1000, **options):
+        """A bounded sequential batch of ordinary asks, each with its own trace/store record.
+
+        Materialize and check containers, fact keys and the item bound before any
+        ask. Runtime errors propagate normally: earlier records and side effects
+        remain, later inputs are not run. No concurrency or speedup is promised.
+        Other options are the normal ask keyword options.
+        """
+        from ._parameters import _ask_many
+        return _ask_many(self, states, questions, max_items=max_items, **options)
+
     @_deprecate.removed_kwargs(names="questions")
     def ask(self, init_state, questions=None, *, workers=None, order=None, store=True, early_exit=None, check_loss=None):
         """init_state: a dict of given facts, or a pydantic BaseModel instance (its fields). questions: the questions to

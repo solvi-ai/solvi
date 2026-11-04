@@ -343,6 +343,9 @@ def describe(p):
 
 def fingerprint_of(system, kind=None):
     """What a node's system is, as JSON-ready data (see the module docs). kind: the node's kind when known."""
+    from ..core._parameters import _ParameterView
+    if isinstance(system, _ParameterView):
+        raise TypeError("Process does not support parameter views; bind a System and pass facts explicitly")
     if kind == "guard" or (kind is None and _is_guard(system)):
         return {"guard": system.fingerprint()}
     disp = getattr(system, "dispatcher", None)
@@ -874,6 +877,9 @@ class Process:
         "confidence" | "by" | "status"}; end: an end node; merge: "all" | "any" (for a node with several inputs);
         store: where its decisions are stored (default: the system's storage path); promise: the node's own promise
         record (Promise.record()); fingerprint: overrides the computed one. → self."""
+        from ..core._parameters import _ParameterView
+        if isinstance(system, _ParameterView):
+            raise TypeError("Process does not support parameter views; bind a System and pass facts explicitly")
         if not isinstance(name, str) or not _NAME.match(name):
             raise ProcessSpecError(f"a node name is a letter or _ then letters, digits, _ or -: not {name!r}")
         if name in self.nodes:
