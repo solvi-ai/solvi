@@ -362,13 +362,14 @@ class QuestionGuard:
 
     def fingerprint(self):
         fp = getattr(self, "_fp", None)
-        if fp is not None and fp[0] is self.promise:       # cached: a guard does not change once attached
+        binding = self.promise.report.get("learned_rule_model")
+        if fp is not None and fp[0] is self.promise and len(fp) == 3 and fp[2] == binding:
             return fp[1]
         from ..provenance import code_fingerprint, digest
         sig = {"fn": code_fingerprint(self.signal)} if callable(self.signal) else self.signal
         grp = None if self.groups is None else ("answer" if self.groups == "answer" else self._by.describe())
-        self._fp = (self.promise, digest("QuestionGuard", self.question, sig, repr(self.answer), grp,
-                                         self.promise.fingerprint()))
+        base = digest("QuestionGuard", self.question, sig, repr(self.answer), grp, self.promise.fingerprint())
+        self._fp = (self.promise, digest(base, "learned_rule_model", binding) if binding else base, binding)
         return self._fp[1]
 
     # --- reading the signal and the group
@@ -759,6 +760,11 @@ def _guard_question(system, question, examples, *, max_error, max_risk, method, 
             promise.prime_grid(list(prior[:promise.grid_from]), source=f"past ordinary calibration: {question}")
     if labels is not None:
         promise.report["labels"] = labels
+    learned = _learned_rule_model(system, question)
+    if learned is not None and learned.quality_mode:
+        # A reused/saved promise keeps its original model binding. Fresh labelled
+        # calibration creates a new report and binds the newly measured model.
+        promise.report.setdefault("learned_rule_model", learned.fingerprint())
     guard.promise = promise
     system.guards[question] = guard
     return promise.report
@@ -812,6 +818,16 @@ def _drop_checkpoints(system, guard):
 
 
 # ------------------------------------------------------------------------------------------------ at ask time
+def _learned_rule_model(system, question):
+    """The fitted model actually serving this rule, including renamed/shared catalogs."""
+    from ..deciders.rulelist import RuleList
+    rule = system.catalog.rules.get(question)
+    model = getattr(getattr(rule, "func", None), "__solvi_model__", None)
+    if not isinstance(model, RuleList):
+        model = getattr(rule, "model", None)
+    return model if isinstance(model, RuleList) else None
+
+
 def apply_guards(system, results, trace, vals, flow, live=True):
     """Gate the answers of the guarded questions (called by System.ask and System.answers_of). live: record each verdict
     in the trace (and let a stateful gate observe the signal); False — re-derive the verdicts of a recorded trace (a
@@ -835,7 +851,12 @@ def apply_guards(system, results, trace, vals, flow, live=True):
             state = p.state() if p.stateful else None
             thr, node, info = p.threshold_of(grp)
         reason = None
-        if guard.groups is not None and grp is None:
+        binding = p.report.get("learned_rule_model")
+        learned = _learned_rule_model(system, qn)
+        if binding and (learned is None or learned.fingerprint() != binding):
+            reason = "stale learned-rule guarantee: the rule or held-out quality changed; recalibrate the guarantee"
+            ok, why, s = False, reason, None
+        elif guard.groups is not None and grp is None:
             reason = f"group unknown: the thresholds are per group ({p.by}) and this input does not give it"
             ok, why, s = False, reason, None if isinstance(v, str) else v
         elif isinstance(v, str):

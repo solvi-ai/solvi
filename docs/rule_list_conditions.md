@@ -20,7 +20,7 @@ The caller must collect training, quality estimation and guarantee calibration s
 
 ## Rules confirming an existing model
 
-`learn_rule(..., calibrated=True, calibration=held_out, confirm='proposal')` reads a separate explicit proposal fact, never a question's answer by implicit name binding. Keep it outside `features`: the rule structure learns from text/features, not model outputs. The proposal is `{'value': declared_choice, 'confidence': finite_number_in_0_1}`. Invalid/unscored proposals and rule/model disagreements abstain. Quality calibration counts only agreeing rows in each first-firing-rule bucket; reports also count `disagreed` and `unscored` rows. Zero agreeing observations give no quality support.
+`learn_rule(..., calibrated=True, calibration=held_out, confirm='proposal')` reads a separate explicit proposal fact, never a question's answer by implicit name binding. Keep it outside `features`: the rule structure learns from text/features, not model outputs. The proposal is `{'value': declared_choice, 'confidence': finite_number_in_0_1, 'identity': stable_nonempty_string}`. Invalid/unscored proposals and rule/model disagreements abstain. Quality calibration counts only agreeing rows in each first-firing-rule bucket; reports also count `disagreed` and `unscored` rows. Zero agreeing observations give no quality support.
 
 For example, register a wrapper around an existing native decider:
 
@@ -30,7 +30,8 @@ def proposal(text):
     decision = existing_decider.decide(text)
     if decision.escalate is not None:
         return None
-    return {'value': decision.value, 'confidence': decision.conf}
+    return {'value': decision.value, 'confidence': decision.conf,
+            'identity': existing_decider.fingerprint()}
 
 # Build System(catalog, questions) first, with the intended question declared.
 system.learn_rule('intent', training, features=['text'], max_literals=3,
@@ -40,3 +41,9 @@ system.learn_rule('intent', training, features=['text'], max_literals=3,
 The explicit `model=` records the proposal decider identity through the normal catalog model mechanism. A given proposal fact is also allowed when its provenance is supplied by the application. Never feed the question's own learned answer back as its proposal or present an escalated model output as scored support.
 
 On agreement, `act` and confidence are the minimum of the independently estimated agreement precision and the proposal confidence. This is a descriptive bounded signal, not an independence or risk theorem about correlated rules/models. Apply the native guarantee on a third independent set for the serving promise. The source-confidence cap cannot upgrade a weak source to certainty. Neither this mode nor repeated evaluation asserts the historical traffic percentages from any corpus experiment.
+
+## Model and guarantee lifecycle
+
+An installed native guarantee on a calibrated learned rule records that rule's fitted-model fingerprint. Updating per-rule quality, refitting, or replacing the learned rule does not remove the guard. It makes the guard stale: serving abstains until a fresh labeled guarantee is calibrated. Reusing a previously bound Promise, including save/load with `strict=False`, preserves its original binding; it does not authorize the new model. Unrelated ordinary guards retain their prior fingerprints and behavior.
+
+The explicit proposal identity must describe the same frozen source throughout quality calibration. Multiple scored identities refuse calibration atomically. Missing or changed identity abstains at runtime. Recalibrating quality for a new source changes the learned model fingerprint, so an existing native guarantee remains stale until remeasured. An honest owner can propagate the existing decider fingerprint or an authenticated provider identity. A configuration fingerprint cannot reveal a hidden provider weight change; this is a declared source-identity boundary, not hidden-swap detection.

@@ -1932,6 +1932,7 @@ class System:
         def learned(**args):
             return rl.decision(args) if calibrated else rl.predict(args)[0]
         learned.__name__ = f"learned_{question}"
+        learned.__solvi_model__ = rl  # the function's actual fitted model survives catalog/view copying
         self.catalog.replace_rule(Part(kind="rule", name="answer:" + question, inputs=list(facts) + ([confirm] if confirm is not None else []), func=learned,
                                        doc=str(rl), question=question, model=rl, provenance="learned"))
         self.learned_rules[question] = rl

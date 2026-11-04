@@ -68,23 +68,26 @@ class RuleList:
         self.rules, self.default, self.truncated = [], None, 0
         self.quality_mode = False
         self.quality = None
+        self.confirm_identity = None
 
     def _proposal(self, row):
         import math
         proposal = row.get(self.confirm)
-        if not isinstance(proposal, dict) or "value" not in proposal:
+        if (not isinstance(proposal, dict) or "value" not in proposal
+                or not isinstance(proposal.get("identity"), str) or not proposal["identity"]):
             return None
         confidence = proposal.get("confidence")
         if (isinstance(confidence, bool) or not isinstance(confidence, (int, float))
                 or not math.isfinite(confidence) or not 0 <= confidence <= 1 or proposal["value"] is None):
             return None
-        return proposal["value"], float(confidence)
+        return proposal["value"], float(confidence), proposal["identity"]
 
     def calibrate(self, rows, answers):
         """Per-firing-rule smoothed precision on independent, explicitly held-out rows."""
         if not rows or len(rows) != len(answers):
             raise ValueError("rule calibration needs held-out rows and one answer per row")
         counts = [[0, 0, 0, 0] for _ in range(len(self.rules) + 1)]
+        identities = set()
         for row, answer in zip(rows, answers):
             value, rule = self.predict(row)
             bucket = self.rules.index(rule) if rule is not None else len(self.rules)
@@ -93,6 +96,7 @@ class RuleList:
                 if proposal is None:
                     counts[bucket][3] += 1
                     continue
+                identities.add(proposal[2])
                 if proposal[0] != value:
                     counts[bucket][2] += 1
                     continue
@@ -100,7 +104,10 @@ class RuleList:
             counts[bucket][1] += 1
         quality = [{"correct": k, "n": n, "act": (k + 1) / (n + 2) if n else None,
                     "disagreed": disagreed, "unscored": unscored} for k, n, disagreed, unscored in counts]
+        if len(identities) > 1:
+            raise ValueError("confirmation calibration requires one frozen proposal identity")
         self.quality = quality
+        self.confirm_identity = next(iter(identities), None)
         return quality
 
     def decision(self, row):
@@ -115,6 +122,9 @@ class RuleList:
             if proposal is None or proposal[0] != value:
                 reason = "no scored model proposal" if proposal is None else "rule and model disagree"
                 act = None
+            elif proposal[2] != self.confirm_identity:
+                reason = "model proposal identity changed; recalibrate rule quality"
+                act = None
             elif act is not None:
                 act = min(act, proposal[1])
         return Decision(value, confidence=0.0 if act is None else act,
@@ -124,7 +134,7 @@ class RuleList:
     def fingerprint(self):
         from ..provenance import digest
         return digest("RuleList", self.facts, self.rules, self.default, self.max_literals, self.ngrams,
-                      self.negations, self.confirm, self.quality_mode, self.quality)
+                      self.negations, self.confirm, self.confirm_identity, self.quality_mode, self.quality)
 
     def fit(self, rows, answers):
         """Learn the list from rows of facts and their answers; a second fit starts over (it replaces the list). When
@@ -135,6 +145,7 @@ class RuleList:
                              f"{len(answers)} answers")
         self.rules, self.default, self.truncated = [], None, 0
         self.quality = None
+        self.confirm_identity = None
         L = [literals(r, self.facts, self.ngrams) for r in rows]
         if self.max_literals > 1 or self.negations or self.ngrams > 1:
             return self._fit_conditions(L, answers)
