@@ -39,6 +39,9 @@ def __getattr__(name):
     """`solvi.Facts` (lazy: a top-level export must not drag `solvi.core.deciders` into every `import solvi` —
     the import-layers rule), a name solvi exported in 0.9 and no longer does (`solvi.JSONLStorage`), or a moved
     module (`solvi.typed`): found at its 1.0 place, with a SolviDeprecationWarning, until 1.1."""
+    if name == "wrap":
+        from .solutions.wrap import wrap
+        return wrap
     if name == "trace":
         from .core.store.calls import trace
         return trace
@@ -48,7 +51,7 @@ def __getattr__(name):
     return _deprecate.old_attribute(__name__, name)
 
 
-# 26 names: the candidate transition adds explicit ordinary-function recording via trace.
+# 27 names: explicit recording via trace and external decision interception via wrap.
 __all__ = ["build", "document", "Agent", "Guard", "Knowledge", "Budget", "Catalog", "Question", "Answer", "System", "Response", "Quote", "Claim", "Decision", "Facts",
            "Fail", "Unknown", "Span", "Maybe", "Rank", "Estimate", "Scale", "Bins", "SolviDeprecationWarning",
-           "ExperimentalWarning", "trace"]
+           "ExperimentalWarning", "trace", "wrap"]
