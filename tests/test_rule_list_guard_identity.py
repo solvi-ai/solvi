@@ -1,5 +1,4 @@
 """A learned quality update cannot silently inherit an installed threshold."""
-import pytest
 
 from test_rule_list_quality import data,make
 
