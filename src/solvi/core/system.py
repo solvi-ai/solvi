@@ -482,6 +482,11 @@ class System:
         """Validate check reachability and learned evidence scope without executing checks."""
         from ._check_evidence import validate
         validate(self)
+        # Without a hard check there is no reachability question. Re-scan on
+        # every call so registering or editing a check cannot leave a stale
+        # waiver, but do not build throwaway plans for ordinary catalogs.
+        if not any(part.kind == "check" and part.hard for part in self.catalog.parts.values()):
+            return
         idle = _idle_hard_checks(self.catalog, self.questions.values(), self.heads)
         missing = {}
         if isinstance(init_state, dict):
