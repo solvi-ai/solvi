@@ -616,6 +616,17 @@ def _only(change):
 _WORLD_RESERVATION_LOCK = threading.RLock()
 
 
+def _world_allocation(alpha, count):
+    if type(alpha) not in (int, float) or not math.isfinite(alpha) or not 0 < alpha < 1:
+        raise ValueError("alpha must be finite in (0, 1)")
+    allocation = alpha / count
+    level = 1 - allocation
+    if not 0 < allocation < 1 or not 0 < level < 1:
+        raise ValueError("family alpha allocation and interval level must be representable in (0, 1)")
+    return allocation, level
+
+
+
 class FreshEnvironments:
     """The candidate against the current agent on fresh worlds of an Environment, paired by seed (ported from a gated
     evolution harness).
@@ -669,8 +680,7 @@ class FreshEnvironments:
                 raise ValueError("candidate_ids must register a finite distinct string family")
             if not callable(candidate_id) or not callable(world_id):
                 raise ValueError("candidate_id and world_id must be explicit owner callbacks")
-            if type(alpha) not in (int, float) or not math.isfinite(alpha) or not 0 < alpha < 1:
-                raise ValueError("alpha must be finite in (0, 1)")
+            _world_allocation(alpha, len(candidate_ids))
         elif any(x is not None for x in (candidate_ids, candidate_id, world_id)):
             raise ValueError("candidate/world identities require world_registry")
         self.world_registry = world_registry
@@ -695,17 +705,24 @@ class FreshEnvironments:
         self.min_lower, self.progress_tolerance, self.replay = min_lower, progress_tolerance, replay
         self.handed_over = handed_over
 
-    def _reserve_worlds(self, change, ctx, select, confirm):
+    def _registry_storage(self, ctx):
         if ctx is None or getattr(ctx, "journal", None) is None:
             raise ValueError("world_registry requires a pipeline journal")
         from ...core.store import JSONLStorage, SQLiteStorage
-        from ...core.provenance import code_fingerprint
         storage = ctx.journal.storage
         if isinstance(storage, JSONLStorage):
             if not storage.fsync or storage.rotates:
                 raise ValueError("world registry requires nonrotating JSONLStorage(fsync=True)")
         elif not isinstance(storage, SQLiteStorage):
             raise ValueError("world registry requires durable JSONL or SQLite storage")
+        if getattr(storage, "_batch", None) is not None:
+            raise ValueError("world registry cannot reserve inside an active storage batch")
+        return storage
+
+    def _reserve_worlds(self, change, ctx, select, confirm):
+        from ...core.provenance import code_fingerprint
+        storage = self._registry_storage(ctx)
+        allocation, interval_level = _world_allocation(self.alpha, len(self.candidate_ids))
         identity_code = {"world_id": code_fingerprint(self.world_id),
                          "candidate_id": code_fingerprint(self.candidate_id)}
         cid = self.candidate_id(change, ctx)
@@ -729,13 +746,12 @@ class FreshEnvironments:
             used = {w for r in previous for w in r["worlds"]}
             if used.intersection(worlds):
                 return None, "world registry refuses previously used worlds"
-            allocation = self.alpha / len(family)
             record = ctx.journal.write("fresh_world_reservation", registry=self.world_registry,
                 family=family, candidate=cid, worlds=worlds, alpha=self.alpha, identity_code=identity_code,
                 allocated_alpha=allocation, change=ctx.change_id)
         return {"reservation": record["id"], "registry": self.world_registry,
                 "candidate": cid, "family_size": len(family), "allocated_alpha": allocation,
-                "interval_level": 1 - allocation, "worlds": worlds,
+                "interval_level": interval_level, "worlds": worlds,
                 "scope": "nominal bootstrap allocation; not a distribution-free family guarantee"}, None
 
     def _failure_veto(self, base, cand, measured, phase):
@@ -779,6 +795,9 @@ class FreshEnvironments:
 
     def run(self, change, ctx):
         from ._paired import paired_bootstrap
+        if self.world_registry is not None:
+            self._registry_storage(ctx)
+            _world_allocation(self.alpha, len(self.candidate_ids))
         sel, conf = self._seeds(self.select, change, ctx), self._seeds(self.confirm, change, ctx)
         if not sel or not conf:
             return StageVerdict.refuse("no selection or confirmation worlds")

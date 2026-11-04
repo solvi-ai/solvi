@@ -99,3 +99,32 @@ def test_nominal_family_level_is_passed_to_all_intervals(tmp_path,monkeypatch):
     monkeypatch.setattr(_paired,'paired_bootstrap',track)
     assert stage().run('a',context(JSONLStorage(tmp_path/'levels.jsonl',fsync=True))).ok
     assert levels==[.975,.975,.975]
+
+
+@pytest.mark.parametrize('alpha',[1e-20,5e-324])
+def test_unrepresentable_family_allocation_is_rejected_at_construction(alpha):
+    calls=[]
+    def never(*args):calls.append(args);raise AssertionError('callback must not run')
+    with pytest.raises(ValueError,match='representable'):
+        FreshEnvironments(never,never,select=never,confirm=never,world_registry='alpha',
+            candidate_ids=['a','b'],candidate_id=never,world_id=never,alpha=alpha)
+    assert calls==[]
+
+
+@pytest.mark.parametrize('backend',['jsonl','sqlite'])
+def test_outer_batch_refuses_before_all_callbacks_and_cannot_rollback_evaluation(tmp_path,backend):
+    path=tmp_path/('outer.jsonl' if backend=='jsonl' else 'outer.db')
+    storage=JSONLStorage(path,fsync=True) if backend=='jsonl' else SQLiteStorage(path)
+    s=stage();calls=[]
+    def never(*args):calls.append(args);raise AssertionError('callback must not run')
+    s.agent=s.select=s.confirm=s.candidate_id=s.world_id=never
+    with pytest.raises(RuntimeError,match='outer rollback'):
+        with storage.batch():
+            with pytest.raises(ValueError,match='active storage batch'):
+                s.run('a',context(storage))
+            assert calls==[]
+            raise RuntimeError('outer rollback')
+    reopened=JSONLStorage(path,fsync=True) if backend=='jsonl' else SQLiteStorage(path)
+    assert context(reopened).journal.records('fresh_world_reservation')==[]
+    # No evaluation happened in the rejected outer transaction; a normal durable attempt is allowed.
+    assert stage().run('a',context(reopened)).ok
