@@ -1452,7 +1452,9 @@ class KnowledgeStore:
         """The world times the item holds as its key's value → [[since, until], ...] (half-open, None: unbounded), or
         None for an item that holds at any time (no `valid` on it or under it). On a key with `valid` a version holds
         from its since until a later version's since (or its own until; a bounded later version gives it back after
-        the bounded one ends), outside any contested overlap; versions pending a re-test take no part. A derived item
+        the bounded one ends), outside any contested overlap. A version pending a re-test takes no
+        side, but its writer's standing later different value leaves a gap in that writer's older
+        version until review/withdrawal; other writers' pending data do not create this gap. A derived item
         holds where its own validity and, for one of its derivations, every premise holds."""
         self._settle()
         return self._periods(iid, set(), _isolated=True)
@@ -2224,6 +2226,48 @@ def _retest_why(items, iid, t, memo):
     return f"its support was cut at journal entry {t}"
 
 
+def _continuity_units(items, units, live, retest, pclaims, key_ids):
+    """A writer's standing later pending value cannot certify its older value.
+
+    Only that writer's direct assertion is restricted; another writer's pending
+    data takes no side, and actual withdrawal removes the continuity gap.
+    """
+    if not retest and not pclaims:
+        return units
+    ids = {u[1] for u in units}
+    key = items[next(iter(ids))].key
+    pending = [(i, a) for i in key_ids if i in live and items[i].key == key
+               for a in live[i] if (i in retest or (i, a["t"]) in pclaims)
+               and a.get("valid") is not None and not a["just"] and not a.get("consulted")
+               and not a.get("inferred") and a.get("by") is not None]
+    if not pending:
+        return units
+    out = []
+    for unit, iid, value, iv, lost in units:
+        assertions = [a for a in live[iid] if a.get("valid") is not None
+                      and _same_since(_interval(a["valid"])[0], iv[0])
+                      and (iid, a["t"]) not in pclaims]
+        intervals = []
+        for a in assertions:
+            gaps = []
+            for j, b in pending:
+                biv = _interval(b["valid"])
+                try:
+                    later = _lo_lt(iv[0], biv[0])
+                except TypeError:
+                    later = False  # no declared later chronology; preserve mixed-time resolution
+                if (items[j].kind == items[iid].kind and items[j].value != items[iid].value
+                        and b["by"] == a["by"] and later):
+                    gaps.append(list(biv))
+            try:
+                intervals += _ivs_minus([iv], gaps) if gaps else [list(iv)]
+            except TypeError:
+                intervals = []  # incomparable declared chronology cannot certify the older version
+                break
+        out.extend((unit, iid, value, tuple(period), lost) for period in _ivs_or(intervals))
+    return out
+
+
 def _resolve(items, comp, by_key, resolves, clock, flagged, max_iter=200, taints=None, state=None, guards=None, revival_window=None, entry_clocks=None):
     """The state of the items in `comp` (closed under dependents and shared keys) from their raw entries → {id:
     record} for present items. Fixed point of: liveness of justifications ↔ per-key walk. Deterministic; premises
@@ -2272,7 +2316,11 @@ def _resolve(items, comp, by_key, resolves, clock, flagged, max_iter=200, taints
     eff = {}
     for k in keys:                                      # effective intervals on the keys with `valid`
         if units.get(k):
-            eff.update(_effective(units[k]) or {})
+            effective_units = _continuity_units(items, units[k], live, retest, pclaims, by_key[k])
+            effective = _effective(effective_units) or {}
+            for _, iid, _, _, _ in units[k]:
+                effective.setdefault(iid, {"periods": [], "contested": []})
+            eff.update(effective)
     scoped = set()                                      # derived items held up only by a dispute scoped to an
     grew = True                                         # overlap: each holds where its premises hold (usable /
     while grew:                                         # snapshot at a time read the premises' periods there)

@@ -4,6 +4,10 @@
 
 This release contains breaking changes. See [migration notes](docs/migration-1.5-candidate.md).
 
+- A writer's standing later pending value now leaves a temporal gap in that same writer's older different value,
+  rather than serving an obsolete fallback. Other writers' pending claims cannot suppress clean support; actual
+  withdrawal reopens the older version. See [pending version continuity](docs/knowledge_pending_continuity.md).
+
 ### Decision systems and checks
 
 - Parameter views bind privately copied input defaults to a shared System runtime. Bounded `ask_many` executes
