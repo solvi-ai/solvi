@@ -277,7 +277,9 @@ class Knowledge:
         ag.states.clear()
         if self.failures is not None:
             self.failures.new_episode()
-        self._episode = {"at": len(self.store.journal), "flagged": set(), "n": self._episode["n"] + 1}
+        # learned_at is a logical journal position, unlike snapshot.at/rebuild's
+        # record-count cursor. Prefixes with skipped records can have holes.
+        self._episode = {"at": self.store._next_n, "flagged": set(), "n": self._episode["n"] + 1}
         self.store.note(episode="begin", episode_n=self._episode["n"], map=None if map_id is None else str(map_id))
 
     def _end(self):
