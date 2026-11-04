@@ -2808,6 +2808,10 @@ class LawSet:
         buffer's N and the set's cost are not touched. → {"passes", "failed", "reason" (in words), "support", "hits",
         "net", "precision", "null", "tested", "need", "short"}.
 
+        null_warning: present for sized null="base"; describes the same-buffer estimated
+        comparator and possible regime mixing, without declaring every such test invalid.
+        This is a stateless diagnostic; it does not detect a historical change or change admission.
+
         failed: None (it would pass; `confirm`, when the set has one, is still asked), "active" (already an active
         law), "readmit" (retired on a buffer this size, readmit="grown"), "falsified" (refuted where it applies by a
         leftover probe on a buffer this size, admit_by_probes(falsify='leftover'), and not re-proposed since), "cap"
@@ -2832,6 +2836,13 @@ class LawSet:
         out = {"passes": False, "failed": None, "reason": "", "support": sup, "hits": hits, "net": net,
                "precision": round(hits / sup, 4) if sup else None, "null": round(null, 4) if self.sized else None,
                "tested": N, "need": need, "short": 0}
+        if self.sized and self.null == "base":
+            out["null_warning"] = (
+                "null='base' estimates the comparator from this same action/effect buffer "
+                "(after the declared group exclusion), including rows matching the candidate. "
+                "It may mix regimes and rise with support; it is not automatically a known "
+                "null probability or an independent upper bound. A fixed numeric null needs "
+                "its own model or reference-data justification.")
 
         def fail(name, reason, short=0):
             out.update(failed=name, reason=reason, short=int(short))

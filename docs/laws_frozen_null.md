@@ -48,3 +48,11 @@ rows can change support/hits/net and whether admission passes; they do not chang
 the null itself. `need_at` and `passes` expose the existing fixed-null arithmetic.
 Observed `min_precision`, support, net, and other admission gates remain in force.
 No adaptive complement baseline or empirical quality improvement is claimed.
+
+For sized `null="base"`, `why_not` also returns `null_warning`: the comparator is
+estimated from the same action/effect buffer after declared group exclusion,
+including rows matching the candidate. Mixing regimes can make it rise along
+with support. This stateless explanation neither detects a historical shift nor
+asserts that every adaptive comparison is invalid. It leaves admission, counts,
+null arithmetic and thresholds unchanged; numeric nulls do not receive this
+warning. No automatic complement/pre-change estimator is installed.
