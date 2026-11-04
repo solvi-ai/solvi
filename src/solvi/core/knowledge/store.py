@@ -463,6 +463,7 @@ class KnowledgeStore:
         self.flags = {}                              # t → {"ids", "scope", "key", "why", "by", "parent", "ended"}
         self.clock = 0
         self.state = {}                              # id → resolved record (present items)
+        self._period_epoch, self._period_cache = 0, {}  # immutable top-level read results only
         self.questions = []                          # person questions (disputes), one per dispute event
         self._open_disputes = set()
         self._batch, self._touched, self._tick_dirty = 0, set(), False
@@ -1368,6 +1369,7 @@ class KnowledgeStore:
                 self.state[i] = new[i]
             else:
                 self.state.pop(i, None)
+        self._period_epoch += 1                       # O(1) invalidation; no unrelated-key traversal
         for i in comp:
             row = self._fingerprint_row(i) if i in self.state else None
             if row == self._fingerprint_rows.get(i):
@@ -1456,6 +1458,22 @@ class KnowledgeStore:
         return self._periods(iid, set(), {})
 
     def _periods(self, iid, seen, memo=None):
+        # Cyclic recursive answers depend on seen/local memo: never share them
+        # across read roots. In particular find() may carry a populated memo.
+        root = not seen and not memo and iid in self.items
+        epoch = self._period_epoch
+        if root:
+            cached = self._period_cache.get(iid)
+            if cached is not None and cached[0] == epoch:
+                return None if cached[1] is None else [list(iv) for iv in cached[1]]
+        out = self._compute_periods(iid, seen, memo)
+        if root:
+            frozen = None if out is None else tuple(tuple(iv) for iv in out)
+            self._period_cache[iid] = (epoch, frozen)
+            return None if frozen is None else [list(iv) for iv in frozen]
+        return out
+
+    def _compute_periods(self, iid, seen, memo=None):
         it, st = self.items.get(iid), self.state.get(iid) or {}
         if it is None or iid in seen:
             return None
