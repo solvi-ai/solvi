@@ -250,7 +250,8 @@ class Cusum:
         spread is simulated (each null stream standardized by a reference of ref_n values drawn from the same null),
         which raises h for a short reference; None: a known mean and spread. (With make_null, put the reference's
         error into it: ref_n= is refused there.) Null draws must have exactly the declared (sims, channels) shape;
-        NaN increments are missing observations, while infinite increments, states or thresholds are refused."""
+        NaN increments are missing observations and -inf resets a channel. Positive infinite increments, states
+        or thresholds are refused."""
         names = list(names)
         if not names:
             raise ValueError("at least one CUSUM channel required")
@@ -276,8 +277,8 @@ class Cusum:
             increments = np.asarray(nxt(), float)
             if increments.shape != S.shape:
                 raise ValueError(f"null draws must have shape {S.shape}, got {increments.shape}")
-            if np.isinf(increments).any():
-                raise ValueError("null increments must be finite or NaN for missing observations")
+            if np.isposinf(increments).any():
+                raise ValueError("null increments must be finite, -inf for reset or NaN for missing observations")
             with np.errstate(over="ignore", invalid="ignore"):
                 S = np.maximum(0.0, S + np.nan_to_num(increments, nan=0.0))
             peaks = S.max(1)

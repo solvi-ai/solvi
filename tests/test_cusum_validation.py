@@ -28,11 +28,22 @@ def test_null_draws_must_have_one_value_per_simulation_and_channel(shape):
         Cusum.calibrate(["up", "down"], lambda rng, sims: lambda: np.zeros(shape), horizon=1, sims=4)
 
 
-@pytest.mark.parametrize("value,horizon", [(np.inf, 1), (-np.inf, 1), (1e308, 2), (np.finfo(float).max, 1)])
+@pytest.mark.parametrize("value,horizon", [(np.inf, 1), (1e308, 2), (np.finfo(float).max, 1)])
 def test_nonfinite_null_or_threshold_is_refused(value, horizon):
     with pytest.raises(ValueError, match="finite"):
         Cusum.calibrate(["up", "down"], lambda rng, sims: lambda: np.full((sims, 2), value),
                         horizon=horizon, sims=4)
+
+
+def test_negative_infinity_is_a_valid_likelihood_ratio_reset():
+    draws = iter([np.tile([2.0, 5.0], (4, 1)), np.full((4, 2), -np.inf)])
+    monitor = Cusum.calibrate(["up", "down"], lambda rng, sims: lambda: next(draws),
+                              alpha=0.25, horizon=2, sims=4)
+    assert monitor.h == np.nextafter(5.0, np.inf) and monitor.rate == 0
+    monitor.step([2.0, 5.0])
+    monitor.step([-np.inf, -np.inf])
+    np.testing.assert_array_equal(monitor.S, [0.0, 0.0])
+    np.testing.assert_array_equal(monitor.since, [0, 0])
 
 
 def test_nan_null_increments_are_still_missing_and_small_explicit_budget_is_kept():
