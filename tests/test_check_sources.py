@@ -141,3 +141,17 @@ def test_same_root_lint_traverses_computed_sources_and_aliases():
     # Existing catalogs without an explicit binding retain their lint behavior.
     s.catalog.parts["valid"].reads_from = None
     assert not [x for x in lint(s).findings if x.code == "check_shared_source"]
+
+
+def test_empty_mapping_detaches_caller_alias_without_changing_cache_or_replay():
+    mapping = {}
+    s = make(mapping, cache=8)
+    facts = {**DATA, "tax": 7}
+    fp = catalog_fingerprint(s.catalog)["fp"]
+    original = s.ask(facts, store=False)
+    assert original["q"].answer == "no"
+    mapping["tax"] = "stale_tax"
+    assert s.catalog.parts["valid"].reads_from is None
+    assert catalog_fingerprint(s.catalog)["fp"] == fp
+    assert s.ask(facts, store=False)["q"].answer == "no"
+    assert original.trace.replay(s, original.flow)["ok"]
