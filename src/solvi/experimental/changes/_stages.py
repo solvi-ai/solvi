@@ -30,6 +30,8 @@ from __future__ import annotations
 
 import fnmatch
 import os
+import threading
+import math
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Protocol, runtime_checkable
@@ -611,6 +613,9 @@ def _only(change):
 
 
 # ───────────────────────────────────────────────────────────── 6. fresh environments (ported)
+_WORLD_RESERVATION_LOCK = threading.RLock()
+
+
 class FreshEnvironments:
     """The candidate against the current agent on fresh worlds of an Environment, paired by seed (ported from a gated
     evolution harness).
@@ -629,6 +634,13 @@ class FreshEnvironments:
     progress not lower — the upper bound of the paired progress change on `confirm` is ≥ −`progress_tolerance`
     (a rule that makes the agent overcautious is refused). Everything measured is recorded.
 
+    world_registry (opt-in): an owner-declared world namespace in the Pipeline journal. Requires
+    a frozen finite candidate_ids list, candidate_id(change, ctx), world_id(seed), and alpha.
+    Both sets are reserved durably before agent evaluation, never refunded, and refused on reuse.
+    JSONL must be nonrotating with fsync=True; SQLite uses its write transaction. The nominal
+    bootstrap interval uses level=1-alpha/len(candidate_ids), not a distribution-free FWER certificate.
+    Identities and unpredictable fresh sampling remain the owner's responsibility.
+
     failure_policy (opt-in, default None): an independent veto on BOTH sets, using the environment's
     info["failed"] convention even with a custom score. "zero_failures" refuses any candidate failure;
     "no_new_failures" refuses any paired safe-baseline → failed-candidate world; "max_failure_rate" refuses
@@ -646,7 +658,24 @@ class FreshEnvironments:
                  progress: Callable | None = None, max_steps: int = 200, boot: int = 2000, seed: int = 0,
                  min_lower: float = 0.0, progress_tolerance: float = 0.0, replay: int = 2,
                  on_episode_start: Callable | None = None, handed_over: Callable | None = None,
-                 failure_policy: str | None = None, max_failure_rate: float | None = None):
+                 failure_policy: str | None = None, max_failure_rate: float | None = None,
+                 world_registry=None, candidate_ids=None, candidate_id=None, world_id=None, alpha=0.05):
+        if world_registry is not None:
+            if not isinstance(world_registry, str) or not world_registry.strip():
+                raise ValueError("world_registry must be a nonempty owner-declared scope")
+            if (not isinstance(candidate_ids, (list, tuple)) or not candidate_ids
+                    or any(not isinstance(x, str) or not x for x in candidate_ids)
+                    or len(set(candidate_ids)) != len(candidate_ids)):
+                raise ValueError("candidate_ids must register a finite distinct string family")
+            if not callable(candidate_id) or not callable(world_id):
+                raise ValueError("candidate_id and world_id must be explicit owner callbacks")
+            if type(alpha) not in (int, float) or not math.isfinite(alpha) or not 0 < alpha < 1:
+                raise ValueError("alpha must be finite in (0, 1)")
+        elif any(x is not None for x in (candidate_ids, candidate_id, world_id)):
+            raise ValueError("candidate/world identities require world_registry")
+        self.world_registry = world_registry
+        self.candidate_ids = tuple(candidate_ids or ())
+        self.candidate_id, self.world_id, self.alpha = candidate_id, world_id, alpha
         if on_episode_start is not None and not callable(on_episode_start):
             raise TypeError("on_episode_start is a function (policy, seed) or None")
         if failure_policy not in (None, "zero_failures", "no_new_failures", "max_failure_rate"):
@@ -665,6 +694,49 @@ class FreshEnvironments:
         self.max_steps, self.boot, self.seed = max_steps, boot, seed
         self.min_lower, self.progress_tolerance, self.replay = min_lower, progress_tolerance, replay
         self.handed_over = handed_over
+
+    def _reserve_worlds(self, change, ctx, select, confirm):
+        if ctx is None or getattr(ctx, "journal", None) is None:
+            raise ValueError("world_registry requires a pipeline journal")
+        from ...core.store import JSONLStorage, SQLiteStorage
+        from ...core.provenance import code_fingerprint
+        storage = ctx.journal.storage
+        if isinstance(storage, JSONLStorage):
+            if not storage.fsync or storage.rotates:
+                raise ValueError("world registry requires nonrotating JSONLStorage(fsync=True)")
+        elif not isinstance(storage, SQLiteStorage):
+            raise ValueError("world registry requires durable JSONL or SQLite storage")
+        identity_code = {"world_id": code_fingerprint(self.world_id),
+                         "candidate_id": code_fingerprint(self.candidate_id)}
+        cid = self.candidate_id(change, ctx)
+        if cid not in self.candidate_ids:
+            return None, "candidate is outside the registered finite family"
+        worlds = [self.world_id(seed) for seed in [*select, *confirm]]
+        if any(not isinstance(w, str) or not w for w in worlds) or len(set(worlds)) != len(worlds):
+            return None, "world IDs must be nonempty distinct strings across both sets"
+        family = list(self.candidate_ids)
+        # Thread serialization plus the backend's existing cross-process write transaction.
+        # A reservation is committed BEFORE evaluating anything; failures never refund worlds.
+        with _WORLD_RESERVATION_LOCK, ctx.journal.storage.batch():
+            if any(d.get("redacted") for _, d in storage._raw() if isinstance(d, dict)):
+                return None, "world registry cannot reuse a redacted journal"
+            previous = [r for r in ctx.journal.records("fresh_world_reservation")
+                        if r.get("registry") == self.world_registry]
+            if any(r.get("family") != family or r.get("alpha") != self.alpha or r.get("identity_code") != identity_code for r in previous):
+                return None, "registered family, alpha or identity callbacks changed for this world registry"
+            if any(r.get("candidate") == cid for r in previous):
+                return None, "candidate already reserved an evaluation attempt"
+            used = {w for r in previous for w in r["worlds"]}
+            if used.intersection(worlds):
+                return None, "world registry refuses previously used worlds"
+            allocation = self.alpha / len(family)
+            record = ctx.journal.write("fresh_world_reservation", registry=self.world_registry,
+                family=family, candidate=cid, worlds=worlds, alpha=self.alpha, identity_code=identity_code,
+                allocated_alpha=allocation, change=ctx.change_id)
+        return {"reservation": record["id"], "registry": self.world_registry,
+                "candidate": cid, "family_size": len(family), "allocated_alpha": allocation,
+                "interval_level": 1 - allocation, "worlds": worlds,
+                "scope": "nominal bootstrap allocation; not a distribution-free family guarantee"}, None
 
     def _failure_veto(self, base, cand, measured, phase):
         if self.failure_policy is None:
@@ -712,12 +784,20 @@ class FreshEnvironments:
             return StageVerdict.refuse("no selection or confirmation worlds")
         if set(sel) & set(conf):
             return StageVerdict.refuse(f"selection and confirmation worlds overlap: {sorted(set(sel) & set(conf))[:5]}")
+        registry, level = None, 0.95
+        if self.world_registry is not None:
+            registry, refusal = self._reserve_worlds(change, ctx, sel, conf)
+            if refusal:
+                return StageVerdict.refuse(refusal)
+            level = registry["interval_level"]
         base, cand = self.agent(None, ctx), self.agent(change, ctx)
         rb, rc = self._play(base, sel), self._play(cand, sel)
         m, lo, hi = paired_bootstrap([self.score(r) for r in rb], [self.score(r) for r in rc], boot=self.boot,
-                                     seed=self.seed)
+                                     seed=self.seed, level=level)
         meas = {"select": {"worlds": len(sel), "gain": [m, lo, hi], "failed": [sum(r["failed"] for r in rb),
                                                                               sum(r["failed"] for r in rc)]}}
+        if registry is not None:
+            meas["world_registry"] = registry
         veto = self._failure_veto(rb, rc, meas["select"], "selection")
         errs = sum(r["errors"] for r in rc)
         if errs:
@@ -735,9 +815,9 @@ class FreshEnvironments:
         cb, cc = self._play(base, conf), self._play(cand, conf)
         errs = sum(r["errors"] for r in cc)
         cm, clo, chi = paired_bootstrap([self.score(r) for r in cb], [self.score(r) for r in cc], boot=self.boot,
-                                        seed=self.seed + 1)
+                                        seed=self.seed + 1, level=level)
         pb, pc, ho = self._progress(cb, cc)
-        pm, plo, phi = paired_bootstrap(pb, pc, boot=self.boot, seed=self.seed + 2)
+        pm, plo, phi = paired_bootstrap(pb, pc, boot=self.boot, seed=self.seed + 2, level=level)
         meas["confirm"] = {"worlds": len(conf), "gain": [cm, clo, chi], "progress": [pm, plo, phi],
                            "failed": [sum(r["failed"] for r in cb), sum(r["failed"] for r in cc)]}
         if ho is not None:
