@@ -12,11 +12,11 @@ from ._multiple import ELOND, e_bh
 from ._agreement import agreement_diagnostics
 from ._checks import Check, CheckRegistry, error_correlation, NaiveCombiner, CorrelationAwareCombiner
 from ._source_trust import SourceTrust, SourceOpinion
+from ._episode_priors import EpisodePriors, EpisodePrior
 
 __all__ = ["MeanBound", "Mixture", "MirrorBound", "DeltaBudget", "Certificate", "EProcess", "clean_need", "ELOND", "e_bh", "agreement_diagnostics"]
 
 __all__ += ["Check", "CheckRegistry", "error_correlation", "NaiveCombiner", "CorrelationAwareCombiner"]
 __all__ += ["SourceTrust", "SourceOpinion"]
 
-from ._episode_priors import EpisodePriors, EpisodePrior
 __all__ += ["EpisodePriors", "EpisodePrior"]

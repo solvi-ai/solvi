@@ -4,10 +4,11 @@ import time
 import threading
 import contextlib
 
-_LABEL_LOCK = threading.RLock()
 from ...core.provenance import code_fingerprint
 from ...core.runtime import vhash
 from ._stages import StageVerdict
+
+_LABEL_LOCK = threading.RLock()
 
 
 def _number(value, name):

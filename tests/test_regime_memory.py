@@ -1,4 +1,3 @@
-import copy
 import json
 import pytest
 from solvi.experimental.regime_memory import RegimeMemory
