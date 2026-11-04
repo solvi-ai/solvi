@@ -851,7 +851,7 @@ class Process:
     # --- building
 
     def node(self, name, system=None, *, kind=None, reads=(), writes=None, question=None, end=False, merge=None,
-             store=None, promise=None, fingerprint=None):
+             store=None, promise=None, fingerprint=None, input_contracts=None, output_contracts=None):
         """Add a node. system: a solvi.build result, a System or a Guard (kind inferred), or None for kind="human" (a
         question put to a person: question= is required). reads: fact names; writes: {fact: "answer" | "answer:<q>" |
         "confidence" | "by" | "status"}; end: an end node; merge: "all" | "any" (for a node with several inputs);
@@ -879,6 +879,13 @@ class Process:
         if fingerprint is None and system is not None:
             fingerprint = fingerprint_of(system, kind)
         spec = {"kind": kind, "reads": list(reads), "writes": dict(writes or {})}
+        from ._process_boundary import frozen
+        for key, contracts in (("input_contracts", input_contracts), ("output_contracts", output_contracts)):
+            if contracts is not None:
+                try:
+                    spec[key] = frozen(contracts)
+                except (ValueError, TypeError, OverflowError) as exc:
+                    raise ProcessSpecError(f"node {name!r} {key}: {exc}") from exc
         if question is not None:
             spec["question"] = question
         if end:
@@ -1034,6 +1041,15 @@ class Process:
         p = cls(spec["name"], storage=storage, start=spec.get("start"), on_abstain=spec.get("on_abstain", "handoff"),
                 on_human=spec.get("on_human", "handoff"), user_verifier=user_verifier)
         for name, ns in (spec.get("nodes") or {}).items():
+            # Validate contracts before legacy _plain can coerce Python-only
+            # values/keys in an in-memory spec into different JSON values.
+            from ._process_boundary import frozen
+            for key in ("input_contracts", "output_contracts"):
+                if key in ns:
+                    try:
+                        frozen(ns[key])
+                    except (ValueError, TypeError) as exc:
+                        raise ProcessSpecError(f"node {name!r} {key}: {exc}") from exc
             if name in systems:
                 sysm = systems[name]
                 actual = fingerprint_of(sysm, ns.get("kind"))
@@ -1116,6 +1132,10 @@ class Process:
     def _given(self, ns, facts, prov):
         """The facts a node is given: the ones it reads (a human node that reads nothing: every fact), plain values,
         with the labels as the fact "provenance" when it reads it."""
+        for fact, contract in ns.get("input_contracts", {}).items():
+            if fact not in facts or prov.get(fact, {}).get("interface_version") != contract["version"]:
+                raise ProcessRunError(f"input boundary {fact!r}: missing fact or exact interface version mismatch")
+            _boundary_payload(contract, facts[fact], f"input boundary {fact!r}")
         reads = ns["reads"] or (list(facts) if ns["kind"] == "human" else [])
         state = {r: facts[r] for r in reads if r in facts and r != "provenance"}
         if "provenance" in reads:
@@ -1375,13 +1395,16 @@ class Process:
         that holds (counted in taken) is chosen → (the step as recorded, the edge or None). A run and its replay both
         take a step through here, so the replay recomputes exactly what the run recorded."""
         declined = res.by == "human" and res.status == "abstain"
-        out = {} if declined else {f: res.value(what) for f, what in ns["writes"].items()}
+        out = _boundary_outputs(ns, res, node, declined)
         label = {"from": node, "decision": res.stored_id, "by": res.by, "confidence": res.confidence,
                  "trace_hash": res.trace_hash}
         if res.by == "human" and isinstance(res.raw, HumanAnswer):
             label["reviewer"] = res.raw.reviewer
         facts.update(out)
         prov.update({f: dict(label) for f in out})
+        for fact, contract in ns.get("output_contracts", {}).items():
+            if fact in out:
+                prov[fact]["interface_version"] = contract["version"]
         outcome = {"facts": facts, "status": res.status, "by": res.by, "confidence": res.confidence,
                    "budget_over": res.budget_over, "drift": res.drift}
         edge = None
@@ -1533,6 +1556,12 @@ class Process:
                               declined=bool(d.get("declined")), ticket=ticket)
             rec_id = old.id
         else:
+            if not ans.declined and self.nodes[req.node].get("output_contracts"):
+                # Validate the ORIGINAL answer before legacy JSON serialization
+                # or recording. A rejected tuple must never become an accepted
+                # list when a later resume reuses the one-answer-per-ticket row.
+                proposal = NodeResult(ans.value, {req.question: ans.value}, "human", "ok", None, raw=ans)
+                _boundary_outputs(self.nodes[req.node], proposal, req.node, False)
             verified = None
             if self.user_verifier is not None and not ans.declined:
                 who = self.user_verifier(ans, req)
@@ -2673,7 +2702,7 @@ def _check_split(per, risk, auto):
 
 
 def _check_node(name, s):
-    allowed = {"kind", "reads", "writes", "question", "end", "store", "fingerprint", "promise"}
+    allowed = {"kind", "reads", "writes", "question", "end", "store", "fingerprint", "promise", "input_contracts", "output_contracts"}
     if set(s) - allowed:
         raise ProcessSpecError(f"node {name!r}: unknown fields {sorted(set(s) - allowed)}")
     if s.get("kind") not in KINDS:
@@ -2691,6 +2720,45 @@ def _check_node(name, s):
         raise ProcessSpecError(f"node {name!r}: a human node needs a question")
     if "end" in s and s["end"] is not True:
         raise ProcessSpecError(f"node {name!r}: end is true or absent")
+    from ._process_boundary import schema_check, invariant_check
+    for key, names in (("input_contracts", s["reads"]), ("output_contracts", s["writes"])):
+        contracts = s.get(key, {})
+        if not isinstance(contracts, dict) or any(f not in names for f in contracts):
+            raise ProcessSpecError(f"node {name!r}: {key} must name declared facts")
+        for fact, c in contracts.items():
+            try:
+                if not isinstance(c, dict) or set(c) - {"version", "schema", "invariants"} or not {"version", "schema"} <= set(c):
+                    raise ValueError("contract requires version/schema and optional invariants")
+                if not isinstance(c["version"], str) or not c["version"]:
+                    raise ValueError("version must be a nonempty string")
+                schema_check(c["schema"])
+                invs = c.get("invariants", [])
+                if not isinstance(invs, list) or invs and c["schema"]["type"] != "object":
+                    raise ValueError("invariants require an object schema and a list")
+                for inv in invs:
+                    invariant_check(inv)
+                    check_predicate(inv)
+            except (ValueError, TypeError) as exc:
+                raise ProcessSpecError(f"node {name!r} {key}[{fact!r}]: {exc}") from exc
+
+
+def _boundary_outputs(ns, res, node, declined):
+    out = {} if declined else {f: res.value(what) for f, what in ns["writes"].items()}
+    for fact, contract in ns.get("output_contracts", {}).items():
+        if fact in out:
+            _boundary_payload(contract, out[fact], f"node {node!r} output boundary {fact!r}")
+    return out
+
+
+def _boundary_payload(contract, value, where):
+    from ._process_boundary import frozen, payload_check
+    try:
+        value = frozen(value)
+        payload_check(contract["schema"], value)
+        if not all(holds(p, {"facts": value}) for p in contract.get("invariants", [])):
+            raise ValueError("payload invariant is false")
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ProcessRunError(f"{where}: {exc}") from exc
 
 
 def _check_edge(e, nodes, where):
