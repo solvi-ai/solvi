@@ -61,6 +61,7 @@ nav:
       - Fact-name aliases: api/fact-aliases.md
       - Structured rule answers: api/structured-answers.md
       - Hypothetical rule evaluation: api/system-probe.md
+      - Fitted check evidence: check_models.md
       - Code strategist: strategist.md
   - Experimental:
       - experimental.md
