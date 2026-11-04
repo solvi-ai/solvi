@@ -202,3 +202,158 @@ def discriminate(laws_a, laws_b, safe: Callable[[Any, Any], bool], probes: Itera
 
 
 __all__ = ["Probe", "discriminate", "eig", "split"]
+
+
+def _finite_number(value, name, *, positive=False):
+    if isinstance(value, bool) or not isinstance(value, numbers.Real) or not math.isfinite(value):
+        raise ValueError(f"{name} must be a finite number")
+    value = float(value)
+    if positive and value <= 0:
+        raise ValueError(f"{name} must be positive")
+    return value
+
+
+def _logsum(values):
+    top = max(values)
+    return top + math.log(sum(math.exp(v - top) for v in values))
+
+
+class GaussianProbes:
+    """Finite numeric hypotheses with owner-declared independent Normal measurement noise.
+
+    sigma is a positive standard deviation in the prediction's units, or fn(state, action).
+    Information ranking integrates the continuous Normal mixture using 64 deterministic
+    midpoint-quantile nodes per component: approximate expected bits, not a certificate.
+    Predictions/sigma must remain frozen during an experiment. Posterior confidence is
+    conditional on this finite family, prior and noise model, not guaranteed coverage.
+    """
+
+    def __init__(self, hypotheses, *, sigma, weights=None):
+        self._predictors = tuple(_predictor(h) for h in hypotheses)
+        if not self._predictors:
+            raise ValueError("give at least one hypothesis")
+        self._sigma = sigma if callable(sigma) else _finite_number(sigma, "sigma", positive=True)
+        ws = [1.] * len(self._predictors) if weights is None else list(weights)
+        if len(ws) != len(self._predictors):
+            raise ValueError("one weight per hypothesis")
+        ws = [_finite_number(w, "weight") for w in ws]
+        if any(w < 0 for w in ws) or not any(ws):
+            raise ValueError("weights must be nonnegative and not all zero")
+        # Scale before summing, so large finite weights cannot overflow.
+        scale = max(ws)
+        total = sum(w / scale for w in ws)
+        self._logs = tuple(math.log(w) - math.log(scale) - math.log(total) if w else -math.inf for w in ws)
+        self.observations = 0
+
+    @property
+    def weights(self):
+        return tuple(math.exp(w) for w in self._logs)
+
+    def _parameters(self, state, action):
+        means = tuple(_finite_number(p(state, action), "prediction") for p in self._predictors)
+        sigma = self._sigma(state, action) if callable(self._sigma) else self._sigma
+        return means, _finite_number(sigma, "sigma", positive=True)
+
+    def _posterior(self, means, sigma, value):
+        distances = [(value - mu) / sigma for mu in means]
+        if any(not math.isfinite(d) or abs(d) > 1e150 for d in distances):
+            raise ValueError("measurement/model scale is outside supported finite range")
+        logs = [w - .5 * d * d for w, d in zip(self._logs, distances)]
+        top = max(logs)
+        shifted = [v - top for v in logs]
+        norm = _logsum(shifted)
+        return tuple(v - norm for v in shifted)
+
+    def _information(self, means, sigma):
+        from statistics import NormalDist
+        if len(set(means)) < 2:
+            return 0.
+        # E_h E_(Y|h) log2 p(Y|h)/p(Y), continuous mixture quadrature.
+        nodes = [NormalDist().inv_cdf((i + .5) / 64) for i in range(64)]
+        info = 0.
+        for weight, mu in zip(self.weights, means):
+            if not weight:
+                continue
+            for z in nodes:
+                y = mu + sigma * z
+                ds = [(y - m) / sigma for m in means]
+                if any(not math.isfinite(d) or abs(d) > 1e150 for d in ds):
+                    raise ValueError("prediction/noise scale is outside supported finite range")
+                mixture = _logsum([w - .5 * d * d for w, d in zip(self._logs, ds)])
+                info += weight * (-.5 * z * z - mixture) / (64 * math.log(2))
+        return max(0., info)
+
+    def choose(self, safe, probes, *, read_only=None, cost=None, per_cost=False, max_cost=None):
+        """Read-only first, then expected bits (or bits/cost), lower cost, original order.
+
+        Unsafe probes are excluded before prediction/noise/cost callbacks. A supplied
+        max_cost excludes unaffordable probes before selection; repeats stay eligible.
+        """
+        if per_cost and cost is None:
+            raise ValueError("per_cost requires cost")
+        limit = None if max_cost is None else _finite_number(max_cost, "max_cost")
+        if limit is not None and limit < 0:
+            raise ValueError("max_cost must be nonnegative")
+        ro, best = _ro(read_only), None
+        for i, (state, action) in enumerate(probes):
+            if not safe(state, action):
+                continue
+            c = 1. if cost is None else _finite_number(cost(state, action), "cost")
+            if c < 0:
+                raise ValueError("cost must be nonnegative")
+            if limit is not None and c > limit:
+                continue
+            means, sigma = self._parameters(state, action)
+            info = self._information(means, sigma)
+            if info <= 1e-12:
+                continue
+            key = (0 if ro is None or ro(state, action) else 1,
+                   -info / max(c, 1e-12) if per_cost else -info, c, i)
+            if best is None or key < best[0]:
+                best = key, Probe(state, action, means, len(set(means)) - 1, info, c)
+        return None if best is None else best[1]
+
+    def observe(self, probe, value):
+        """Update on one fresh measurement, including another at the same point."""
+        value = _finite_number(value, "observation")
+        means, sigma = self._parameters(probe.state, probe.action)
+        if means != probe.predictions:
+            raise ValueError("hypothesis predictions changed since selection")
+        logs = self._posterior(means, sigma, value)
+        self._logs = logs
+        self.observations += 1
+        return self.weights
+
+    def run(self, observe, safe, probes, *, max_observations, max_cost=None,
+            confidence=None, read_only=None, cost=None, per_cost=False):
+        """Adaptive bounded loop; observe(state, action) performs the actual measurement.
+
+        Stop on declared call/cost budget, conditional posterior confidence, or no
+        informative affordable safe probe. Failed measurements propagate, not retry.
+        Returned history holds posterior after each completed observation.
+        """
+        if type(max_observations) is not int or max_observations < 0:
+            raise ValueError("max_observations must be a nonnegative integer")
+        budget = None if max_cost is None else _finite_number(max_cost, "max_cost")
+        if budget is not None and budget < 0:
+            raise ValueError("max_cost must be nonnegative")
+        if confidence is not None:
+            confidence = _finite_number(confidence, "confidence")
+            if not 0 < confidence <= 1:
+                raise ValueError("confidence must be in (0, 1]")
+        points, history, spent = tuple(probes), [], 0.
+        while len(history) < max_observations:
+            if confidence is not None and max(self.weights) >= confidence:
+                break
+            p = self.choose(safe, points, read_only=read_only, cost=cost, per_cost=per_cost,
+                            max_cost=None if budget is None else budget - spent)
+            if p is None:
+                break
+            value = observe(p.state, p.action)
+            posterior = self.observe(p, value)
+            spent += p.cost
+            history.append({"probe": p, "value": value, "weights": posterior, "spent": spent})
+        return history
+
+
+__all__.append("GaussianProbes")

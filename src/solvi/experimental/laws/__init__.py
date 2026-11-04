@@ -244,7 +244,7 @@ from ._confidence import Abstained, LawConfidence, LawStats, fisher_p
 from ._history import Context, History, Past, Same, Tracker
 from ._core import (Admission, Atom, Buffer, BudgetedProposer, CallableProposer, Candidate, Delta, Enumerate, Grammar, Law, LawSet, Proposer,
                     RandomProposer, Step, Transition, Undetermined, Unknown, sized_level, sized_need)
-from ._probes import Probe, discriminate, eig, split
+from ._probes import GaussianProbes, Probe, discriminate, eig, split
 from ._residual import residual_check
 from ._rank import (FEATURES, BagOfAtomsRanker, FeatureRanker, HandoverRanker, JointRanker, PriorRanker, RankedProposer,
                     SyntheticTask, atom_features, atom_kind, candidate_features, checks_to, synthetic_task)
@@ -253,7 +253,7 @@ warn_on_import(__name__)
 
 __all__ = ["Abstained", "Admission", "Atom", "BackoffBase", "BagOfAtomsRanker", "Buffer", "BudgetedProposer", "CallableProposer", "Candidate",
            "CompiledCheck", "Context", "Delta", "Enumerate",
-           "FEATURES", "FeatureRanker", "Grammar", "HandoverRanker", "History", "JointRanker", "Law", "LawConfidence", "LawSet", "LawStats", "PriorRanker", "Probe",
+           "FEATURES", "FeatureRanker", "GaussianProbes", "Grammar", "HandoverRanker", "History", "JointRanker", "Law", "LawConfidence", "LawSet", "LawStats", "PriorRanker", "Probe",
            "OutcomeClass", "Past", "Proposer", "RandomProposer",
            "RankedProposer", "Same", "Step", "SyntheticTask", "Transition", "atom_features", "atom_kind", "candidate_features",
            "check_compiled", "checks_to", "coarse", "discriminate", "eig", "fisher_p", "load_module", "residual_check", "sized_level", "sized_need", "split",
