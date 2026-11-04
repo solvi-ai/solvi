@@ -713,7 +713,17 @@ class FreshEnvironments:
         if isinstance(storage, JSONLStorage):
             if not storage.fsync or storage.rotates:
                 raise ValueError("world registry requires nonrotating JSONLStorage(fsync=True)")
-        elif not isinstance(storage, SQLiteStorage):
+        elif isinstance(storage, SQLiteStorage):
+            with storage._lock:
+                databases = storage.db.execute("PRAGMA database_list").fetchall()
+                main = next((row[2] for row in databases if row[1] == "main"), "")
+                if not main:
+                    raise ValueError("world registry requires SQLite main backed by a persistent file")
+                sync = storage.db.execute("PRAGMA synchronous").fetchone()[0]
+                mode = storage.db.execute("PRAGMA journal_mode").fetchone()[0].lower()
+                if sync < 2 or mode in ("off", "memory"):
+                    raise ValueError("world registry requires SQLite durable journaling and FULL synchronous")
+        else:
             raise ValueError("world registry requires durable JSONL or SQLite storage")
         if getattr(storage, "_batch", None) is not None:
             raise ValueError("world registry cannot reserve inside an active storage batch")

@@ -128,3 +128,34 @@ def test_outer_batch_refuses_before_all_callbacks_and_cannot_rollback_evaluation
     assert context(reopened).journal.records('fresh_world_reservation')==[]
     # No evaluation happened in the rejected outer transaction; a normal durable attempt is allowed.
     assert stage().run('a',context(reopened)).ok
+
+
+@pytest.mark.parametrize('path',[':memory:',''])
+def test_ephemeral_sqlite_cannot_evaluate_or_reopen_as_fresh_registry(path):
+    storage=SQLiteStorage(path);calls=[];s=stage()
+    def never(*args):calls.append(args);raise AssertionError('callback must not run')
+    s.agent=s.select=s.confirm=s.candidate_id=s.world_id=never
+    try:
+        with pytest.raises(ValueError,match='persistent file'):
+            s.run('a',context(storage))
+        assert calls==[] and context(storage).journal.records('fresh_world_reservation')==[]
+    finally:storage.close()
+    reopened=SQLiteStorage(path)
+    try:
+        with pytest.raises(ValueError,match='persistent file'):
+            s.run('a',context(reopened))
+        assert calls==[]
+    finally:reopened.close()
+
+
+@pytest.mark.parametrize('pragma',['synchronous=OFF','synchronous=NORMAL','journal_mode=OFF','journal_mode=MEMORY'])
+def test_explicitly_disabled_sqlite_durability_refuses_before_callbacks(tmp_path,pragma):
+    storage=SQLiteStorage(tmp_path/'disabled.db');storage.db.execute('PRAGMA '+pragma)
+    calls=[];s=stage(calls=calls)
+    def never(*args):calls.append(args);raise AssertionError('callback must not run')
+    s.select=s.confirm=s.candidate_id=s.world_id=never
+    try:
+        with pytest.raises(ValueError,match='durable journaling'):
+            s.run('a',context(storage))
+        assert calls==[] and context(storage).journal.records('fresh_world_reservation')==[]
+    finally:storage.close()
