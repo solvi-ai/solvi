@@ -278,7 +278,7 @@ class Knowledge:
         if self.failures is not None:
             self.failures.new_episode()
         self._episode = {"at": len(self.store.journal), "flagged": set(), "n": self._episode["n"] + 1}
-        self.store.note(episode="begin", n=self._episode["n"], map=None if map_id is None else str(map_id))
+        self.store.note(episode="begin", episode_n=self._episode["n"], map=None if map_id is None else str(map_id))
 
     def _end(self):
         """The episode ended: the action model's learned rules are committed as "action" items (newer versions refute

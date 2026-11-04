@@ -438,6 +438,7 @@ class KnowledgeStore:
         self._lock = threading.RLock()
         self._mem = _MemoryJournal() if self.storage is None else None
         self.journal = []                            # the entries in order, each with its position "n"
+        self._next_n = 0                             # logical positions may have historical holes/legacy notes
         self.items: dict[str, _Item] = {}
         self.by_key = defaultdict(set)
         self._by_subject = defaultdict(set)
@@ -466,7 +467,7 @@ class KnowledgeStore:
 
     # ------------------------------------------------------------------------------------------------ the journal
     def _write(self, op, **data):
-        body = {"kind": _KNOWLEDGE, "n": self.journal[-1]["n"] + 1 if self.journal else 0,
+        body = {"kind": _KNOWLEDGE, "n": self._next_n,
                 "op": op, "clock": self.clock, **data}
         if self._mem is not None:
             from ..store import _stamp
@@ -475,6 +476,7 @@ class KnowledgeStore:
             from ..store import FORMAT
             rec = self.storage._append({"v": FORMAT, **body})
         self.journal.append(rec)
+        self._next_n += 1
         self._fp = None
         return rec
 
@@ -592,6 +594,7 @@ class KnowledgeStore:
     def _apply(self, r):
         """Apply one journal entry to the raw data (rebuild and replay: no new entry is written)."""
         op, t = r["op"], r["n"]
+        self._next_n = max(self._next_n, t + 1)
         if op == "assert" and r.get("reassert_proof"):
             self._validate_reassert_record(r, t)
         self.clock = r.get("clock", self.clock)
@@ -1017,7 +1020,7 @@ class KnowledgeStore:
             it = self.items.get(iid)
             if it is None:
                 raise KeyError(f"no item {iid!r}")
-            end = (self.journal[-1]["n"] if self.journal else -1) if at is None else int(at)
+            end = self._next_n - 1 if at is None else int(at)
             cut0 = max((t for t in it.retracted if t <= end), default=-1)
             out = []
             for a in it.asserts:
@@ -1139,6 +1142,9 @@ class KnowledgeStore:
 
     def note(self, **data):
         """A journal entry that changes nothing (a gate's rejected measurement, a reason): recorded and chained."""
+        reserved = {"kind", "n", "op", "clock", "v", "seq", "id", "time", "prev", "hash", "run"}
+        if reserved & data.keys():
+            raise ValueError(f"note cannot override reserved journal fields: {sorted(reserved & data.keys())}")
         with self._lock:
             return self._write("note", **plain_json(data))
 

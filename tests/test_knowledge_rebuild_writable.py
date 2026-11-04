@@ -108,3 +108,35 @@ def test_verify_does_not_require_cloneable_write_policy(tmp_path, persistent):
     source.journal[0]["body"]["o"] = "tampered"
     assert not source.verify()
     assert gate.calls == calls
+
+
+def test_legacy_episode_tail_does_not_reset_logical_counter(tmp_path):
+    from solvi.core.store import FORMAT
+    path = tmp_path / "legacy.jsonl"
+    source = KnowledgeStore(path)
+    ids = [source.add("fact", {"s": str(i), "r": "v", "o": i}, source="outcome") for i in range(10)]
+    # Old native episode notes overwrote the journal n with an episode counter.
+    source.storage._append({"v": FORMAT, "kind": "knowledge", "op": "note", "n": 1, "clock": 0, "episode": "begin"})
+    saved = path.read_bytes()
+    restored = KnowledgeStore(path)
+    assert path.read_bytes() == saved and restored.journal[-1]["n"] == 1
+    assert restored.supporters(ids[-1])
+    rebuilt = restored.rebuild()
+    child = restored.branch()
+    for store in (restored, rebuilt, child):
+        prior_max = max(r["n"] for r in store.journal)
+        iid = store.add("fact", fact("next"), source="outcome")
+        assert store.journal[-1]["n"] == prior_max + 1
+        assert store.supporters(iid) and store.usable(iid) and store.verify()
+
+
+@pytest.mark.parametrize("field", ["n", "kind", "op", "clock", "v", "seq", "id", "time", "prev", "hash", "run"])
+def test_note_reserved_metadata_is_rejected_atomically(field):
+    source = KnowledgeStore()
+    source.add("fact", fact("before"), source="outcome")
+    before = copy.deepcopy(source.journal), source.head(), source.fingerprint(), source._next_n
+    with pytest.raises(ValueError, match="reserved"):
+        source.note(**{field: "override"})
+    assert (source.journal, source.head(), source.fingerprint(), source._next_n) == before
+    source.note(reason="valid")
+    assert source.journal[-1]["n"] == before[-1]
