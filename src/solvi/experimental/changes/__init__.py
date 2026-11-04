@@ -126,6 +126,7 @@ from ._stages import (DEFAULT_APPROVAL, LEVELS, REFUSAL_WORDS, Approval, Canarie
                      Stage, Static, StageVerdict, allowed, gate_of, gates_of, hazard_body, hazard_gate, is_refusal)
 from ._targets import KnowledgeTarget, LearningTarget, Promoted, Refused, VersionsTarget
 from ._watch import ShipWatch
+from ._economics import Economics, ProposerHistory
 
 warn_on_import(__name__)
 
@@ -587,7 +588,7 @@ class Pipeline:
                 if held_at.get(cid) is not None and now - float(held_at[cid]) >= max_age]
 
 
-__all__ = ["allowed", "Approval", "ARTIFACTS", "Canaries", "catalog_of", "Change", "CHANGE_TYPES", "ChangeJournal", "CleanCases",
+__all__ = ["Economics", "ProposerHistory", "allowed", "Approval", "ARTIFACTS", "Canaries", "catalog_of", "Change", "CHANGE_TYPES", "ChangeJournal", "CleanCases",
            "Confirmation", "Consistency", "Context", "DEFAULT_APPROVAL", "EvalLocked", "EvaluatorLock",
            "FreshEnvironments", "gate_of", "IsolatedTests", "gates_of", "hazard_body", "hazard_gate", "identity", "IDENTITY_KEYS", "Impact", "is_refusal", "KnowledgeTarget",
            "KnownFailures", "REFUSAL_WORDS", "RefusalRegression",

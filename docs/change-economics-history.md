@@ -1,0 +1,9 @@
+# Opt-in economics and proposer history
+
+`Economics(estimate, costs={stage_name: amount}, units='USD')` expects an owner callback `(change, ctx) -> {gain, loss}`. Finite nonnegative quantities share declared units; net gain minus loss minus costs must be strictly positive. Place it before expensive callbacks using given order (or explicit appropriate costs under cheap_first). Costs are anticipated amounts, not measured time. The callback must not itself run expensive evaluation. Verdicts journal estimates and utility-code fingerprint. No automatic causal-loss learning, savings certificate or bypass of later stages.
+
+`ProposerHistory(window=seconds, min_labels=1, max_loss=.5, unknown='audit', clock=...)` uses stable `change.proposer`. Record independently observed bounded loss with `stage.label(pipe.journal, proposer='id', loss=0, observed_at=..., evidence='external-receipt', event_id='unique')`. Owner authenticates stable identity, evidence and independence. Never label prior admission/refusal/prediction as truth: ordinary pipeline records do not count. Labels use the existing hash-chained journal; persistent paths support restart, memory paths do not.
+
+Observation-time windows prevent delayed labels rejuvenating old outcomes. Future observation/label times are excluded; duplicate event IDs refuse. Enough labelled mean loss above threshold refuses; otherwise all fresh gates still run. Unknown history audits-and-continues by default, preventing permanent cold-start refusal; optional hold waits for external evidence or human ruling. Verdicts retain policy fingerprint and selected evidence. No alias merging, truth certificate or sandbox against dishonest owner callbacks.
+
+Neither stage is installed by default or bypasses approval and mandatory stages. Run a fresh candidate through hard checks even after good proposer history.
