@@ -1919,7 +1919,7 @@ class LawSet:
         grammar/buffer writes and mutation inside shared action/effect/group payload objects are outside this scope.
         """
         from ._consolidate import consolidate
-        return consolidate(self, candidate, buffer, exclude, commit=commit)
+        return consolidate(self, candidate, buffer, exclude, commit=commit, candidate_type=Candidate, key_of=_key)
 
     @staticmethod
     def _clock(buffer):

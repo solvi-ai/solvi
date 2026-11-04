@@ -1,7 +1,7 @@
 """Transactional, opt-in LawSet compaction; ordinary admission remains in _core.test."""
 from copy import deepcopy
 
-from ._core import Candidate, _key
+__all__ = []
 
 
 def _scoped_confirm(owner, confirm, candidate, evidence):
@@ -30,15 +30,15 @@ def _scoped_confirm(owner, confirm, candidate, evidence):
         owner.__dict__.update(state)
 
 
-def consolidate(owner, candidate, buffer, exclude, *, commit):
+def consolidate(owner, candidate, buffer, exclude, *, commit, candidate_type, key_of):
     if getattr(owner, "_consolidation_confirming", False):
         raise RuntimeError("consolidate cannot be re-entered from confirmation")
-    c = Candidate(candidate.action, owner.grammar.check(candidate.condition), candidate.effect, candidate.proposer)
-    key = (_key(c.action), tuple(c.condition), _key(c.effect))
+    c = candidate_type(candidate.action, owner.grammar.check(candidate.condition), candidate.effect, candidate.proposer)
+    key = (key_of(c.action), tuple(c.condition), key_of(c.effect))
     if any(owner._ck(law) == key for law in owner.laws):
         return None
     targets = [law for law in owner.laws
-               if _key(law.action) == key[0] and _key(law.effect) == key[2]
+               if key_of(law.action) == key[0] and key_of(law.effect) == key[2]
                and set(c.condition) < set(law.condition)]
     if len(targets) < 2:
         return None
