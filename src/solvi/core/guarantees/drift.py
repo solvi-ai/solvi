@@ -68,6 +68,7 @@ import math
 import warnings
 from collections import Counter, deque
 from dataclasses import dataclass
+from operator import index as _index
 
 import numpy as np
 from scipy.stats import chi2, fisher_exact, norm
@@ -180,6 +181,27 @@ def _pooled(r, c, n1, n2):
     return np.array(rb, float), np.array(cb, float)
 
 
+def _calibration_count(value, name, minimum=1):
+    message = f"{name} must be an integer at least {minimum}"
+    if isinstance(value, (bool, np.bool_)):
+        raise ValueError(message)
+    try:
+        count = _index(value)
+    except TypeError:
+        raise ValueError(message) from None
+    if count < minimum:
+        raise ValueError(message)
+    return count
+
+
+def _calibration_level(alpha):
+    alpha = float(alpha)
+    if not 1e-4 <= alpha < 1:
+        raise ValueError(f"alpha {alpha:g}: a level set by simulation needs alpha between 1e-4 and 1 (rarer false "
+                         "flags cannot be certified by it)")
+    return alpha
+
+
 class Cusum:
     """One-sided CUSUMs over several channels at once: S_j = max(0, S_j + x_j) for each step's increments x (one per
     channel; NaN leaves a channel as it is), a flag when any S_j reaches h. Each channel's increments are a
@@ -191,6 +213,8 @@ class Cusum:
 
     def __init__(self, names, h):
         self.names, self.h = list(names), float(h)
+        if not self.names:
+            raise ValueError("at least one CUSUM channel required")
         self.reset()
 
     def reset(self):
@@ -200,6 +224,10 @@ class Cusum:
     def step(self, x):
         """One step's increments → the channel with the largest S (its index)."""
         x = np.asarray(x, float)
+        if x.ndim == 0 and len(self.names) == 1:
+            x = x.reshape(1)
+        if x.shape != self.S.shape:
+            raise ValueError("one increment per CUSUM channel required")
         ok = ~np.isnan(x)
         self.S[ok] = np.maximum(0.0, self.S[ok] + x[ok])
         self.since[ok] = np.where(self.S[ok] == 0.0, 0, self.since[ok] + 1)
@@ -213,34 +241,56 @@ class Cusum:
     @classmethod
     def calibrate(cls, names, make_null=None, alpha=0.01, horizon=1000, sims=None, seed=0, *, ref_n=None, allowance=0.5):
         """make_null(rng, sims) → a function giving one step's increments of `sims` null streams, an array (sims,
-        channels). sims: at least 2,000 and 20 / alpha. → a Cusum with h such that at most alpha of the simulated
+        channels). sims: defaults to max(2,000, ceil(20 / alpha)); an explicit positive integer is kept, with empirical
+        rate resolution 1 / sims. horizon and ref_n are integer counts. → a Cusum with h such that at most alpha of the simulated
         streams reach h within `horizon` steps; .rate is that share.
 
         Without make_null: two channels (a rise and a fall) over values standardized by a reference — the null is
         independent N(0, 1) values, increments ±z − allowance. ref_n: the reference's size; its own error of mean and
         spread is simulated (each null stream standardized by a reference of ref_n values drawn from the same null),
         which raises h for a short reference; None: a known mean and spread. (With make_null, put the reference's
-        error into it: ref_n= is refused there.)"""
+        error into it: ref_n= is refused there.) Null draws must have exactly the declared (sims, channels) shape;
+        NaN increments are missing observations, while infinite increments, states or thresholds are refused."""
+        names = list(names)
+        if not names:
+            raise ValueError("at least one CUSUM channel required")
+        alpha = _calibration_level(alpha)
+        horizon = _calibration_count(horizon, "horizon")
+        sims = max(2000, math.ceil(20 / alpha)) if sims is None else _calibration_count(sims, "sims")
         if make_null is None:
             if len(names) != 2:
                 raise ValueError("without make_null the null is a rise and a fall of one standardized value: two names")
-            make_null = _standardized_null(ref_n, float(allowance))
+            allowance = float(allowance)
+            if not math.isfinite(allowance):
+                raise ValueError("allowance must be finite")
+            if ref_n is not None:
+                ref_n = _calibration_count(ref_n, "ref_n", 2)
+            make_null = _standardized_null(ref_n, allowance)
         elif ref_n is not None:
             raise ValueError("ref_n= is for the built-in null; a make_null of your own simulates its reference itself")
-        if not 1e-4 <= float(alpha) < 1:
-            raise ValueError(f"alpha {alpha:g}: a level set by simulation needs alpha between 1e-4 and 1 (rarer false "
-                             "flags cannot be certified by it)")
-        sims = int(sims or max(2000, math.ceil(20 / alpha)))
         rng = np.random.default_rng(seed)
         nxt = make_null(rng, sims)
         S = np.zeros((sims, len(names)))
         top = np.zeros(sims)
-        for _ in range(int(horizon)):
-            S = np.maximum(0.0, S + np.nan_to_num(nxt(), nan=0.0))
-            top = np.maximum(top, S.max(1))
+        for _ in range(horizon):
+            increments = np.asarray(nxt(), float)
+            if increments.shape != S.shape:
+                raise ValueError(f"null draws must have shape {S.shape}, got {increments.shape}")
+            if np.isinf(increments).any():
+                raise ValueError("null increments must be finite or NaN for missing observations")
+            with np.errstate(over="ignore", invalid="ignore"):
+                S = np.maximum(0.0, S + np.nan_to_num(increments, nan=0.0))
+            peaks = S.max(1)
+            if not np.isfinite(peaks).all():
+                raise ValueError("calibration CUSUM values must remain finite")
+            top = np.maximum(top, peaks)
         top = np.sort(top)
         allowed = int(math.floor(alpha * sims))          # simulated streams that may reach h
-        c = cls(names, float(np.nextafter(top[sims - allowed - 1], math.inf)))
+        with np.errstate(over="ignore", invalid="ignore"):
+            h = float(np.nextafter(top[sims - allowed - 1], math.inf))
+        if not math.isfinite(h):
+            raise ValueError("calibration threshold must be finite")
+        c = cls(names, h)
         c.rate, c.sims, c.alpha, c.horizon = float((top >= c.h).mean()), sims, float(alpha), int(horizon)
         return c
 
@@ -657,8 +707,13 @@ class NumericDrift:
     them first; the bound is per `horizon` values, not for an unbounded stream."""
 
     def __init__(self, *, alpha=0.01, horizon=1000, allowance=0.5, ref_n=50, settle=0, min_sd=1e-9, value=None, seed=0):
-        if int(ref_n) < 2:
-            raise ValueError("ref_n: a reference has at least two values")
+        alpha = _calibration_level(alpha)
+        horizon = _calibration_count(horizon, "horizon")
+        ref_n = _calibration_count(ref_n, "ref_n", 2)
+        settle = _calibration_count(settle, "settle", 0)
+        allowance = float(allowance)
+        if not math.isfinite(allowance):
+            raise ValueError("allowance must be finite")
         if not math.isfinite(float(min_sd)) or float(min_sd) <= 0:
             raise ValueError("min_sd must be finite and positive")
         if value is not None and not callable(value):
