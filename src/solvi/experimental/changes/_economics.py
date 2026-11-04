@@ -1,6 +1,10 @@
 """Opt-in owner-model economics and independently labelled proposer history."""
 import math
 import time
+import threading
+import contextlib
+
+_LABEL_LOCK = threading.RLock()
 from ...core.provenance import code_fingerprint
 from ...core.runtime import vhash
 from ._stages import StageVerdict
@@ -61,18 +65,42 @@ class ProposerHistory:
         at, loss = _number(observed_at, 'observed_at'), _number(loss, 'loss')
         if at > now or loss > 1 or any(not isinstance(x, str) or not x for x in (proposer, evidence, event_id)):
             raise ValueError('past labelled outcome, stable proposer/evidence/event IDs required')
-        if any(r.get('action') == 'proposer_outcome' and r.get('event_id') == event_id for r in journal.records()):
-            raise ValueError('outcome event already labelled')
-        return journal.write('proposer_outcome', proposer=proposer, loss=loss, observed_at=at,
-                             labelled_at=now, evidence=evidence, event_id=event_id)
+        from ...core.store import JSONLStorage, SQLiteStorage
+        from ._journal import ChangeJournal, MemoryStorage
+        storage = journal.storage
+        if not isinstance(storage, (JSONLStorage, SQLiteStorage, MemoryStorage)):
+            raise ValueError('atomic history labels require native JSONL, SQLite or memory storage')
+        with _LABEL_LOCK:
+            if getattr(storage, '_batch', None) is not None:
+                raise ValueError('history labels require their own atomic batch')
+            batch = contextlib.nullcontext() if isinstance(storage, MemoryStorage) else storage.batch()
+            with batch:
+                # A fresh reader observes the head synchronized by the backend batch,
+                # rather than a caller journal's cached snapshot.
+                fresh = ChangeJournal(storage)
+                if any(r.get('event_id') == event_id for r in fresh.records('proposer_outcome')):
+                    raise ValueError('outcome event already labelled')
+                return fresh.write('proposer_outcome', proposer=proposer, loss=loss, observed_at=at,
+                                   labelled_at=now, evidence=evidence, event_id=event_id)
 
     def run(self, change, ctx):
         now = _number(self.clock(), 'now')
         if not isinstance(change.proposer, str) or not change.proposer:
             raise ValueError('stable proposer ID required')
-        records = [r for r in ctx.journal.records() if r.get('action') == 'proposer_outcome'
-                   and r.get('proposer') == change.proposer and now-self.window <= r['observed_at'] <= now
-                   and r['labelled_at'] <= now]
+        unique = {}
+        for row in ctx.journal.records('proposer_outcome'):
+            event = row['event_id']
+            signature = tuple(row[k] for k in ('proposer', 'loss', 'observed_at', 'evidence'))
+            if event in unique:
+                old = unique[event]
+                if tuple(old[k] for k in ('proposer', 'loss', 'observed_at', 'evidence')) != signature:
+                    raise ValueError('conflicting labels for one independent event')
+                if row['labelled_at'] < old['labelled_at']:
+                    unique[event] = row
+            else:
+                unique[event] = row
+        records = [r for r in unique.values() if r['proposer'] == change.proposer
+                   and now-self.window <= r['observed_at'] <= now and r['labelled_at'] <= now]
         mean = math.fsum(r['loss'] for r in records)/len(records) if records else None
         measured = dict(proposer=change.proposer, labels=len(records), mean_loss=mean, window=self.window,
                         evidence=[r['evidence'] for r in records], unknown=self.unknown,
