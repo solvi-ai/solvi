@@ -148,3 +148,26 @@ def test_returned_override_cannot_mutate_the_journal_record(tmp_path):
     row = next(storage._raw())[1]
     assert row['proposal']['action'] == {'value': 'override'}
     assert storage.verify()['ok']
+
+
+@pytest.mark.parametrize('path', [':memory:', ''])
+def test_ephemeral_sqlite_cannot_authorize_an_unrecoverable_override(path):
+    agent = Agent()
+    storage = SQLiteStorage(path)
+    wrapped = solvi.wrap(agent, decision_points={'decide': improve}, storage=storage)
+    with pytest.raises(ValueError, match='persistent SQLite'):
+        wrapped.decide({'x': 1})
+    assert agent.calls == 1 and list(storage._raw()) == []
+
+
+@pytest.mark.parametrize('pragma', ['synchronous=OFF', 'synchronous=NORMAL', 'journal_mode=OFF', 'journal_mode=MEMORY'])
+def test_unsafe_sqlite_durability_settings_are_refused_not_silently_changed(tmp_path, pragma):
+    storage = SQLiteStorage(tmp_path/'unsafe.db')
+    storage.db.execute('PRAGMA '+pragma)
+    key = pragma.split('=')[0]
+    before = storage.db.execute('PRAGMA '+key).fetchone()[0]
+    wrapped = solvi.wrap(Agent(), decision_points={'decide': improve}, storage=storage)
+    with pytest.raises(ValueError, match='persistent SQLite'):
+        wrapped.decide({'x': 1})
+    assert list(storage._raw()) == []
+    assert storage.db.execute('PRAGMA '+key).fetchone()[0] == before

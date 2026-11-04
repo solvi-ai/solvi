@@ -99,7 +99,14 @@ class _WrappedAgent:
         if isinstance(storage, JSONLStorage):
             if not storage.fsync or storage.rotates:
                 raise ValueError('overrides require nonrotating JSONLStorage(fsync=True)')
-        elif not isinstance(storage, SQLiteStorage):
+        elif isinstance(storage, SQLiteStorage):
+            databases = storage.db.execute('PRAGMA database_list').fetchall()
+            main = next((row[2] for row in databases if row[1] == 'main'), '')
+            synchronous = storage.db.execute('PRAGMA synchronous').fetchone()[0]
+            journal_mode = storage.db.execute('PRAGMA journal_mode').fetchone()[0].lower()
+            if not main or synchronous < 2 or journal_mode in ('off', 'memory'):
+                raise ValueError('overrides require persistent SQLite with synchronous FULL/EXTRA and a disk journal')
+        else:
             raise ValueError('overrides require durable JSONL or SQLite storage')
         if getattr(storage, '_batch', None) is not None:
             raise ValueError('override journal cannot commit inside an active storage batch')

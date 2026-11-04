@@ -31,7 +31,9 @@ internally is **not** monkeypatched; invoke the wrapped decision point externall
 
 An accepted override is durably journaled before returning it. A path creates
 fsynced nonrotating JSONL (or SQLite for .db/.sqlite/.sqlite3); explicit storage must
-be durable JSONL/SQLite and outside an active batch. Missing or failed storage raises
+be durable JSONL/SQLite and outside an active batch. SQLite must have a real main
+database file, synchronous FULL/EXTRA, and a disk journal; memory/temp databases
+and OFF/MEMORY journal modes are refused without changing owner settings. Missing or failed storage raises
 explicitly after the one base call; an unjournaled override is never returned. The
 chain records input/default/proposal/evidence, method/component and proposer code
 identity; its authentication does not establish that a loss estimate is true.
