@@ -17,6 +17,28 @@ the declared reading mode. Original quote text and offsets remain the evidence.
 For stable reference probes, see [canary probe selection](canary_probe_selection.md). The picker reports selection
 coverage and rejection reasons; it does not estimate population detection power from the candidate list.
 
+## Learned rules, external agents and fresh evaluation
+
+`learn_rule(..., max_literals=2, ngrams=2, negations=True)` opts into a richer bounded condition language.
+`calibrated=True, calibration=held_out` supplies a held-out precision signal; it does not create a guarantee.
+A separate labeled guarantee set remains necessary. With `confirm='proposal'`, the declared proposal fact carries
+`value`, `confidence` and a stable `identity`. Source changes or missing support cause abstention. Mutating learned
+structure or quality preserves an existing guard but makes it refuse stale calibration. See
+[learned conditions and quality](rule_list_conditions.md).
+
+Use [external-agent wrapping](external-agent-wrap.md) for explicitly named decision methods. Other methods forward
+to the original agent; internal `self` calls are not patched. Disabled mode calls the original method once without
+analysis or override writes. Utility estimates and evidence IDs are supplied by the application. Override journals
+require actual persistent SQLite with durable settings or nonrotating, fsynced JSONL; an outer storage batch is
+refused. Training-only component selection does not authorize deployment or reuse evaluation labels.
+
+[Fresh world registries](fresh_world_registry.md) reserve owner-defined identities before evaluation. Register the
+candidate family in advance and use a persistent journal; reservations are not refunded after failures. Allocation
+is nominal bootstrap accounting, not a distribution-free family guarantee.
+
+[Mutation site declarations](mutation-sites.md) describe explicit helper manifests and supported literal patterns.
+[LoRA timing](lora_time_estimate.md) explains warm-probe estimates and the additional preflight cost.
+
 ## Conditional checks and source accountability
 
 `System(check_policies=...)` adds opt-in, recorded adaptive acquisition. Each request supplies `check_loss`;

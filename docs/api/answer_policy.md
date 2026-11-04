@@ -48,6 +48,8 @@ Callbacks must return nonnegative finite weights for observed checks. Callbacks
 and mutable configuration are caller-owned; thread safety is not provided.
 Weights must be deterministic for the same observed subset during a decision and
 must not mutate the model or configuration while planning.
+Zero weight excludes that check from posterior candidates, collision terms and answer-source attribution.
+An acquired check still counts toward purchase limits and spending, even when its evidence weight is zero.
 Unlike the prototype's sticky cross-call memo, each decision uses a fresh memoized
 DP tree so changed model/configuration/callback state cannot reuse stale values.
 This preserves valid-method arithmetic while trading cross-call reuse for safety.

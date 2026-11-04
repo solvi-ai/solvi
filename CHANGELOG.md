@@ -23,6 +23,9 @@ This release contains breaking changes. See [migration notes](docs/migration-1.5
   their acquired cost still counts against decision budgets.
 - Identity canaries can select stable boundary probes from declared candidates, with selection coverage and
   rejection diagnostics. Probe selection does not establish a population detection rate.
+- Learned rule lists support bounded conjunctions, n-grams and explicit negation. Independent held-out precision
+  can supply native confidence/act; optional model confirmation binds a declared proposal identity. Changing
+  learned structure or quality makes an installed guarantee abstain until it is recalibrated.
 
 ### Knowledge and complete processes
 
@@ -38,6 +41,8 @@ This release contains breaking changes. See [migration notes](docs/migration-1.5
   failure vetoes have documented contracts rather than implicit truth or identity guarantees.
 - Simple uninterrupted succession chains resolve the previous and new version incrementally. Custom gates,
   dependencies, repeated claims and other unsupported histories retain the general resolver.
+- Append-witness invalidation uses an epoch instead of traversing unrelated cached keys. Replay with omitted
+  premises retains the general resolver and preserves dependency references.
 
 ### Learning, streams and evidence
 
@@ -56,6 +61,13 @@ This release contains breaking changes. See [migration notes](docs/migration-1.5
   restart and fresh request ids. Retry aliases are durable; legacy duplicate tickets recover oldest first.
 - Ticket clients and blind oracles have separate capability views. Passing a TicketDesk to Service exposes only
   oracle operations; client decision access requires the explicit client view.
+- Fresh-environment evaluation can reserve explicit world IDs durably before evaluation and account for a
+  registered finite candidate family. Nominal bootstrap allocation is reported without claiming FWER control.
+- `solvi.wrap` intercepts declared external agent decision points, preserving the original call when disabled or
+  without an admissible proposal. Overrides are journaled before return. A training-only helper compares
+  registered component configurations on paired seeds; utility and evidence remain caller declarations.
+- LoRA compute estimates use warm unapplied probes and expose timing diagnostics. This is not a wall-clock
+  limit or a claim of uniformly improved forecast accuracy.
 
 ### Safety and reliability
 
@@ -68,6 +80,8 @@ This release contains breaking changes. See [migration notes](docs/migration-1.5
 - Mutation testing handles module tuple/dict literal thresholds. Explicit integer parameter declarations can
   group supported equivalent mutations, reporting aliases and the score denominator; ordinary float mutations
   retain their default behavior.
+- Explicit check-function manifests, literal match patterns and multi-statement raise guards add bounded
+  mutation sites without executing registration callbacks during discovery.
 - Skill learners retain rejected-plan verification reasons and warn once about repeated same-start prediction
   mismatches, including possible clone/RNG issues, while continuing to reject the plans.
 - Journal ownership, durable ticket retries, mutation-worker cleanup/timeouts and knowledge indexing have
