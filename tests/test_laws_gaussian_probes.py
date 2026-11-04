@@ -67,11 +67,12 @@ def test_invalid_budget_prediction_and_cost():
     with pytest.raises(ValueError):model().choose(lambda *_:True,[(1,'r')],cost=lambda *_:-1)
 
 
-@pytest.mark.parametrize('observation,expected',[(1e100,(0.,1.)),(-1e100,(1.,0.))])
-def test_huge_common_squared_residual_does_not_erase_logodds(observation,expected):
-    g=model();p=g.choose(lambda *_:True,[(1,'r')])
-    assert g.observe(p,observation)==pytest.approx(expected)
-    assert sum(g.weights)==pytest.approx(1)
+@pytest.mark.parametrize('observation',[1e100,-1e100])
+def test_astronomical_likelihood_rejected_atomically(observation):
+    g=model();p=g.choose(lambda *_:True,[(1,'r')]);before=(g.weights,g.observations)
+    with pytest.raises(ValueError,match='supported finite range'):
+        g.observe(p,observation)
+    assert (g.weights,g.observations)==before
 
 
 def test_centered_means_posterior_and_information_translation_invariant():
@@ -82,11 +83,31 @@ def test_centered_means_posterior_and_information_translation_invariant():
 
 
 def test_unsupported_relative_scale_is_atomic():
-    g=model(sigma=1e-200)
-    # Build a matching probe without an unrepresentable EIG ranking calculation.
-    from solvi.experimental.laws import Probe
-    p=Probe(1,'r',(0.,2.),1)
-    before=(g.weights,g.observations)
+    g=model(sigma=1e-200);before=(g.weights,g.observations)
     with pytest.raises(ValueError,match='supported finite range'):
-        g.observe(p,1e200)
+        g.choose(lambda *_:True,[(1,'r')])
+    assert (g.weights,g.observations)==before
+
+
+def test_repeated_in_range_opposites_preserve_known_logodds():
+    g=model();p=g.choose(lambda *_:True,[(1,'r')])
+    for _ in range(50):
+        g.observe(p,100.);g.observe(p,-100.)
+    # Each pair contributes -4 log odds; 50 pairs => -200.
+    assert math.log(g.weights[1]/g.weights[0])==pytest.approx(-200,abs=1e-10)
+    assert g.observations==100 and sum(g.weights)==pytest.approx(1)
+
+
+def test_foreign_noise_and_means_changed_probes_refuse_atomically():
+    g=model();p=g.choose(lambda *_:True,[(1,'r')]);other=model()
+    before=(other.weights,other.observations)
+    with pytest.raises(ValueError,match='this planner'):other.observe(p,1.)
+    assert (other.weights,other.observations)==before
+    state={'sigma':1.,'mean':2.}
+    g=GaussianProbes([lambda *_:0.,lambda *_:state['mean']],sigma=lambda *_:state['sigma'])
+    p=g.choose(lambda *_:True,[(1,'r')]);before=(g.weights,g.observations)
+    state['sigma']=2.
+    with pytest.raises(ValueError,match='noise changed'):g.observe(p,1.)
+    state['sigma']=1.;state['mean']=3.
+    with pytest.raises(ValueError,match='predictions changed'):g.observe(p,1.)
     assert (g.weights,g.observations)==before

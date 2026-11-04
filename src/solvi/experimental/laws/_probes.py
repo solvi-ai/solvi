@@ -5,7 +5,7 @@ from __future__ import annotations
 import inspect
 import math
 import numbers
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Callable, Iterable, Sequence
 
 
@@ -218,6 +218,12 @@ def _logsum(values):
     return top + math.log(sum(math.exp(v - top) for v in values))
 
 
+@dataclass(frozen=True)
+class _GaussianProbe(Probe):
+    sigma: float = 1.
+    owner: Any = field(default=None, repr=False, compare=False)
+
+
 class GaussianProbes:
     """Finite numeric hypotheses with owner-declared independent Normal measurement noise.
 
@@ -244,6 +250,7 @@ class GaussianProbes:
         total = sum(w / scale for w in ws)
         self._logs = tuple(math.log(w) - math.log(scale) - math.log(total) if w else -math.inf for w in ws)
         self.observations = 0
+        self._owner = object()
 
     @property
     def weights(self):
@@ -258,13 +265,16 @@ class GaussianProbes:
     def _relative_likelihood(means, sigma, reference, centered_value):
         # log f_i(y) - log f_reference(y), with no common y**2 term.
         # Subtract means before scaling to retain their representable separation.
-        if not math.isfinite(centered_value):
+        # Finite float arithmetic cannot preserve small terms after arbitrarily
+        # large opposite updates. Refuse unsupported standardized coordinates,
+        # rather than silently lose evidence that a later observation may cancel.
+        if not math.isfinite(centered_value) or abs(centered_value) > 1e4:
             raise ValueError("measurement/model scale is outside supported finite range")
         relative = []
         for mu in means:
             delta = (mu - reference) / sigma
             term = delta * (centered_value - .5 * delta)
-            if not math.isfinite(delta) or not math.isfinite(term):
+            if not math.isfinite(delta) or abs(delta) > 1e4 or not math.isfinite(term):
                 raise ValueError("measurement/model scale is outside supported finite range")
             relative.append(term)
         return relative
@@ -324,13 +334,17 @@ class GaussianProbes:
             key = (0 if ro is None or ro(state, action) else 1,
                    -info / max(c, 1e-12) if per_cost else -info, c, i)
             if best is None or key < best[0]:
-                best = key, Probe(state, action, means, len(set(means)) - 1, info, c)
+                best = key, _GaussianProbe(state, action, means, len(set(means)) - 1, info, c, sigma, self._owner)
         return None if best is None else best[1]
 
     def observe(self, probe, value):
         """Update on one fresh measurement, including another at the same point."""
         value = _finite_number(value, "observation")
+        if not isinstance(probe, _GaussianProbe) or probe.owner is not self._owner:
+            raise ValueError("probe was not selected by this planner")
         means, sigma = self._parameters(probe.state, probe.action)
+        if sigma != probe.sigma:
+            raise ValueError("noise changed since selection")
         if means != probe.predictions:
             raise ValueError("hypothesis predictions changed since selection")
         logs = self._posterior(means, sigma, value)
