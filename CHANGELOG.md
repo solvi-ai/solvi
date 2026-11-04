@@ -18,6 +18,9 @@ This release contains breaking changes. See [migration notes](docs/migration-1.5
   hypothetical probes and a restricted unrecorded decision path support inspection without disguising its limits.
 - Model identity changes invalidate caches and calibration under the supported identity contract. Nonfinite model
   outputs fail explicitly, and replay checks probability/decision consistency.
+- Requests without hard checks avoid redundant reachability planning while retaining evidence validation.
+- Identity canaries can select stable boundary probes from declared candidates, with selection coverage and
+  rejection diagnostics. Probe selection does not establish a population detection rate.
 
 ### Knowledge and complete processes
 
@@ -31,6 +34,8 @@ This release contains breaking changes. See [migration notes](docs/migration-1.5
   bindings. Whole-process shadow comparison of native-System graphs serves the current result while recording candidate differences.
 - Explicit scoped coexistence, temporal reads, source-bound reassertion, source accountability and independent
   failure vetoes have documented contracts rather than implicit truth or identity guarantees.
+- Simple uninterrupted succession chains resolve the previous and new version incrementally. Custom gates,
+  dependencies, repeated claims and other unsupported histories retain the general resolver.
 
 ### Learning, streams and evidence
 
@@ -47,6 +52,8 @@ This release contains breaking changes. See [migration notes](docs/migration-1.5
   from uniform base audits, with recorded propensities and unchanged sample floors.
 - Open identical oracle-ticket inputs are deduplicated before a new model call or sampling draw, including across
   restart and fresh request ids. Retry aliases are durable; legacy duplicate tickets recover oldest first.
+- Ticket clients and blind oracles have separate capability views. Passing a TicketDesk to Service exposes only
+  oracle operations; client decision access requires the explicit client view.
 
 ### Safety and reliability
 
@@ -54,6 +61,11 @@ This release contains breaking changes. See [migration notes](docs/migration-1.5
   Human approval binds exact arguments and verified identity; replay retains the proposal and checks.
 - Numeric grounding handles large scales, Unicode signs, currency/locale readings and ambiguous labelled values.
   Extraction provenance identifies the selected evidence rather than accepting an arbitrary numeric occurrence.
+- Documents can explicitly declare space-separated thousands with `space_grouping=True`, retaining the original
+  quoted evidence and rejecting incomplete groups.
+- Mutation testing handles module tuple/dict literal thresholds. Explicit integer parameter declarations can
+  group supported equivalent mutations, reporting aliases and the score denominator; ordinary float mutations
+  retain their default behavior.
 - Journal ownership, durable ticket retries, mutation-worker cleanup/timeouts and knowledge indexing have
   targeted correctness and lifecycle fixes. Check, mutation and decision diagnostics report their actual scope.
 

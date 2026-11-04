@@ -2,6 +2,21 @@
 
 Version 1.5 contains breaking changes. These notes describe the prepared package; publication is a separate step.
 
+## Ticket roles and numeric declarations
+
+`Service(agent_oracle=desk)` now narrows a TicketDesk to its blind oracle view: open tickets, resolve and give up.
+It returns acknowledgments without the model answer. A request producer uses
+`Service(agent_oracle=desk.client())` for decision access. Host applications must authenticate the roles and keep
+their transports and storage access separate. These views do not authenticate a network connection.
+
+`document(..., space_grouping=True)` explicitly declares thousands separated by spaces, including bare `1 234`.
+Only complete groups of three are read; digits cannot be joined across lines or tabs. Without this declaration,
+ambiguous bare grouped digits still cause abstention. This changes the catalog identity; calibrations belong to
+the declared reading mode. Original quote text and offsets remain the evidence.
+
+For stable reference probes, see [canary probe selection](canary_probe_selection.md). The picker reports selection
+coverage and rejection reasons; it does not estimate population detection power from the candidate list.
+
 ## Conditional checks and source accountability
 
 `System(check_policies=...)` adds opt-in, recorded adaptive acquisition. Each request supplies `check_loss`;
