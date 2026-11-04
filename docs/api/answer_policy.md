@@ -3,7 +3,7 @@
 `solvi.core.plan.answer_policy` ports the archived `solvi_ext/answer_policy.py`:
 SHA256 `6bd3e7e39ce82d76a5d0dc34d36f20a575e3040a581d501d5e0377a5ee16f30b`.
 Primary source: `solvi_handoff_2026-10-30/solvi_ext/answer_policy.py` and
-`solvi_ext/tests/test_answer_policy.py`; research context S103 and S117 in
+`solvi_ext/tests/test_answer_policy.py`; earlier answer-replacement and check-cost research in
 `bag_reports/solvi_1.1.1.md`. The native tests pin a small deterministic record
 set and numerical outputs computed using that exact source. No external archive
 is needed to run tests. They do not reproduce historical model quality.
@@ -58,8 +58,8 @@ type, and simulated unseen candidates receive an ID distinct from observed IDs.
 Renaming an observed candidate therefore leaves the selected action and utility
 unchanged, including names such as `agree`, `fail` or `new1:P`.
 
-This is a bounded functional port, not evidence of improved quality. Scientific
-S103 original acceptance, frozen AIME calibration/cross-fitting, comparisons and
-cost-quality claims remain open. It does not implement S128 agent refusal repair.
+This is a bounded functional port, not evidence of improved quality. The
+original answer-replacement acceptance, frozen AIME calibration/cross-fitting, comparisons and
+cost-quality claims remain open. It does not implement agent refusal repair.
 
 ::: solvi.core.plan.answer_policy

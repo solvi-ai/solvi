@@ -20,7 +20,7 @@ The owner supplies numeric hypothesis means and a known positive measurement sta
 
 Expected information integrates continuous Normal likelihoods using deterministic 64 midpoint-quantile nodes per component. Probe.info is approximate bits, not exact integration or a certified bound. The loop reselects after each observation, stopping at the predeclared observation/cost budget, no informative affordable safe probe, or the declared posterior threshold. It does not automatically increase budgets or retry failed measurements. Confidence is conditional posterior mass, not a distribution-free guarantee, test alpha, accuracy certificate, or guaranteed identification within 20 observations. Highly extreme unsupported numeric scales are rejected explicitly.
 
-Fourier/dimensional formula discovery, learned noise, correlated measurements, historical formula-discovery accuracy and population power are outside this finite helper. Retain the historical S170 negative experiment; these focused tests establish the numeric likelihood and adaptive plumbing only.
+Fourier/dimensional formula discovery, learned noise, correlated measurements, historical formula-discovery accuracy and population power are outside this finite helper. Retain the historical numeric formula-discovery negative experiment; these focused tests establish the numeric likelihood and adaptive plumbing only.
 
 
 Floating-point support is deliberately bounded: each standardized mean separation

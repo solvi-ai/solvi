@@ -10,4 +10,4 @@ The selected data contributes success=1−loss to Beta alpha and loss to beta. T
 
 Use `SourceTrust(window=..., prior=result.prior, min_labels=...)` to construct a NEW current-context trust model before any current-episode labels. Its current-label support requirements and TrustGate remain unchanged; this helper does not manufacture current labels, mutate an existing SourceTrust or automatically apply an opinion. No anytime/FWER bound follows from the empirical prior. Snapshot is detached JSON; strict restore validates the complete schema/records before returning a fresh object. Persist the snapshot using the owner's durable storage; no automatic filesystem writes or episode discovery occurs.
 
-Historical S136 AUROC0.54 versus war-indicator0.82 on2138 pairs/16episodes remains a negative result. This finite functionality does not replicate that study or establish ranking/utility gains.
+The historical cross-episode trust study (AUROC0.54 versus war-indicator0.82 on2138 pairs/16episodes) remains a negative result. This finite functionality does not replicate that study or establish ranking/utility gains.
