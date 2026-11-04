@@ -7,7 +7,7 @@ catalog's task file with one small fault in it, of four kinds:
                or a comparison negated (<  ↔ >=, == ↔ !=, in ↔ not in, is ↔ is not)
     boundary   a comparison moved by its edge (< ↔ <=, > ↔ >=)
     constant   a signed threshold nudged up/down (comparison operands, UPPER_CASE module constants,
-               including annotated assignments)
+               including annotated assignments and tuple/dict literal values)
     branch     a rule branch swapped (if/else bodies, a if c else b → b if c else a)
     drop       a check dropped (a @cat.check / @cat.constraint function always answers True; a guard
                "if ...: raise" never raises; an assert always passes)
@@ -25,7 +25,7 @@ task does not load, or the System cannot be made) is "stillborn" and left out of
 A survivor is either a gap in the cases (add one that tells the two apart) or an equivalent mutant (no input can tell
 them apart: a constant nudged inside a range no realistic input reaches) — read it before writing a case.
 
-Supported sites do not cover Python in general: match patterns, tuple/dict thresholds,
+Supported sites do not cover Python in general: match patterns,
 helper/call-form check registration, multi-statement raise guards and arbitrary returned
 boolean expressions are not mutation operators. No static reachability is inferred;
 use functions=["rule", "Rules.decide"] to exclude unrelated helpers explicitly.
@@ -176,6 +176,24 @@ def _scope_nodes(tree, functions=None):
     return nodes
 
 
+def _upper_target(node):
+    if isinstance(node, ast.Name):
+        return node.id.isupper()
+    return isinstance(node, (ast.Tuple, ast.List)) and bool(node.elts) and all(map(_upper_target, node.elts))
+
+
+def _literal_thresholds(node):
+    if _num(node):
+        yield node
+    elif isinstance(node, (ast.Tuple, ast.List, ast.Set)):
+        for value in node.elts:
+            yield from _literal_thresholds(value)
+    elif isinstance(node, ast.Dict):
+        for key, value in zip(node.keys, node.values):
+            if key is not None:  # **expression is opaque, not a literal threshold declaration
+                yield from _literal_thresholds(value)
+
+
 def _sites(tree, functions=None):
     """Supported source sites; a main guard and its whole subtree are excluded."""
     out, upper = [], set()
@@ -183,8 +201,8 @@ def _sites(tree, functions=None):
         for node in tree.body:
             target = (node.targets[0] if isinstance(node, ast.Assign) and len(node.targets) == 1 else
                       node.target if isinstance(node, ast.AnnAssign) else None)
-            if isinstance(target, ast.Name) and target.id.isupper() and _num(node.value):
-                upper.add(id(node.value))
+            if _upper_target(target):
+                upper.update(id(value) for value in _literal_thresholds(node.value))
     nodes = _scope_nodes(tree, functions)
     for node in nodes:
         if isinstance(node, ast.Compare):
