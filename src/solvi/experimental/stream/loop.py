@@ -1991,10 +1991,12 @@ class AdapterLoop:
         """Additive mode: an alarm per layer. det_reps: layer version → its detector's report (each detector reads its
         layer's base-coin samples of its zone); the score monitor's alarm is about L0 (decision D4: the monitor reads
         L0's scores only). Each alarmed layer asks policy.alarm (the report carries "version" and "layer"), from L0
-        down; "recertify" restarts only that layer's promise (λ = +inf: it answers nowhere, the decisions it owns
+        down; with alarm_cascade="layer", "recertify" restarts only that layer's promise (λ = +inf: it answers nowhere, the decisions it owns
         escalate to the oracle and are labelled — rate full — and it relearns on them in the owned regime until it
         re-certifies) and puts only that layer in probation; Λ and the other layers are untouched. "rollback:<j>"
-        detaches the layers ≥ j (j a layer index). "ignore" as in replacement."""
+        detaches the layers ≥ j (j a layer index). With alarm_cascade="downstream", a non-ignored alarm also
+        restarts later layers and their probation, resets their detectors and discards an active trial before
+        old-zone evidence can be reused; retained routing thresholds stay fixed. "ignore" as in replacement."""
         l0 = self._layers[0]
         who_of = {}
         for v in det_reps:
