@@ -99,6 +99,16 @@ continues to declare a computed fact.
 
 ## Knowledge identity and readers
 
+`Knowledge.branch()` and `KnowledgeStore.branch()` provide isolated writable what-if copies. Writable
+`rebuild()` now also copies its policy; a gate holding noncopyable resources must supply a safe independent
+copy before it can be branched. Ordinary read-only `verify()` does not require copying the write gates.
+Callback closures and external state are not copied. Persistent reopening still needs explicit Python policy,
+writers, vocabulary and callbacks; inherited verified decision proofs are not exported automatically.
+
+`KnowledgeStore.note()` now rejects reserved journal metadata (`n`, `kind`, `op`, `clock`, `v`, `seq`, `id`,
+`time`, `prev`, `hash`, `run`) before writing. Use a distinct payload name such as `episode_n`; old recorded
+notes retain their data during replay. The internal logical cursor is separate from note payloads.
+
 The default belief fingerprint is `km2:sha256:<64 hex>`, a canonical Merkle root. The journal's hash chain and item IDs
 retain their existing formats. Loading the same journal rebuilds the root; no history rewrite is required.
 `store.legacy_fingerprint()` computes the previous 16-character belief fingerprint when auditing older records.

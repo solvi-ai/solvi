@@ -2,11 +2,16 @@
 
 ## 1.4.1 — unreleased
 
+- `Process.node(input_contracts=..., output_contracts=...)` declares versioned payload boundaries with
+  strict finite JSON shape checks and native predicate invariants. Input checks run before the consumer;
+  output and human-answer checks run before publishing or saving. Contracts bind the process spec and replay.
 - `Knowledge.branch()` and `KnowledgeStore.branch()` create independent writable what-if branches, with
   parent lineage and optional empty persistent storage. Native agenda/action/failure state is preserved;
   custom action models and persistent export without verified decision proofs are explicitly refused.
 - Rebuilt knowledge keeps an independent complete journal chain, write policy and assertion positions.
   Corrupt parent journals and destinations aliasing the parent, including hardlinks, are refused before copying.
+  Journal positions remain monotone across legacy episode notes; new notes cannot replace journal metadata.
+  Read-only verification continues to support custom write gates that own noncopyable resources.
 
 - `System(check_policies=...)` executes priced optional soft checks adaptively, with request `check_loss`,
   fixed model snapshots, budgets, skipped unavailable checks and recorded/replayable acquisition decisions.
