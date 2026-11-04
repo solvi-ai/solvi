@@ -3,7 +3,7 @@ import hashlib
 import json
 import math
 from ...core.runtime import vhash
-from ...core.store import JSONLStorage, SQLiteStorage
+from ...core.store import JSONLStorage, SQLiteStorage, record_hash
 
 
 class StagedTraffic:
@@ -72,9 +72,24 @@ class StagedTraffic:
             raise ValueError('rollout configuration mutated')
         if self.pipeline._watch_unavailable(self.version) is not None:
             raise ValueError('candidate version no longer active')
-        decisions=self._records('rollout_decision')
-        if any(r['decision']=='rollback' for r in decisions):return None
-        return sum(r['decision']=='advance' for r in decisions)
+        phase=0;terminal=False;last=-1
+        for row in self._records('rollout_decision'):
+            seq=row.get('seq')
+            if (terminal or type(row.get('phase')) is not int or row['phase']!=phase
+                    or phase>=len(self.phases) or type(seq) is not int or seq<=last
+                    or row.get('hash')!=record_hash(row) or row.get('decision') not in ('advance','rollback')):
+                raise ValueError('invalid recovered rollout decision')
+            labels=self._observations(phase,before=seq)
+            if {r['unit'] for r in labels}!=set(self.phases[phase]['units']):
+                raise ValueError('recovered decision lacks complete prior assigned outcomes')
+            candidate=[r['loss'] for r in labels if r['version']==self.version]
+            baseline=[r['loss'] for r in labels if r['version']==self.baseline]
+            diff=sum(candidate)/len(candidate)-sum(baseline)/len(baseline)
+            expected='rollback' if diff>self.phases[phase]['max_excess_loss'] else 'advance'
+            if row['decision']!=expected or type(row.get('labels')) is not int or row['labels']!=len(labels) or row.get('excess_loss')!=diff:
+                raise ValueError('recovered decision differs from fixed-cohort outcomes')
+            terminal=expected=='rollback';phase+=1;last=seq
+        return None if terminal else phase
 
     def route(self,unit):
         phase=self._phase()
@@ -82,7 +97,7 @@ class StagedTraffic:
             raise ValueError('rollout stopped/completed; owner must explicitly choose next deployment')
         p=self.phases[phase]
         if unit not in p['units']:raise ValueError('unit outside frozen current cohort')
-        old=[r for r in self._records('rollout_assignment') if r['phase']==phase and r['unit']==unit]
+        old=[r for r in self._assignments(phase).values() if r['unit']==unit]
         if old:return old[0]['version']
         version=self.version if self._arm(unit,p['share']) else self.baseline
         self._write('rollout_assignment',phase=phase,unit=unit,version=version)
@@ -92,19 +107,41 @@ class StagedTraffic:
         phase=self._phase()
         if isinstance(loss,bool) or not isinstance(loss,(int,float)) or not math.isfinite(loss) or not 0<=loss<=1:
             raise ValueError('actual bounded loss required')
-        assignments=[r for r in self._records('rollout_assignment') if r['phase']==phase and r['unit']==unit]
+        assignments=[r for r in self._assignments(phase).values() if r['unit']==unit]
         if not assignments:raise ValueError('durable assignment required before observation')
         if any(r['unit'] == unit for r in self._observations(phase)):
             raise ValueError('unit already labelled')
         return self.pipeline.observe(self.change_id,dict(rollout=self.id,phase=phase,unit=unit,
                                      assignment=assignments[0]['id'],version=assignments[0]['version'],loss=float(loss)),by=by)
 
-    def _observations(self, phase):
+    def _assignments(self, phase):
+        """Validate recovered assignment data before routing or accepting outcomes."""
+        plans=self._records('rollout_plan')
+        plan_seq=min(r['seq'] for r in plans)
+        head_count=self.journal.storage.head()['count']
+        selected={};units=set();sequences=set();ids=set()
+        for row in self._records('rollout_assignment'):
+            at,unit,version,seq=row.get('phase'),row.get('unit'),row.get('version'),row.get('seq')
+            rid=row.get('id')
+            if (type(at) is not int or not 0<=at<len(self.phases) or not isinstance(unit,str)
+                    or unit not in self.phases[at]['units'] or type(version) is not int
+                    or version!=(self.version if self._arm(unit,self.phases[at]['share']) else self.baseline)
+                    or type(seq) is not int or not plan_seq<seq<head_count
+                    or not isinstance(rid,str) or not rid or row.get('hash')!=record_hash(row)
+                    or rid!=row['hash'][:16] or (at,unit) in units or seq in sequences or rid in ids):
+                raise ValueError('invalid or duplicate recovered rollout assignment')
+            units.add((at,unit));sequences.add(seq);ids.add(rid)
+            if at==phase:selected[rid]=row
+        return selected
+
+    def _observations(self, phase, before=None):
         """Revalidate raw Pipeline.observe records before they can count as evidence."""
-        assignments={r['id']:r for r in self._records('rollout_assignment') if r['phase']==phase}
+        assignments=self._assignments(phase)
         p=self.phases[phase]
         labels={}
         for record in self.journal.records('observed'):
+            if before is not None and record['seq']>=before:
+                continue
             effect=record.get('observed')
             if not isinstance(effect,dict) or effect.get('rollout')!=self.id:
                 continue
@@ -113,7 +150,8 @@ class StagedTraffic:
             if effect['phase']!=phase:
                 continue
             unit=effect.get('unit')
-            assignment=assignments.get(effect.get('assignment'))
+            reference=effect.get('assignment')
+            assignment=assignments.get(reference) if isinstance(reference,str) else None
             loss=effect.get('loss')
             if (record.get('change')!=self.change_id or not isinstance(unit,str) or unit not in p['units']
                     or assignment is None or assignment['unit']!=unit or assignment['seq']>=record['seq']

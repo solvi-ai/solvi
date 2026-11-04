@@ -67,3 +67,45 @@ def test_raw_observation_provenance_is_revalidated(tmp_path,corruption):
     if corruption=='duplicate':p.journal.write('observed',change=change_id,observed=effect)
     with pytest.raises(ValueError):s.checkpoint()
     assert p.journal.records('rollout_decision')==[]
+
+@pytest.mark.parametrize('field,value',[('phase',True),('phase',-1),('phase',10),('phase','0'),('version',100),('version',True),('unit','foreign'),('unit',None)])
+def test_recovered_assignment_fields_fail_before_route_and_checkpoint(tmp_path,field,value):
+    p,r,phases=setup(tmp_path);s=StagedTraffic(p,r.version,rollout_id='A',phases=phases)
+    fields=dict(rollout='A',phase=0,unit='0',version=r.version if s._arm('0',.5) else s.baseline)
+    fields[field]=value
+    p.journal.write('rollout_assignment',**fields)
+    with pytest.raises(ValueError,match='recovered'):s.route('0')
+    with pytest.raises(ValueError,match='recovered'):s.checkpoint()
+
+@pytest.mark.parametrize('sequence',[True,-1,10000,'1'])
+def test_recovered_assignment_sequence_and_hash_integrity(tmp_path,sequence):
+    p,r,phases=setup(tmp_path);s=StagedTraffic(p,r.version,rollout_id='A',phases=phases)
+    s.route('0')
+    p.journal.records('rollout_assignment')[-1]['seq']=sequence
+    with pytest.raises(ValueError):s.route('0')
+    with pytest.raises(ValueError):s.checkpoint()
+
+
+def test_duplicate_recovered_assignment_refused_not_last_wins(tmp_path):
+    p,r,phases=setup(tmp_path);s=StagedTraffic(p,r.version,rollout_id='A',phases=phases)
+    version=s.route('0')
+    p.journal.write('rollout_assignment',rollout='A',phase=0,unit='0',version=version)
+    with pytest.raises(ValueError):s.route('0')
+    with pytest.raises(ValueError):s.checkpoint()
+
+
+def test_raw_decision_cannot_skip_unlabelled_phase(tmp_path):
+    p,r,phases=setup(tmp_path);s=StagedTraffic(p,r.version,rollout_id='A',phases=phases)
+    p.journal.write('rollout_decision',rollout='A',phase=0,decision='advance',excess_loss=0,labels=20)
+    with pytest.raises(ValueError,match='complete prior'):s.route('0')
+
+
+def test_two_phase_decisions_replay_against_prior_complete_labels(tmp_path):
+    p,r,phases=setup(tmp_path)
+    phases.append(dict(share=.5,units=[str(i) for i in range(20,40)],max_excess_loss=0))
+    s=StagedTraffic(p,r.version,rollout_id='A',phases=phases)
+    for phase in phases:
+        for unit in phase['units']:s.route(unit);s.observe(unit,0,by='gold')
+        assert s.checkpoint()['decision']=='advance'
+        s=StagedTraffic(p,r.version,rollout_id='A',phases=phases)
+    with pytest.raises(ValueError):s.route('39')
