@@ -1,6 +1,6 @@
 # Effective interval read cache
 
-KnowledgeStore reuses effective intervals across repeated reads of the same settled state. Only top-level computations with empty recursion context and empty local memo may enter the shared cache. Recursive/seen-dependent results and populated per-query memo results are never promoted into it; cyclic dependencies keep the existing evaluation semantics.
+KnowledgeStore reuses effective intervals across repeated reads of the same settled state. Only periods() and _holds_at() explicitly mark an isolated top-level computation for the shared cache. An initially empty caller-owned snapshot/find memo never reads or populates the shared cache; its original population semantics remain intact. Recursive/seen-dependent results and populated per-query memo results are never promoted into it; cyclic dependencies keep the existing evaluation semantics.
 
 Each cache entry stores a scalar resolved-state epoch and immutable tuple interval pairs. A completed affected-state flush increments the scalar epoch; writes do not clear or traverse the whole cache. Entries are bounded by existing item IDs, including invalid old-epoch entries until that ID is read again. A missing item is never cached. Public periods() returns fresh interval lists, including on cache hits; callers cannot mutate the cached list structure. None retains its prior meaning (no effective validity restriction), not an empty interval set.
 

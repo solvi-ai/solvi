@@ -51,3 +51,26 @@ def test_expiry_tick_and_missing_periods_preserved():
     assert s.periods(p) is None and s.usable(p,valid_at=10)
     s.tick(2);assert not s.usable(p,valid_at=10)
     assert s.verify() and s.rebuild().periods(p) is None
+
+
+
+def test_warm_root_cache_preserves_cyclic_shared_snapshot_memo():
+    import warnings
+    class Reference(KnowledgeStore):
+        def _periods(self,iid,seen,memo=None,**kw):
+            return self._compute_periods(iid,seen,{} if kw.get('_isolated') else memo)
+    def make(cls):
+        s=cls();p=add(s,'P',valid=(0,1))
+        a=s.add('fact',{'s':'A','r':'v','o':1},source='spec',valid=(0,10),derived_from=[p],inferred=True)
+        b=s.add('fact',{'s':'B','r':'v','o':1},source='spec',valid=(5,15),derived_from=[a],inferred=True)
+        s.add('fact',{'s':'A','r':'v','o':1},source='spec',valid=(0,10),derived_from=[b],inferred=True)
+        return s,a,b
+    with warnings.catch_warnings():
+        warnings.simplefilter('ignore')
+        fast,a,b=make(KnowledgeStore);reference,ra,rb=make(Reference)
+    assert fast.periods(a)==reference.periods(ra)
+    assert fast.periods(b)==reference.periods(rb)
+    assert fast.snapshot()==reference.snapshot()
+    local={};fast._periods(a,set(),local)
+    assert a in local  # even initially empty caller memo must be populated
+    assert fast.rebuild().snapshot()==reference.rebuild().snapshot()

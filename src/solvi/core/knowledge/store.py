@@ -1455,18 +1455,19 @@ class KnowledgeStore:
         the bounded one ends), outside any contested overlap; versions pending a re-test take no part. A derived item
         holds where its own validity and, for one of its derivations, every premise holds."""
         self._settle()
-        return self._periods(iid, set(), {})
+        return self._periods(iid, set(), _isolated=True)
 
-    def _periods(self, iid, seen, memo=None):
-        # Cyclic recursive answers depend on seen/local memo: never share them
-        # across read roots. In particular find() may carry a populated memo.
-        root = not seen and not memo and iid in self.items
+    def _periods(self, iid, seen, memo=None, *, _isolated=False):
+        # Only periods()/holds_at() explicitly mark isolated roots. An empty
+        # shared snapshot/find memo still needs its existing population effects;
+        # claims and recursive computations keep their original memo semantics.
+        root = _isolated and not seen and memo is None and iid in self.items
         epoch = self._period_epoch
         if root:
             cached = self._period_cache.get(iid)
             if cached is not None and cached[0] == epoch:
                 return None if cached[1] is None else [list(iv) for iv in cached[1]]
-        out = self._compute_periods(iid, seen, memo)
+        out = self._compute_periods(iid, seen, {} if _isolated else memo)
         if root:
             frozen = None if out is None else tuple(tuple(iv) for iv in out)
             self._period_cache[iid] = (epoch, frozen)
@@ -1509,7 +1510,7 @@ class KnowledgeStore:
 
     def _holds_at(self, iid, at):
         try:
-            p = self._periods(iid, set(), {})
+            p = self._periods(iid, set(), _isolated=True)
         except TypeError:                                # times that do not compare: the item's own `valid`
             return covers(self.valid(iid), at)
         return p is None or any(covers(iv, at) for iv in p)
