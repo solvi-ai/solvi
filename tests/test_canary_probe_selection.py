@@ -56,7 +56,8 @@ def test_selects_stable_boundary_preserves_existing_canary_and_detects_finite_sw
 
 
 def test_no_informative_candidate_reports_empty_without_claiming_coverage():
-    s = Server(); s.p = .999
+    s = Server()
+    s.p = .999
     report = IdentityCanary.pick_probes(_model(s), PROBES, repeats=2)
     assert report['selected'] == 0 and report['probes'] == []
     assert not report['has_stable_boundary_probes'] and report['answered_fraction'] == 1
