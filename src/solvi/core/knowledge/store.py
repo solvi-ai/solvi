@@ -458,6 +458,7 @@ class KnowledgeStore:
         self._fingerprint_rows = {}
         self._taints = {}                            # id → the journal position its support was last cut at (memo)
         self._append_chains = {}                     # proven plain open-ended succession keys only
+        self._append_epoch = 0                      # invalidate witnesses without walking unrelated keys
         self._append_pair = None
         self._guards = {}                            # key → _GuardKey: the revival guard's per-key cache (S266)
         if self.storage is not None and _replay:
@@ -598,7 +599,7 @@ class KnowledgeStore:
         op, t = r["op"], r["n"]
         self._next_n = max(self._next_n, t + 1)
         if op != "assert":
-            self._append_chains.clear()
+            self._append_epoch += 1
             self._append_pair = None
         if op == "assert" and r.get("reassert_proof"):
             self._validate_reassert_record(r, t)
@@ -746,6 +747,8 @@ class KnowledgeStore:
             if premise is not None:
                 self._append_chains.pop(premise.key, None)
         chain = self._append_chains.pop(it.key, None)
+        if chain is not None and chain[-1] != self._append_epoch:
+            chain = None
         since, until = _interval(r.get("valid"))
         plain = (fresh and it.kind == "fact" and it.key is not None and not self._touched and not self.flags
                  and not self.dependents.get(iid)
@@ -754,7 +757,7 @@ class KnowledgeStore:
                  and not it.reconfirm_after and r.get("by") is not None
                  and not any(r.get(k) for k in ("just", "consulted", "supersedes", "inferred", "reassert_proof")))
         if plain and chain is not None:
-            previous, old_since, writer, source = chain
+            previous, old_since, writer, source, _ = chain
             try:
                 plain = (self.state.get(previous, {}).get("status") == "active"
                          and writer == r.get("by") and source == r["source"]
@@ -764,7 +767,7 @@ class KnowledgeStore:
             if plain:
                 self._append_pair = (previous, iid)
         if plain and (chain is not None or len(self.by_key[it.key]) == 1):
-            self._append_chains[it.key] = (iid, since, r.get("by"), r["source"])
+            self._append_chains[it.key] = (iid, since, r.get("by"), r["source"], self._append_epoch)
         self._touch(iid)
 
     def proposal(self, kind, body, scope=None, *, source, by=None, evidence=None, derived_from=(), supersedes=None,
