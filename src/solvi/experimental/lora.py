@@ -5,7 +5,7 @@ cannot change what the model reads in the input. A LoRA adapter can: low-rank up
 and MLP weights in every layer, plus the last layer of the output head, trained on this question's examples with the
 rest of the checkpoint frozen. A gain over `fit` needs examples: at a few dozen try `fit` first (it takes
 milliseconds), and compare the two on held-out labels. The adapter is 3.2 MB (bf16); training on a CPU takes
-minutes (adapt_lora estimates the time after its first update and says so before training), on a GPU seconds.
+minutes (adapt_lora estimates compute from three warm unapplied updates after a discarded cold probe and says so before training), on a GPU seconds.
 
     part = model.decision("team", "Which team?", "email", TEAMS)      # DecideModel.load(..., backend="torch")
     from solvi.experimental.lora import adapt_lora, remove_lora
@@ -425,6 +425,29 @@ def _duration(s):
     return f"{s:.0f} s" if s < 90 else f"{s / 60:.0f} min"
 
 
+def _warm_update_estimate(loss, zero_grad, *, synchronize=None, clock=None):
+    """One discarded cold backward, then median of three unapplied warm backwards.
+
+    No optimizer is constructed or stepped. Timing is diagnostic compute, not a wall-clock SLA.
+    """
+    from statistics import median
+    clock = time.perf_counter if clock is None else clock
+    samples = []
+    for _ in range(4):
+        if synchronize is not None:
+            synchronize()
+        start = clock()
+        try:
+            loss().backward()
+        finally:
+            zero_grad()
+        if synchronize is not None:
+            synchronize()
+        samples.append(clock() - start)
+    return median(samples[1:]), {"cold_seconds": samples[0], "warm_seconds": samples[1:],
+                                 "basis": "median of three warm unapplied forward/backward probes"}
+
+
 def train(part, rows, *, r=8, alpha=None, epochs=6, lr=3e-4, seed=0, device=None, max_updates=400, notify=None,
           updates=None, log=None):
     """Train an adapter on [(text, label)] (labels as part.spec.label gives them) → LoraAdapter. notify(estimate_seconds,
@@ -487,10 +510,9 @@ def train(part, rows, *, r=8, alpha=None, epochs=6, lr=3e-4, seed=0, device=None
                       torch.nn.functional.cross_entropy(z[None], y[None]))
         return torch.stack(ls).mean()
 
-    t0 = time.perf_counter()                       # time one update (not applied) for the estimate
-    loss_of(list(range(min(BS, k)))).backward()
-    net.zero_grad(set_to_none=True)
-    per = time.perf_counter() - t0
+    per, estimate = _warm_update_estimate(
+        lambda: loss_of(list(range(min(BS, k)))), lambda: net.zero_grad(set_to_none=True),
+        synchronize=(lambda: torch.cuda.synchronize(dev)) if cuda else None)
     if notify is not None:
         notify(per * U, U, per, str(dev))
     opt = adamw(params, dev, lr=lr, weight_decay=0.0, betas=(0.9, 0.98), eps=1e-6)
@@ -525,7 +547,7 @@ def train(part, rows, *, r=8, alpha=None, epochs=6, lr=3e-4, seed=0, device=None
             tensors[n] = p.detach().to("cpu", torch.bfloat16).float()
     from .. import __version__
     info = {"k": k, "updates": U, "epochs": epochs, "lr": lr, "seed": seed, "batch": BS, "device": str(dev),
-            "seconds": round(seconds, 1), "loss_first": round(sum(losses[:5]) / len(losses[:5]), 4),
+            "seconds": round(seconds, 1), "estimate": estimate, "loss_first": round(sum(losses[:5]) / len(losses[:5]), 4),
             "loss_last": round(sum(losses[-5:]) / len(losses[-5:]), 4), "weights": model.weights_fingerprint(),
             "model_id": str(model.model_id), "question": list(map(str, (sp.task, *sp.real))), "kind": sp.kind,
             "solvi": __version__, "torch": torch.__version__, "threads": torch.get_num_threads()}
@@ -833,7 +855,7 @@ def adapt_lora(part, examples, *, r=8, epochs=6, holdout=None, seed=0, device=No
     milliseconds; the adapter can keep improving where `fit` levels off. Compare the two on held-out labels. (Was
     `part.adapt_lora(examples, ...)` before 1.0.)
 
-    Cost: minutes on a CPU; the time is estimated from the first update and reported (a LoraWarning) before
+    Cost: minutes on a CPU; the time is estimated from warm unapplied updates and reported (a LoraWarning) before
     training. r: the adapter's rank (alpha = 2r);
     epochs: passes over the examples (updates of 8 examples, between 40 and max_updates); lr: the learning rate;
     seed: the adapter's initialization and the order of the examples — the same seed gives the same adapter on a
