@@ -63,6 +63,37 @@ class RuleList:
         self.max_literals, self.ngrams, self.negations = max_literals, ngrams, negations
         self.facts, self.min_support, self.min_precision, self.max_rules = facts, min_support, min_precision, max_rules
         self.rules, self.default, self.truncated = [], None, 0
+        self.quality_mode = False
+        self.quality = None
+
+    def calibrate(self, rows, answers):
+        """Per-firing-rule smoothed precision on independent, explicitly held-out rows."""
+        if not rows or len(rows) != len(answers):
+            raise ValueError("rule calibration needs held-out rows and one answer per row")
+        counts = [[0, 0] for _ in range(len(self.rules) + 1)]
+        for row, answer in zip(rows, answers):
+            value, rule = self.predict(row)
+            bucket = self.rules.index(rule) if rule is not None else len(self.rules)
+            counts[bucket][0] += value == answer
+            counts[bucket][1] += 1
+        quality = [{"correct": k, "n": n, "act": (k + 1) / (n + 2) if n else None} for k, n in counts]
+        self.quality = quality
+        return quality
+
+    def decision(self, row):
+        from ..catalog import Decision
+        value, rule = self.predict(row)
+        bucket = self.rules.index(rule) if rule is not None else len(self.rules)
+        quality = None if self.quality is None else self.quality[bucket]
+        act = None if quality is None else quality["act"]
+        return Decision(value, confidence=0.0 if act is None else act,
+                        escalate="no independent held-out support for this rule" if act is None else None,
+                        extra={"act": 0.0 if act is None else act, "rule_quality": quality, "rule_index": bucket})
+
+    def fingerprint(self):
+        from ..provenance import digest
+        return digest("RuleList", self.facts, self.rules, self.default, self.max_literals, self.ngrams,
+                      self.negations, self.quality_mode, self.quality)
 
     def fit(self, rows, answers):
         """Learn the list from rows of facts and their answers; a second fit starts over (it replaces the list). When
@@ -72,6 +103,7 @@ class RuleList:
             raise ValueError(f"a rule list is fitted on examples, one answer for each: got {len(rows)} rows and "
                              f"{len(answers)} answers")
         self.rules, self.default, self.truncated = [], None, 0
+        self.quality = None
         L = [literals(r, self.facts, self.ngrams) for r in rows]
         if self.max_literals > 1 or self.negations or self.ngrams > 1:
             return self._fit_conditions(L, answers)

@@ -1893,11 +1893,13 @@ class System:
     fit_fast = _deprecate.removed_attr("fit_fast()", "fit(question, examples, features, select=False)", "System")
 
     @_deprecate.removed_kwargs(facts="features")
-    def learn_rule(self, question, examples, features, **kw):
+    def learn_rule(self, question, examples, features, *, calibrated=False, calibration=None, **kw):
         """An answer rule learned from examples (solvi.core.deciders.rulelist.RuleList): a readable "if feature then answer" list, installed in the
         catalog as a regular rule (deterministic, replayable). examples: [(init_state, answer)], at least one; features: the
         facts the list reads (`facts=` in 0.7) — parts of the catalog or given facts of the examples (a name that is neither raises, and
-        nothing is installed)."""
+        nothing is installed). calibrated=True explicitly returns a native Decision whose confidence/act is per-rule
+        smoothed precision from calibration=[(state, answer)] supplied independently by the caller; a rule without
+        such support abstains. Training never reads those labels. Use a separate independent set for guarantee()."""
         self._refuse_static_policy_execution()
         from .deciders.rulelist import RuleList
         q = self.questions[question]
@@ -1909,10 +1911,19 @@ class System:
         if lost or not facts:
             raise ValueError(f"learn_rule({question!r}): " + (f"{', '.join(lost)} is not a part of the catalog or a given "
                              "fact of the examples" if lost else "facts is empty") + " — the rule could never be computed")
+        if type(calibrated) is not bool:
+            raise TypeError("calibrated must be bool")
+        if calibration is not None and not calibrated:
+            raise ValueError("calibration requires calibrated=True")
         rl = RuleList(facts, **kw).fit(rows, [q.answer.normalize(a) for _, a in examples])
+        rl.quality_mode = calibrated
+        if calibration is not None:
+            calibration = list(calibration)
+            rl.calibrate([self.facts_for(state) for state, _ in calibration],
+                         [q.answer.normalize(a) for _, a in calibration])
 
         def learned(**args):
-            return rl.predict(args)[0]
+            return rl.decision(args) if calibrated else rl.predict(args)[0]
         learned.__name__ = f"learned_{question}"
         self.catalog.replace_rule(Part(kind="rule", name="answer:" + question, inputs=list(facts), func=learned,
                                        doc=str(rl), question=question, model=rl, provenance="learned"))
