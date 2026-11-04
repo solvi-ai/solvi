@@ -66,6 +66,8 @@ This release contains breaking changes. See [migration notes](docs/migration-1.5
 - Mutation testing handles module tuple/dict literal thresholds. Explicit integer parameter declarations can
   group supported equivalent mutations, reporting aliases and the score denominator; ordinary float mutations
   retain their default behavior.
+- Skill learners retain rejected-plan verification reasons and warn once about repeated same-start prediction
+  mismatches, including possible clone/RNG issues, while continuing to reject the plans.
 - Journal ownership, durable ticket retries, mutation-worker cleanup/timeouts and knowledge indexing have
   targeted correctness and lifecycle fixes. Check, mutation and decision diagnostics report their actual scope.
 
