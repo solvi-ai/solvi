@@ -108,8 +108,8 @@
  "gallery/01_support_triage": {
   "catalog": "e94e92d7b3d2236c",
   "models": {
-   "intent_class": "1555c164950e5955",
-   "intent_rule_line": "1555c164950e5955"
+   "intent_class": "8aa8ff92f6903dae",
+   "intent_rule_line": "8aa8ff92f6903dae"
   },
   "parts": {
    "anger": "6c24ec9e788932d2",
@@ -137,7 +137,7 @@
  "gallery/02_email_routing": {
   "catalog": "6a71d611f5857abe",
   "models": {
-   "team_votes": "a66dde49e5b19e0e"
+   "team_votes": "b4c787c4339fff37"
   },
   "parts": {
    "answer:needs_human": "89dad585ebb587b0",
@@ -511,12 +511,12 @@
   "questions": "141ed1993f263716"
  },
  "golden/rule_list": {
-  "catalog": "91412ff5a1258473",
+  "catalog": "9789be6914e3e9f1",
   "models": {
-   "answer:ok": "4fe31d9407610f78"
+   "answer:ok": "f719245381072ddc"
   },
   "parts": {
-   "answer:ok": "0c6d6ba1352bc247",
+   "answer:ok": "c2387bd5a0eb6773",
    "large": "492eec4a80f4184b",
    "late": "569370981783f8db",
    "small_share": "e5e4d3fa23db5051"

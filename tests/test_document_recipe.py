@@ -71,7 +71,9 @@ def ops_system(server, **kw):
 def test_solvi_document_is_the_recipe_entry():
     from solvi.solutions.document import DocumentSystem, document
     assert solvi.document is document and "document" in solvi.__all__ and "trace" in solvi.__all__
-    assert len(solvi.__all__) == 26  # candidate transition adds ordinary-function tracing
+    from solvi.solutions.wrap import wrap
+    assert solvi.wrap is wrap and "wrap" in solvi.__all__
+    assert len(solvi.__all__) == 27  # published surface adds external-agent wrap
     s = ops_system(Server(case_reply()))
     assert isinstance(s, DocumentSystem) and isinstance(s.system, solvi.System)
     assert s.fields == ["a", "b"] and s.checks == ["b_not_zero"]
