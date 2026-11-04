@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.5.0 — prepared 2026-11-04 (not published)
+## 1.5.0 — prepared 2026-11-05 (not published)
 
 This release contains breaking changes. See [migration notes](docs/migration-1.5-candidate.md).
 
@@ -19,6 +19,8 @@ This release contains breaking changes. See [migration notes](docs/migration-1.5
 - Model identity changes invalidate caches and calibration under the supported identity contract. Nonfinite model
   outputs fail explicitly, and replay checks probability/decision consistency.
 - Requests without hard checks avoid redundant reachability planning while retaining evidence validation.
+- Zero-weight checks no longer create posterior candidates, collision evidence or answer-source attribution;
+  their acquired cost still counts against decision budgets.
 - Identity canaries can select stable boundary probes from declared candidates, with selection coverage and
   rejection diagnostics. Probe selection does not establish a population detection rate.
 
