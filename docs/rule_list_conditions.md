@@ -17,3 +17,26 @@ The learned list remains a deterministic ordinary catalog rule with a default an
 Native `Decision.extra['act']` carries the quality estimate. On a third independent labeled set, use the existing `system.guarantee(question, guarantee_examples, signal='act', max_error=..., ...)` calibration path. The guarantee's method and assumptions remain unchanged. The example-free `promise=` structural act-head shortcut is not implemented for this ordinary-rule wrapper. Ordinary question minimum confidence can also abstain below the quality signal.
 
 The caller must collect training, quality estimation and guarantee calibration separately and declare their independence honestly. Equal feature values can occur in fresh independent observations, while different feature hashes do not prove independence; this API does not infer independence from content. Never reuse training or quality labels as guarantee calibration evidence. After refitting or changing quality data, recalibrate the native guarantee on new independent observations before relying on it. No generic guarantee/corrections channel was changed for this feature.
+
+## Rules confirming an existing model
+
+`learn_rule(..., calibrated=True, calibration=held_out, confirm='proposal')` reads a separate explicit proposal fact, never a question's answer by implicit name binding. Keep it outside `features`: the rule structure learns from text/features, not model outputs. The proposal is `{'value': declared_choice, 'confidence': finite_number_in_0_1}`. Invalid/unscored proposals and rule/model disagreements abstain. Quality calibration counts only agreeing rows in each first-firing-rule bucket; reports also count `disagreed` and `unscored` rows. Zero agreeing observations give no quality support.
+
+For example, register a wrapper around an existing native decider:
+
+```python
+@catalog.fn(model=existing_decider)
+def proposal(text):
+    decision = existing_decider.decide(text)
+    if decision.escalate is not None:
+        return None
+    return {'value': decision.value, 'confidence': decision.conf}
+
+# Build System(catalog, questions) first, with the intended question declared.
+system.learn_rule('intent', training, features=['text'], max_literals=3,
+                  calibrated=True, calibration=held_out, confirm='proposal')
+```
+
+The explicit `model=` records the proposal decider identity through the normal catalog model mechanism. A given proposal fact is also allowed when its provenance is supplied by the application. Never feed the question's own learned answer back as its proposal or present an escalated model output as scored support.
+
+On agreement, `act` and confidence are the minimum of the independently estimated agreement precision and the proposal confidence. This is a descriptive bounded signal, not an independence or risk theorem about correlated rules/models. Apply the native guarantee on a third independent set for the serving promise. The source-confidence cap cannot upgrade a weak source to certainty. Neither this mode nor repeated evaluation asserts the historical traffic percentages from any corpus experiment.

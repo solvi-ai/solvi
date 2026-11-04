@@ -54,29 +54,52 @@ def literals(row, facts, ngrams=1):
 
 class RuleList:
     def __init__(self, facts, min_support=3, min_precision=0.8, max_rules=40, *, max_literals=1, ngrams=1,
-                 negations=False):
+                 negations=False, confirm=None):
         for name, value in (("max_literals", max_literals), ("ngrams", ngrams)):
             if type(value) is not int or not 1 <= value <= 3:
                 raise ValueError(f"{name} must be an integer from 1 to 3")
         if type(negations) is not bool:
             raise TypeError("negations must be bool")
+        if confirm is not None and (not isinstance(confirm, str) or not confirm or confirm in facts):
+            raise ValueError("confirm must name a separate proposal fact, outside the learned features")
+        self.confirm = confirm
         self.max_literals, self.ngrams, self.negations = max_literals, ngrams, negations
         self.facts, self.min_support, self.min_precision, self.max_rules = facts, min_support, min_precision, max_rules
         self.rules, self.default, self.truncated = [], None, 0
         self.quality_mode = False
         self.quality = None
 
+    def _proposal(self, row):
+        import math
+        proposal = row.get(self.confirm)
+        if not isinstance(proposal, dict) or "value" not in proposal:
+            return None
+        confidence = proposal.get("confidence")
+        if (isinstance(confidence, bool) or not isinstance(confidence, (int, float))
+                or not math.isfinite(confidence) or not 0 <= confidence <= 1 or proposal["value"] is None):
+            return None
+        return proposal["value"], float(confidence)
+
     def calibrate(self, rows, answers):
         """Per-firing-rule smoothed precision on independent, explicitly held-out rows."""
         if not rows or len(rows) != len(answers):
             raise ValueError("rule calibration needs held-out rows and one answer per row")
-        counts = [[0, 0] for _ in range(len(self.rules) + 1)]
+        counts = [[0, 0, 0, 0] for _ in range(len(self.rules) + 1)]
         for row, answer in zip(rows, answers):
             value, rule = self.predict(row)
             bucket = self.rules.index(rule) if rule is not None else len(self.rules)
+            if self.confirm is not None:
+                proposal = self._proposal(row)
+                if proposal is None:
+                    counts[bucket][3] += 1
+                    continue
+                if proposal[0] != value:
+                    counts[bucket][2] += 1
+                    continue
             counts[bucket][0] += value == answer
             counts[bucket][1] += 1
-        quality = [{"correct": k, "n": n, "act": (k + 1) / (n + 2) if n else None} for k, n in counts]
+        quality = [{"correct": k, "n": n, "act": (k + 1) / (n + 2) if n else None,
+                    "disagreed": disagreed, "unscored": unscored} for k, n, disagreed, unscored in counts]
         self.quality = quality
         return quality
 
@@ -86,14 +109,22 @@ class RuleList:
         bucket = self.rules.index(rule) if rule is not None else len(self.rules)
         quality = None if self.quality is None else self.quality[bucket]
         act = None if quality is None else quality["act"]
+        reason = "no independent held-out support for this rule" if act is None else None
+        if self.confirm is not None:
+            proposal = self._proposal(row)
+            if proposal is None or proposal[0] != value:
+                reason = "no scored model proposal" if proposal is None else "rule and model disagree"
+                act = None
+            elif act is not None:
+                act = min(act, proposal[1])
         return Decision(value, confidence=0.0 if act is None else act,
-                        escalate="no independent held-out support for this rule" if act is None else None,
+                        escalate=reason,
                         extra={"act": 0.0 if act is None else act, "rule_quality": quality, "rule_index": bucket})
 
     def fingerprint(self):
         from ..provenance import digest
         return digest("RuleList", self.facts, self.rules, self.default, self.max_literals, self.ngrams,
-                      self.negations, self.quality_mode, self.quality)
+                      self.negations, self.confirm, self.quality_mode, self.quality)
 
     def fit(self, rows, answers):
         """Learn the list from rows of facts and their answers; a second fit starts over (it replaces the list). When

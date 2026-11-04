@@ -1893,7 +1893,7 @@ class System:
     fit_fast = _deprecate.removed_attr("fit_fast()", "fit(question, examples, features, select=False)", "System")
 
     @_deprecate.removed_kwargs(facts="features")
-    def learn_rule(self, question, examples, features, *, calibrated=False, calibration=None, **kw):
+    def learn_rule(self, question, examples, features, *, calibrated=False, calibration=None, confirm=None, **kw):
         """An answer rule learned from examples (solvi.core.deciders.rulelist.RuleList): a readable "if feature then answer" list, installed in the
         catalog as a regular rule (deterministic, replayable). examples: [(init_state, answer)], at least one; features: the
         facts the list reads (`facts=` in 0.7) — parts of the catalog or given facts of the examples (a name that is neither raises, and
@@ -1915,7 +1915,14 @@ class System:
             raise TypeError("calibrated must be bool")
         if calibration is not None and not calibrated:
             raise ValueError("calibration requires calibrated=True")
-        rl = RuleList(facts, **kw).fit(rows, [q.answer.normalize(a) for _, a in examples])
+        if confirm is not None:
+            if not calibrated:
+                raise ValueError("confirm requires calibrated=True")
+            if confirm in self.questions and confirm not in self.catalog.parts:
+                raise ValueError("confirm must name an explicit proposal fact, not a question")
+            if confirm not in self.catalog.parts and not all(confirm in row for row in rows):
+                raise ValueError("confirm must name a catalog or given proposal fact")
+        rl = RuleList(facts, confirm=confirm, **kw).fit(rows, [q.answer.normalize(a) for _, a in examples])
         rl.quality_mode = calibrated
         if calibration is not None:
             calibration = list(calibration)
@@ -1925,7 +1932,7 @@ class System:
         def learned(**args):
             return rl.decision(args) if calibrated else rl.predict(args)[0]
         learned.__name__ = f"learned_{question}"
-        self.catalog.replace_rule(Part(kind="rule", name="answer:" + question, inputs=list(facts), func=learned,
+        self.catalog.replace_rule(Part(kind="rule", name="answer:" + question, inputs=list(facts) + ([confirm] if confirm is not None else []), func=learned,
                                        doc=str(rl), question=question, model=rl, provenance="learned"))
         self.learned_rules[question] = rl
         return rl
