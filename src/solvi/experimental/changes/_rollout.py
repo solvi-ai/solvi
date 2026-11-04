@@ -6,6 +6,8 @@ import math
 from ...core.runtime import vhash
 from ...core.store import JSONLStorage, SQLiteStorage, record_hash
 
+__all__ = ["StagedTraffic"]
+
 
 class StagedTraffic:
     """Return a version for owner execution; never execute/deploy candidate code.

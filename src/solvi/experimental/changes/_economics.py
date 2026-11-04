@@ -8,6 +8,8 @@ from ...core.provenance import code_fingerprint
 from ...core.runtime import vhash
 from ._stages import StageVerdict
 
+__all__ = ["Economics", "ProposerHistory"]
+
 _LABEL_LOCK = threading.RLock()
 
 

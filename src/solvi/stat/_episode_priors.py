@@ -5,6 +5,8 @@ import hashlib
 import json
 import math
 
+__all__ = ["EpisodePrior", "EpisodePriors"]
+
 
 def _key(value):
     if not isinstance(value, str) or not value:
