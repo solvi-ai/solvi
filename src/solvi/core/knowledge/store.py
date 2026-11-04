@@ -114,7 +114,7 @@ from contextlib import contextmanager
 
 from ..runtime import vhash
 from . import _merkle
-from .gates import RANK, SOURCES, Verdict, WriterGate, default_gates, with_source_gate
+from .gates import RANK, SOURCES, Verdict, WriterGate, SourceGate, ConsistencyGate, default_gates, with_source_gate
 
 KINDS = ("fact", "rule", "skill", "action", "episode")
 NEEDS_PROMOTION = ("rule", "skill", "action")         # behaviour-changing kinds: a hypothesis until the gates promote it
@@ -457,6 +457,8 @@ class KnowledgeStore:
         self._fingerprint_root = None
         self._fingerprint_rows = {}
         self._taints = {}                            # id → the journal position its support was last cut at (memo)
+        self._append_chains = {}                     # proven plain open-ended succession keys only
+        self._append_pair = None
         self._guards = {}                            # key → _GuardKey: the revival guard's per-key cache (S266)
         if self.storage is not None and _replay:
             with self.batch():
@@ -595,6 +597,9 @@ class KnowledgeStore:
         """Apply one journal entry to the raw data (rebuild and replay: no new entry is written)."""
         op, t = r["op"], r["n"]
         self._next_n = max(self._next_n, t + 1)
+        if op != "assert":
+            self._append_chains.clear()
+            self._append_pair = None
         if op == "assert" and r.get("reassert_proof"):
             self._validate_reassert_record(r, t)
         self.clock = r.get("clock", self.clock)
@@ -705,6 +710,7 @@ class KnowledgeStore:
             self._validate_reassert_record(r, t)
         iid = r["item"]
         it = self.items.get(iid)
+        fresh = it is None
         if it is None:
             key = key_of(r["body"], r["scope"])
             value = r["body"].get("o") if isinstance(r["body"], dict) else None
@@ -732,6 +738,30 @@ class KnowledgeStore:
             self.dependents[p].add(iid)
         if it.reconfirm_after:                          # this assertion's clock is a possible last support: past
             insort(self._expiry, (it.asserts[-1]["clock"] + it.reconfirm_after, iid))   # it, the item expires
+        # Only a witnessed, dependency-free succession may resolve its last two
+        # versions. Any other write keeps the general component resolver.
+        self._append_pair = None
+        for parent in it.asserts[-1]["just"] + it.asserts[-1]["consulted"]:
+            self._append_chains.pop(self.items[parent].key, None)
+        chain = self._append_chains.pop(it.key, None)
+        since, until = _interval(r.get("valid"))
+        plain = (fresh and it.kind == "fact" and it.key is not None and not self._touched and not self.flags
+                 and self.now is None and all(type(g) in (SourceGate, ConsistencyGate) for g in self.gates)
+                 and not self.resolves.get(it.key) and since is not None and until is None
+                 and not it.reconfirm_after and r.get("by") is not None
+                 and not any(r.get(k) for k in ("just", "consulted", "supersedes", "inferred", "reassert_proof")))
+        if plain and chain is not None:
+            previous, old_since, writer, source = chain
+            try:
+                plain = (self.state.get(previous, {}).get("status") == "active"
+                         and writer == r.get("by") and source == r["source"]
+                         and _time_kind(since) == _time_kind(old_since) and since > old_since)
+            except TypeError:
+                plain = False
+            if plain:
+                self._append_pair = (previous, iid)
+        if plain and (chain is not None or len(self.by_key[it.key]) == 1):
+            self._append_chains[it.key] = (iid, since, r.get("by"), r["source"])
         self._touch(iid)
 
     def proposal(self, kind, body, scope=None, *, source, by=None, evidence=None, derived_from=(), supersedes=None,
@@ -1260,7 +1290,10 @@ class KnowledgeStore:
             self._resolved_clock, self._tick_dirty = self.clock, False
         if not self._touched:
             return
-        comp = self.downstream(self._touched)           # upstream items keep their state: nothing here changes it
+        pair = self._append_pair
+        self._append_pair = None
+        fast = pair is not None and self._touched == {pair[1]}
+        comp = set(pair) if fast else self.downstream(self._touched)  # upstream items keep their state: nothing here changes it
         for i in self._touched:                         # the guard cache mirrors the taint memo: a touched item's
             it = self.items.get(i)                      # raw entries may have moved, so its key re-reads it
             if it is not None and it.key is not None:
@@ -1273,7 +1306,12 @@ class KnowledgeStore:
             self._taints.pop(i, None)
         pending = self._pending_flags()
         flagged = {i for i in comp if any(self._flag_covers(t, i) for t in pending)}
-        new = _resolve(self.items, comp, self.by_key, self.resolves, self.clock, flagged, taints=self._taints,
+        by_key = self.by_key
+        if fast:
+            key = self.items[pair[1]].key
+            by_key = {key: comp}
+            self._guards.pop(key, None)  # a later general pass must rebuild the whole-key guard
+        new = _resolve(self.items, comp, by_key, self.resolves, self.clock, flagged, taints=self._taints,
                        state=self.state, guards=self._guards)
         for i in comp:
             if i in new:
@@ -1291,7 +1329,8 @@ class KnowledgeStore:
             self._fingerprint_root = _merkle.put(self._fingerprint_root, i,
                 None if row is None else _merkle.digest("solvi.km2.leaf", row))
         self._fp = None
-        self._update_questions(comp)
+        if not fast:  # a plain succession has no disputed versions to open
+            self._update_questions(comp)
 
     def _update_questions(self, comp):
         keys = {self.items[i].key for i in comp if self.items[i].key is not None}
