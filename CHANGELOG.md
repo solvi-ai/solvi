@@ -29,6 +29,9 @@ This release contains breaking changes. See [migration notes](docs/migration-1.5
 
 ### Knowledge and complete processes
 
+- Optional `Knowledge(revival_window=N)` bounds withdrawal protection in owner-declared logical ticks.
+  Within the inclusive window, shifted validity periods still require existing copy/retest checks; a fresh
+  direct claim after it may vouch anew. Old held claims and derived support do not revive merely with time.
 - Independent writable Knowledge branches preserve lineage, policy and native agenda/action/failure state.
   Rebuild preserves a complete independent journal, logical positions and assertion provenance.
 - Parent corruption and aliased destinations are refused before copying. Read-only verification supports gates

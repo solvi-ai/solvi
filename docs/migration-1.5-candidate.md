@@ -2,6 +2,14 @@
 
 Version 1.5 contains breaking changes. These notes describe the prepared package; publication is a separate step.
 
+## Explicit withdrawal window
+
+`Knowledge(revival_window=N)` opts into [bounded withdrawal protection](knowledge_revival_window.md).
+The default remains the existing overlap-based guard. Declare tick units and reopen a persistent journal
+with the same policy. The inclusive window covers any validity period of the same content/key; after it,
+only a fresh direct dated assertion may vouch anew. A tick never clears existing held claims or old derived
+support. Source/write gates, flags, retirement and reassert capabilities remain in force.
+
 ## Ticket roles and numeric declarations
 
 `Service(agent_oracle=desk)` now narrows a TicketDesk to its blind oracle view: open tickets, resolve and give up.
