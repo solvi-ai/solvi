@@ -46,7 +46,7 @@ def test_oracle_initialize_instructions_and_label_schema(tmp_path):
         run_builtin(Service(agent_oracle=desk), io.StringIO(json.dumps({
             'jsonrpc': '2.0', 'id': 1, 'method': 'initialize', 'params': {}})+'\n'), output)
         instructions = json.loads(output.getvalue())['result']['instructions']
-        assert 'oracle' in instructions and 'request_id' in instructions and 'certify' in instructions
+        assert 'oracle' in instructions and 'decide is unavailable' in instructions and 'certify' in instructions
         resolve = next(t for t in desk.mcp_tools() if t['name'] == 'resolve')
         assert resolve['inputSchema']['properties']['label']['enum'] == ['billing', 'cards']
     finally:
@@ -333,8 +333,8 @@ def test_mcp_round_trip_with_the_builtin_server(tmp_path):
     from solvi.serve import Service, mcp_tools, run_builtin
     store = JSONLStorage(tmp_path / "t.jsonl")
     desk, sp, _ = _desk(store)
-    svc = Service(agent_oracle=desk)
-    assert [t["name"] for t in mcp_tools(svc)] == ["decide", "resolve", "open_tickets", "give_up"]
+    svc = Service(agent_oracle=desk.client())
+    assert [t["name"] for t in mcp_tools(svc)] == ["decide"]
 
     def call(i, name, args):
         return {"jsonrpc": "2.0", "id": i, "method": "tools/call", "params": {"name": name, "arguments": args}}
@@ -344,9 +344,10 @@ def test_mcp_round_trip_with_the_builtin_server(tmp_path):
     out = io.StringIO()
     run_builtin(svc, inp, out)
     rs = [json.loads(x) for x in out.getvalue().splitlines()]
-    assert {t["name"] for t in rs[0]["result"]["tools"]} == {"decide", "resolve", "open_tickets", "give_up"}
+    assert {t["name"] for t in rs[0]["result"]["tools"]} == {"decide"}
     ticket = rs[1]["result"]["structuredContent"]
     assert ticket["status"] == "needs_verdict" and ticket["input"] == {"case": 7} and not rs[1]["result"]["isError"]
+    svc = Service(agent_oracle=desk.oracle())
     inp = io.StringIO("\n".join(json.dumps(m) for m in [
         call(3, "resolve", {"ticket": ticket["ticket"], "label": "loans"}),
         call(4, "resolve", {"ticket": ticket["ticket"], "label": _gold(7)}),
@@ -358,9 +359,9 @@ def test_mcp_round_trip_with_the_builtin_server(tmp_path):
     rs = [json.loads(x) for x in out.getvalue().splitlines()]
     assert rs[0]["result"]["isError"] and "not an answer" in rs[0]["result"]["structuredContent"]["error"]
     ok = rs[1]["result"]["structuredContent"]
-    assert ok["status"] == "resolved" and ok["answer"] == _gold(7) and ok["stored_id"]
+    assert ok == {"status": "resolved"}
     assert rs[2]["result"]["isError"] and rs[2]["result"]["structuredContent"]["error"] == UNKNOWN
-    assert rs[3]["result"]["isError"] and "JSON object" in rs[3]["result"]["structuredContent"]["error"]
+    assert rs[3]["error"]["code"] == -32602  # oracle cannot submit decisions
     assert rs[4]["error"]["code"] == -32602                  # the question tools are not served in this mode
     assert sp.n == 1 and desk.dispatcher.replay_stream()["ok"]
 
@@ -386,7 +387,10 @@ def build():
     s1.guarantee("intent", promise=sp)
     d = Dispatcher(s1, AgentOracle(s1), audit="adaptive", promise=sp, detector=RiskDetector(0.05), secret="k",
                    storage=JSONLStorage(os.environ["DESK_STORE"]))
-    return TicketDesk(d)
+    desk = TicketDesk(d)
+    if d.n == 0:
+        desk.decide({"case": 1})
+    return desk
 """
 
 
@@ -405,16 +409,15 @@ def test_serve_agent_oracle_across_two_processes(tmp_path):
     f = tmp_path / "desk.py"
     f.write_text(textwrap.dedent(DESK_FILE))
     store = tmp_path / "s.jsonl"
-    call = {"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {"name": "decide",
-                                                                          "arguments": {"state": {"case": 1}}}}
+    call = {"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {"name": "open_tickets", "arguments": {}}}
     rs = _session(f, store, [{"jsonrpc": "2.0", "id": 1, "method": "tools/list"}, call])
-    assert {t["name"] for t in rs[0]["result"]["tools"]} == {"decide", "resolve", "open_tickets", "give_up"}
-    ticket = rs[1]["result"]["structuredContent"]["ticket"]
+    assert {t["name"] for t in rs[0]["result"]["tools"]} == {"resolve", "open_tickets", "give_up"}
+    ticket = rs[1]["result"]["structuredContent"]["tickets"][0]["ticket"]
     # the server stops; a new one on the same store resolves the ticket
     rs = _session(f, store, [{"jsonrpc": "2.0", "id": 3, "method": "tools/call",
                               "params": {"name": "resolve", "arguments": {"ticket": ticket, "label": "cards"}}}])
     res = rs[0]["result"]["structuredContent"]
-    assert res["status"] == "resolved" and res["answer"] == "cards"
+    assert res == {"status": "resolved"}
     kinds = [json.loads(x)["kind"] for x in store.read_text().splitlines()]
     assert kinds.count("pending") == 1 and kinds.count("dispatch") == 1
     from solvi.cli import main
@@ -711,7 +714,7 @@ def test_mcp_recovery_and_refusal_use_normal_tool_error_envelope(tmp_path):
     from solvi.serve import Service, call_tool
     desk, _, _ = _desk(JSONLStorage(tmp_path / "errors.jsonl"))
     svc = Service(agent_oracle=desk)
-    issued, bad = call_tool(svc, "decide", {"state": {"case": 1}})
+    issued, bad = call_tool(Service(agent_oracle=desk.client()), "decide", {"state": {"case": 1}})
     assert not bad
     recovered, bad = call_tool(svc, "open_tickets", {})
     assert not bad and recovered == {"tickets": [issued]}

@@ -21,7 +21,17 @@ the kind in an isolated ticket; it does not make the whole interaction indisting
 `decide` cannot re-probe an identical input while its ticket is open: by default the desk returns that ticket,
 without another draw or decision. This also applies across restart and different request ids. After completion or
 expiry a repeated input is a new decision. `deduplicate_open=False` restores the old per-call behavior and permits
-the same-input side channel. The calibration coin is still drawn per decision, not fixed per input.
+the same-input side channel. Modified unused fields also bypass serialized-input deduplication and can reveal the
+model guess via fresh decisions. The calibration coin is still drawn per decision, not fixed per input.
+
+Serving boundary. `Service(agent_oracle=desk)` narrows to `desk.oracle()`: only open_tickets, resolve and give_up.
+`Service(agent_oracle=desk.client())` exposes decide only. Oracle verdicts return status only, never the completed
+answer or storage metadata. Both services share one owner desk and its lock; pending work recovers from the journal.
+Run the two services over separately authenticated/authorized transports: the oracle must not reach the client
+endpoint, journal or process memory. These views enforce tool access, not transport authentication or Python isolation.
+Local desk.decide/resolve/call_tool remain trusted combined APIs. A labeler granted those APIs can still probe.
+Queue membership, input, count and timing remain visible: arbitrary whole-interaction indistinguishability is not
+supported. This is a trusted-role contract, not a promise against an oracle with arbitrary access.
 
 The certificate assumes that the oracle's label does not depend on whether the decision was sampled. Equal ticket
 fields alone do not enforce this assumption: the application must account for the oracle's access to repeated
@@ -499,6 +509,14 @@ class TicketDesk:
             return [{"ticket": t, "age_s": round(now - v["created"], 3)}
                     for t, v in sorted(self._open.items(), key=lambda kv: kv[1]["started"].n)]
 
+    def client(self):
+        """Trusted request producer capability; deploy separately from the oracle endpoint."""
+        return TicketRole(self, "client")
+
+    def oracle(self):
+        """Blind labeler capability: durable pending queue, verdict acknowledgments, no decide."""
+        return TicketRole(self, "oracle")
+
     # --- MCP (solvi serve --mcp --agent-oracle)
     def mcp_tools(self) -> list:
         """Decide, resolve, recover open tickets, or explicitly give up."""
@@ -565,6 +583,38 @@ class TicketDesk:
             out = self.expire(ticket, why)
             return {"status": "expired", "ticket": ticket, "stored_id": out.stored_id}
         raise KeyError(name)
+
+
+class TicketRole:
+    """Server-side tool allowlist, not a Python sandbox or an authentication mechanism.
+
+    The operator must isolate the oracle from client endpoints, storage and process memory.
+    Queue membership/timing is observable; whole-interaction indistinguishability is not promised.
+    """
+
+    Error = TicketError
+
+    def __init__(self, desk, role):
+        if role not in ("client", "oracle"):
+            raise ValueError("role is client or oracle")
+        self._desk, self.role = desk, role
+        self.dispatcher = desk.dispatcher
+
+    def mcp_tools(self):
+        allowed = {"decide"} if self.role == "client" else {"open_tickets", "resolve", "give_up"}
+        return [t for t in self._desk.mcp_tools() if t["name"] in allowed]
+
+    def call_tool(self, name, arguments):
+        if name not in {t["name"] for t in self.mcp_tools()}:
+            raise KeyError(name)
+        result = self._desk.call_tool(name, arguments)
+        if self.role == "oracle" and name in ("resolve", "give_up"):
+            # Even a resolved audit may return System 1's guess via on_disagree.
+            return {"status": result["status"]}
+        return result
+
+    def sweep(self):
+        self._desk.sweep()
 
 
 __all__ = ["AgentOracle", "SOURCES", "TTL", "TicketDesk", "TicketError", "UNKNOWN"]

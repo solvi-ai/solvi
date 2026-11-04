@@ -33,11 +33,13 @@ question and returns its result (answer, confidence, status, why, safeguards) wi
 the official `mcp` SDK (2.x, `solvi[mcp]`) when it is installed, else a built-in stdio JSON-RPC server with the subset of
 the protocol that tools need (initialize, ping, tools/list, tools/call).
 
-MCP with the agent as the oracle (`--mcp --agent-oracle`, a preview: the stream package's tickets): the object
-served is a TicketDesk (a Dispatcher whose slow path is the agent, with its storage), and the tools are two — `decide`
-({"state"}: the decision, or a blind ticket: all options, the input, the question's text, no model guess) and
-`resolve` ({"ticket", "label"}: the agent's verdict completes the decision). This module does not import the
-stream package: the desk is duck-typed (mcp_tools, call_tool, Error).
+MCP with the agent as the oracle (`--mcp --agent-oracle`, a preview): the object served is a TicketDesk,
+which Service narrows to its oracle capability: open_tickets (blind durable work), resolve and give_up (status-only
+acknowledgments). `Service(agent_oracle=desk.client())` exposes decide to a trusted request producer. Deploy the two
+services on separately authorized transports sharing one owner desk; no transport authentication is added by these
+views. The oracle must not access the client endpoint, storage or process memory. Combined local desk APIs remain
+trusted. Queue timing/membership is observable; whole-interaction indistinguishability is not promised. Generic
+System/decider entrypoints are denied on either ticket-role Service.
 
 Security (see docs/guide.md, Serving): `--token` / $SOLVI_SERVE_TOKEN requires `Authorization: Bearer <token>` on every
 HTTP request (constant-time compare); a request body / MCP message is at most `--max-body` bytes and `--max-depth` levels
@@ -137,7 +139,10 @@ class Service:
 
     def __init__(self, system=None, decider=None, storage=None, model_name=None, limits=None, textin=None,
                  allow_client_no_store=False, agent_oracle=None):
-        self.oracle = agent_oracle                    # a TicketDesk (a preview): MCP serves its two tools only
+        # Raw desks narrow to the oracle role; exposing both decision and label tools silently is unsafe.
+        if agent_oracle is not None and callable(getattr(agent_oracle, "oracle", None)):
+            agent_oracle = agent_oracle.oracle()
+        self.oracle = agent_oracle
         if agent_oracle is not None:
             if not all(callable(getattr(agent_oracle, k, None)) for k in ("mcp_tools", "call_tool")):
                 raise TypeError("agent_oracle= takes a TicketDesk (the stream package's tickets)")
@@ -201,6 +206,8 @@ class Service:
         return redact(d, "ask")
 
     def _checked(self, state, names):
+        if self.oracle is not None:
+            raise NotFound("ticket role services expose only their permitted MCP tools")
         s = self.system
         if s is None:
             raise NotFound("this server has no System (only POST /v1/systemone)")
@@ -272,6 +279,8 @@ class Service:
         (a date or ISO string, recorded in the trace) on a copy per request. Without the request's `today` the TextIn's
         own applies (None by default): the server's date is never supplied, so a date without a year is not read ("the
         year is not stated") rather than given this year."""
+        if self.oracle is not None:
+            raise NotFound("ticket role services expose only their permitted MCP tools")
         import copy
         import datetime as dt
 
@@ -370,6 +379,8 @@ class Service:
         (criteria in order, lowest first) and the expected level index. `other` / `none` options are scored like any
         other (the API has no abstain option). The answers carry no act / escalate signal: the client decides. The
         request's "model" is only a name echoed back: nothing is loaded from request data."""
+        if self.oracle is not None:
+            raise NotFound("ticket role services expose only their permitted MCP tools")
         if self.decider is None:
             raise NotFound("this server has no decider: start it with --decider")
         if isinstance(body, SystemOneRequest):
@@ -735,7 +746,8 @@ def _call_oracle(svc, name, arguments):
     try:
         a = _arguments(svc, arguments)
         if name == "decide" and isinstance(a.get("state"), dict):
-            svc._checked(a["state"], None)
+            if too_deep(a["state"], svc.limits.max_depth):
+                raise BadRequest("the state exceeds the JSON depth limit")
         with svc.exclusive():
             return svc.oracle.call_tool(name, a), False
     except RequestError as e:
@@ -795,7 +807,9 @@ MCP_INSTRUCTIONS = ("Each tool is a question of a solvi decision system: pass th
 def _mcp_instructions(svc):
     if svc.oracle is None:
         return MCP_INSTRUCTIONS
-    return ("You are the oracle for System 1. Use decide with the case and a stable request_id for retries. "
+    if getattr(svc.oracle, "role", None) == "client":
+        return "Trusted request producer: use decide with a stable request_id for durable retries."
+    return ("You are the oracle for System 1. Recover blind work with open_tickets; decide is unavailable. "
             "A needs_verdict result is a blind ticket: judge the input yourself and resolve with one of its options "
             "before expires_in_s elapses. Your external labels calibrate and certify System 1; do not infer a label "
             "from whether a case was escalated or sampled. Recover outstanding work with open_tickets, or give_up "
