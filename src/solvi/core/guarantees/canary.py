@@ -67,7 +67,8 @@ reduce noise but may also reduce sensitivity; neither the default tolerance nor 
 Every event includes diagnostics for the configured probes: reference top probability, top-two gap, probability
 shift and confirmation agreement when available, plus explicit blind spots. `diagnose()` explicitly spends two
 rounds on repeat agreement without changing the reference or verdict. These descriptive reports neither estimate
-general detection power nor select probes or tune tolerance.
+general detection power nor tune tolerance. `IdentityCanary.pick_probes` explicitly spends repeated
+raw-provider rounds to select stable boundary candidates without labels; see docs/canary_probe_selection.md.
 fpverify (MIT) does an anytime-valid sequential test on many probes; this
 canary is the cheap first step, tested on fake servers only (tests/test_identity_canary.py)."""
 from __future__ import annotations
@@ -210,7 +211,13 @@ class IdentityCanary:
                          "repeat_answer_agreement": (cur["answer"] == rep["answer"])
                          if rep is not None and cur["answer"] is not None and rep["answer"] is not None else None})
         agreements = [r["repeat_answer_agreement"] for r in rows if r["repeat_answer_agreement"] is not None]
+        tops = [r["reference_top_probability"] for r in rows if r["reference_top_probability"] is not None]
+        comparable = sum(a["answer"] is not None and b["answer"] is not None
+                         for a, b in zip(reference, current))
         return {"probes": rows, "tol": self.tol, "min_changed": self.min_changed,
+                "reference_answered": len(tops), "comparable": comparable,
+                "comparable_fraction": comparable / len(self.probes),
+                "reference_top_probability_range": [min(tops), max(tops)] if tops else None,
                 "very_clear_reference_count": sum((r["reference_top_probability"] or 0) >= .99 for r in rows),
                 "repeat_agreement": sum(agreements) / len(agreements) if agreements else None,
                 "repeat_comparable": len(agreements),
@@ -219,6 +226,89 @@ class IdentityCanary:
                                "Clear probes can hide swaps; boundary probes can amplify provider noise.",
                                "Repeated deterministic agreement adds no input coverage.",
                                "Confirmation can leave partial routing unconfirmed; served names are self-reported."]}
+
+    @classmethod
+    def pick_probes(cls, model, candidates, *, repeats=3, top_probability=(0.5, 0.9),
+                    max_repeat_tv=0.02, max_probes=None):
+        """Spend repeated raw-provider rounds to select stable boundary probes, without labels.
+
+        Returns probes and descriptive selection diagnostics, not a detection-power estimate.
+        The caller supplies a frozen reference provider; no canary is attached or reference accepted.
+        Stability means equal answers and TV distance from the first round at most max_repeat_tv.
+        All repeated top probabilities must lie in [low, high). Calls cost repeats * candidates.
+        """
+        import math
+
+        if type(repeats) is not int or not 2 <= repeats <= 32:
+            raise ValueError("repeats must be an integer from 2 to 32")
+        if max_probes is not None and (type(max_probes) is not int or max_probes < 1):
+            raise ValueError("max_probes must be a positive integer or None")
+        try:
+            low, high = map(float, top_probability)
+        except (TypeError, ValueError):
+            raise ValueError("top_probability is a pair 0 <= low < high <= 1") from None
+        if not (0 <= low < high <= 1) or not math.isfinite(float(max_repeat_tv)) or not 0 <= float(max_repeat_tv) <= 1:
+            raise ValueError("top_probability is 0 <= low < high <= 1; max_repeat_tv is in [0, 1]")
+        max_repeat_tv = float(max_repeat_tv)
+        inspector = cls(candidates)
+        if len(inspector.probes) > 4096:
+            raise ValueError("at most 4096 candidate probes are supported")
+        if not callable(getattr(model, "_score", None)):
+            raise TypeError("probe selection requires a DecideModel")
+        for _, _, options, _ in inspector.probes:
+            if len(options) < 2 or len(set(options)) != len(options):
+                raise ValueError("candidate options must contain at least two distinct choices")
+        inspector.model = model  # do not attach: preserve an existing canary and its reference
+        rounds = [inspector._ask() for _ in range(repeats)]
+        rows, eligible = [], []
+        for i, probe in enumerate(inspector.probes):
+            observations = [r[i] for r in rounds]
+            def scored(row):
+                p = row.get("p", [])
+                return (row.get("answer") is not None and len(p) == len(probe[2]) and
+                        all(math.isfinite(v) and 0 <= v <= 1 for v in p) and abs(sum(p) - 1) <= 0.001)
+            answered = [r for r in observations if scored(r)]
+            probabilities = [max(r["p"]) for r in answered]
+            gap = None
+            tv = None
+            same = False
+            if len(answered) == repeats:
+                p = sorted(answered[0]["p"], reverse=True)
+                gap = round(p[0] - p[1], 4)
+                tv = max(float(0.5 * np.abs(np.subtract(answered[0]["p"], r["p"])).sum())
+                         for r in answered[1:])
+                same = (len({r["answer"] for r in answered}) == 1 and
+                        len({r.get("served_by") for r in answered}) == 1)
+            reasons = []
+            if any(r.get("answer") is None for r in observations):
+                reasons.append("unanswered")
+            if len(answered) != repeats:
+                reasons.append("unscored")
+            if probabilities and not all(low <= p < high for p in probabilities):
+                reasons.append("outside_probability_range")
+            if len(answered) == repeats and (not same or tv > max_repeat_tv):
+                reasons.append("unstable")
+            row = {"index": i, "answered_rounds": len(answered), "answer_agreement": same,
+                   "top_probability_range": [min(probabilities), max(probabilities)] if probabilities else None,
+                   "reference_top_gap": gap, "max_tv_from_reference": round(tv, 4) if tv is not None else None,
+                   "rejected": reasons, "selected": False}
+            rows.append(row)
+            if not reasons:
+                eligible.append(i)
+        eligible.sort(key=lambda i: (rows[i]["reference_top_gap"], i))
+        chosen = eligible if max_probes is None else eligible[:max_probes]
+        for i in chosen:
+            rows[i]["selected"] = True
+        return {"probes": [inspector.probes[i] for i in chosen], "candidates": rows,
+                "calls": inspector.calls, "repeats": repeats, "eligible": len(eligible),
+                "selected": len(chosen), "has_stable_boundary_probes": bool(chosen),
+                "answered_fraction": sum(r["answered_rounds"] for r in rows) / (len(rows) * repeats),
+                "selection_fraction": len(chosen) / len(rows),
+                "top_probability": [low, high], "max_repeat_tv": float(max_repeat_tv),
+                "detection_power": None,
+                "limitations": ["Reference-only selection does not measure harmful-swap detection power.",
+                                "Repeated stability does not guarantee future provider stability.",
+                                "Fixed selected probes provide no coverage of unprobed inputs."]}
 
     def diagnose(self):
         """Ask exactly two rounds of the configured probes for descriptive stability.
