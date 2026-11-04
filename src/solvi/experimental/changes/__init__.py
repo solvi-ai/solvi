@@ -110,6 +110,7 @@ What is not done:
   sandbox (solvi.experimental.compile.sandbox.run), the expected answers kept in the parent;
 - a held change lives only in this process's memory until it is ruled on (its journal records survive, the Change
   object does not); Pipeline.expire_held(max_age) rules on the ones that waited too long."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -121,9 +122,35 @@ from ._isolated import IsolatedTests, strict_equal
 from ._journal import ChangeJournal, EvalLocked, EvaluatorLock, MemoryStorage
 from ._paired import paired_bootstrap, run_episode
 from ._prove import prove_direction
-from ._stages import (DEFAULT_APPROVAL, LEVELS, REFUSAL_WORDS, Approval, Canaries, CleanCases, catalog_of, Confirmation,
-                     Consistency, Context, FreshEnvironments, identity, IDENTITY_KEYS, Impact, KnownFailures, RefusalRegression, SliceGuard, SOURCES,
-                     Stage, Static, StageVerdict, allowed, gate_of, gates_of, hazard_body, hazard_gate, is_refusal)
+from ._stages import (
+    DEFAULT_APPROVAL,
+    LEVELS,
+    REFUSAL_WORDS,
+    Approval,
+    Canaries,
+    CleanCases,
+    catalog_of,
+    Confirmation,
+    Consistency,
+    Context,
+    FreshEnvironments,
+    identity,
+    IDENTITY_KEYS,
+    Impact,
+    KnownFailures,
+    RefusalRegression,
+    SliceGuard,
+    SOURCES,
+    Stage,
+    Static,
+    StageVerdict,
+    allowed,
+    gate_of,
+    gates_of,
+    hazard_body,
+    hazard_gate,
+    is_refusal,
+)
 from ._targets import KnowledgeTarget, LearningTarget, Promoted, Refused, VersionsTarget
 from ._watch import ShipWatch
 from ._economics import Economics, ProposerHistory
@@ -142,6 +169,7 @@ class Change:
     "derived_from", "supersedes", "valid", "reconfirm_after"}; for "compiled", a solvi.core.versions.CatalogVersion (a Compiled too);
     for "update", None (LearningTarget reads the stored labels itself) or the updated state, whose `fingerprint` (an attribute or
     a dict key) identifies the candidate (two updates to different states are different candidates)."""
+
     source: str
     artifact: str = "item"
     payload: Any = None
@@ -185,9 +213,17 @@ class Change:
         body = p.get("body")
         if self.change_type is not None and isinstance(body, dict) and "change" not in body:
             body = {**body, "change": self.change_type}
-        kw = {"kind": p.get("kind"), "body": body, "scope": p.get("scope"), "source": self.store_source, "by": self.by,
-              "evidence": self.evidence or None, "derived_from": p.get("derived_from") or (),
-              "supersedes": p.get("supersedes"), "valid": p.get("valid")}
+        kw = {
+            "kind": p.get("kind"),
+            "body": body,
+            "scope": p.get("scope"),
+            "source": self.store_source,
+            "by": self.by,
+            "evidence": self.evidence or None,
+            "derived_from": p.get("derived_from") or (),
+            "supersedes": p.get("supersedes"),
+            "valid": p.get("valid"),
+        }
         if p.get("reconfirm_after") is not None:
             kw["reconfirm_after"] = p["reconfirm_after"]
         return kw
@@ -196,11 +232,16 @@ class Change:
         """What identifies the candidate (the failure memory compares it): source, artifact, content, code."""
         if self.artifact == "item":
             c = {k: v for k, v in self.item_kwargs().items() if k not in ("by", "evidence")}
-        else:                                         # "compiled", or an "update" whose payload names its state
-            c = self.payload.get("fingerprint") if isinstance(self.payload, dict) else getattr(self.payload, "fingerprint", None)
+        else:  # "compiled", or an "update" whose payload names its state
+            c = (
+                self.payload.get("fingerprint")
+                if isinstance(self.payload, dict)
+                else getattr(self.payload, "fingerprint", None)
+            )
         chk = None
         if self.check is not None:
             from ...core.provenance import code_fingerprint
+
             chk = code_fingerprint(self.check)
         return {"source": self.source, "artifact": self.artifact, "content": c, "code": self.code, "check": chk}
 
@@ -208,9 +249,16 @@ class Change:
         return vhash(self.content())[:24]
 
     def to_dict(self):
-        return {**self.content(), "proposer": self.proposer, "reason": self.reason, "evidence": self.evidence,
-                "expected": self.expected, "change_type": self.change_type, "parent": self.parent,
-                "fingerprint": self.fingerprint()}
+        return {
+            **self.content(),
+            "proposer": self.proposer,
+            "reason": self.reason,
+            "evidence": self.evidence,
+            "expected": self.expected,
+            "change_type": self.change_type,
+            "parent": self.parent,
+            "fingerprint": self.fingerprint(),
+        }
 
 
 @dataclass
@@ -218,6 +266,7 @@ class Result:
     """What one proposal (or ruling) came to: status "promoted" | "rejected" | "held" | "error" (a stage raised: not a
     verdict on the change, which may be proposed again); the version for a promotion; the stage that refused, held or
     raised; every verdict."""
+
     change_id: str
     status: str
     version: int | None = None
@@ -231,21 +280,40 @@ class Result:
         return self.status == "promoted"
 
     def __str__(self):
-        head = {"promoted": f"change {self.change_id}: promoted as version {self.version}",
-                "rejected": f"change {self.change_id}: rejected by {self.stage}: {self.reason}",
-                "held": f"change {self.change_id}: held at {self.stage}: {self.reason}",
-                "error": f"change {self.change_id}: error in {self.stage}: {self.reason}"}[self.status]
-        return "\n".join([head] + [f"  {'✓' if v.ok else '…' if v.decision == 'hold' else '✗'} {v.stage}"
-                                   + (f": {v.reason}" if v.reason else "") for v in self.verdicts])
+        head = {
+            "promoted": f"change {self.change_id}: promoted as version {self.version}",
+            "rejected": f"change {self.change_id}: rejected by {self.stage}: {self.reason}",
+            "held": f"change {self.change_id}: held at {self.stage}: {self.reason}",
+            "error": f"change {self.change_id}: error in {self.stage}: {self.reason}",
+        }[self.status]
+        return "\n".join(
+            [head]
+            + [
+                f"  {'✓' if v.ok else '…' if v.decision == 'hold' else '✗'} {v.stage}"
+                + (f": {v.reason}" if v.reason else "")
+                for v in self.verdicts
+            ]
+        )
 
 
 FINAL = ("static", "approval", RefusalRegression.name)
 ORDERS = ("given", "cheap_first")
 # What a built-in stage costs to run, roughly (Pipeline(order="cheap_first") sorts by it): reading the journal or the
 # store is cheap, replaying recorded cases is moderate, a sandbox, a honesty run or slices are dear, fresh worlds dearest.
-STAGE_COSTS = {"failure_memory": 1.0, "static": 1.0, "consistency": 1.0, "approval": 1.0, "confirmation": 10.0,
-               "clean_cases": 10.0, "impact": 10.0, "refusal_regression": 10.0, "canaries": 100.0, "slices": 100.0,
-               "isolated_tests": 100.0, "fresh_environments": 1000.0}
+STAGE_COSTS = {
+    "failure_memory": 1.0,
+    "static": 1.0,
+    "consistency": 1.0,
+    "approval": 1.0,
+    "confirmation": 10.0,
+    "clean_cases": 10.0,
+    "impact": 10.0,
+    "refusal_regression": 10.0,
+    "canaries": 100.0,
+    "slices": 100.0,
+    "isolated_tests": 100.0,
+    "fresh_environments": 1000.0,
+}
 DEFAULT_COST = 10.0
 
 
@@ -258,7 +326,9 @@ def stage_cost(stage, costs=None):
     c = getattr(stage, "cost", None)
     if isinstance(c, (int, float)) and not isinstance(c, bool):
         return float(c)
-    return STAGE_COSTS.get(name, DEFAULT_COST)   # stages whose refusal is never advisory
+    return STAGE_COSTS.get(name, DEFAULT_COST)  # stages whose refusal is never advisory
+
+
 SEARCH_UNCONFIRMED = "search proposal: confirmation on its evidence did not run"
 
 
@@ -300,8 +370,20 @@ class Pipeline:
 
     experimental = True
 
-    def __init__(self, stages, storage, *, store=None, approval=None, targets=(), refusals=(), answer_of=None,
-                 raise_stage_errors=False, order="given", costs=None):
+    def __init__(
+        self,
+        stages,
+        storage,
+        *,
+        store=None,
+        approval=None,
+        targets=(),
+        refusals=(),
+        answer_of=None,
+        raise_stage_errors=False,
+        order="given",
+        costs=None,
+    ):
         if order not in ORDERS:
             raise ValueError(f"order is one of {ORDERS}, not {order!r}")
         self.order, self.costs = order, dict(costs or {})
@@ -320,8 +402,8 @@ class Pipeline:
             self.targets[t.artifact] = t
         self.refusals, self.answer_of = refusals, answer_of
         self.raise_stage_errors = bool(raise_stage_errors)
-        self._refusal = RefusalRegression()           # run for every answering change (see the class docstring)
-        self._held = {}                               # change id → (change, stage index, verdicts)
+        self._refusal = RefusalRegression()  # run for every answering change (see the class docstring)
+        self._held = {}  # change id → (change, stage index, verdicts)
 
     # ------------------------------------------------------------------------------------------------ answering
     def answers(self, change) -> bool:
@@ -346,7 +428,7 @@ class Pipeline:
         if self.answers(change) and not any(isinstance(s, RefusalRegression) for s in st):
             i = next((k for k, s in enumerate(st) if isinstance(s, Approval)), len(st))
             st.insert(i, self._refusal)
-        if self.order == "cheap_first":                # stable: ties keep the given order; Approval decides last
+        if self.order == "cheap_first":  # stable: ties keep the given order; Approval decides last
             st.sort(key=lambda s: (isinstance(s, Approval), stage_cost(s, self.costs)))
         return st
 
@@ -357,8 +439,15 @@ class Pipeline:
             raise TypeError("propose takes a Change")
         parent = self.current if change.parent is None else change.parent
         extra = {"order": [s.name for s in self.stages_for(change)]} if self.order != "given" else {}
-        rec = self.journal.write("propose", change=change.to_dict(), fingerprint=change.fingerprint(), parent=parent,
-                                 source=change.source, artifact=change.artifact, **extra)
+        rec = self.journal.write(
+            "propose",
+            change=change.to_dict(),
+            fingerprint=change.fingerprint(),
+            parent=parent,
+            source=change.source,
+            artifact=change.artifact,
+            **extra,
+        )
         return self._run(change, rec["id"], 0, {}, parent)
 
     def rule(self, change_id, ruling, *, by) -> Result:
@@ -376,10 +465,14 @@ class Pipeline:
         level = appr.level(change, verdicts) if appr is not None else "gate"
         ctx = Context(self, self.store, self.journal, cid, dict(verdicts), level, ruling)
         stages = self.stages_for(change)
-        if ruling is not None:                        # the stage that held the change is decided by the ruling
+        if ruling is not None:  # the stage that held the change is decided by the ruling
             st = stages[start]
-            v = StageVerdict("admit" if ruling[0] else "refuse", f"{'approved' if ruling[0] else 'rejected'} by {ruling[1]}"
-                        + (f": {ruling[2]}" if ruling[2] else ""), {"level": level, "by": ruling[1]}, st.name)
+            v = StageVerdict(
+                "admit" if ruling[0] else "refuse",
+                f"{'approved' if ruling[0] else 'rejected'} by {ruling[1]}" + (f": {ruling[2]}" if ruling[2] else ""),
+                {"level": level, "by": ruling[1]},
+                st.name,
+            )
             self.journal.write("verdict", change=cid, **v.to_dict(), advisory=False)
             ctx.verdicts[st.name] = v
             if not v.ok:
@@ -391,13 +484,14 @@ class Pipeline:
                 v = StageVerdict.of(st.run(change, ctx), st.name)
             except Exception as e:  # noqa: BLE001 — a stage that raises is an error (recorded), not a verdict
                 why = f"the stage raised {type(e).__name__}: {e}"
-                self.journal.write("error", change=cid, fingerprint=change.fingerprint(), stage=st.name, reason=why,
-                                   level=level)
+                self.journal.write(
+                    "error", change=cid, fingerprint=change.fingerprint(), stage=st.name, reason=why, level=level
+                )
                 if self.raise_stage_errors:
                     raise
                 return Result(cid, "error", stage=st.name, reason=why, verdicts=list(ctx.verdicts.values()))
             v.stage = st.name
-            advisory = (v.decision == "refuse" and level == "person" and st.name not in FINAL)
+            advisory = v.decision == "refuse" and level == "person" and st.name not in FINAL
             self.journal.write("verdict", change=cid, **v.to_dict(), advisory=advisory)
             ctx.verdicts[st.name] = v
             if v.decision == "hold":
@@ -416,12 +510,20 @@ class Pipeline:
         except Refused as e:
             self._target_verdicts(cid, e.verdicts, ctx)
             return self._reject(change, cid, e.stage or "promote", str(e), ctx)
-        if isinstance(ref, Promoted):                 # the target's own gates: journaled as the change's stages
+        if isinstance(ref, Promoted):  # the target's own gates: journaled as the change's stages
             self._target_verdicts(cid, ref.verdicts, ctx)
             ref = ref.ref
         version = self._next_version()
-        self.journal.write("promoted", change=cid, version=version, parent=parent, artifact=change.artifact, ref=ref,
-                           expected=change.expected, level=self._level(change, ctx))
+        self.journal.write(
+            "promoted",
+            change=cid,
+            version=version,
+            parent=parent,
+            artifact=change.artifact,
+            ref=ref,
+            expected=change.expected,
+            level=self._level(change, ctx),
+        )
         return Result(cid, "promoted", version=version, verdicts=list(ctx.verdicts.values()), ref=ref)
 
     def _target_verdicts(self, cid, verdicts, ctx):
@@ -430,8 +532,14 @@ class Pipeline:
             ctx.verdicts[v.stage] = v
 
     def _reject(self, change, cid, stage, reason, ctx):
-        self.journal.write("rejected", change=cid, fingerprint=change.fingerprint(), stage=stage, reason=reason,
-                           level=self._level(change, ctx))
+        self.journal.write(
+            "rejected",
+            change=cid,
+            fingerprint=change.fingerprint(),
+            stage=stage,
+            reason=reason,
+            level=self._level(change, ctx),
+        )
         return Result(cid, "rejected", stage=stage, reason=reason, verdicts=list(ctx.verdicts.values()))
 
     def _level(self, change, ctx):
@@ -463,6 +571,7 @@ class Pipeline:
 
     def _state(self):
         """(the versions in force in order, {version: its "promoted" record}) — kept up to date by the journal's fold."""
+
         def step(st, d):
             if d["action"] == "promoted":
                 st[1][d["version"]] = d
@@ -470,6 +579,7 @@ class Pipeline:
             elif d["action"] == "rollback":
                 undone = set(d["undone"])
                 st[0][:] = [v for v in st[0] if v not in undone]
+
         in_force, promoted = self.journal.fold("versions", lambda: ([], {}), step)
         return list(in_force), promoted
 
@@ -488,10 +598,22 @@ class Pipeline:
         superseded items become in force again if reverting their successor restores them. Snapshot versions retain
         their journal ancestry; only the latest snapshot of an artifact can be watched or individually reverted."""
         in_force, promoted = self._state()
-        return [{"version": v, "change": d["change"], "parent": d["parent"], "artifact": d["artifact"], "ref": d["ref"],
-                 "in_force": v in in_force and (not isinstance(self.targets[d["artifact"]], KnowledgeTarget)
-                     or self.targets[d["artifact"]].store.status(d["ref"]) == "active"),
-                 "id": d["id"]} for v, d in sorted(promoted.items())]
+        return [
+            {
+                "version": v,
+                "change": d["change"],
+                "parent": d["parent"],
+                "artifact": d["artifact"],
+                "ref": d["ref"],
+                "in_force": v in in_force
+                and (
+                    not isinstance(self.targets[d["artifact"]], KnowledgeTarget)
+                    or self.targets[d["artifact"]].store.status(d["ref"]) == "active"
+                ),
+                "id": d["id"],
+            }
+            for v, d in sorted(promoted.items())
+        ]
 
     def _watch_unavailable(self, version):
         """None, or (terminal event, reason) before a watch reads an outcome of this version."""
@@ -504,8 +626,11 @@ class Pipeline:
             return "superseded", f"version {version} is superseded or its target is no longer active"
         target = self.targets[rec["artifact"]]
         if not getattr(target, "independent", False):
-            later = [r["version"] for r in rows if r["in_force"] and r["artifact"] == rec["artifact"]
-                     and r["version"] > version]
+            later = [
+                r["version"]
+                for r in rows
+                if r["in_force"] and r["artifact"] == rec["artifact"] and r["version"] > version
+            ]
             if later:
                 return "superseded", f"snapshot version {version} is superseded by versions {later}"
         return None
@@ -522,8 +647,15 @@ class Pipeline:
             d = promoted[v]
             self.targets[d["artifact"]].rollback(d["ref"], by=by, why=why or f"rollback to version {version}")
         failed = why is not None if failed is None else bool(failed)
-        self.journal.write("rollback", to=version, undone=undone, by=None if by is None else str(by), why=why,
-                           failed=failed, changes=[promoted[v]["change"] for v in undone])
+        self.journal.write(
+            "rollback",
+            to=version,
+            undone=undone,
+            by=None if by is None else str(by),
+            why=why,
+            failed=failed,
+            changes=[promoted[v]["change"] for v in undone],
+        )
         return undone
 
     def revert(self, version, *, by=None, why=None, failed=None):
@@ -539,12 +671,22 @@ class Pipeline:
         target = self.targets[d["artifact"]]
         later = [v for v in in_force if v > version and promoted[v]["artifact"] == d["artifact"]]
         if later and not getattr(target, "independent", False):
-            raise ValueError(f"version {version} is a snapshot of artifact {d['artifact']!r} with later versions in "
-                             f"force {later}: reverting it alone would drop them; rollback to its parent instead")
+            raise ValueError(
+                f"version {version} is a snapshot of artifact {d['artifact']!r} with later versions in "
+                f"force {later}: reverting it alone would drop them; rollback to its parent instead"
+            )
         target.rollback(d["ref"], by=by, why=why or f"revert of version {version}")
         failed = why is not None if failed is None else bool(failed)
-        self.journal.write("rollback", to=None, revert=version, undone=[version], by=None if by is None else str(by),
-                           why=why, failed=failed, changes=[d["change"]])
+        self.journal.write(
+            "rollback",
+            to=None,
+            revert=version,
+            undone=[version],
+            by=None if by is None else str(by),
+            why=why,
+            failed=failed,
+            changes=[d["change"]],
+        )
         return [version]
 
     def watch(self, version, promise, **kw):
@@ -569,8 +711,9 @@ class Pipeline:
         """Record what the change did next to what its proposer expected → {"expected", "observed"}."""
         props = {d["id"]: d for d in self.journal.records("propose")}
         expected = props[change_id]["change"].get("expected")
-        self.journal.write("observed", change=change_id, expected=expected, observed=effect,
-                           by=None if by is None else str(by))
+        self.journal.write(
+            "observed", change=change_id, expected=expected, observed=effect, by=None if by is None else str(by)
+        )
         return {"expected": expected, "observed": effect}
 
     def held(self):
@@ -585,13 +728,67 @@ class Pipeline:
             raise ValueError(f"max_age is a number of seconds >= 0, not {max_age!r}")
         now = self.journal.storage.clock() if now is None else now
         held_at = {d["change"]: d.get("time") for d in self.journal.records("held")}
-        return [self.rule(cid, bool(approve), by=by) for cid in self.held()
-                if held_at.get(cid) is not None and now - float(held_at[cid]) >= max_age]
+        return [
+            self.rule(cid, bool(approve), by=by)
+            for cid in self.held()
+            if held_at.get(cid) is not None and now - float(held_at[cid]) >= max_age
+        ]
 
 
-__all__ = ["Economics", "ProposerHistory", "StagedTraffic", "allowed", "Approval", "ARTIFACTS", "Canaries", "catalog_of", "Change", "CHANGE_TYPES", "ChangeJournal", "CleanCases",
-           "Confirmation", "Consistency", "Context", "DEFAULT_APPROVAL", "EvalLocked", "EvaluatorLock",
-           "FreshEnvironments", "gate_of", "IsolatedTests", "gates_of", "hazard_body", "hazard_gate", "identity", "IDENTITY_KEYS", "Impact", "is_refusal", "KnowledgeTarget",
-           "KnownFailures", "REFUSAL_WORDS", "RefusalRegression",
-           "LearningTarget", "LEVELS", "ORDERS", "stage_cost", "STAGE_COSTS", "DEFAULT_COST", "MemoryStorage", "paired_bootstrap", "Pipeline", "prove_direction", "Promoted", "Refused", "Result", "run_episode", "ShipWatch", "SliceGuard", "SOURCES",
-           "Stage", "Static", "STORE_SOURCE", "StageVerdict", "strict_equal", "VersionsTarget"]
+__all__ = [
+    "Economics",
+    "ProposerHistory",
+    "StagedTraffic",
+    "allowed",
+    "Approval",
+    "ARTIFACTS",
+    "Canaries",
+    "catalog_of",
+    "Change",
+    "CHANGE_TYPES",
+    "ChangeJournal",
+    "CleanCases",
+    "Confirmation",
+    "Consistency",
+    "Context",
+    "DEFAULT_APPROVAL",
+    "EvalLocked",
+    "EvaluatorLock",
+    "FreshEnvironments",
+    "gate_of",
+    "IsolatedTests",
+    "gates_of",
+    "hazard_body",
+    "hazard_gate",
+    "identity",
+    "IDENTITY_KEYS",
+    "Impact",
+    "is_refusal",
+    "KnowledgeTarget",
+    "KnownFailures",
+    "REFUSAL_WORDS",
+    "RefusalRegression",
+    "LearningTarget",
+    "LEVELS",
+    "ORDERS",
+    "stage_cost",
+    "STAGE_COSTS",
+    "DEFAULT_COST",
+    "MemoryStorage",
+    "paired_bootstrap",
+    "Pipeline",
+    "prove_direction",
+    "Promoted",
+    "Refused",
+    "Result",
+    "run_episode",
+    "ShipWatch",
+    "SliceGuard",
+    "SOURCES",
+    "Stage",
+    "Static",
+    "STORE_SOURCE",
+    "StageVerdict",
+    "strict_equal",
+    "VersionsTarget",
+]
