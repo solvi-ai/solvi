@@ -216,6 +216,12 @@ nav:
   - Bounded withdrawal protection: knowledge_revival_window.md
   - Effective-period read cache: knowledge-period-cache.md
   - Pending-version continuity: knowledge_pending_continuity.md
+  - Stable canary probes: canary_probe_selection.md
+  - Fresh world registry: fresh_world_registry.md
+  - LoRA timing estimates: lora_time_estimate.md
+  - Explicit mutation sites: mutation-sites.md
+  - Learned rule conditions: rule_list_conditions.md
+  - Fixed-cohort staged traffic: staged-traffic.md
   - Changelog: changelog.md
   - Roadmap: roadmap.md
   - Development plan: development-1.4.1.md
