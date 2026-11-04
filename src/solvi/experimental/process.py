@@ -230,32 +230,11 @@ def _check_participation_graph(nodes, edges):
 
 
 def _participation(declaration):
-    """Validate and detach the deliberately bounded System participation format."""
-    from ._process_boundary import frozen
-    d = frozen(declaration)
-    keys = {"after", "when", "max_iter", "reads", "writes", "question", "end"}
-    if not isinstance(d, dict) or set(d) != keys:
-        raise ProcessSpecError("participation: expected after/when/max_iter/reads/writes/question/end")
-    after, limit = d["after"], d["max_iter"]
-    if after is not None and (not isinstance(after, str) or not _NAME.fullmatch(after)):
-        raise ProcessSpecError("participation after: expected a node name or None")
-    if limit is not None and (type(limit) is not int or limit < 1):
-        raise ProcessSpecError("participation max_iter: expected a positive integer")
-    if after is None and (d["when"] is not None or limit is not None):
-        raise ProcessSpecError("participation entry cannot have when or max_iter")
-    if type(d["end"]) is not bool:
-        raise ProcessSpecError("participation end: expected bool")
-    if d["question"] is not None and not isinstance(d["question"], str):
-        raise ProcessSpecError("participation question: expected a string or None")
-    check_predicate(d["when"])
-    ns = {k: d[k] for k in ("reads", "writes")}
-    if d["end"]:
-        ns["end"] = True
-    ns["kind"] = "system"
-    if d["question"] is not None:
-        ns["question"] = d["question"]
-    _check_node("participation", ns)
-    return d
+    from ..core._process_declaration import _participation as validate
+    try:
+        return validate(declaration)
+    except (ValueError, TypeError) as exc:
+        raise ProcessSpecError(str(exc)) from exc
 
 
 def canonical(spec):
@@ -292,52 +271,12 @@ def _num(v, where):
 
 
 def check_predicate(p, where="when"):
-    """Validate a predicate (see the module docs); None is "always". → p. ProcessSpecError names the bad place."""
-    if p is None:
-        return p
-    if not isinstance(p, dict) or not p:
-        raise ProcessSpecError(f"{where}: a predicate is a non-empty dict, not {p!r}")
-    keys = set(p)
-    if "answer" in keys:
-        ops = keys - {"answer"}
-        if len(ops) != 1 or not ops <= {"eq", "in", "lt", "gt"}:
-            raise ProcessSpecError(f"{where}: {{'answer': fact}} takes exactly one of eq, in, lt, gt; got {sorted(keys)}")
-        if not isinstance(p["answer"], str) or not p["answer"]:
-            raise ProcessSpecError(f"{where}: 'answer' names a fact (a non-empty string), not {p['answer']!r}")
-        op = ops.pop()
-        if op == "in" and not isinstance(p["in"], list):
-            raise ProcessSpecError(f"{where}: 'in' takes a list, not {p['in']!r}")
-        if op in ("lt", "gt"):
-            _num(p[op], f"{where}.{op}")
-        return p
-    if len(keys) != 1:
-        raise ProcessSpecError(f"{where}: one form per predicate (combine with and / or), got {sorted(keys)}")
-    (k, v), = p.items()
-    if k == "status" and v not in STATUSES:
-        raise ProcessSpecError(f"{where}: status is one of {', '.join(STATUSES)}, not {v!r}")
-    elif k == "by" and v not in BYS:
-        raise ProcessSpecError(f"{where}: by is one of {', '.join(BYS)}, not {v!r}")
-    elif k == "confidence_below":
-        if not 0.0 <= _num(v, f"{where}.confidence_below") <= 1.0:
-            raise ProcessSpecError(f"{where}: confidence_below is in [0, 1], not {v!r}")
-    elif k in ("budget_over", "drift"):
-        if not isinstance(v, bool):
-            raise ProcessSpecError(f"{where}: {k} takes true or false, not {v!r}")
-    elif k in ("and", "or"):
-        if not isinstance(v, list) or not v:
-            raise ProcessSpecError(f"{where}: {k} takes a non-empty list of predicates")
-        for i, q in enumerate(v):
-            if q is None:
-                raise ProcessSpecError(f"{where}.{k}[{i}]: null is not a predicate here")
-            check_predicate(q, f"{where}.{k}[{i}]")
-    elif k == "not":
-        if v is None:
-            raise ProcessSpecError(f"{where}.not: null is not a predicate here")
-        check_predicate(v, f"{where}.not")
-    elif k not in ("status", "by"):
-        raise ProcessSpecError(f"{where}: unknown predicate {k!r} (answer, status, by, confidence_below, budget_over, "
-                               "drift, and, or, not)")
-    return p
+    """Validate the shared closed predicate language; None means always."""
+    from ..core._process_declaration import check_predicate as validate
+    try:
+        return validate(p, where)
+    except ValueError as exc:
+        raise ProcessSpecError(str(exc)) from exc
 
 
 def holds(p, outcome):

@@ -247,10 +247,12 @@ class System:
         ``after`` names one predecessor (None declares an entry). ``when`` is
         the Process predicate on that predecessor's outcome. ``max_iter`` marks
         this incoming edge as a bounded loop, counting edge traversals per run.
-        Process.participants snapshots the declaration; later declarations affect
-        only newly assembled processes. This does not schedule standalone asks.
+        Process.participants snapshots the declaration. Redeclaring a bound System
+        leaves that snapshot unchanged and makes subsequent process runs fail
+        before node calls; assemble a new process to adopt the new declaration.
+        This does not schedule standalone asks.
         """
-        from ..experimental.process import _participation
+        from ._process_declaration import _participation
         self._process_participation = _participation(dict(after=after, when=when, max_iter=max_iter,
             reads=list(reads), writes=dict(writes or {}), question=question, end=end))
         return self

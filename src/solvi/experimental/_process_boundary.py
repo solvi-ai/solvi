@@ -2,6 +2,8 @@
 import json
 import math
 
+from ..core._process_declaration import frozen
+
 __all__ = []
 
 _KEYS = {
@@ -11,26 +13,6 @@ _KEYS = {
     "number": {"minimum", "maximum"},
     "integer": {"minimum", "maximum"}, "boolean": set(), "null": set(),
 }
-
-
-def frozen(value):
-    def check(v, depth=0):
-        if depth > 32:
-            raise ValueError("finite JSON nesting limit is 32")
-        if type(v) in (str, int, bool, type(None)):
-            return
-        if type(v) is float and math.isfinite(v):
-            return
-        if type(v) is dict and all(type(k) is str for k in v):
-            children = v.values()
-        elif type(v) is list:
-            children = v
-        else:
-            raise ValueError("only finite JSON with string object keys is supported")
-        for child in children:
-            check(child, depth + 1)
-    check(value)
-    return json.loads(json.dumps(value, allow_nan=False))
 
 
 def schema_check(s, depth=0):
