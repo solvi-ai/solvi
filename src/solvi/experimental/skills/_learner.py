@@ -4,6 +4,7 @@ from __future__ import annotations
 import hashlib
 import json
 import random
+import warnings
 
 from ...core.dispatch import SlowPath, Thought
 from ._certificate import Certificate
@@ -65,6 +66,9 @@ class SkillLearner:
     it, at most three runs. The certificate is unchanged. Per episode: generalized, generalize_accepted,
     generalize_checks.
 
+    Failed plan checks are retained in `plan_rejections` (also in report). Three consecutive same-start
+    prediction mismatches warn once per learner about possible clone/RNG/hidden-state or prediction issues.
+
     Per step (`act(state)` → an action; the caller steps the environment and calls `observe(outcome)`; `run(seed,
     steps)` does both): a skill run in progress takes its next action; else, for the first open goal, System 1 runs
     the most specific matching skill whose certificate holds, alone; else the most specific matching skill is
@@ -121,6 +125,9 @@ class SkillLearner:
         self.planner, self.horizon, self.budget = planner, int(horizon), int(budget)
         self.actions, self.cost = actions, cost
         self.verify_plans, self.learn, self.guard, self.seed = bool(verify_plans), bool(learn), bool(guard), int(seed)
+        self.plan_rejections: list[dict] = []
+        self._rejection_streak = None
+        self._rejection_warned = False
         self.decisions: list[dict] = []
         self.episodes: list[dict] = []
         self.totals = {k: 0 for k in _EPISODE}
@@ -213,6 +220,32 @@ class SkillLearner:
         self._count("verify_calls")
         return self._guarded(verify, self.model, state, p, fn)
 
+    def _verified_plan(self, state, p, fn):
+        if p is None or not self.verify_plans:
+            self._rejection_streak = None
+            return p
+        check = self._verify(state, p, fn)
+        if check.ok:
+            self._rejection_streak = None
+            return p
+        self._count("plans_rejected")
+        at = self.model.key(state)
+        self.plan_rejections.append({"at": at, "plan_start": p.start, "why": check.why,
+                                     "steps": check.steps, "simulation": check.simulation,
+                                     "episode": self._ep["n"] if self._ep is not None else None})
+        mismatch = (p.start == at and bool(p.start) and len(p.predicted) == len(p.actions)
+                    and ("other than the predicted one" in check.why
+                         or "simulation differs" in check.why))
+        prior = self._rejection_streak
+        self._rejection_streak = (at, prior[1] + 1 if prior and prior[0] == at else 1) if mismatch else None
+        if self._rejection_streak and self._rejection_streak[1] >= 3 and not self._rejection_warned:
+            self._rejection_warned = True
+            warnings.warn("Repeated same-start plans failed exact-model verification; possible causes include "
+                          "a clone that does not preserve RNG or hidden state, or inaccurate plan predictions. "
+                          "Inspect plan_rejections and check_environment(make, clone=); verification remains strict.",
+                          UserWarning, stacklevel=3)
+        return None
+
     # --- one step
     def act(self, state):
         """Decide the next action in `state` → an action, or None (every goal reached, or nothing offered). The real
@@ -255,10 +288,7 @@ class SkillLearner:
                     else:
                         self._count("supervised_failed")
         if run is None:
-            p = self._plan(state, fn)
-            if p is not None and self.verify_plans and not self._verify(state, p, fn).ok:
-                self._count("plans_rejected")
-                p = None
+            p = self._verified_plan(state, self._plan(state, fn), fn)
             if p is not None and p.actions:
                 sk = None
                 if self.learn:
@@ -479,14 +509,15 @@ class SkillLearner:
             return g, c["plan"].actions[i], {"goal": g, "plan": [_plain(a) for a in c["plan"].actions], "step": i,
                                              "at": k, "searched": 0, "cached": True, "skill": c["skill"]}
         fn = self._goal_fn[g]
-        p = self._plan(state, fn)
-        if p is not None and self.verify_plans and not self._verify(state, p, fn).ok:
-            self._count("plans_rejected")
-            p = None
+        before_rejections = len(self.plan_rejections)
+        p = self._verified_plan(state, self._plan(state, fn), fn)
         if p is None or not p.actions:
             self._cache = None
-            return g, None, {"goal": g, "why": f"no verified plan ({self.model.last.get('why')})", "at": k,
-                             "searched": self.model.last.get("searched", 0)}
+            rejection = self.plan_rejections[-1] if len(self.plan_rejections) > before_rejections else None
+            why = rejection["why"] if rejection is not None else self.model.last.get("why")
+            return g, None, {"goal": g, "why": f"no verified plan ({why})", "at": k,
+                             "searched": self.model.last.get("searched", 0),
+                             **({"verification": dict(rejection)} if rejection is not None else {})}
         sk = self.skills.compile(g, p, state, verified=self.verify_plans) if self.learn else None
         at = {k: 0}
         for i, s in enumerate(p.predicted[:-1]):
@@ -505,7 +536,8 @@ class SkillLearner:
         tot["s1_share"] = tot["s1"] / tot["steps"] if tot["steps"] else None
         tot["simulated"] = self.model.steps
         tot["cost"] = _cost(tot)
-        return {"episodes": eps, "totals": tot, "skills": self.skills.report()}
+        return {"episodes": eps, "totals": tot, "skills": self.skills.report(),
+                "plan_rejections": [dict(row) for row in self.plan_rejections]}
 
     def __repr__(self):
         return f"SkillLearner({type(self.env).__name__}, {len(self.episodes)} episodes, {len(self.skills.skills)} skills)"
