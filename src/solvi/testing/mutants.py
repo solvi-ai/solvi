@@ -31,7 +31,11 @@ boolean expressions are not mutation operators. No static reachability is inferr
 use functions=["rule", "Rules.decide"] to exclude unrelated helpers explicitly.
 Standard equality __main__ guards and their subtrees are never mutation sites.
 Only identical resulting ASTs (and unchanged ASTs) are removed; semantically equivalent
-but syntactically different mutants can still count separately.
+but syntactically different mutants can still count separately. An explicit
+integer_parameters={"rule": ["age"]} contract optionally groups elementary integer-boundary
+and conditional-swap aliases without executing probes. Parameters must be exact builtin ints
+throughout every execution (not floats, custom int subclasses or annotations alone).
+Report.score then counts selected equivalence groups, with raw alias counts exposed.
 
 The mutant runs from a copy of the task's directory (top-level files) in a temporary directory, so a "system" factory
 next to the task (`{"system": "run.py:system"}`) loads the mutant too; the original files are never written. A task in
@@ -74,6 +78,7 @@ class Mutant:
     status: str = ""
     killed_by: str | None = None
     ms: float = 0.0
+    equivalent_mutations: list = field(default_factory=list)
 
 
 @dataclass
@@ -85,6 +90,7 @@ class Report:
     mutants: list
     seconds: float = 0.0
     baseline_ms: float = 0.0
+    integer_parameters: dict | None = None
 
     def _n(self, st):
         return sum(m.status == st for m in self.mutants)
@@ -124,6 +130,11 @@ class Report:
         return {"path": str(self.path), "task": str(self.task), "score": self.score, "killed": self.killed,
                 "survived": self.survived, "stillborn": self.stillborn, "seconds": round(self.seconds, 3),
                 "by_kind": self.by_kind(),
+                "score_unit": "declared_integer_equivalence_groups" if self.integer_parameters else "distinct_ASTs",
+                "integer_parameters": self.integer_parameters,
+                "raw_mutations_represented": sum(1 + len(m.equivalent_mutations) for m in self.mutants),
+                "equivalence_groups": [{"line": m.line, "kind": m.kind, "description": m.description,
+                    "aliases": m.equivalent_mutations} for m in self.mutants if m.equivalent_mutations],
                 "survivors": [{"line": m.line, "kind": m.kind, "description": m.description} for m in self.survivors()]}
 
 
@@ -266,29 +277,104 @@ def _apply(tree, kind, node, k):
     return f"check {node.name}() always passes"
 
 
-def generate(source, kinds=KINDS, *, functions=None):
+def _integer_fingerprint(tree, declarations):
+    """Canonicalize only explicitly declared, unassigned builtin-integer parameters.
+
+    This is a caller domain contract, not inference from Python annotations.
+    No task code executes; float/NaN and custom overloaded operators are outside it.
+    """
+    class Canonical(ast.NodeTransformer):
+        def __init__(self):
+            self.prefix = ""
+            self.names = set()
+            self.found = set()
+
+        def visit_FunctionDef(self, node):
+            qualified = self.prefix + node.name
+            previous, self.prefix = self.names, qualified + "."
+            names = set(declarations.get(qualified, ()))
+            if qualified in declarations:
+                self.found.add(qualified)
+            arguments = {a.arg for a in [*node.args.posonlyargs, *node.args.args, *node.args.kwonlyargs]}
+            if not names <= arguments:
+                raise ValueError("integer_parameters must name function parameters")
+            written = {n.id for n in ast.walk(node) if isinstance(n, ast.Name) and isinstance(n.ctx, (ast.Store, ast.Del))}
+            if names & written:
+                raise ValueError("integer_parameters cannot be reassigned")
+            self.names = names
+            self.generic_visit(node)
+            self.names, self.prefix = previous, qualified.rpartition(".")[0]
+            if self.prefix:
+                self.prefix += "."
+            return node
+
+        visit_AsyncFunctionDef = visit_FunctionDef
+
+        def visit_Compare(self, node):
+            self.generic_visit(node)
+            if (len(node.ops) == 1 and isinstance(node.left, ast.Name) and node.left.id in self.names
+                    and isinstance(node.comparators[0], ast.Constant) and type(node.comparators[0].value) is int):
+                if isinstance(node.ops[0], ast.Gt):
+                    node.ops[0] = ast.GtE()
+                    node.comparators[0].value += 1
+                elif isinstance(node.ops[0], ast.LtE):
+                    node.ops[0] = ast.Lt()
+                    node.comparators[0].value += 1
+            return node
+
+        def visit_IfExp(self, node):
+            self.generic_visit(node)
+            t = node.test
+            if (isinstance(t, ast.Compare) and len(t.ops) == 1 and isinstance(t.ops[0], ast.GtE)
+                    and isinstance(t.left, ast.Name) and t.left.id in self.names
+                    and isinstance(t.comparators[0], ast.Constant) and type(t.comparators[0].value) is int):
+                t.ops[0] = ast.Lt()
+                node.body, node.orelse = node.orelse, node.body
+            return node
+
+    visitor = Canonical()
+    normalized = visitor.visit(copy.deepcopy(tree))
+    if set(declarations) != visitor.found:
+        raise ValueError("integer_parameters names an unknown function")
+    return ast.dump(normalized, include_attributes=False)
+
+
+def generate(source, kinds=KINDS, *, functions=None, integer_parameters=None):
     """One-fault sources in line order, excluding main guards and exact AST duplicates.
 
     functions optionally selects qualified names (e.g. ["rule", "Rules.decide"]),
     including their nested bodies, but excluding module constants and other helpers.
     This explicit source boundary is not System reachability or code coverage.
+    integer_parameters={"rule": ["age"]} opts into grouping under an explicit exact builtin-int
+    input contract for unassigned named parameters. No floats, custom int subclasses or domain inference.
+    Equivalent aliases remain in Mutant.equivalent_mutations. Default is AST-only deduplication.
     Different ASTs can still be semantically equivalent and count separately.
     """
     if functions is not None and not isinstance(functions, str):
         functions = tuple(functions)
     tree = ast.parse(source)
     base = _sites(tree, functions)
-    out, seen = [], {ast.dump(tree, include_attributes=False)}
+    if integer_parameters is not None:
+        if not isinstance(integer_parameters, dict) or any(not isinstance(k, str) or not isinstance(v, (list, tuple))
+                or any(not isinstance(n, str) for n in v) for k, v in integer_parameters.items()):
+            raise ValueError("integer_parameters maps function names to parameter names")
+    fingerprint_of = (lambda t: _integer_fingerprint(t, integer_parameters)) if integer_parameters else (
+        lambda t: ast.dump(t, include_attributes=False))
+    out, seen = [], {fingerprint_of(tree): None}
     for i, (kind, node, k) in enumerate(base):
         if kind not in kinds:
             continue
         t2 = copy.deepcopy(tree)
         kind2, node2, _ = _sites(t2, functions)[i]
         desc = _apply(t2, kind2, node2, k)
-        fingerprint = ast.dump(t2, include_attributes=False)
+        fingerprint = fingerprint_of(t2)
+        alias = {"kind": kind, "line": getattr(node, "lineno", 0), "description": desc}
         if fingerprint not in seen:
-            seen.add(fingerprint)
-            out.append(Mutant(kind, getattr(node, "lineno", 0), desc, ast.unparse(ast.fix_missing_locations(t2))))
+            mutant = Mutant(kind, getattr(node, "lineno", 0), desc, ast.unparse(ast.fix_missing_locations(t2)))
+            seen[fingerprint] = mutant
+            out.append(mutant)
+        elif seen[fingerprint] is not None:
+            seen[fingerprint].equivalent_mutations.append(alias)
     return out
 
 
@@ -403,7 +489,7 @@ def _worker(req):
     Path(req["result"]).write_text(json.dumps(verdict))
 
 
-def run(path, kinds=KINDS, timeout=5.0, limit=None, isolate=False, progress=None, *, functions=None):
+def run(path, kinds=KINDS, timeout=5.0, limit=None, isolate=False, progress=None, *, functions=None, integer_parameters=None):
     """Mutants of the task a cases file tests, each run against the cases → Report.
 
     kinds: which faults to make (KINDS); timeout: finite positive wall-clock seconds for each whole
@@ -413,6 +499,8 @@ def run(path, kinds=KINDS, timeout=5.0, limit=None, isolate=False, progress=None
     retained for compatibility and now uses this same bounded worker in both modes.
     limit: positive integer, at most that many mutants, spread evenly over the file;
     functions: optional qualified function names, as in generate(); no reachability inference;
+    integer_parameters: explicit builtin-int domain contract, as in generate(); grouped score
+    counts representatives, while to_dict exposes aliases and raw_mutations_represented;
     progress: called with (i, n, mutant) after each one.
     The cases must pass on the catalog as it is (else ValueError: a failing suite kills every mutant)."""
     from . import _read
@@ -429,7 +517,7 @@ def run(path, kinds=KINDS, timeout=5.0, limit=None, isolate=False, progress=None
     if status != "survived":
         raise ValueError(f"{path}: the cases fail on the catalog as it is ({why}); fix them before mutating")
     baseline_ms = (time.perf_counter() - started) * 1000
-    ms = generate(task_path.read_text(), kinds, functions=functions)
+    ms = generate(task_path.read_text(), kinds, functions=functions, integer_parameters=integer_parameters)
     if limit is not None and len(ms) > limit:
         step = len(ms) / limit
         ms = [ms[int(i * step)] for i in range(limit)]
@@ -454,7 +542,7 @@ def run(path, kinds=KINDS, timeout=5.0, limit=None, isolate=False, progress=None
                     progress(i + 1, len(ms), m)
         finally:
             sys.path[:] = saved
-    return Report(path, task_path, ms, time.perf_counter() - started, baseline_ms)
+    return Report(path, task_path, ms, time.perf_counter() - started, baseline_ms, integer_parameters)
 
 
 def main(argv=None):
