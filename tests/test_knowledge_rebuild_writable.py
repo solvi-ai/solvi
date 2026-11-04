@@ -73,3 +73,38 @@ def test_snapshot_prefix_count_after_skip_excludes_future_writes():
     assert historical.snapshot()["facts"] == snapshot["facts"]
     assert historical.fingerprint() == snapshot["fp"]
     assert len(historical.items) == 2
+
+
+@pytest.mark.parametrize("persistent", [False, True])
+def test_verify_does_not_require_cloneable_write_policy(tmp_path, persistent):
+    import threading
+    from solvi.core.knowledge.gates import Verdict
+
+    class LockedGate:
+        def __init__(self):
+            self.lock = threading.RLock()
+            self.calls = 0
+
+        def admit(self, store, item, shadow):
+            with self.lock:
+                self.calls += 1
+                return Verdict(True)
+
+    gate = LockedGate()
+    source = KnowledgeStore(tmp_path / "parent.jsonl" if persistent else None, gates=[gate],
+                            writers={"world": "outcome"}, reassert_writers={"world"})
+    iid = source.add("fact", fact("a"), source="outcome", by="world", valid=(10, 20))
+    source.retract(iid, by="world", assertion=source.journal[-1]["n"])
+    source.add("fact", fact("a"), source="outcome", by="world", valid=(10, 20), reassert=True)
+    before, calls = copy.deepcopy(source.journal), gate.calls
+    assert source.verify()
+    assert source.journal == before and gate.calls == calls
+    destination = tmp_path / "branch.jsonl"
+    for operation in (lambda: source.rebuild(), lambda: source.branch(destination)):
+        with pytest.raises(TypeError, match="independently copyable"):
+            operation()
+    assert not destination.exists() and source.journal == before and gate.calls == calls
+    source.journal = copy.deepcopy(source.journal)
+    source.journal[0]["body"]["o"] = "tampered"
+    assert not source.verify()
+    assert gate.calls == calls

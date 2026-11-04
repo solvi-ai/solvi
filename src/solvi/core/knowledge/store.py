@@ -489,9 +489,16 @@ class KnowledgeStore:
     def verify(self):
         """Is the journal's hash chain whole (in memory: its own chain; on a backend: the backend's verify()), and is the
         state the one the journal gives (the store rebuilt from it has the same fingerprint)?"""
-        if not self._journal_whole():
-            return False
-        return self.rebuild().fingerprint() == self.fingerprint()
+        with self._lock:
+            if not self._journal_whole():
+                return False
+            # Verification replays recorded verdicts; it never invokes write
+            # gates or exposes a writable copy. Locks/resources owned by custom
+            # gates therefore need not be cloneable for this read-only query.
+            ks = KnowledgeStore(None, gates=self.gates, defaults=self.defaults, now=self.now, _replay=False)
+            ks.reassert_writers = self.reassert_writers
+            self._replay_entries(ks, copy.deepcopy(self.journal))
+            return ks.fingerprint() == self.fingerprint()
 
     def _journal_whole(self):
         """Validate source records without calling rebuild/verify recursively."""
@@ -526,6 +533,11 @@ class KnowledgeStore:
             # the separate, explicit capability; do not add a second registry.
             ks.reassert_writers = self.reassert_writers
             entries = copy.deepcopy(self.journal if upto is None else self.journal[:upto])
+        return self._replay_entries(ks, entries, skip)
+
+    @staticmethod
+    def _replay_entries(ks, entries, skip=()):
+        """Replay recorded history only, with no write-gate calls or new verdicts."""
         with ks.batch():
             for r in entries:
                 if r.get("item") in skip:
