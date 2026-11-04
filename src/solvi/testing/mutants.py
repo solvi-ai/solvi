@@ -328,6 +328,11 @@ def _integer_fingerprint(tree, declarations):
 
         visit_AsyncFunctionDef = visit_FunctionDef
 
+        def visit_Lambda(self, node):
+            # A lambda has its own parameter domain, even when names shadow
+            # a declared outer integer. No lambda domain is inferred here.
+            return node
+
         def visit_Compare(self, node):
             self.generic_visit(node)
             if (len(node.ops) == 1 and isinstance(node.left, ast.Name) and node.left.id in self.names

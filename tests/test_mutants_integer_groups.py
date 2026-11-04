@@ -78,3 +78,22 @@ def test_run_reports_group_denominator_and_progress_without_extra_execution(tmp_
     assert len(progress) == len(report.mutants)
     assert report.total == report.killed + report.survived
     assert data['equivalence_groups']
+
+
+def test_lambda_shadowed_float_is_not_an_integer_domain_alias():
+    source = 'def rule(age):\n return (lambda age: age >= 18)(18.5)\n'
+    raw = mutants.generate(source, kinds=('boundary', 'constant'))
+    grouped = mutants.generate(source, kinds=('boundary', 'constant'), integer_parameters={'rule': ['age']})
+    assert [m.source for m in raw] == [m.source for m in grouped]
+    boundary = next(m for m in grouped if m.description == '>= → >')
+    constant = next(m for m in grouped if m.description == '18 → 19')
+    assert evaluate(boundary.source, 20) is True
+    assert evaluate(constant.source, 20) is False
+    assert not boundary.equivalent_mutations
+
+
+def test_lambda_captured_outer_parameter_is_conservatively_not_normalized():
+    source = 'def rule(age):\n return (lambda: age >= 18)()\n'
+    raw = mutants.generate(source, kinds=('boundary', 'constant'))
+    grouped = mutants.generate(source, kinds=('boundary', 'constant'), integer_parameters={'rule': ['age']})
+    assert [m.source for m in raw] == [m.source for m in grouped]
