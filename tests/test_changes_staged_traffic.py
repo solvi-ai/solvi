@@ -42,3 +42,28 @@ def test_unsafe_storage_and_mutation_refused(tmp_path):
     with pytest.raises(ValueError):s.route('0')
     p.journal.storage.fsync=False
     with pytest.raises(ValueError):StagedTraffic(p,r.version,rollout_id='B',phases=phases)
+
+
+def test_raw_observe_without_assignment_cannot_advance(tmp_path):
+    p,r,phases=setup(tmp_path);s=StagedTraffic(p,r.version,rollout_id='A',phases=phases)
+    for unit in phases[0]['units']:
+        p.observe(r.change_id,dict(rollout='A',phase=0,unit=unit,version=r.version if s._arm(unit,.5) else s.baseline,loss=0))
+    with pytest.raises(ValueError,match='prior assignment'):s.checkpoint()
+    assert p.journal.records('rollout_decision')==[]
+
+@pytest.mark.parametrize('corruption',['version','unit','loss','change','assignment','duplicate'])
+def test_raw_observation_provenance_is_revalidated(tmp_path,corruption):
+    p,r,phases=setup(tmp_path);s=StagedTraffic(p,r.version,rollout_id='A',phases=phases)
+    unit='0';version=s.route(unit);assignment=p.journal.records('rollout_assignment')[-1]
+    effect=dict(rollout='A',phase=0,unit=unit,version=version,loss=0,assignment=assignment['id'])
+    change_id=r.change_id
+    if corruption=='version':effect['version']=100
+    if corruption=='unit':effect['unit']='outside'
+    if corruption=='loss':effect['loss']=float('nan')
+    if corruption=='assignment':effect['assignment']='not-the-assignment'
+    if corruption=='change':change_id='different-change'
+    # Direct raw journal event deliberately bypasses public validation.
+    p.journal.write('observed',change=change_id,observed=effect)
+    if corruption=='duplicate':p.journal.write('observed',change=change_id,observed=effect)
+    with pytest.raises(ValueError):s.checkpoint()
+    assert p.journal.records('rollout_decision')==[]

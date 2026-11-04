@@ -94,16 +94,43 @@ class StagedTraffic:
             raise ValueError('actual bounded loss required')
         assignments=[r for r in self._records('rollout_assignment') if r['phase']==phase and r['unit']==unit]
         if not assignments:raise ValueError('durable assignment required before observation')
-        observed=[r for r in self.journal.records('observed') if (r.get('observed') or {}).get('rollout')==self.id and r['observed'].get('phase')==phase and r['observed'].get('unit')==unit]
-        if observed:raise ValueError('unit already labelled')
-        return self.pipeline.observe(self.change_id,dict(rollout=self.id,phase=phase,unit=unit,version=assignments[0]['version'],loss=float(loss)),by=by)
+        if any(r['unit'] == unit for r in self._observations(phase)):
+            raise ValueError('unit already labelled')
+        return self.pipeline.observe(self.change_id,dict(rollout=self.id,phase=phase,unit=unit,
+                                     assignment=assignments[0]['id'],version=assignments[0]['version'],loss=float(loss)),by=by)
+
+    def _observations(self, phase):
+        """Revalidate raw Pipeline.observe records before they can count as evidence."""
+        assignments={r['id']:r for r in self._records('rollout_assignment') if r['phase']==phase}
+        p=self.phases[phase]
+        labels={}
+        for record in self.journal.records('observed'):
+            effect=record.get('observed')
+            if not isinstance(effect,dict) or effect.get('rollout')!=self.id:
+                continue
+            if type(effect.get('phase')) is not int or effect['phase'] < 0 or effect['phase'] >= len(self.phases):
+                raise ValueError('invalid rollout observation phase')
+            if effect['phase']!=phase:
+                continue
+            unit=effect.get('unit')
+            assignment=assignments.get(effect.get('assignment'))
+            loss=effect.get('loss')
+            if (record.get('change')!=self.change_id or not isinstance(unit,str) or unit not in p['units']
+                    or assignment is None or assignment['unit']!=unit or assignment['seq']>=record['seq']
+                    or type(effect.get('version')) is not int or effect['version']!=assignment['version']
+                    or effect['version']!=(self.version if self._arm(unit,p['share']) else self.baseline)
+                    or isinstance(loss,bool) or not isinstance(loss,(int,float)) or not math.isfinite(loss) or not 0<=loss<=1):
+                raise ValueError('outcome must bind the prior assignment, change, unit, variant and bounded actual loss')
+            if unit in labels:
+                raise ValueError('duplicate rollout unit outcome')
+            labels[unit]=effect
+        return list(labels.values())
 
     def checkpoint(self):
         phase=self._phase()
         if phase is None or phase>=len(self.phases):raise ValueError('rollout stopped/completed')
         p=self.phases[phase]
-        observations=[r['observed'] for r in self.journal.records('observed') if (r.get('observed') or {}).get('rollout')==self.id and r['observed'].get('phase')==phase]
-        labels={r['unit']:r for r in observations}
+        labels={r['unit']:r for r in self._observations(phase)}
         missing=[u for u in p['units'] if u not in labels]
         if missing:return dict(decision='hold',phase=phase,missing=missing)
         candidate=[r['loss'] for r in labels.values() if r['version']==self.version]
