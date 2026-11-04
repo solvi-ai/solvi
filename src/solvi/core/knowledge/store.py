@@ -314,17 +314,20 @@ def _covers_seg(iv, seg):
     return (a is None or (lo is not None and not lo < a)) and (b is None or (hi is not None and not b < hi))
 
 
-def _effective(units):
+def _effective(units, original_since_by_unit=None):
     """Effective intervals on one key with `valid`: at each world time the value of the in-play versions that cover it
     with the latest since holds (a version closes an earlier one at its own since; a bounded one gives the earlier value
     back after its until); a version that took another's overlap (a same-since contest it won) beats it there; two
     values left at one time are contested there. units: [(unit, item id, value (JSON text), (since, until), lost_to
     (units))] → {item id: {"periods": [[lo, hi], ...], "contested": [[lo, hi], ...]}}, or None when the times on the
     key do not compare."""
+    def priority(u):
+        return u[3][0] if original_since_by_unit is None else original_since_by_unit[u[0]]
+
     try:
         units = [u for u in units if u[3][0] is None or u[3][1] is None or u[3][0] < u[3][1]]   # empty: never holds
-        order = sorted(range(len(units)), key=lambda k: (units[k][3][0] is not None, units[k][3][0]
-                                                          if units[k][3][0] is not None else 0))
+        order = sorted(range(len(units)), key=lambda k: (priority(units[k]) is not None,
+                                                          priority(units[k]) if priority(units[k]) is not None else 0))
         rank = {k: n for n, k in enumerate(order)}      # position by since (None first)
         starts, ends = defaultdict(list), defaultdict(list)
         active = []                                     # the covering versions' positions, in since order
@@ -345,11 +348,11 @@ def _effective(units):
                     insort(active, n)
             if not active:
                 continue
-            top = units[order[active[-1]]][3][0]
+            top = priority(units[order[active[-1]]])
             best = []
             for n in reversed(active):
                 u = units[order[n]]
-                if _lo_lt(u[3][0], top):
+                if _lo_lt(priority(u), top):
                     break
                 best.append(u)
             names = {u[0] for u in best}
@@ -2244,11 +2247,13 @@ def _continuity_units(items, units, live, retest, pclaims, key_ids):
         return units
     out = []
     for unit, iid, value, iv, lost in units:
-        assertions = [a for a in live[iid] if a.get("valid") is not None
-                      and _same_since(_interval(a["valid"])[0], iv[0])
+        assertions = [a for a in live[iid] if _same_since(_interval(a["valid"])[0], iv[0])
                       and (iid, a["t"]) not in pclaims]
         intervals = []
         for a in assertions:
+            if a["just"] or a.get("consulted") or a.get("inferred"):
+                intervals.append(list(iv))
+                continue
             gaps = []
             for j, b in pending:
                 biv = _interval(b["valid"])
@@ -2317,10 +2322,12 @@ def _resolve(items, comp, by_key, resolves, clock, flagged, max_iter=200, taints
     for k in keys:                                      # effective intervals on the keys with `valid`
         if units.get(k):
             effective_units = _continuity_units(items, units[k], live, retest, pclaims, by_key[k])
-            effective = _effective(effective_units) or {}
-            for _, iid, _, _, _ in units[k]:
-                effective.setdefault(iid, {"periods": [], "contested": []})
-            eff.update(effective)
+            original_since = ({u[0]: u[3][0] for u in units[k]} if effective_units != units[k] else None)
+            effective = _effective(effective_units, original_since_by_unit=original_since)
+            if effective is not None:  # retain existing incomparable-time fallback
+                for _, iid, _, _, _ in units[k]:
+                    effective.setdefault(iid, {"periods": [], "contested": []})
+                eff.update(effective)
     scoped = set()                                      # derived items held up only by a dispute scoped to an
     grew = True                                         # overlap: each holds where its premises hold (usable /
     while grew:                                         # snapshot at a time read the premises' periods there)

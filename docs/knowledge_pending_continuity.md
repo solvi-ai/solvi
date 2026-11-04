@@ -28,3 +28,10 @@ This intentionally differs from 1.4's older-value fallback. It fixes an unsafe
 host answer, not the truth of the later copy: abstention is still different from
 the known gold value. The frozen corpus performance/quality result remains
 negative; this focused migration does not establish a new corpus pass.
+
+Continuity clipping changes occupancy only: a fragment reopening at the end of a
+gap retains its ORIGINAL version-start priority. It cannot outrank an independent
+clean version published between the original start and the gap end. Undated clean
+support is preserved when no matching same-writer restriction applies. Derived,
+inferred and consulted older contributions are not direct declarations and are
+not clipped by this continuity rule; their existing dependency gates decide them.
