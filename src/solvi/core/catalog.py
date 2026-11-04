@@ -725,6 +725,7 @@ class Part:
     tout: Any = field(default=None, repr=False, compare=False)          # ... and of the return type
 
     text: str | None = None             # rule only: author-declared condition, rendered in why
+    precedence: int | None = None  # hard checks: larger values select among proven false checks
 
     def strict(self):
         """Must a Quote from this part be literally at its offsets? Yes for model-backed parts (unless exact=False)."""
@@ -1256,7 +1257,7 @@ class Catalog:
                           timeout=timeout, blocking=blocking, cites=cites_of(cite, clause))
 
     def check(self, f=None, *, hard=False, then=None, cost=None, model=None, provenance=None, timeout=None, blocking=None,
-              cite=None, clause=None, family=None, shares_call_with=None):
+              cite=None, clause=None, family=None, shares_call_with=None, precedence=None):
         """A check: a function of facts that answers True or False (or `solvi.core.slow.refine.Fail("why")` for False with its
         reasons). hard=True: when it is False it decides the questions it governs — the model cannot override it.
         then: {question: answer} — the answer a question gets when this hard check is False (a question listed here is
@@ -1268,19 +1269,23 @@ class Catalog:
         trace (record kind "then") and re-checked by replay. `then={"q": None}` (or "abstain") names that abstention
         itself: the check fails and the question abstains on purpose. When several hard checks governing a question are False,
         the strictest answer by the question's option order decides (since 1.2; Catalog(combine="first"): the first
-        declared).
+        declared). precedence: an integer priority for hard checks only (None is 0). The largest priority among
+        proven false governing checks selects the deciding group; ties use the existing combine mode. It does not
+        remove mandatory checks or permit ignoring unavailable checks.
         `cite`, `clause`: as for extract. family: where the check's evidence comes from (a model family such as
         "gpt", "code", "human", a data source); shares_call_with: the part or question whose model call the check
         re-reads (a self-check in the same response). Both are metadata: nothing changes at ask time and the
         fingerprint is the same; `solvi check` warns about a check that shares a call (it agrees with that answer
         whatever it is) and about a question whose checks are all of one family (they err together)."""
+        if precedence is not None and (type(precedence) is not int or not hard):
+            raise ValueError("precedence requires hard=True and an integer (bool and float are not supported)")
         for k, v in (("family", family), ("shares_call_with", shares_call_with)):
             if v is not None and not isinstance(v, str):
                 raise TypeError(f"{k}= is a name (str), not {type(v).__name__}")
         if then is not None and not isinstance(then, dict):
             raise TypeError(f"then= is {{question: answer or function of facts}}, not {type(then).__name__}: e.g. "
                             "then={\"step\": free_side}")
-        return self._deco("check", f, hard=hard, then=then or {}, cost=cost, model=model, provenance=provenance,
+        return self._deco("check", f, hard=hard, precedence=precedence, then=then or {}, cost=cost, model=model, provenance=provenance,
                           timeout=timeout, blocking=blocking, cites=cites_of(cite, clause), family=family,
                           shares_call_with=shares_call_with)
 

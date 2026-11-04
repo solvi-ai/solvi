@@ -1428,7 +1428,22 @@ class System:
         # A hard check with `then` governs only the questions listed there (and those that require it);
         # for other questions it is an ordinary failed check. hard: the catalog's hard checks, in catalog order.
         in_flow = set(facts)
+        explicit_priority = any(getattr(part, "precedence", None) for f, part in hard
+                                if governs(part, q) and (f in in_flow or f in flow.unresolved.get(q.name, ())))
         hard = [(f, part) for f, part in hard if f in in_flow]
+        if explicit_priority:
+            for f, part in hard:
+                if governs(part, q) and (by.get(f) is None or by[f].value is MISSING):
+                    rec = by.get(f)
+                    detail = "no value" if rec is None else (rec.error or "no value") + _caused_by(by, rec)
+                    return Result(None, 0.0, f"hard check {f} is unavailable ({detail}): precedence cannot select from "
+                                  "incomplete evidence", "abstain", source=f, guard="hard_check")
+            lost = flow.unresolved.get(q.name, ())
+            nodata = self._no_data(q, lost, trace.init) if lost else {}
+            if nodata:
+                said = "; ".join(f"no data for hard check {c}: missing {', '.join(m)}" for c, m in nodata.items())
+                return Result(None, 0.0, said + "; precedence cannot select from incomplete evidence", "abstain",
+                              source=next(iter(nodata)), guard=NO_DATA, extra={NO_DATA: nodata})
         failed = [(f, part) for f, part in hard if by.get(f) is not None and by[f].value is False and governs(part, q)]
         if len(failed) > 1:                           # several failed: the first declared decides, or the strictest
             failed = _combine_failed(self.catalog, q, failed)
@@ -2295,6 +2310,10 @@ def _combine_failed(catalog, q, failed):
     (no `then` answer for q: an abstention, strictest of all), and the first declared where the options give no order.
     A warning names them when their answers differ, unless the mode was chosen and applies."""
     import warnings
+    highest = max(getattr(part, "precedence", None) or 0 for _, part in failed)
+    failed = [(name, part) for name, part in failed if (getattr(part, "precedence", None) or 0) == highest]
+    if len(failed) == 1:
+        return failed
     keys = []
     for f, part in failed:
         a = part.then.get(q.name, _ABSTAIN)

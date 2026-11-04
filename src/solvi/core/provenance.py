@@ -579,6 +579,8 @@ def part_fingerprint(part, _code=None):
          "validate": code_fingerprint_(part.validate), "model": None if part.model is None else type(part.model).__qualname__,
          "types": None if part.types is None else {k: type_fingerprint(t) for k, t in part.types.items()},
          "returns": None if part.returns is None else type_fingerprint(part.returns)}
+    if getattr(part, "precedence", None):
+        d["precedence"] = part.precedence
     if getattr(part, "quotes", "normalized") != "normalized":   # only when set otherwise: 0.9's fingerprints stay as
         d["quotes"] = part.quotes                                # they were
     if part.text is not None:
@@ -601,7 +603,8 @@ def catalog_fingerprint(catalog):
             [("constraint:" + n, p) for n, p in catalog.constraints.items()]
     combine = getattr(catalog, "combine", "strictest")
     boundary_given = tuple(sorted(getattr(catalog, '_boundary_given_aliases', ())))
-    key = tuple((n, id(p), id(p.func), id(p.model), len(p.alternatives or ()), len(p.inputs)) for n, p in items) + (combine, boundary_given)
+    key = tuple((n, id(p), id(p.func), id(p.model), len(p.alternatives or ()), len(p.inputs),
+                 getattr(p, "precedence", None) or 0) for n, p in items) + (combine, boundary_given)
     cached = getattr(catalog, "_fp_cache", None)
     if cached is not None and cached[0] == key:
         return cached[1]

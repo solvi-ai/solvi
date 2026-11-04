@@ -1831,7 +1831,9 @@ def _learned_hard_checks(run):
     def settle():
         for q in list(live):
             gs = governing.get(q, ())
-            if strictest:                               # settled only once every check governing q is evaluated
+            if strictest or any(getattr(steps[i].part, "precedence", None) for i in gs):
+                # Explicit priority can beat an earlier failure even with combine="first". Evaluate all governing
+                # checks before selecting among their proven failures; priority never cancels mandatory evidence.
                 failed = [i for i in gs if i in done and done[i].value is False]
                 if failed and all(i in done for i in gs):
                     live.discard(q)
