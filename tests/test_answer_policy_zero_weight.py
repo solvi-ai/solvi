@@ -34,3 +34,24 @@ def test_invalid_weight_still_refuses(bad):
     p = policy(weights=lambda obs: {k: bad for k in obs})
     with pytest.raises(ValueError):
         p.posterior(.7, {'D': ('val', 'g')})
+
+
+@pytest.mark.parametrize("disabled_first", [True, False])
+def test_disabled_first_alias_is_not_selected_as_answer_source_or_reweighted(disabled_first):
+    calls = []
+    def weights(obs):
+        calls.append(tuple(obs))
+        return {k: 0.0 if k == 'D' else 1.0 for k in obs}
+    p = policy(weights=weights, max_checks=2, units={'D': 2, 'P': 3}, max_units=5)
+    state = dict([('D', ('val', 'g')), ('P', ('val', 'g'))][::1 if disabled_first else -1])
+    answer = p.decide(.15, state, 1)
+    assert answer.kind == 'answer_check' and answer.check == 'P'
+    assert calls == [tuple(state), tuple(state)]  # decision + existing why report; none for source selection
+    assert p.spent(state) == 5  # disabled evidence was still purchased
+    assert state == {'D': ('val', 'g'), 'P': ('val', 'g')}
+
+
+def test_all_disabled_candidates_cannot_be_answer_sources():
+    p = policy(weights=lambda obs: {k: 0.0 for k in obs}, max_checks=2)
+    answer = p.decide(.15, {'D': ('val', 'g'), 'P': ('val', 'g')}, 1)
+    assert answer.kind in ('answer', 'abstain') and answer.check is None

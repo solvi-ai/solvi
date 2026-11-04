@@ -227,6 +227,10 @@ class AnswerPolicy:
     # ---- posterior over hypotheses
     def posterior(self, q0: float, state: dict):
         """state: {check: "agree" | "fail" | ("val", value_id)} → (P(a0), {value_id: P(value)}, P(unseen))."""
+        return self._posterior_evidence(q0, state)[0]
+
+    def _posterior_evidence(self, q0, state):
+        """Posterior and its active source witnesses from the same weights evaluation."""
         _number(q0, "q0", probability=True)
         self._validate(state, q0)
         q0 = min(max(q0, 1e-9), 1 - 1e-9)
@@ -274,7 +278,8 @@ class AnswerPolicy:
         allv = [la0, lother] + list(lv.values())
         mx = max(allv)
         z = sum(math.exp(x - mx) for x in allv)
-        return (math.exp(la0 - mx) / z, {g: math.exp(weight - mx) / z for g, weight in lv.items()}, math.exp(lother - mx) / z)
+        post = (math.exp(la0 - mx) / z, {g: math.exp(weight - mx) / z for g, weight in lv.items()}, math.exp(lother - mx) / z)
+        return post, state
 
     def _predictive(self, k, state, post):
         """Outcomes of buying k at `state`: [(prob, outcome)] with outcome "agree" | "fail" | ("val", id)."""
@@ -312,9 +317,9 @@ class AnswerPolicy:
         key = tuple(sorted(state.items()))
         if key in memo:
             return memo[key]
-        post = self.posterior(q0, state)
+        post, evidence = self._posterior_evidence(q0, state)
         best = Action("abstain", None, 0.0, None)
-        for a in self._answer_options(post, state, lam):
+        for a in self._answer_options(post, evidence, lam):
             if a.value > best.value + 1e-12:
                 best = a
         can_buy = self.max_checks is None or len(state) < self.max_checks
