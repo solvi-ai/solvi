@@ -19,3 +19,19 @@ Replay uses the same declared option. Ignored alarms remain ignored by policy.
 
 This option responds to observed alarms. It does not detect an arbitrary hidden
 model swap or establish that an unchanged provider has an unchanged distribution.
+
+## Empty trial zones
+
+`DefaultPolicy(stale=...)` already discards an uncertified trial after the stated
+number of **all decisions since freeze**, including decisions outside its zone.
+An empty zone therefore reaches a deterministic maximum age without relaxing the
+certification or novelty sample requirements. The policy and decision clock persist
+in checkpoints. Pause prevents new training; it does not suspend the trial deadline.
+Discard removes only the candidate's trial routing boundary. Set the deadline when
+constructing the policy; no second occupancy counter or minimum-evidence override
+is needed to terminate a zero-occupancy trial.
+
+This does not bypass escalation inside a nonempty trial zone. An alternative shadow
+label policy would need an explicit sampling and propensity ledger, separate
+validation of which labels may update each promise, and durable replay of that
+choice. Such a protocol is outside this option.

@@ -3,7 +3,7 @@ import math
 
 import pytest
 
-from test_stream_additive_b3 import (GOOD, GOOD2, GW, _Hand, _clock, _events, _loop,
+from test_stream_additive_b3 import (GOOD, GOOD2, GW, _Hand, _events, _loop,
                                      _resume_check, _until, _xs)
 
 from solvi.experimental.stream import AdapterLoop, RiskDetector
