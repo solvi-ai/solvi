@@ -65,3 +65,28 @@ def test_invalid_budget_prediction_and_cost():
         with pytest.raises(ValueError):model().run(lambda *_:0,lambda *_:True,[(1,'r')],**kw)
     with pytest.raises(ValueError):model().choose(lambda *_:True,[(float('nan'),'r')])
     with pytest.raises(ValueError):model().choose(lambda *_:True,[(1,'r')],cost=lambda *_:-1)
+
+
+@pytest.mark.parametrize('observation,expected',[(1e100,(0.,1.)),(-1e100,(1.,0.))])
+def test_huge_common_squared_residual_does_not_erase_logodds(observation,expected):
+    g=model();p=g.choose(lambda *_:True,[(1,'r')])
+    assert g.observe(p,observation)==pytest.approx(expected)
+    assert sum(g.weights)==pytest.approx(1)
+
+
+def test_centered_means_posterior_and_information_translation_invariant():
+    g=model();p=g.choose(lambda *_:True,[(1,'r')]);info=p.info
+    shifted=model((1e12,1e12+2));q=shifted.choose(lambda *_:True,[(1,'r')])
+    assert q.info==pytest.approx(info,abs=1e-12)
+    assert shifted.observe(q,1e12+2)==pytest.approx(g.observe(p,2.))
+
+
+def test_unsupported_relative_scale_is_atomic():
+    g=model(sigma=1e-200)
+    # Build a matching probe without an unrepresentable EIG ranking calculation.
+    from solvi.experimental.laws import Probe
+    p=Probe(1,'r',(0.,2.),1)
+    before=(g.weights,g.observations)
+    with pytest.raises(ValueError,match='supported finite range'):
+        g.observe(p,1e200)
+    assert (g.weights,g.observations)==before

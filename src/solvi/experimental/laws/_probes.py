@@ -254,11 +254,27 @@ class GaussianProbes:
         sigma = self._sigma(state, action) if callable(self._sigma) else self._sigma
         return means, _finite_number(sigma, "sigma", positive=True)
 
-    def _posterior(self, means, sigma, value):
-        distances = [(value - mu) / sigma for mu in means]
-        if any(not math.isfinite(d) or abs(d) > 1e150 for d in distances):
+    @staticmethod
+    def _relative_likelihood(means, sigma, reference, centered_value):
+        # log f_i(y) - log f_reference(y), with no common y**2 term.
+        # Subtract means before scaling to retain their representable separation.
+        if not math.isfinite(centered_value):
             raise ValueError("measurement/model scale is outside supported finite range")
-        logs = [w - .5 * d * d for w, d in zip(self._logs, distances)]
+        relative = []
+        for mu in means:
+            delta = (mu - reference) / sigma
+            term = delta * (centered_value - .5 * delta)
+            if not math.isfinite(delta) or not math.isfinite(term):
+                raise ValueError("measurement/model scale is outside supported finite range")
+            relative.append(term)
+        return relative
+
+    def _posterior(self, means, sigma, value):
+        reference = means[0]
+        relative = self._relative_likelihood(means, sigma, reference, (value - reference) / sigma)
+        logs = [w + r for w, r in zip(self._logs, relative)]
+        if any(not math.isfinite(v) for v, w in zip(logs, self._logs) if w != -math.inf):
+            raise ValueError("posterior scale is outside supported finite range")
         top = max(logs)
         shifted = [v - top for v in logs]
         norm = _logsum(shifted)
@@ -268,19 +284,17 @@ class GaussianProbes:
         from statistics import NormalDist
         if len(set(means)) < 2:
             return 0.
-        # E_h E_(Y|h) log2 p(Y|h)/p(Y), continuous mixture quadrature.
+        # Under component mu, Y = mu + sigma*z. Compute all log densities
+        # relative to this component directly, without constructing huge Y.
         nodes = [NormalDist().inv_cdf((i + .5) / 64) for i in range(64)]
         info = 0.
         for weight, mu in zip(self.weights, means):
             if not weight:
                 continue
             for z in nodes:
-                y = mu + sigma * z
-                ds = [(y - m) / sigma for m in means]
-                if any(not math.isfinite(d) or abs(d) > 1e150 for d in ds):
-                    raise ValueError("prediction/noise scale is outside supported finite range")
-                mixture = _logsum([w - .5 * d * d for w, d in zip(self._logs, ds)])
-                info += weight * (-.5 * z * z - mixture) / (64 * math.log(2))
+                relative = self._relative_likelihood(means, sigma, mu, z)
+                mixture = _logsum([w + r for w, r in zip(self._logs, relative)])
+                info -= weight * mixture / (64 * math.log(2))
         return max(0., info)
 
     def choose(self, safe, probes, *, read_only=None, cost=None, per_cost=False, max_cost=None):
