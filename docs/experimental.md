@@ -121,6 +121,10 @@ and rollback (`solvi.experimental.changes.Pipeline(stages, storage, store=...)`)
 
 ## `laws`
 
+For an explicit replacement of a same-effect patchwork with a broader candidate, see
+[opt-in LawSet consolidation](lawset-consolidation.md). Its matched-evidence compaction is separate from ordinary
+positive-net admission and does not guarantee correctness on unseen states.
+
 Laws of an environment from prediction mismatches, judged by the environment, never by a model
 (`solvi.experimental.laws`): a grammar of boolean atoms you write, candidates "for this action, under this condition,
 the effect is this" from each wrong prediction, acceptance only by a held-out test on other worlds, sessions or paths,

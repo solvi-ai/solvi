@@ -737,7 +737,9 @@ class Law:
     told apart from); null: the null precision it was tested against (the effect's base rate, or the set's fixed
     null); need: the clean support the sized rule asked for at that N; level:
     the per-candidate error level δ_N it passed (None: fixed thresholds, `sized=False`, or a law added by hand);
-    admitted: "test" (the held-out buffer), "probes" (`admit_by_probes`) or "hand" (`add`). aliases: the effects
+    admitted: "test" (the held-out buffer), "probes" (`admit_by_probes`), "consolidation" (`consolidate`) or
+    "hand" (`add`). consolidation: an opt-in replacement's proof (replaced IDs, evidence IDs, original and
+    counterfactual net, held-out correct counts); None on ordinary admissions. aliases: the effects
     declared one with `effect` under the law's condition (`LawSet(equivalent=)`) and merged into it; `effect` (the
     first candidate given) is the one applied."""
     id: str
@@ -766,6 +768,7 @@ class Law:
     base_version: str | None = None          # opt-in exceptions belong to one owner-declared base revision
     recent: Any = field(default=None, repr=False)      # the last observations (1 right, 0 wrong) with LawSet(recent=)
     doubt: Any = field(default=None, repr=False)       # suspended: the last observations where it would apply
+    consolidation: dict | None = None       # opt-in replacement proof; net remains counterfactual, not a gain
 
     def holds(self, true: Iterable[str]) -> bool:
         t = set(true)
@@ -1896,6 +1899,24 @@ class LawSet:
             out.append(law)
             self.last_retired += self.check(buffer, c.action)
         return out
+
+    @_stable_base
+    def consolidate(self, candidate: Candidate, buffer: Buffer, exclude=None, *, commit: bool = True):
+        """Opt-in empirical compaction; return a replacement Law, or None without changing the book.
+
+        Replace at least two strictly narrower same-action/effect laws. Test on ALL matched held-out rows with
+        the existing acceptance, sized/null, rivals, readmission and confirmation gates, and positive net against
+        the book with those laws removed. No formerly correct held-out prediction may become wrong. Other active
+        laws must survive the normal check. The original book need not have positive net: this is compaction,
+        not evidence of error reduction. `law.consolidation` records both nets, replaced IDs and evidence IDs.
+
+        Like ordinary empirical admission this can answer on unseen states under the declared condition; matched
+        evidence is not a domain guarantee. In particular, a broader default must pass on all its matched rows.
+        `commit=False` returns a proposed law, without confirmation callbacks, book changes or spending buffer N.
+        Rejections and callback exceptions leave the book unchanged; attempted committed tests still spend N.
+        """
+        from ._consolidate import consolidate
+        return consolidate(self, candidate, buffer, exclude, commit=commit)
 
     @staticmethod
     def _clock(buffer):
