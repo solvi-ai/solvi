@@ -167,7 +167,7 @@ def _same_currency(x, y):
     return x == y or (x == "$" and y in _DOLLARS) or (y == "$" and x in _DOLLARS)
 
 
-def _read_quote(vtype, text, decimal=None, label=None):
+def _read_quote(vtype, text, decimal=None, label=None, space_grouping=False):
     """A quoted number → (the value as vtype, its Unit). See the module docs, "numbers": the scale never multiplied,
     the currency dropped (an ISO code or a sign), a percentage as its number, a sign in any dash before or after the
     currency or trailing, parentheses as a negative around a number with a separator, decimals, a currency or a
@@ -176,6 +176,8 @@ def _read_quote(vtype, text, decimal=None, label=None):
     ".ddd" group ("30.000") reads only when decimal declares the decimal mark ("," for a document that groups
     thousands with a dot — what document(..., decimal="dot") passes; a declaration, never a guess). Apostrophe
     thousands groups must be complete triples; their decimal mark must agree with a declaration if given.
+    space_grouping: an explicit declaration that complete space-separated triples are thousands groups, including
+    without a currency. The default abstains on bare grouped digits. It never admits incomplete groups.
     label: the field's name, whose exact same-line prefix and delimiter may be read with the number; no numeric
     or recognized unit/marker words in that prefix. The original quote remains the provenance. ValueError when
     it is not one number."""
@@ -218,6 +220,8 @@ def _read_quote(vtype, text, decimal=None, label=None):
     t = _SCALE_SUFFIX.sub(" ", _SCALE_WORD.sub(" ", t))
     pct = bool(_PERCENT.search(t))
     t = _PERCENT.sub(" ", t)
+    if space_grouping and re.search(r"[\t\r\n]", t) and re.search(r"[0-9]\s+[0-9]", t):
+        raise ValueError("space-grouped digits cannot cross a line or a tab")
     t = re.sub(r"\s+", " ", t).strip()
     t = re.sub(r"\(\s*", "(", re.sub(r"\s*\)", ")", t))
     neg = False
@@ -231,6 +235,10 @@ def _read_quote(vtype, text, decimal=None, label=None):
         neg, t = True, t[:-1].strip()
     elif t.startswith("+"):
         t = t[1:].strip()
+    if space_grouping and re.search(r"\d \d", t):
+        if not re.fullmatch(r"[0-9]{1,3}(?: [0-9]{3})+(?:[.,][0-9]+)?", t):
+            raise ValueError("space-grouped digits must be complete groups of three")
+        t = t.replace(" ", "")
     if not _CORE.fullmatch(t or "-"):
         raise ValueError("not one number")
     swiss = re.fullmatch(_SWISS, t) is not None
@@ -870,7 +878,8 @@ def _same_number(r, y):
 
 
 def document(schema, model, *, task=None, text="doc", compute=None, answer=None, checks=None, units="same",
-             storage=None, calibration=None, record="full", workers=1, reads_with=None, slow=None, decimal=None):
+             storage=None, calibration=None, record="full", workers=1, reads_with=None, slow=None, decimal=None,
+             space_grouping=False):
     """A decision over a document (see the module docs) → DocumentSystem.
 
     schema: a pydantic model class, one field per fact to read (`Span[float]`, `Span[date]`, `Span[str]`, a
@@ -891,9 +900,14 @@ def document(schema, model, *, task=None, text="doc", compute=None, answer=None,
     "12,5" → 12.5) — or "comma" (a comma groups thousands; the dot reads decimals). A per-document declaration of
     the separator the guarded reader abstains on by default (a single ".ddd" group is a thousands point or a decimal
     point, the text does not say — never a guess); the recipe with it is its own catalog (a calibration or a record
-    made with another decimal= does not attach)."""
+    made with another decimal= does not attach).
+    space_grouping: explicitly declare space-separated thousands ("1 234" → 1234 without a currency). Only
+    complete groups of three on the same line are accepted; the default abstains on that ambiguous bare quote.
+    This declaration is part of the catalog fingerprint, like decimal=."""
     from ..core.store import JSONLStorage
     from ..core.system import System
+    if type(space_grouping) is not bool:
+        raise TypeError("space_grouping must be a bool: explicitly declare space-separated thousands")
     if not (isinstance(schema, type) and isinstance(getattr(schema, "model_fields", None), dict)):
         raise TypeError(f"schema is a pydantic model class (one field per fact to read), not {schema!r}")
     if not schema.model_fields:
@@ -986,12 +1000,12 @@ def document(schema, model, *, task=None, text="doc", compute=None, answer=None,
     for name in numbers:                                   # a number field's value: read, its sign checked in the text
         vt = schema.model_fields[name].annotation
 
-        def value(kw, name=name, vt=vt, dec=dec):
+        def value(kw, name=name, vt=vt, dec=dec, space_grouping=space_grouping):
             raw = kw[name]
             if not isinstance(raw, str):
                 return raw
             try:
-                v = _read_quote(vt, raw, decimal=dec, label=name)[0]
+                v = _read_quote(vt, raw, decimal=dec, label=name, space_grouping=space_grouping)[0]
             except ValueError as e:
                 raise ValueError(f"{name}: {raw!r} does not read as {vt.__name__}: {e}") from None
             why = _left_out(raw, kw[text])
@@ -1011,14 +1025,15 @@ def document(schema, model, *, task=None, text="doc", compute=None, answer=None,
                 raise ValueError(f"the computed answer is {v!r}, not a finite number")
         return v
 
-    def units_fact(kw, dec=dec):
+    def units_fact(kw, dec=dec, space_grouping=space_grouping):
         """{field: [scale, currency, percent]}: what each number's quote writes, and the currency or scale its text
         token writes where the quote left them out."""
         out = {}
         for x in numbers:
             raw = kw[x]
             try:
-                u = _read_quote(schema.model_fields[x].annotation, raw, decimal=dec, label=x)[1]
+                u = _read_quote(schema.model_fields[x].annotation, raw, decimal=dec, label=x,
+                                space_grouping=space_grouping)[1]
             except (ValueError, TypeError):            # unreadable: its value part says why
                 u = Unit()
             why, got = _ground(raw, kw[text])
