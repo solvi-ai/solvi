@@ -1,6 +1,6 @@
-# Breaking development changes: candidate migration notes
+# Migrating to 1.5
 
-These changes are local unreleased development work. They do not announce a release or change the package version.
+Version 1.5 contains breaking changes. These notes describe the prepared package; publication is a separate step.
 
 ## Conditional checks and source accountability
 
@@ -193,7 +193,7 @@ not requests to compute catalog parts. Local `System.ask` keeps its existing app
 
 ## Base-dependent law exceptions
 
-S235 adds an explicit opt-in `lapse_on_base_change=True, base_version="edition"` and
+Base-dependent exceptions add an explicit opt-in `lapse_on_base_change=True, base_version="edition"` and
 `set_base(base, version="new-edition")`. Default laws retain their absolute meaning. In the bound mode,
 old active/suspended exceptions retire on a new edition; compile and Knowledge exports refuse until they
 can preserve the dependency. Update the declared version for mutable bases. A base change invalidates the
@@ -260,7 +260,7 @@ calibration/guarantee under the new runtime; retain the old environment to repla
 
 Use `sampling_policy="uniform"` only for an input-independent audit coin whose rate can depend on the past. Use `sampling_policy="complete"` when every decision in the certificate's population is labelled. Missing labels still count as losses. Input-dependent sampling is rejected before any evidence or delta budget changes; this certificate has no IPW/DR support. Separate per-slice certificates need independent uniform sampling within each slice and separately allocated delta budgets.
 
-Dispatcher and StreamLoop supply declarations for the sampling paths they own. Manual callers must establish their actual sampling design; adding the word `uniform` does not make a slice-dependent coin valid. This API validates a declaration, cannot detect a dishonest caller, and does not solve adversarial re-probing (S334). Grid construction, statistical thresholds and label floors are unchanged.
+Dispatcher and StreamLoop supply declarations for the sampling paths they own. Manual callers must establish their actual sampling design; adding the word `uniform` does not make a slice-dependent coin valid. This API validates a declaration, cannot detect a dishonest caller, and does not establish whole-interaction blindness. Grid construction, statistical thresholds and label floors are unchanged.
 
 ## Trusted exact claim reassertion
 
@@ -353,7 +353,7 @@ retains the old programmatic path. The flag requires an actual bool, emits an `U
 marks the returned reasons and stores `approval_verification="unverified-explicit-waiver"`. It supplies no identity
 authentication and never bypasses a configured verifier. Rejections still need no token. Normal checks, calls and
 batch policies are unchanged. Message-role authentication remains a separate boundary; this change does not close
-all of S157 or establish the truth of authenticated messages.
+a complete distributed ledger protocol or establish the truth of authenticated messages.
 
 MCP elicitation's plain `accept`/`approve: true` response supplies no authenticated identity or approval token.
 Without an applicable trusted verifier/token, the proxy keeps the escalation unresolved and returns structured
@@ -371,3 +371,44 @@ Session clipping and batch deep copies retain their internal provenance. Session
 that accepted context; they do not promise fresh age verification on every subsequent call. Repeated raw signed
 contexts still pass through the verifier and its existing age checks. This boundary does not defend against hostile
 Python code modifying private in-process Guard state, nor does it establish the truth of authenticated content.
+
+
+## Parameters, batches and explicit check priority
+
+[Parameter views](api/parameters.md) share their backend runtime; only defaults and per-request inputs are private.
+Caller facts override defaults. Use distinct Systems when calibration, learning or guard histories must be isolated.
+`ask_many` is sequential and bounded, with preflight of input structure. Earlier request effects remain if a later
+request fails; it is not an atomic transaction or a throughput claim.
+
+[Hard-check precedence](check_precedence.md) overrides answer-option order among proved false checks. Equal priorities
+retain the configured combine rule. A nonzero priority requires complete mandatory-check evidence; missing evidence
+causes abstention. Default/zero priorities preserve the prior behavior and fingerprints.
+
+## Process participation and complete shadow comparison
+
+[Process participation](api/process.md) snapshots a System's declaration. Re-declaring a bound System causes the old
+process to refuse execution; construct a new process to use the new declaration. An iteration limit bounds the
+incoming loop edge, not arbitrary total scheduler invocations. [Whole-process shadow](process-shadow.md) requires
+disjoint native bindings, guards and supported journals and disables candidate human handoff. External callbacks
+are not sandboxed.
+
+## Law compaction and stream lifecycle
+
+[Consolidation](lawset-consolidation.md) is opt-in and distinct from evidence of predictive improvement. It may
+generalize under its declared condition after ordinary matched-evidence checks; it is not an unseen-domain proof.
+[Downstream alarm cascades](stream_alarm_cascade.md) explicitly declare additive routing dependencies. Keep the
+default layer-local mode only when that independence is the intended application contract.
+
+
+`AdapterLoop(trial_serving="certified")` is an opt-in additive-stream mode: certified existing layers may
+serve inside the fixed candidate zone, while candidate evidence uses only the input-independent base audit
+coin in the whole zone. Incidental unsampled escalation labels are ignored. Actual sample floors and decision-age
+timeouts stay unchanged. Default `"escalate"` still labels every trial-zone decision. See
+[certified trial serving](stream-trial-serving.md) for ledger, missing-label and checkpoint semantics.
+
+
+`Catalog.check(reads_from={"argument": "source_fact"})` binds only that check's Python arguments to explicit
+actual facts. Typed validation, trace inputs, entry schemas, cache and replay use the actual dependencies.
+Bindings do not redirect a callable `then` function's own arguments. Model-backed and shared-pass mappings are
+currently refused. Lint can identify declared common given roots; disjoint names do not prove independent
+backends or statistical errors. See [check sources](check_sources.md).

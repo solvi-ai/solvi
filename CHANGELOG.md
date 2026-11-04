@@ -1,506 +1,64 @@
 # Changelog
 
-## 1.4.1 — unreleased
+## 1.5.0 — prepared 2026-11-04 (not published)
 
-- `Process.node(input_contracts=..., output_contracts=...)` declares versioned payload boundaries with
-  strict finite JSON shape checks and native predicate invariants. Input checks run before the consumer;
-  output and human-answer checks run before publishing or saving. Contracts bind the process spec and replay.
-- `Knowledge.branch()` and `KnowledgeStore.branch()` create independent writable what-if branches, with
-  parent lineage and optional empty persistent storage. Native agenda/action/failure state is preserved;
-  custom action models and persistent export without verified decision proofs are explicitly refused.
-- Rebuilt knowledge keeps an independent complete journal chain, write policy and assertion positions.
-  Corrupt parent journals and destinations aliasing the parent, including hardlinks, are refused before copying.
-  Journal positions remain monotone across legacy episode notes; new notes cannot replace journal metadata.
-  Read-only verification continues to support custom write gates that own noncopyable resources.
+This release contains breaking changes. See [migration notes](docs/migration-1.5-candidate.md).
 
-- `System(check_policies=...)` executes priced optional soft checks adaptively, with request `check_loss`,
-  fixed model snapshots, budgets, skipped unavailable checks and recorded/replayable acquisition decisions.
-  `CheckPolicy` is a bounded conditional-table utility surrogate, not a new calibration or false-accept guarantee.
-- Fitted check combiners expose seeded conditional uncertainty draws and intervals. `check_intervals` can report
-  them or use a lower score before abstention safeguards. Existing fitted point-only snapshots require refitting
-  for uncertainty; check-model fingerprints include the additional fitted state.
-- `SourceTrust` tracks time-local source/repeater accountability under explicitly supplied independent labels.
-  Opt-in `TrustGate` keeps base source/writer authority checks and refuses unsupported writers for all item kinds.
-- `FreshEnvironments` supports explicit observed-failure policies independent of a custom reward score:
-  zero failures, no new paired failures, or a supplied observed-rate cap. Its default policy is unchanged.
+### Decision systems and checks
 
-- `Knowledge.redecide` explicitly binds each stored input's date to current knowledge, retaining earlier valid
-  assertions. It prepares private snapshots before callbacks and distinguishes answer changes from justification changes.
-- `solvi.stat.agreement_diagnostics` reports conditional agreement counts, correlations and matching wrong answers
-  on fixed normalized rows, with explicit missing values and undefined denominators.
+- Parameter views bind privately copied input defaults to a shared System runtime. Bounded `ask_many` executes
+  ordinary requests sequentially, with separate traces and storage records for every response.
+- Checks bind their arguments to explicit source facts; typed execution, trace, replay and input schemas use
+  those dependencies. Lint warns about declared shared data roots without certifying independence.
+- Hard checks can declare integer precedence independently of answer-option order. Default and learned schedules
+  preserve the same selection; incomplete evidence under explicit priorities causes abstention.
+- Fitted conditional check models, conditional uncertainty and priced adaptive acquisition connect to native asks,
+  with frozen identities, request loss, budgets, missing-check handling and replayable purchase decisions.
+- Explicit answer facts compose accepted answers within a System. Boundary renaming, entry-point descriptions,
+  hypothetical probes and a restricted unrecorded decision path support inspection without disguising its limits.
+- Model identity changes invalidate caches and calibration under the supported identity contract. Nonfinite model
+  outputs fail explicitly, and replay checks probability/decision consistency.
 
-- `System.decide` returns explicitly unrecorded, nonreplayable answers for a narrow synchronous catalog. It refuses
-  configured guards, calibration, storage, models and adaptive execution before evaluating inputs or user callbacks.
+### Knowledge and complete processes
 
-- `solvi.trace` records eager synchronous JSON function calls, their outcomes and parent UUIDs in ordinary storage.
-  Explicit helpers replay trusted callables, compare replacements and export native fixtures without importing stored code.
-- Decision cases can test literal JSON null and reserved strings with `Answer.value()` and an explicit successful status;
-  JSON-value comparisons distinguish booleans from numbers.
+- Independent writable Knowledge branches preserve lineage, policy and native agenda/action/failure state.
+  Rebuild preserves a complete independent journal, logical positions and assertion provenance.
+- Parent corruption and aliased destinations are refused before copying. Read-only verification supports gates
+  with noncopyable resources; episode notes cannot overwrite reserved journal metadata.
+- Versioned Process payload contracts validate strict JSON shape and invariants before consumption/publication.
+  Human answers are checked before coercion or persistence; contracts are part of the spec and replay.
+- Systems declare bounded participation in a process. The graph snapshots declarations and refuses changed
+  bindings. Whole-process shadow comparison of native-System graphs serves the current result while recording candidate differences.
+- Explicit scoped coexistence, temporal reads, source-bound reassertion, source accountability and independent
+  failure vetoes have documented contracts rather than implicit truth or identity guarantees.
 
-- `Answer.value()` accepts finite JSON values, including scalars and explicit `null`, while ordinary `None` retains
-  its abstention meaning. Structured arrays retain list shape when loading saved responses.
+### Learning, streams and evidence
 
-- A joint-repaired answer receives the fitted calibration for its selected path-aware score, before independent
-  fact/text-entry bounds and the final confidence threshold. Calibration no longer disappears during repair.
-- The concurrency test's direct-call stress loop yields cooperatively: Python RLock does not promise fairness.
-  Original deadlines, all450 dispatcher outcomes, side-call coverage and replay checks remain in place.
+- Opt-in law consolidation replaces multiple refinements only after matched-evidence admission and checks that
+  previously correct observed predictions survive. Ordinary admission thresholds remain unchanged.
+- Law admission uses safer matched support defaults, deterministic/noisy falsification paths and explicit
+  ambiguity diagnostics. Fixed numerical nulls support a predeclared baseline; estimating a baseline is not
+  a certificate of its validity.
+- Manual stream learning requires an explicit sampling declaration. Frozen grids, label-availability diagnostics,
+  bounded label acquisition and training scheduling retain their evidence floors and missing-label losses.
+- Downstream alarm cascades optionally invalidate dependent additive layers and stale trials. Empty trials obey
+  the existing decision-age deadline across save/resume. Layer-local alarms remain the default.
+- Opt-in certified serving during additive trials keeps fixed routing zones and learns candidate evidence only
+  from uniform base audits, with recorded propensities and unchanged sample floors.
+- Open identical oracle-ticket inputs are deduplicated before a new model call or sampling draw, including across
+  restart and fresh request ids. Retry aliases are durable; legacy duplicate tickets recover oldest first.
 
-- Joint repair retains the evidence path and text-entry confidence bounds when replacing an answer. Learned-head
-  candidate probabilities retain their path multiplier. Low-confidence refusal still applies after repair.
+### Safety and reliability
 
-- `System.depends(question)` reports declared initial inputs using the same planner as input schemas, including
-  transitive computations, checks, aliases and applicability declarations. It does not infer causal relevance.
+- Guard batch preflight checks every call and declared caller-state transition before registered tool execution.
+  Human approval binds exact arguments and verified identity; replay retains the proposal and checks.
+- Numeric grounding handles large scales, Unicode signs, currency/locale readings and ambiguous labelled values.
+  Extraction provenance identifies the selected evidence rather than accepting an arbitrary numeric occurrence.
+- Journal ownership, durable ticket retries, mutation-worker cleanup/timeouts and knowledge indexing have
+  targeted correctness and lifecycle fixes. Check, mutation and decision diagnostics report their actual scope.
 
-- `Catalog.alias` adapts an external fact name for unchanged consumers, with an explicit or inferred common type,
-  source descriptions in entry points/input schemas, cycle and declaration-collision checks. It retains ordinary
-  traces/replay and changes catalog identity; question/answer renaming is a separate request.
-
-- `System.probe` evaluates an actual rule at explicit intermediate fact values. It marks results/traces hypothetical,
-  preserves replay, and bypasses production bookkeeping and calibrated guarantees. Checks and answer rules cannot
-  be overridden; identity canaries remain disabled by serial execution in the diagnostic context.
-
-### Accepted-answer dependencies and naming
-
-- Nonfinite answer-head outcomes are recorded and replayed as abstentions without storing NaN probabilities.
-  Head replay validates finite recorded probabilities and their confidence arithmetic even when models are trusted.
-- Historical stateful-guard metadata survives subsequent learning; record-free candidate evaluation does not
-  advance the promise or freeze its automatic grid.
-
-- Guard sessions preflight an entire batch before starting registered tools (`check_many` / `call_many` and async
-  counterparts). An explicit `advance` callback simulates cumulative caller facts; rejected plans execute no tools.
-  Session access must be serialized; tool failures/cancellation can leave partial external effects, without rollback.
-- Exact user confirmation discharges tool-taint only for the confirmed fields. User-only grounding, scan-user
-  taint, unconfirmed fields and the `injections="any"` policy remain enforced.
-- Head training rejects dependencies on its own accepted answer through other questions before replacing a head.
-
-- `LawSet.why_not` names observed overlap with narrower same-effect laws when net gain is zero; this diagnostic
-  does not relax admission or claim coverage on unseen inputs. README retirement wording matches the experimental registry.
-
-- Instruction-like text detection distinguishes conventional invoice/reference lines from explicit assistant
-  addresses and task prerequisites. New matching preserves Unicode normalization, original offsets and the
-  `actions=False` user-message contract; it remains a lexical heuristic, not a calibrated safety certificate.
-- Ticket documentation separates an isolated blind payload from the external oracle sampling-independence
-  assumption; repeated decisions may disclose System 1 behavior.
-
-- `Catalog.answer_fact` publishes normalized accepted answers within a staged request, including refusals,
-  confidence bounds, structured metadata, source checks/guarantees, async execution and checked replay.
-- `Catalog.rule(text=...)` records an explicit condition in explanations and catalog fingerprints.
-- `System.rename(inputs=..., answers=...)` adapts external names with contracts, constraints and source references;
-  rename transfers preserve automatic-check selection. Input-model renames require an explicit external model.
-- Re-deriving a head or callable hard-check answer from an incomplete trace refuses instead of calling user code.
-
-### Structured rule answers
-
-- `Answer.structured` and inferred object/array/model answers preserve the normal trace and confidence, with explicit
-  field explanations in `Claim.extra['fields']`. JSON types and rule return annotations are checked separately;
-  invalid metadata/evidence abstains. Importable class schemas bind serialized types and Process identities.
-  Structured cached values and traces are isolated from caller mutation. No new statistical guarantee is implied.
-
-### Base revision dependencies
-
-- **S235:** opt-in law sets bind exceptions to an owner-declared base revision. `set_base` retires old active
-  and suspended exceptions, refreshes caches and refuses token reuse or revision changes during admission.
-  Absolute laws retain the default behavior. Bound compile/Knowledge exports refuse to erase the dependency.
-
-
-### Shared statistics
-
-- `solvi.stat` exposes the existing bounded-mean, mixture, mirror and skill certificate processes;
-  experimental paths re-export the same classes. `MeanBound.dump/restore` supports data-only replay.
-- `DeltaBudget` adds an explicit finite horizon. `e_bh` and sequential `ELOND` operate on valid e-values;
-  online allocations precede outcomes and cannot be refunded. These APIs do not establish e-value validity
-  for arbitrary scores or demonstrate autonomous improvement.
-
-
-### Breaking development changes (candidate for 1.5; not released)
-
-- Laws evaluate matched observations by default. Automatic falsification uses leftover probes on supported exact
-  single-law paths; explicit `support_on="applied", falsify=None` retains the previous policy. Finite probe pools
-  do not prove a law on unseen inputs.
-- `Knowledge.value` refuses ambiguous distinct values instead of picking the first fact. Use `scope=`, `valid_at=`
-  or `Knowledge.values` to select the intended fact(s). Snapshots include each item's scope.
-- Knowledge fingerprints use a versioned full-SHA256 Merkle root, maintained incrementally. `legacy_fingerprint()`
-  returns the previous 16-character identity. Journal hashes and item IDs keep their formats; old and new belief
-  fingerprints are deliberately distinct. Addressed snapshots use indexes, and graph traversals expand each key once.
-- Hook CLI content recording is opt-in with `--record-content`; full edited files and prompts are then retained for
-  audit/replay. `--no-store` overrides it. The deterministic skill picker requires two shared stems by default;
-  `--min-shared=1` selects the older heuristic.
-
-### External handoff stabilization
-
-- The default chart proposer accepts explicit `label: value [scale/unit]` rows and refuses unsupported prose instead
-  of guessing series labels or turning years/uncertainties into measurements. `RuleProposer(allow_prose=True)` retains
-  the heuristic path explicitly; numeric quote verification does not establish semantic correctness of those labels.
-- Law readers and compiled books expose all matching/maximal predictions and violations. Memoized scoring retains
-  weak buffer identity, so recycled object IDs cannot return another buffer's scores.
-- Guard tools can declare effects and outbound destination arguments. Explicit egress requires a strict full URL from
-  the current authorized user request or application-owned approved URLs; prefix grounding and remote read-only hints
-  do not authorize it. `require_effects=True` escalates unknown effects; legacy mode records them as unverified.
-- The torch encoder retries the specific unsupported Python 3.12 Dynamo error with compilation temporarily disabled.
-  Other runtime failures propagate; the fallback is covered by simulated loaders, not a tested Intel Mac deployment.
-- Stream status lists resident version references separately from the soft retained-version target. Documentation
-  distinguishes accepted-label floors from decision counts and names the current additive checkpoint format.
-- Root CLI help shows six entry commands; `--all-help` lists all registered commands. Existing commands still route.
-- Contracts declare initial-state applicability dependencies with `applicable_inputs=`. Exported input schemas include
-  these required facts; opaque undeclared predicates fail export with an actionable error instead of silently omitting
-  their inputs. Local `ask` behavior is unchanged; explicit `Question.uses` remains a compatibility declaration.
-- Guard slot grounding checks typed dates and datetimes in canonical ISO form, including nested values and facts;
-  type coercion no longer makes an unauthorized date exempt from the grounding check. Existing explicit/enum/bool
-  exemptions retain their declared semantics; no natural-language date parser is implied.
-
-- Stream training rejects labels outside a closed vocabulary before changing learner state; legacy invalid training
-  rows are quarantined without removing real calibration/holdout failures. `AdapterLoop.replay_all` names the full
-  protocol-log replay; online snapshots remain independent of their mutable learner.
-- Ticket desks lease persistent stores, close explicitly and support durable `request_id` retries, open-ticket recovery
-  and refusal. Redacted incomplete requests fail closed. Oracle MCP instructions and option schemas describe the oracle
-  role; idle tickets expire under the server's tool lock, and ignored oracle CLI options are refused.
-- Numeric guards and charts preserve Unicode signs, declared decimal commas, grouped digits, currency aliases and
-  trillion scales. Malformed or unknown numeric forms refuse rather than partially verify. Numeric provenance lookups
-  avoid repeated full scans; optional rescaling/rounding retains its documented fallback.
-- Hooks check both sides of moves, notebooks and filesystem case behavior; restrict explicit approval to checked
-  project edits; bound repetitive line diffs; validate malformed payload/settings; restore owned install artifacts;
-  refuse accidental HOME installation; and return a structured decision for obsolete pre-edit flags.
-- Mutation workers bound the whole lifecycle, preserve local imports, stop killed mutants early and terminate their
-  own POSIX process groups on timeout. Main guards are excluded, function scopes are available, and identical ASTs
-  are deduplicated. Distinct behaviorally equivalent programs remain a limitation.
-- Conformance checks validate probability/option contracts, bypass serving caches, interleave repeat decisions and
-  detect input mutation. Protocol-only callable deciders register without private marker/name requirements.
-  Identity canaries isolate provider probes from local adapters and report unconfirmed differences and probe diagnostics.
-  Finite probes/repeats do not prove detection of every provider change or future deterministic behavior.
-- Watches reject superseded targets and terminate with an explicit superseded event if a newer snapshot takes effect;
-  they do not unexpectedly revert the newer snapshot. Lint reports hard checks reading question answers as input facts.
-- README starts with an executable offline example and an init/test/ask path.
-
-### Fixed (model identity and conformance — S373/S378)
-
-- A confirmed `IdentityCanary` change clears the model's scored-output cache before recalibration;
-  `accept()` clears it again. An older forward pass cannot repopulate the cleared cache. Local adaptations
-  are retained and must still be recalibrated on the new model. `DecideModel.clear_cache()` also exposes
-  this invalidation explicitly; unchanged and unconfirmed probe rounds leave the cache alone.
-- `check_decider` bypasses `DecideModel`'s serving cache while checking outputs and determinism, including
-  calls through combinations. A cached first answer no longer makes a changing scorer pass the repeat check;
-  the serving cache and its settings are preserved, including when conformance fails.
-
-### Fixed (numeric document spans)
-
-- Numeric document reads accept complete ASCII/curly-apostrophe thousands groups and a field's exact own
-  label prefix, retaining the original quote, offsets, sign and units. Recognized currency/scale/percent and
-  CR/DR words cannot be discarded as labels; incomplete/mixed groups and conflicting decimal declarations refuse.
-- Whole-number boundaries reject truncated values from apostrophe groups, malformed joined numbers,
-  underscore and exponent tokens. Decimal negation preserves precision and signed zero. Old numeric recipe
-  calibrations fail the changed catalog fingerprint and require recalibration. These are regression fixes;
-  the already viewed invoice pilot was not rerun or claimed as a new independent measurement.
-
-### Examples and evaluation tools
-
-- `examples/invoice_workflow.py`: a document decision with a durable local human inbox, restart/resume,
-  version checks and an operator snapshot. Uses the experimental process API; the offline demo makes no
-  statistical accuracy claim and performs no payment.
-- An invoice pilot runner and offline scorer: immutable source/data manifests, cached requests, a persistent
-  spending ledger, calibration-only thresholds and descriptive slices. After the initial Google route's HTTP 403,
-  a Qwen pilot completed on 190 synthetic invoices; the primary acceptance criteria were not met and no measured
-  benefit over the plain extraction pipeline is claimed (see `docs/invoice-result.md`).
-
-### Fixed (knowledge store — the 2026-10-30 external handoff, S261/S262/S263/S265)
-- **An erratum of content the writer no longer stands behind now withdraws it (S262).** `_kept` read the writer's
-  older claim by raw interval containment, so a version the key's walk had already closed (a correction at a later
-  `since`) kept an erratum from landing as a withdrawal — a copy of the withdrawn content revived silently (the
-  living-knowledge stand read 12–13 harmful revivals of 540). The keeper is now read as far as the key's live
-  versions leave it: a live later version closes it at its since (a bounded one gives it back after its until), and
-  the writer's own later value at that since replaces it.
-- **A passed re-test vouches for its own validity only (S265).** The revival guard cleared withdrawals of the
-  content by the content alone, so a re-test passed on one version re-admitted copies of a version withdrawn on
-  another validity. Clears are keyed on (content, since) — a re-test vouches for the versions live at it.
-- **Support through a premise cycle is no support (S261).** A circular derivation (a ← p, b ← a, a ← b) used to
-  keep both items `active` past the retraction of p — content that cites itself was un-retractable. The taint walk
-  now treats a chain back through an open item as no support: retracting the loop's outside premise taints every
-  item in it (each waits for its own re-test), and a loop with no outside support anywhere waits too. `add` warns
-  about a cyclic `derived_from` (the check is advisory, 64 hops).
-- **`KnowledgeStore(now=)`: an opt-in world clock for `usable()` with no `valid_at`** (the old S25; their S263). A
-  callable returning the current world time, or a fixed time; with it `usable(id)` reads the effective intervals
-  (`periods`) instead of status alone, so a version closed by a later `since` — and an item derived from it — is not
-  usable. Default unchanged: status and staleness only. `Knowledge(now=)` passes it through.
-  Behaviour note for 1.4.0 readers: close-not-refute kept a closed version's status `active`, so `usable(id)`
-  without a `valid_at` changed from False (1.3's refuted) to True on such versions — give the store a clock if you
-  relied on the old reading.
-- **`KnowledgeStore.supporters(id, at=)`: who stood behind an item when (S233).** The claims written by journal
-  position `at` (default: now) and not yet taken back there — one row per claim (by, at, source, its `valid`, a
-  derived claim's premises as "just"). A later retraction does not rewrite the answer, which is what an audit of a
-  decision made at that position needs.
-- Docs: the module docstring now says the same-since replacement is blind to which value an erratum corrected
-  (S264), and the guard's docstring states the re-test's validity scoping.
-
-### Fixed (knowledge store — S266)
-- **A guard-active write no longer re-reads the key's whole history (S266).** Every `tell` outside a batch
-  re-resolved the downstream component and ran the revival guard for each of its keys, and each pass re-scanned
-  every assertion of every item on the key, matching each live assertion against every withdrawal again — so on a
-  corpus with errata and copies (the living-knowledge pattern: one id per (s, r), validity per assertion) a write
-  cost more than the whole version walk under it and grew with the corpus: 6.4 → 27.7 ms per write, 0.96 → 8.3 s
-  total as the corpus doubled (6.8× the plain versioned pattern's 3.6 ms — plain writes were never slower). The
-  guard now keeps per key what each item contributes — its withdrawals (an assertion's entry is its first takedown
-  and never moves: journal positions only grow, and a withdrawal matches only assertions written after it, so a
-  live assertion's matches are computed once, at its first classification), the re-tests that vouch for its
-  content, and the last pass's result for a key nothing touched. Only the items whose raw entries moved are
-  re-read; the `_kept` re-admissions (an assertion-level erratum whose writer may still stand behind the content)
-  and the matches a re-test stopped vouching for are resolved on every pass of a touched key. A write also re-ran
-  `_live`/`_cut` over the item's whole assertion history whenever cuts existed — exactly the guard-active pattern —
-  so those are kept on the item too and moved forward by the takedown events. Measured on the same bench: 0.5 →
-  0.6 ms per write, 0.07 → 0.17 s for the doubled corpus — under the plain pattern, whose live set no erratum ever
-  prunes. Exactness unchanged: random retraction, revival and rebuild histories read the same as the cold rebuild
-  (a new random-history test compares the fingerprint, the pending items and the full item records, and the bench
-  asserts `verify()`).
-
-### Fixed (stream — the 2026-10-30 external handoff, S297/S298/S299)
-- **`DriftMonitor.reset()` no longer re-simulates the CUSUM threshold it already has (S299).** The reset kept the
-  reference and re-ran `Cusum.calibrate` over the same 8,000 null streams × horizon steps — ~1 s per reset (3 s on
-  the reporters' box) of pure waste, h verified bit-identical. The calibration is memoized on the reference's
-  content and the monitor's configuration (the null resamples the reference's own rows, so the key must be the
-  content, not the size); a new reference — `set_reference`, the window refilled, `adapted()` — recomputes.
-- **A Dispatcher's own stream certificate no longer trips its `DriftMonitor` (S298).** While the threshold is +inf
-  every response is escalated, so the first-window reference had "answered alone" share 0.0; the first certification
-  then climbed the window to ~18 % and the z-test flagged `p = 3e-06` on an unchanged stream — a false
-  GuaranteeWarning about unchecked System 1 answers. Two fixes, as `NumericDrift` already had the first: the share
-  answered alone is not tested against a reference of 0 or 1 (no spread — every window that moved at all is
-  "significant"; warned once, said in every report's `not_tested`), and the Dispatcher calls the monitor's new
-  `adapted()` at every threshold move (certified, loosened, restarted): the reference is re-taken from the next
-  decision, gated under the new threshold. Starting the monitor at the first certification — the reporters' own
-  workaround — still false-flagged 5/6 seeds because the threshold only loosens and any reference taken mid-loosening
-  is stale for ever after; a reference must not span a threshold change, which is what the re-take guarantees. The
-  price, now stated in the Dispatcher and monitor docstrings: while the certificate loosens the monitor spends most
-  of its time re-taking its reference (phase "reference") and its window tests see nothing — and a real shift that
-  lands right on a loosening is absorbed into the new reference (the label-side `detector=` is the alarm then). A
-  real shift with no threshold move after it is flagged as before (~46 decisions on the pinning stream).
-- **The auto grid's price is said, and warned (S297).** `grid="auto"` (the default) reads no label until the first
-  `grid_from` (200) scores are observed; under a Dispatcher every one of those decisions is escalated — the first
-  `grid_from` slow-path calls are paid for labels the certificate drops, and the first S1-alone answer comes at
-  ~284, not 85 (`grid="fixed"`). The Dispatcher now warns when it is built with the auto grid and a slow path, and
-  the `Dispatcher`, `stream` and `certificate` docstrings say the cost and when to prefer `grid="fixed"` (scores
-  already on [0, 1]) or a smaller `grid_from`.
-- Docs (S300/S301/S302, design asks, no code change beyond the lines above): an expired ticket is a loss for the
-  detector whatever System 1 would have done, so the oracle's expiry rate adds to the rate the detector tests
-  (risk r seen through expiry e reads as e + (1 − e)·r) and must sit well below α — said in `stream.sampling` and
-  `stream.tickets` with the alarm→restart→probation→more-expiry loop the deferred `max_drop` would break; the
-  coin-fed RiskDetector sees a break ~1/ρ decisions after it happens (≈ 20× at the default floor) and is never the
-  only alarm — the note `loop.py` enforces for `AdapterLoop` is now in the `Dispatcher(promise=, detector=)` and
-  `detector.py` docs too; `clean_need` is a floor on labels, not the useful cost — the first threshold in force is
-  the strictest certified grid point (how strict is distribution-dependent), so price a coverage-vs-labels curve.
-- Tests: `tests/test_stream_handoff_oct30.py` (a reset loop does not resimulate — the calibration call count, not
-  wall clock; the degenerate reference warns and is not tested; `adapted()` re-takes; the worker's unchanged-stream
-  Dispatcher scenario stays unflagged while the certificate certifies and loosens; a real shift is still flagged;
-  the auto-grid warning fires with a slow path and not otherwise). `test_drift.py`'s act-probability test now
-  expects "answered" in `not_tested` for its all-alone reference — the degenerate-reference behaviour it pinned by
-  accident.
-
-### Fixed (laws — the 2026-10-30 external handoff, S303/S305–S307)
-- **A law falsified by a leftover probe is now remembered in the set (S303).** `admit_by_probes(falsify="leftover")`
-  committed nothing when its falsification probe refuted the accepted candidate, so the same mismatch re-proposed it
-  and re-probed it on every call — in the handoff's repro refuted 3× by the same probe, probes 6→12→18. The set now
-  keeps the falsified (action, condition, effect) with the buffer size it fell at: `mismatch(…, buffer=…)` drops it
-  and `admit_by_probes` does not offer it again until the buffer grows past that size (the readmit="grown" rule; with
-  no buffer, while the call gives none — a probe answer does not un-happen). The refusals are counted in
-  `refused_falsified`, `why_not` names one ("falsified"), and when every candidate of a call was dropped the
-  admission is "undetermined" saying so, at no probe. Passing the asked rows back as `buffer=` remains the wider
-  workaround (it also remembers the split phase's refutations, which this memory does not).
-- **`mismatch(…, buffer=, exclude=)` carries `negations="refine"` into `admit_by_probes` (S305).** The negated
-  candidates were computed where the buffer never reached: only `step` set what the proposer reads, so on the whole
-  `mismatch → admit_by_probes` path "refine" was dead (their repro: 0 of 120 rounds; `admit_by_probes(buffer=…)`
-  could not help, its candidates are computed before it sees the buffer). `mismatch` now takes the buffer (and its
-  `exclude` group) the way `step` passes its own; the docstrings of `Grammar(negations=)`, `Enumerate`,
-  `mismatch` and `admit_by_probes` say where the buffer must be given.
-- **`residual_check(…, dof_sigma=ν)` tests an estimated σ̂ (S306).** The check was a plain χ² quantile, which assumes
-  σ is known: with residuals in units of an estimated σ̂ it refused the true law far above the nominal level
-  (measured here: refusal 0.2315 against a nominal 0.005, σ̂ from 15 repetitions of 3). With `dof_sigma=` the ν
-  degrees of freedom of σ̂² are tested at the F quantile, Σ r² ≤ (n − k) · F_level(n − k, ν) — the known-σ rule is
-  its ν → ∞ limit and stays the default (`dof_sigma=None` changes nothing; measured: 0.0055 refusals at ν = 10).
-  The docstring now also says the measured 0.60 → 0.14 used a known σ.
-- **Docs: the refit χ² does not refuse a wrong formula that fits within the noise (S307).** At 10 % noise, with the
-  truth y = x(1 + 0.05x), the wrong law y = c·x — the right structure, the constant refitted every trial — passed
-  0.961 of 1,000 trials (σ known). The number is now in the cautions next to the flexible-model one, so the check
-  is not read as "never a guess".
-
-### Fixed (document / numguard — the 2026-10-30 external handoff, S308/S310–S313)
-- **numguard reads a parenthesised number after another number as what it is: a comparative (S310).** "16.6% (18.8%)"
-  used to read −18.8 while `solvi.document`'s grounding abstained on the same text ("a comparative or a negative").
-  The two readers are aligned: document's `_AFTER_NUMBER` rule (a paren number right after another number on its
-  line — up to ten characters between, one new line, a tab or a comma allowed; a table's "|" or ";" is a separator)
-  now applies in `numerals` too: the parentheses stay, the number reads unsigned, the sign is never guessed (a
-  `fill` of `[k]` writes "(18.8%)" as the input writes it; `check` marks a model-typed −18.8 against it "sign").
-  Genuine negatives — a paren number standing alone — still read negative. API-visible: fill texts for "N (M)"
-  comparatives change.
-- **A table's units header now applies to its cells (S311).** `parse_tables` did not even recognise "SEK million"
-  / "£ million" headers (only "in thousands"-style and "'000s"), and `check` never applied a table's `scale` to
-  the cells: "18,742 million" against a cell 18,742 under a "SEK million" header was unsourced (or "rescaled",
-  which launders real scale errors). The caption parser reads the currency + scale header (setting the new
-  `Table.currency`, shown in `describe()` and used as the cells' unit in the typed tools), and `check` multiplies
-  non-percent cell numbers by the header's scale — for `tables=` given apart and for a source text's own tables
-  (`NumberGuard.run` included), so the claim sources as an exact "table cell". A bare "18,742" against a
-  millions header stays unsourced (six orders off).
-- **`document(..., decimal="dot")`: the dot-thousands declaration (S308).** A single ".ddd" group ("30.000",
-  "1.000") abstained by design (a thousands point or a decimal point, the text does not say) — and the abstain
-  reason pointed at `TextIn(decimal=…)`, an API the recipe never exposes. The knob is end-to-end now:
-  `decimal="dot"` (the document groups thousands with a dot, the comma reads decimals: "30.000" → 30000,
-  "12,5" → 12.5) or `"comma"`, plumbed through `_read_quote` into `span_value(..., spec=)` (a new keyword of
-  `solvi.core.types.span_value`) and `parse_number`; a declared reading wins over the type's own where they
-  differ. Default unchanged (never a guess); the abstain reason names `document(..., decimal="dot")`; a recipe
-  with a `decimal=` is its own catalog (a calibration or a record made with another one does not attach).
-- **Space-grouped digits read when the quote writes their currency (S313).** `_read_quote` stripped the currency
-  before the value reader, so even "€1 234" — the escape hatch textin documents for space-grouped numbers —
-  refused through `solvi.document` while raw `parse_number("€1 234")` read 1234. The currency now stays in the
-  span the reader sees: "€1 234" → 1234 in EUR. The bare "1 234" (and "1 ,234") keeps abstaining — the protected
-  never-guess decision of 2026-10-29.
-- **A scale word binds to the number on its own line (S312).** numguard's numeral regex took the scale word
-  across a new line: "£1,000\nmillion" was one numeral with the newline inside its surface. The whitespace
-  before a scale word is same-line only; the one-line form still reads "£1,000 million" (a billion pounds).
-
-### Fixed (document — S309 label-aware grounding)
-- **A labelled number field grounds on its label's line, not on the digits' first occurrence (S309).** An LLM's
-  span answer is located at the first occurrence of its digits in the text (solvi.core.deciders.llm.locate, its
-  documented rule), so a read of TOTAL over "SUB TOTAL 28,000\nTOTAL 28,000" grounded to the SUB TOTAL line —
-  the value right, the fact's offsets the wrong line (their CORD number, 14/34, is consistent with the
-  mechanism). A number field whose name is a label the text carries ("total", "sub_total" — every word of two
-  letters or more, normalized as the readers normalize text; a one-letter name is no label) now grounds on the
-  one occurrence of the quoted digits on a line that starts with the label ("TOTAL 28,000", "Total: 28,000",
-  "Net sales 1,234" for "net_sales"; "SUB TOTAL 28,000" does not start with "total" — but it is what
-  "sub_total" starts with): the fact's quote and its offsets, the evidence and the recorded quote note name the
-  label's line. When the label cannot say which occurrence — no label, no line that starts with it, several of
-  them, or the value written under its label on the next line (the rule reads the label's own line only, the
-  documented residual gap) — the first occurrence stands as before: grounding never guesses. `locate`'s
-  first-occurrence rule itself is unchanged (plain strings and every other user keep it); the wrapper lives in
-  the recipe (solvi.solutions.document._LabelGrounded), and only labelled number fields are wrapped.
-
-### Fixed (process and the stream certificate — the 2026-10-30 external handoff, S270/S273/S275/S279/S280/S281/S282)
-- **A stream-certified node's promise is read at its risk level (S282).** `StreamPromise.record()` keeps its level
-  under "risk" (kind "joint"), while `Process.guarantee()` read "error" for every non-CRC method: the per_node
-  statement said "stream-ltt error ≤ None", and in union mode the node "had no risk or error level", putting the
-  union promise silently out of force with a stream-certified node. The level lookup now reads "risk" for a joint
-  record (an LTT and a selective stream record still read "error"), the statement says "stream-ltt risk ≤ …", and a
-  joint stream node is counted with Bonferroni over its δ like an LTT one.
-- **The equal union split is weighted by the visits a loop can make (S273).** `split="equal"` gave r_i = r / K_auto,
-  so `Σ r_i·m_i` was over the risk on any looped process whatever the nodes did — the default split was never in
-  force. It now gives r_i = risk / Σ_j m_j over the automatic nodes: `Σ r_i·m_i = risk` by construction, an equal
-  split is in force on a process with a loop, and a loop-free process keeps the plain r / K_auto. New specs' shares
-  (and so their hashes) differ; a given split that leaves no room is still refused as before.
-- **`{"confidence_below": c}` sees a hand-over (S275).** A decision the dispatcher sent to a person has confidence
-  None, so the predicate never held for it and a hand-off edge had to be written `{"status": "human"}`; an edge
-  under the node's own threshold was dead code. An outcome whose decision went to a person (status "human", by
-  "human") now satisfies the predicate — no confidence to compare, and the unsure answers are exactly what it
-  routes to one; answers that carry a confidence compare as before (the slow path's None still holds nothing).
-- **A node whose fitted head reads a fact it is not given warns at build time (S270).** `node(..., reads=[…])`
-  validated and every run abstained ("cannot compute: b") into a person's hands — all runs pending, nothing at
-  spec() or guarantee() said why. `node()` (and `from_spec` binding the system) now warns, naming the facts the
-  head reads that the node is not given and its catalog cannot compute from what it is.
-- **A promise gated on a signal the answers cannot carry is refused at install (S279).** `System.guarantee(q,
-  promise=sp, signal="act")` skipped the calibration examples, so the readability check the `max_risk=` path makes
-  never ran: on a head without an act probability the certificate installed silently and could never let an answer
-  through nor observe one (seen 0, threshold +inf forever). The `promise=` path now probes its signal — asked on
-  the first example given, or structurally for "act" (the question's answer has to be a model decision with an act
-  head) — and refuses with the calibration path's ValueError; the guarantee in force before the call stays.
-- **A pending `ProcessResult` names its node and question (S280).** The node holding the waiting question lived
-  only inside the `why` string or behind `pending()` (itself a full store scan). The result now carries `node` and
-  `question` — the two fields `pending()` lists — for a pending and a cancelled run, and `resume()` before the
-  answer keeps them (additive fields at the end of the dataclass; positional construction is unaffected).
-- **The risk detector's alarm is on the promise's own event list (S281).** The alarm reached only the events the
-  driver returns to the Dispatcher (written as "stream" records with storage); the detector resets right after, so
-  a caller without storage could not read when it fired or at what statistic. An "alarm" event — with the
-  detector's R and sample count, next to the restart's "recertify" — is now appended to `StreamPromise.events`
-  (and so to `dump()`); the event the driver returns is that same record.
-
-### Fixed (process store — the 2026-10-30 external handoff, S267/S268/S269/S271/S272/S274/S277)
-- **A question to a person no longer rescans the whole process store five times per run (S267, and S276 with
-  it).** Every cycle (run → pending → answer → resume) made five full `iter()` passes (`_ticket_seen` ×2,
-  `_tip`→`_segments`, `_human_record` ×2), and `JSONLStorage.iter` re-read and re-parsed every line of the file
-  on each of them — per-run time grew linearly with the store (~52 ms per run per MB; the reporters' 0.3 s/run
-  /MB on heavier records), quadratic over a stream. The JSON-lines store now keeps a parsed-lines cache — every
-  line parsed once, however often `iter()` asks, its covered prefix validated against the file's bytes (a
-  rewrite in place, even of the same length in the same clock tick, is read whole again), and `iter(after=seq)`
-  serves an incremental reader from a bisect on it — and the process keeps its own index over the store
-  (tickets, "human" records by ticket, segments by run), so each cycle reads only what was appended since.
-  Bench: 400 question cycles over a store grown to 1.3 MB — 111 → 5 ms per run at the end (22 → 2.8 at the
-  start); replay of every run 21.4 → 1.9 s.
-- **`replay()` rides the index, not one store scan per run (S277).** `p.replay(run)` iterated the whole process
-  store once per call (`replay_all`: once per run per run), and the human-step check scanned it once per
-  recorded answer — replaying every run was quadratic in the store (×4 store → ×8.4 total time). The segments,
-  and the human records by ticket, come from the index now: replaying every run of a grown store re-parses
-  nothing, and the answers are unchanged (replay and the tamper admission pass as before).
-- **A replay under a swapped node names the node (S269).** Loading a process with strict=False and another
-  system at a node carried the actual fingerprint, so the spec hash differed and every replayed run died at the
-  blanket `{"node": None, "step": "spec"}` — including runs that never touched the node. When the only
-  difference is a mismatched node's fingerprint, replay now walks by the recorded spec: the run through the
-  swapped node fails at that node's own "record"/"replay" step, the run that bypassed it replays, and a strict
-  load still refuses.
-- **A resumed run's `path` is its whole run (S268).** The resumed `ProcessResult.path` (and so `explain()` and
-  `monitor(reference=ProcessResults)`) covered the last segment only — the nodes before the question and their
-  edges were gone, and a watch set on such runs was set on a sample biased toward runs that never waited. The
-  path is now the run's: the earlier segments' steps first, as the live path watch's edge union always was
-  (`nodes` still holds the last segment's results). A pending-again resume carries it too.
-- **The spec hash no longer depends on where the nodes keep their records (S271).** Only `nodes.n.store` — an
-  absolute path — differed between the same process under two directories, so a process was not portable:
-  rewriting the path in a recorded spec broke its hash and a strict `from_spec` refused. The store paths are
-  now outside the hashed body: the same systems hash the same wherever they live, and a moved spec loads.
-  Behaviour change: hashes of specs whose nodes carry a store differ from the ones 1.4.0 recorded (re-hash or
-  re-spec recorded processes).
-- **`merge="all"` of several inputs is refused at spec() time (S272).** It validated and recorded, and `run()`
-  raised NotImplementedError — a spec that could be written but never run. `spec()` (and so every run, resume
-  and calibrate through it) refuses it now, naming the node and saying why; a recorded spec of an earlier
-  release still loads (`from_spec` checks the format, not the runnability) and cannot be run, as before. On a
-  node with one input "all" is the same as "any" and stays allowed.
-- **A threshold that holds no node back says so (S274).** `per_node_fixed`'s last grid step opens the last node
-  to its smallest calibration signal; on clean labels every step certifies and the chosen threshold holds
-  nothing back — the end_to_end promise then adds nothing over the nodes answering alone, and nothing said so.
-  `calibrate()` warns when the chosen threshold leaves every node open to its smallest calibration signal,
-  naming the nodes.
-
-### Fixed (skills / check / report — the 2026-10-30 external handoff, S283/S285–S296)
-- **Skills: a world mismatch of a supervised or verified planned run is counted on the skill itself (S288).**
-  `skill.outcomes["mismatch"]` — the exact model said it works, the real world did not follow. The certificate
-  still never sees the world's verdict of a supervised use (its documented limit), but the discrepancy is now
-  visible where the skill is read, not only in the episode's global counter.
-- **The skills docstring named the wrong alarm (S283, docs).** The package docstring said of the certificate's
-  e-detector "(at 5% one failure alone does)" — that is `alternatives=None`, the old burst alarm; the default CUSUM
-  alarm (level 50, alternatives (1.5, 2)) first fires on the 7th consecutive alone-failure at 5%. The Certificate
-  class docstring was already right; the parenthetical now states both.
-- **ExactModel's docs now say a clone must carry the world's randomness (S285, docs).** A clone that re-seeds the
-  world gives every fork a future different from the fork that planned, and verify then rejects every plan of two
-  steps or more (each step is compared with the predicted state) — verify is behaving correctly; the model is not
-  exact. The docstring points at `solvi.testing.conformance.check_environment(make, clone=)` to check one.
-- **A condition that narrows to no atoms warns (S286).** Verified starts of one goal that share no atom merged
-  into a skill with condition () — "always", a candidate in every state — with no word. The widening now warns
-  (the lattice's own empty conditions are routine and do not).
-- **`SkillLearner.close_run(ok)`: an outcome for an interrupted run (S287).** A run dropped by `new_episode()` (or
-  paused by a reflex and never resumed — the 57 outcome-less alone runs of docs/best_practices.md) kept its
-  decisions' `run_ok` None and never fed the certificate. `close_run(ok)` closes the open run like any other: the
-  decisions get their `run_ok`, an alone run's outcome feeds its skill's certificate; it refuses while an action's
-  outcome is still pending.
-- **`no_other_option` is a warning (S289).** It was documented under the module docstring's warnings but emitted as
-  a note since 1.1.1, so `solvi check --strict` could not fail on a model-answered closed choice. Now it can.
-- **The catch-all words of real label sets (S290).** `oos` (CLINC), `out of scope`, `abstain`, `unclassified`,
-  `no_match` and `misc` are a catch-all by meaning; `no_other_option` fired on all of them.
-- **`numeric_levels` fires on levels, not numbers (S291).** A choice of bare numbers is judged only when its
-  options read as a small integer scale (consecutive from 0 or 1, at most 20): "2023".."2025" (years) no longer
-  fires, "3+" / "3 or more" (an open top, silent before) now does, descriptions still silence it, and an ordinal's
-  numbers are always levels.
-- **A "?" inside quotes or parentheses is not a second question (S292).** `'why?'?` and "(equal to the sum of the
-  lines?)" fired `compound_question`; quoted and parenthesised spans are stripped before the count and only a
-  sentence-final "?" counts ("filed and paid?" keeps its one).
-- **The library's own parts are not the user's silent defaults (S293).** A Guard with a `once=True` tool linted
-  `silent_default` on `solvi/.../solutions/guard/__init__.py` (`set(calls_made or ())`) — a line the user can
-  neither edit nor `# solvi: ok`. Parts whose source file lies inside the solvi package are skipped.
-- **`then={"q": None}` and `then={"q": "abstain"}` are a named abstention (S294).** The run time abstained exactly
-  as intended while the lint raised `then_bad_answer` (exit 1 under --strict) and System() warned at build — the
-  idiom is taught in the 1.1.1 notes. Lint, the build warning and the forced-answer path accept it now; a value
-  that is an option of the question (one literally named "abstain") still forces that option.
-- **A second reviewer no longer erases the first's judgement (S295).** `corrections["people"]` attributed a
-  decision's pair to whoever labelled last (`person[-1]`): when rev_b re-labelled two of rev_a's four decisions,
-  rev_a's count fell to 2. Per person (`by`) each person is judged on her own last label before the outcome (one
-  row per (person, decision); rev_a 4, rev_b 2); the overall pair stays one judgement per decision; the rule string
-  says so.
-- **A human teach record writes its "source" (S296).** The docstring promised label_source is "stored as the
-  record's 'source'", but only non-human sources were written — an external journal reader could not tell a human
-  label from a record with a missing field. Every record writes one now; readers of `d.get("source", "human")` and
-  records of 0.6 are unaffected. The record schema's teach `source` widens to what the code writes — "human" and
-  "audit" join "outcome", "rule", "verified" (schema 2.3.0, docs/trace_spec.md §teach); the CHANGELOG heading names
-  the unreleased tree again (1.4.1 — unreleased, `solvi.__version__` 1.4.1.dev0), which the 1.1 version test keeps
-  in step and the 30-10 knowledge commit had dropped.
+These changes do not establish new population quality, arbitrary hidden-change sensitivity or universal
+statistical independence guarantees. Experimental APIs keep their documented supported subsets.
 
 ## 1.4.0 — released 2026-10-30
 

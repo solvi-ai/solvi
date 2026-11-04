@@ -195,6 +195,16 @@ nav:
           - solvi.experimental.process: api/process.md
           - solvi.experimental.stream: api/stream.md
           - solvi.experimental.numguard: api/numguard.md
+  - Migration to 1.5: migration-1.5-candidate.md
+  - Parameter views and batches: api/parameters.md
+  - Hard-check priority: check_precedence.md
+  - Check source bindings: check_sources.md
+  - Complete process shadow: process-shadow.md
+  - Law consolidation: lawset-consolidation.md
+  - Fixed law baseline: laws_frozen_null.md
+  - Stream alarm cascades: stream_alarm_cascade.md
+  - Certified trial serving: stream-trial-serving.md
+  - Knowledge coexistence: knowledge_coexistence.md
   - Changelog: changelog.md
   - Roadmap: roadmap.md
   - Development plan: development-1.4.1.md
