@@ -1,0 +1,13 @@
+# Past-episode Beta priors (experimental descriptive model)
+
+`EpisodePriors(window=..., base=(1,1), max_strength=20, min_records=1)` pools explicit independently labelled historical episode records. This is hierarchical **backoff**, not an exact hierarchical Bayesian posterior, truth certificate, discovered source taxonomy, or gain claim. Owner declares context, source_type, source and accountable role, authenticates stable identities and independent bounded loss labels, and supplies consistent timestamp units.
+
+`record(record_id, episode=..., context=..., source_type=..., source=..., role=..., loss=..., asserted_at=..., ended_at=..., known_at=..., now=...)` accepts a unique ID and bounded loss [0,1] only when asserted_at ≤ ended_at ≤ known_at ≤ now. Ordinary admissions/model predictions are not independently observed labels. End times and independence are owner assertions, not an authentication sandbox.
+
+`get(current_episode=..., context=..., source_type=..., source=..., role=..., now=...)` ALWAYS excludes the current episode and records not yet known as of now. The window uses assertion time: a late label cannot rejuvenate an old observation. Only the requested context and role are pooled. The first level with min_records is selected: same source and type; same type; same context; otherwise base. Levels are alternatives, so an outcome is not counted repeatedly at several levels. Source IDs should not silently change type or role meanings.
+
+The selected data contributes success=1−loss to Beta alpha and loss to beta. Total prior strength is capped by proportionally scaling both parameters; the prior mean is retained. `EpisodePrior` is frozen and contains the selected record/episode IDs, excluded current episode, as-of time, selected level and a fingerprint binding configuration, data and query.
+
+Use `SourceTrust(window=..., prior=result.prior, min_labels=...)` to construct a NEW current-context trust model before any current-episode labels. Its current-label support requirements and TrustGate remain unchanged; this helper does not manufacture current labels, mutate an existing SourceTrust or automatically apply an opinion. No anytime/FWER bound follows from the empirical prior. Snapshot is detached JSON; strict restore validates the complete schema/records before returning a fresh object. Persist the snapshot using the owner's durable storage; no automatic filesystem writes or episode discovery occurs.
+
+Historical S136 AUROC0.54 versus war-indicator0.82 on2138 pairs/16episodes remains a negative result. This finite functionality does not replicate that study or establish ranking/utility gains.

@@ -17,3 +17,6 @@ __all__ = ["MeanBound", "Mixture", "MirrorBound", "DeltaBudget", "Certificate", 
 
 __all__ += ["Check", "CheckRegistry", "error_correlation", "NaiveCombiner", "CorrelationAwareCombiner"]
 __all__ += ["SourceTrust", "SourceOpinion"]
+
+from ._episode_priors import EpisodePriors, EpisodePrior
+__all__ += ["EpisodePriors", "EpisodePrior"]
