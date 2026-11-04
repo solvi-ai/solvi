@@ -46,3 +46,45 @@ contract. Nodes without these declarations retain their existing behavior. Run
 and replay use the same boundary checks; no compatibility negotiation is implied.
 
 ::: solvi.experimental.process
+
+## System participation declarations
+
+A bare `System` can declare its role before it is assembled into a process:
+
+```python
+triage.participate(writes={"kind": "answer"})
+payout.participate(after="triage", when={"answer": "kind", "eq": "glass"}, end=True)
+p = Process("claims", storage="process.jsonl").participants({"triage": triage, "payout": payout})
+```
+
+`System.participate` returns the System. `after=None` declares an entry; otherwise
+`after` names exactly one predecessor. `when` uses the existing closed Process
+predicate language and observes that predecessor's outcome. An entry cannot have
+`when` or `max_iter`. `reads`, `writes`, `question` and `end` have the same meaning
+as on `Process.node`. Node names belong to the process mapping, so one System's
+declaration can be used in different processes with the same names.
+
+`max_iter=n` marks the incoming edge as a loop with at most `n` traversals per
+run. It is a positive integer (bool and float are refused). It is **not** a bound
+on total System invocations. For example, a self-loop with `max_iter=2` can run
+its node three times: the initial entry plus two loop traversals. A graph with
+such a loop still needs a reachable end node and may need an explicit
+`Process(start=...)`. Mapping order sets outgoing edge priority. Existing graph,
+loop and merge validation applies; no unbounded cycle or multi-input scheduler
+is introduced. For multiple predecessors or more involved routing use the
+existing explicit node/edge API on nodes without participation declarations.
+
+`participants` validates and installs the batch atomically. It snapshots detached
+JSON declarations and compiles them to existing nodes and edges; declarations
+are included in the process specification and hash. Editing returned specs or
+caller predicate dictionaries cannot change the process. `from_spec` validates
+that declarations agree with compiled nodes and incoming edges; when binding a
+System it requires the same declaration, including with `strict=False` (that
+option relaxes fingerprints, not participation). Redeclaring a bound System does
+not edit the frozen process: its next run fails before invoking any node. Build
+a new process to adopt the changed declaration. Replay follows the recorded
+specification and existing loop counters. The existing trace replay may recompute
+catalog parts; it does not assemble a new graph from live declarations.
+
+This experimental contract describes one sequential path. It does not implement
+runtime negotiation, parallel joins, time triggers or distributed participation.

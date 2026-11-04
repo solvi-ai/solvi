@@ -208,6 +208,56 @@ class ProcessSpecError(ValueError):
     are not the recorded ones."""
 
 
+def _check_participation_graph(nodes, edges):
+    for name, ns in nodes.items():
+        if "participation" not in ns:
+            continue
+        if ns.get("kind") != "system":
+            raise ProcessSpecError(f"node {name!r}: participation requires a System node")
+        d = _participation(ns["participation"])
+        for key in ("reads", "writes", "question", "end"):
+            if ns.get(key, False if key == "end" else None) != d[key]:
+                raise ProcessSpecError(f"node {name!r}: participation {key} differs from node")
+        incoming = [e for e in edges if e["to"] == name]
+        expected = []
+        if d["after"] is not None:
+            e = {"from": d["after"], "to": name, "when": d["when"]}
+            if d["max_iter"] is not None:
+                e.update(loop=True, max_iter=d["max_iter"])
+            expected.append(e)
+        if incoming != expected:
+            raise ProcessSpecError(f"node {name!r}: participation differs from incoming edges")
+
+
+def _participation(declaration):
+    """Validate and detach the deliberately bounded System participation format."""
+    from ._process_boundary import frozen
+    d = frozen(declaration)
+    keys = {"after", "when", "max_iter", "reads", "writes", "question", "end"}
+    if not isinstance(d, dict) or set(d) != keys:
+        raise ProcessSpecError("participation: expected after/when/max_iter/reads/writes/question/end")
+    after, limit = d["after"], d["max_iter"]
+    if after is not None and (not isinstance(after, str) or not _NAME.fullmatch(after)):
+        raise ProcessSpecError("participation after: expected a node name or None")
+    if limit is not None and (type(limit) is not int or limit < 1):
+        raise ProcessSpecError("participation max_iter: expected a positive integer")
+    if after is None and (d["when"] is not None or limit is not None):
+        raise ProcessSpecError("participation entry cannot have when or max_iter")
+    if type(d["end"]) is not bool:
+        raise ProcessSpecError("participation end: expected bool")
+    if d["question"] is not None and not isinstance(d["question"], str):
+        raise ProcessSpecError("participation question: expected a string or None")
+    check_predicate(d["when"])
+    ns = {k: d[k] for k in ("reads", "writes")}
+    if d["end"]:
+        ns["end"] = True
+    ns["kind"] = "system"
+    if d["question"] is not None:
+        ns["question"] = d["question"]
+    _check_node("participation", ns)
+    return d
+
+
 def canonical(spec):
     """The canonical JSON text of a spec (or any JSON value): sort_keys, compact separators, UTF-8 as is."""
     return json.dumps(spec, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
@@ -850,6 +900,34 @@ class Process:
 
     # --- building
 
+    def participants(self, systems):
+        """Atomically add named Systems using their participate() declarations.
+
+        Mapping order determines outgoing edge priority. Existing graph validators
+        still reject ambiguous entries, unreachable nodes and unbounded cycles.
+        The declaration and compiled graph are frozen in spec/hash/replay.
+        """
+        declarations = {}
+        from ..core.system import System
+        for name, system in systems.items():
+            if not isinstance(system, System) or not hasattr(system, "_process_participation"):
+                raise ProcessSpecError(f"participant {name!r}: expected a System with participate()")
+            declarations[name] = _participation(system._process_participation)
+        old_nodes, old_systems, old_edges = dict(self.nodes), dict(self.systems), list(self.edges)
+        try:
+            for name, d in declarations.items():
+                self.node(name, systems[name], **{k: d[k] for k in ("reads", "writes", "question", "end")})
+                self.nodes[name]["participation"] = d
+            for name, d in declarations.items():
+                if d["after"] is not None:
+                    self.edge(d["after"], name, when=d["when"], loop=d["max_iter"] is not None,
+                              max_iter=d["max_iter"])
+            self.spec()
+        except Exception:
+            self.nodes, self.systems, self.edges = old_nodes, old_systems, old_edges
+            raise
+        return self
+
     def node(self, name, system=None, *, kind=None, reads=(), writes=None, question=None, end=False, merge=None,
              store=None, promise=None, fingerprint=None, input_contracts=None, output_contracts=None):
         """Add a node. system: a solvi.build result, a System or a Guard (kind inferred), or None for kind="human" (a
@@ -977,6 +1055,7 @@ class Process:
 
     def spec(self):
         """The process as data (see the module docs), validated, with its "hash". → a JSON-ready dict."""
+        _check_participation_graph(self.nodes, self.edges)
         _check_graph(self.nodes, self.edges, self.merges, self._start)
         _check_merges(self.nodes, self.edges, self.merges)          # S272: refused where it is written, not at run
         out = {"solvi_process": FORMAT, "name": self.name, "nodes": _plain(self.nodes), "edges": _plain(self.edges),
@@ -1044,6 +1123,8 @@ class Process:
             # Validate contracts before legacy _plain can coerce Python-only
             # values/keys in an in-memory spec into different JSON values.
             from ._process_boundary import frozen
+            if "participation" in ns:
+                _participation(ns["participation"])
             for key in ("input_contracts", "output_contracts"):
                 if key in ns:
                     try:
@@ -1052,6 +1133,9 @@ class Process:
                         raise ProcessSpecError(f"node {name!r} {key}: {exc}") from exc
             if name in systems:
                 sysm = systems[name]
+                if "participation" in ns and canonical(ns["participation"]) != canonical(
+                        getattr(sysm, "_process_participation", None)):
+                    raise ProcessSpecError(f"node {name!r}: participation differs from recorded declaration")
                 actual = fingerprint_of(sysm, ns.get("kind"))
                 rec = ns.get("fingerprint")
                 if canonical(actual) != canonical(rec):
@@ -1102,6 +1186,7 @@ class Process:
                                            f"recorded one ({rec_f.get('fingerprint')})")
                 p.mismatched["family"] = {"recorded": rec_f.get("fingerprint"), "actual": act["fingerprint"]}
             p._family_obj = family
+        _check_participation_graph(p.nodes, p.edges)
         _check_graph(p.nodes, p.edges, p.merges, p._start)
         return p
 
@@ -1125,6 +1210,10 @@ class Process:
             return self._go(spec, rc.id, w)
 
     def _check_bound(self):
+        for name, ns in self.nodes.items():
+            if "participation" in ns and name in self.systems and canonical(ns["participation"]) != canonical(
+                    getattr(self.systems[name], "_process_participation", None)):
+                raise ProcessRunError(f"node {name!r}: participation changed after binding")
         lack = [n for n, ns in self.nodes.items() if ns["kind"] != "human" and n not in self.systems]
         if lack:
             raise ProcessRunError(f"nodes without a system: {lack} (Process.from_spec(spec, systems=...))")
@@ -2702,7 +2791,7 @@ def _check_split(per, risk, auto):
 
 
 def _check_node(name, s):
-    allowed = {"kind", "reads", "writes", "question", "end", "store", "fingerprint", "promise", "input_contracts", "output_contracts"}
+    allowed = {"kind", "reads", "writes", "question", "end", "store", "fingerprint", "promise", "input_contracts", "output_contracts", "participation"}
     if set(s) - allowed:
         raise ProcessSpecError(f"node {name!r}: unknown fields {sorted(set(s) - allowed)}")
     if s.get("kind") not in KINDS:

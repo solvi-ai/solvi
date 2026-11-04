@@ -240,6 +240,21 @@ class System:
     inputs = _deprecate.removed_attr("inputs", "input_model", "System")       # 0.7 names
     costs = _deprecate.removed_attr("costs", "cost_book", "System")
 
+    def participate(self, *, after=None, when=None, max_iter=None, reads=(), writes=None,
+                    question=None, end=False):
+        """Declare participation in an experimental Process; return self.
+
+        ``after`` names one predecessor (None declares an entry). ``when`` is
+        the Process predicate on that predecessor's outcome. ``max_iter`` marks
+        this incoming edge as a bounded loop, counting edge traversals per run.
+        Process.participants snapshots the declaration; later declarations affect
+        only newly assembled processes. This does not schedule standalone asks.
+        """
+        from ..experimental.process import _participation
+        self._process_participation = _participation(dict(after=after, when=when, max_iter=max_iter,
+            reads=list(reads), writes=dict(writes or {}), question=question, end=end))
+        return self
+
     @_deprecate.removed_kwargs(journal="storage=JSONLStorage(path)", inputs="input_model", costs="cost_policy")
     def __init__(self, catalog: Catalog, questions, *, workers: int = 1, order: str = "default",
                  producers: str = "declared", learn: bool | None = None, input_model=None, strategist=None, storage=None,
