@@ -14,7 +14,8 @@ def test_explicit_space_groups_are_read_exactly(raw, value):
     assert _read_quote(Decimal, raw, space_grouping=True)[0] == Decimal(value)
 
 
-@pytest.mark.parametrize("raw", ["1 23", "1234 567", "1 234 56", "1\n234", "1\t234"])
+@pytest.mark.parametrize("raw", ["1 23", "1234 567", "1 234 56", "1\n234", "1\t234",
+                              "1\u2028234", "1\u2029234", "1\v234", "1\f234", "1\x85234"])
 def test_declaration_does_not_admit_incomplete_or_cross_line_groups(raw):
     with pytest.raises(ValueError):
         _read_quote(Decimal, raw, space_grouping=True)

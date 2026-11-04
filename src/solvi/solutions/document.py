@@ -220,7 +220,7 @@ def _read_quote(vtype, text, decimal=None, label=None, space_grouping=False):
     t = _SCALE_SUFFIX.sub(" ", _SCALE_WORD.sub(" ", t))
     pct = bool(_PERCENT.search(t))
     t = _PERCENT.sub(" ", t)
-    if space_grouping and re.search(r"[\t\r\n]", t) and re.search(r"[0-9]\s+[0-9]", t):
+    if space_grouping and any(c.isspace() and c != " " for c in t) and re.search(r"[0-9]\s+[0-9]", t):
         raise ValueError("space-grouped digits cannot cross a line or a tab")
     t = re.sub(r"\s+", " ", t).strip()
     t = re.sub(r"\(\s*", "(", re.sub(r"\s*\)", ")", t))
