@@ -727,6 +727,22 @@ class Part:
     text: str | None = None             # rule only: author-declared condition, rendered in why
     precedence: int | None = None  # hard checks: larger values select among proven false checks
 
+    reads_from: tuple | None = None  # check only: immutable (function argument, actual fact) bindings
+
+    def call_args(self, values):
+        """Translate already-validated actual fact values to the original check's argument names."""
+        if not self.reads_from:
+            return values
+        if not isinstance(self.reads_from, tuple):
+            raise ValueError("reads_from bindings must be registered immutable pairs")
+        reverse = {source: arg for arg, source in self.reads_from}
+        if len(reverse) != len(self.reads_from) or not set(reverse) <= set(self.inputs):
+            raise ValueError("reads_from no longer matches the registered dependency inputs")
+        args = {reverse.get(name, name): value for name, value in values.items()}
+        if len(args) != len(values):
+            raise ValueError("reads_from has colliding arguments")
+        return args
+
     def strict(self):
         """Must a Quote from this part be literally at its offsets? Yes for model-backed parts (unless exact=False)."""
         from .provenance import FUZZY
@@ -1033,6 +1049,36 @@ class Catalog:
     def _add(self, kind, f, **kw):
         sig = inspect.signature(f)
         name = getattr(f, "__name__", type(f).__name__)
+        bindings = kw.get("reads_from")
+        if bindings:
+            import keyword
+            if kind != "check" or type(bindings) is not dict:
+                raise ValueError("reads_from is a check argument-to-fact dict")
+            if any(not isinstance(arg, str) or arg not in sig.parameters for arg in bindings):
+                raise ValueError("reads_from keys must name the check's function arguments")
+            if any(not isinstance(src, str) or not src.isidentifier() or keyword.iskeyword(src)
+                   for src in bindings.values()):
+                raise ValueError("reads_from sources must be Python fact identifiers")
+            actual = [bindings.get(arg, arg) for arg in sig.parameters]
+            if len(set(actual)) != len(actual) or name in actual:
+                raise ValueError("reads_from creates a collision or self dependency")
+            pending, seen = list(actual), set()
+            while pending:
+                fact = pending.pop()
+                if fact == name:
+                    raise ValueError("reads_from creates a dependency cycle")
+                if fact in seen:
+                    continue
+                seen.add(fact)
+                producer = self.parts.get(fact)
+                if producer is not None:
+                    pending.extend(producer.inputs)
+                    for alt in producer.alternatives or ():
+                        pending.extend(alt.inputs)
+            if (kw.get("model") is not None or getattr(f, "__solvi_model__", None) is not None
+                    or getattr(f, "__solvi_decision__", None) is not None or hasattr(f, "in_pass")):
+                raise ValueError("reads_from does not support model-backed or shared-pass checks")
+            kw["reads_from"] = tuple(sorted(bindings.items()))
         if kind in ("fn", "rule"):
             # Match the Decider leaf contract without loading the high-level deciders package in execution core.
             if callable(f) and hasattr(f, "options") and callable(getattr(f, "fingerprint", None)):
@@ -1067,6 +1113,9 @@ class Catalog:
                           "(a closure: def make(lim): def chk(n): return n <= lim), or give the fact", stacklevel=3)
         p = Part(kind=kind, name=name, inputs=list(sig.parameters), func=f, doc=(f.__doc__ or "").strip(),
                  quotes=getattr(self, "quotes", "normalized"), **kw)
+        if p.reads_from:
+            binding = dict(p.reads_from)
+            p.inputs = [binding.get(arg, arg) for arg in p.inputs]
         if p.source is not None:                       # a Quote without its own source points into this text
             p.func = _sourced(f, p.source)
         if kind == "check" and p.then:
@@ -1075,6 +1124,9 @@ class Catalog:
         if getattr(f, "__annotations__", None) and kind != "constraint":      # typed facts (untyped parts skip all this)
             from .types import compile_part, hints, register
             p.types, p.returns = hints(f, kind)
+            if p.reads_from and p.types:
+                binding = dict(p.reads_from)
+                p.types = {binding.get(arg, arg): typ for arg, typ in p.types.items()}
             if p.types or p.returns is not None:
                 compile_part(p)
                 commit = register(self, p)                 # checks now (FactTypeError), records once the part is in
@@ -1257,7 +1309,7 @@ class Catalog:
                           timeout=timeout, blocking=blocking, cites=cites_of(cite, clause))
 
     def check(self, f=None, *, hard=False, then=None, cost=None, model=None, provenance=None, timeout=None, blocking=None,
-              cite=None, clause=None, family=None, shares_call_with=None, precedence=None):
+              cite=None, clause=None, family=None, shares_call_with=None, precedence=None, reads_from=None):
         """A check: a function of facts that answers True or False (or `solvi.core.slow.refine.Fail("why")` for False with its
         reasons). hard=True: when it is False it decides the questions it governs — the model cannot override it.
         then: {question: answer} — the answer a question gets when this hard check is False (a question listed here is
@@ -1272,11 +1324,16 @@ class Catalog:
         declared). precedence: an integer priority for hard checks only (None is 0). The largest priority among
         proven false governing checks selects the deciding group; ties use the existing combine mode. It does not
         remove mandatory checks or permit ignoring unavailable checks.
+        reads_from: {function_argument: actual_fact} binds this check's inputs only. Planning, types, traces and
+        replay name the actual facts; the function still receives its original argument names. Source names do not
+        certify independent data. Model-backed/shared-pass checks do not support these bindings.
         `cite`, `clause`: as for extract. family: where the check's evidence comes from (a model family such as
         "gpt", "code", "human", a data source); shares_call_with: the part or question whose model call the check
         re-reads (a self-check in the same response). Both are metadata: nothing changes at ask time and the
         fingerprint is the same; `solvi check` warns about a check that shares a call (it agrees with that answer
         whatever it is) and about a question whose checks are all of one family (they err together)."""
+        if reads_from is not None and type(reads_from) is not dict:
+            raise ValueError("reads_from is an argument-to-fact dict")
         if precedence is not None and (type(precedence) is not int or not hard):
             raise ValueError("precedence requires hard=True and an integer (bool and float are not supported)")
         for k, v in (("family", family), ("shares_call_with", shares_call_with)):
@@ -1285,7 +1342,7 @@ class Catalog:
         if then is not None and not isinstance(then, dict):
             raise TypeError(f"then= is {{question: answer or function of facts}}, not {type(then).__name__}: e.g. "
                             "then={\"step\": free_side}")
-        return self._deco("check", f, hard=hard, precedence=precedence, then=then or {}, cost=cost, model=model, provenance=provenance,
+        return self._deco("check", f, hard=hard, precedence=precedence, reads_from=dict(reads_from) if reads_from else None, then=then or {}, cost=cost, model=model, provenance=provenance,
                           timeout=timeout, blocking=blocking, cites=cites_of(cite, clause), family=family,
                           shares_call_with=shares_call_with)
 

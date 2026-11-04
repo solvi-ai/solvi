@@ -713,7 +713,7 @@ def _recompute(part, r, args, init, catalog=None):
         return [(r.step, r.name, "a decision of its shared pass is no longer in the catalog")]
     if why is None:
         try:
-            v = resolved(part.func(**plain) if sibs is None else part.func.in_pass(sibs, plain, r.extra["pass"]["with"]))
+            v = resolved(part.func(**part.call_args(plain)) if sibs is None else part.func.in_pass(sibs, plain, r.extra["pass"]["with"]))
         except Exception as e:  # noqa: BLE001
             return [] if r.error is not None else [(r.step, r.name, f"recompute failed: {type(e).__name__}")]
         if isinstance(v, Decision) and isinstance(r.extra, dict):     # several models (solvi.core.deciders.combine): every proposal;
@@ -1327,7 +1327,7 @@ def _step(p, vals, init_state, policy=None, costs=None, known=None, memo=None, b
         if why:
             return StepOut(MISSING, None, 1.0, why, hashes, (time.perf_counter() - t0) * 1000)
     try:
-        v = yield (p, (lambda: p.func(**args)) if batch is None else (lambda: p.func.in_pass(batch[1], args, batch[0])))
+        v = yield (p, (lambda: p.func(**p.call_args(args))) if batch is None else (lambda: p.func.in_pass(batch[1], args, batch[0])))
     except PartTimeout as e:
         return StepOut(MISSING, None, 1.0, str(e), hashes, (time.perf_counter() - t0) * 1000)
     except Exception as e:  # noqa: BLE001

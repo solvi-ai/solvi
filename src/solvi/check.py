@@ -436,7 +436,33 @@ def _provenance(cat, questions, flows, rep):
             rep.add("warning", "check_shares_call", name,
                     f"re-reads the model call of {x!r}: it agrees with that answer whatever it is, so it is not an "
                     "independent check" + ("" if known else f" (and there is no part or question named {x!r})"))
+    def roots(names, seen=None):
+        seen = set() if seen is None else set(seen)
+        out = set()
+        for fact in names:
+            if fact in seen:
+                continue
+            part = cat.parts.get(fact)
+            if part is None:
+                out.add(fact)
+            else:
+                out |= roots(part.inputs, seen | {fact})
+                for alt in part.alternatives or ():
+                    out |= roots(alt.inputs, seen | {fact})
+        return out
+
     for qn in questions:
+        rule = cat.rules.get(qn)
+        if rule is not None:
+            rule_roots = roots(rule.inputs)
+            for name in sorted(flows.get(qn, ())):
+                p = checks.get(name)
+                if p is not None and getattr(p, "reads_from", None):
+                    shared = roots(p.inputs) & rule_roots
+                    if shared:
+                        rep.add("warning", "check_shared_source", name,
+                                f"check and rule {qn!r} share given source facts: {', '.join(sorted(shared))}; "
+                                "source binding is not an independence certificate (distinct names can also share a backend)")
         fams = {n: checks[n].family for n in sorted(flows.get(qn, ())) if n in checks and getattr(checks[n], "family", None)}
         if len(fams) >= 2 and len(set(fams.values())) == 1:
             rep.add("warning", "checks_one_family", qn,
