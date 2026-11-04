@@ -547,6 +547,8 @@ class KnowledgeStore:
         with self._lock:
             if not self._journal_whole():
                 raise ValueError("cannot reconstruct a corrupt knowledge journal")
+            # Snapshot validated data before policy deepcopy callbacks can run.
+            entries = copy.deepcopy(self.journal if upto is None else self.journal[:upto])
             try:
                 gates, defaults, now = copy.deepcopy((self.gates, self.defaults, self.now))
                 if any(a is b for a, b in zip(self.gates, gates)):
@@ -557,12 +559,22 @@ class KnowledgeStore:
             # WriterGate is already present in the copied gate sequence. Preserve
             # the separate, explicit capability; do not add a second registry.
             ks.reassert_writers = self.reassert_writers
-            entries = copy.deepcopy(self.journal if upto is None else self.journal[:upto])
-        return self._replay_entries(ks, entries, skip)
+        return self._replay_entries(ks, entries, skip, _verified_memory=self._mem is not None and not skip)
 
     @staticmethod
-    def _replay_entries(ks, entries, skip=()):
+    def _replay_entries(ks, entries, skip=(), *, _verified_memory=False):
         """Replay recorded history only, with no write-gate calls or new verdicts."""
+        if _verified_memory and not skip:
+            # Only rebuild's already validated, independently copied memory
+            # prefix qualifies. Persistent records use a different chain schema;
+            # removing records also requires the general rechaining path below.
+            ks._mem.entries = entries
+            ks._mem.prev = entries[-1]["hash"] if entries else ""
+            ks.journal = list(entries)
+            with ks.batch():
+                for r in entries:
+                    ks._apply(r)
+            return ks
         with ks.batch():
             for r in entries:
                 if r.get("item") in skip:
