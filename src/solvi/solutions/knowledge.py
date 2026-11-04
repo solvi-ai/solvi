@@ -75,7 +75,7 @@ class Knowledge:
     (now=)); None: `usable` reads status and staleness only."""
 
     def __init__(self, path=None, *, vocabulary=None, write_gate=None, actions=None, failures=None, severity=1.0,
-                 writers=None, reassert_writers=(), now=None):
+                 writers=None, reassert_writers=(), now=None, revival_window=None):
         from ..core.knowledge import Agenda, ConservativeActionModel, FailureMemory, KnowledgeStore, Vocabulary
         from ..core.knowledge.gates import default_gates
         if vocabulary is not None and actions is not None:
@@ -85,7 +85,7 @@ class Knowledge:
         if write_gate is not None:
             extra = list(write_gate) if isinstance(write_gate, (list, tuple)) else [write_gate]
             gates = default_gates() + extra
-        self.store = KnowledgeStore(path, gates=gates, writers=writers, reassert_writers=reassert_writers, now=now)
+        self.store = KnowledgeStore(path, gates=gates, writers=writers, reassert_writers=reassert_writers, now=now, revival_window=revival_window)
         self.agenda = Agenda(self.store)
         if vocabulary is not None:
             if isinstance(vocabulary, dict):

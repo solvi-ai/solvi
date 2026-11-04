@@ -422,9 +422,12 @@ class KnowledgeStore:
     returning the current world time (no arguments), or a fixed time; with it `usable(id)` and `usable` on derived
     items read the effective intervals at that time instead of status alone, so a version closed by a later one
     (or an item derived from it) is not usable with no `valid_at` given. None (default): as before — `usable(id)`
-    with no `valid_at` reads status and staleness only."""
+    with no `valid_at` reads status and staleness only. revival_window: optional inclusive protection
+    after withdrawal, in logical tick units. New direct dated claims after the window may vouch
+    anew; old held claims never become clean merely because time passes. None preserves the
+    original overlap-based guard. Reopen persistent stores with the same explicit policy."""
 
-    def __init__(self, storage=None, *, gates=None, defaults=None, writers=None, reassert_writers=(), now=None, _replay=True):
+    def __init__(self, storage=None, *, gates=None, defaults=None, writers=None, reassert_writers=(), now=None, revival_window=None, _replay=True):
         from ..store import open_storage
         self.storage = open_storage(storage)
         self.gates = with_source_gate(gates if gates is not None else default_gates())
@@ -434,6 +437,18 @@ class KnowledgeStore:
         if self.reassert_writers and (writers is None or not self.reassert_writers <= set(map(str, writers))):
             raise ValueError("reassert_writers must be registered writers")
         self.defaults = dict(RECONFIRM_DEFAULTS if defaults is None else defaults)
+        if revival_window is not None:
+            import math
+            if type(revival_window) not in (int, float):
+                raise ValueError("revival_window must be a finite nonnegative number or None")
+            try:
+                revival_window = float(revival_window)
+            except OverflowError:
+                raise ValueError("revival_window is not representable") from None
+            if not math.isfinite(revival_window) or revival_window < 0:
+                raise ValueError("revival_window must be finite and nonnegative")
+        self._revival_window = revival_window
+        self._entry_clocks = {}
         self.now = now                                   # a world clock for usable() with no valid_at (see usable)
         self._lock = threading.RLock()
         self._mem = _MemoryJournal() if self.storage is None else None
@@ -491,6 +506,11 @@ class KnowledgeStore:
         """{"count", "hash"}: the number of journal entries and the last entry's hash."""
         return {"count": len(self.journal), "hash": self.journal[-1]["hash"] if self.journal else ""}
 
+    @property
+    def revival_window(self):
+        """Optional inclusive withdrawal window in owner-declared logical clock units."""
+        return self._revival_window
+
     def verify(self):
         """Is the journal's hash chain whole (in memory: its own chain; on a backend: the backend's verify()), and is the
         state the one the journal gives (the store rebuilt from it has the same fingerprint)?"""
@@ -500,7 +520,7 @@ class KnowledgeStore:
             # Verification replays recorded verdicts; it never invokes write
             # gates or exposes a writable copy. Locks/resources owned by custom
             # gates therefore need not be cloneable for this read-only query.
-            ks = KnowledgeStore(None, gates=self.gates, defaults=self.defaults, now=self.now, _replay=False)
+            ks = KnowledgeStore(None, gates=self.gates, defaults=self.defaults, now=self.now, revival_window=self.revival_window, _replay=False)
             ks.reassert_writers = self.reassert_writers
             self._replay_entries(ks, copy.deepcopy(self.journal))
             return ks.fingerprint() == self.fingerprint()
@@ -533,7 +553,7 @@ class KnowledgeStore:
                     raise TypeError("a gate returned itself from deepcopy")
             except Exception as exc:  # noqa: BLE001 - arbitrary policy deepcopy must fail closed
                 raise TypeError("rebuild requires independently copyable write gates and policy") from exc
-            ks = KnowledgeStore(None, gates=gates, defaults=defaults, now=now, _replay=False)
+            ks = KnowledgeStore(None, gates=gates, defaults=defaults, now=now, revival_window=self.revival_window, _replay=False)
             # WriterGate is already present in the copied gate sequence. Preserve
             # the separate, explicit capability; do not add a second registry.
             ks.reassert_writers = self.reassert_writers
@@ -604,6 +624,8 @@ class KnowledgeStore:
         if op == "assert" and r.get("reassert_proof"):
             self._validate_reassert_record(r, t)
         self.clock = r.get("clock", self.clock)
+        if self.revival_window is not None:
+            self._entry_clocks[t] = self.clock
         if op == "assert":
             self._raw_assert(r, t)
         elif op == "promote":
@@ -729,12 +751,20 @@ class KnowledgeStore:
                 index[value].add(iid)
             if key is not None:
                 self.by_key[key].add(iid)
+        # A fresh direct assertion after the optional window may vouch anew;
+        # never waive derived/consulted evidence, retirement or pending flags.
+        cut = _cut(it) if self.revival_window is not None else -1
+        revival_cut = (cut if cut >= 0 and r.get("valid") is not None
+                       and not r.get("just") and not r.get("consulted")
+                       and self.clock - self._entry_clocks[cut] > self.revival_window else None)
         it.asserts.append({"t": t, "clock": r.get("clock", 0), "source": r["source"], "by": r.get("by"),
                            "just": tuple(r.get("just") or ()), "supersedes": r.get("supersedes"),
                            "evidence": r.get("evidence"), "valid": r.get("valid"), "level": r.get("level"),
                            "of": r.get("of"), "inferred": bool(r.get("inferred")),
                            "consulted": tuple(r.get("consulted") or ()),
                            "reassert_proof": r.get("reassert_proof")})
+        if revival_cut is not None:
+            it.asserts[-1]["_revival_cut"] = revival_cut
         for p in it.asserts[-1]["just"] + it.asserts[-1]["consulted"]:     # a consulted item's change re-resolves it
             self.dependents[p].add(iid)
         if it.reconfirm_after:                          # this assertion's clock is a possible last support: past
@@ -1318,7 +1348,8 @@ class KnowledgeStore:
             by_key = {key: comp}
             self._guards.pop(key, None)  # a later general pass must rebuild the whole-key guard
         new = _resolve(self.items, comp, by_key, self.resolves, self.clock, flagged, taints=self._taints,
-                       state=self.state, guards=self._guards)
+                       state=self.state, guards=self._guards, revival_window=self.revival_window,
+                       entry_clocks=self._entry_clocks)
         for i in comp:
             if i in new:
                 self.state[i] = new[i]
@@ -1845,6 +1876,11 @@ def _premise_cycle(items, iid, premises, cap=64):
     return None
 
 
+def _window_vouched(it, cut):
+    # Local eligibility only: descendants still see the historical premise cut.
+    return any(a.get("_revival_cut") == cut for a in _live(it))
+
+
 def _taint(items, iid, memo, deferred=None):
     """The journal position the item's support was last cut at — its own retraction, or, when every assertion since
     then rests on a premise cut after it was written, that premise's cut — or None. An item retracted and then only
@@ -1983,7 +2019,7 @@ def _guard_refresh(items, i, gi, shrunk):
     return gi
 
 
-def _guard(items, ids, cache=None):
+def _guard(items, ids, cache=None, *, revival_window=None, entry_clocks=None):
     """The revival guard on one key: a later assertion with `valid` of content (the key's value) that was withdrawn
     from a writer on an overlapping validity — by any retraction (plain, only_from, an assertion, retract_source, a
     failed re-test, a rollback), on any item — is a copy. A copy is pending a re-test unless writers the content was
@@ -2000,6 +2036,11 @@ def _guard(items, ids, cache=None):
     first classification — and only the items whose raw entries moved are re-read. The `_kept` re-admissions and
     the matches a re-test stopped vouching for are resolved on every pass of a touched key; an untouched key
     reuses its last result whole. Without a cache the pass is computed from scratch, as a rebuilt store does."""
+    def matches(tc, ivb, assertion):
+        if revival_window is None:
+            return _overlap(ivb, _interval(assertion["valid"]))
+        return assertion["clock"] - entry_clocks[tc] <= revival_window
+
     if cache is not None and not cache.stale and cache.result is not None:
         return cache.result
     shrunk = set()                                    # the re-tests that stopped vouching, this pass
@@ -2045,7 +2086,7 @@ def _guard(items, ids, cache=None):
             if fw is None or not shrunk.isdisjoint(fw[1]):
                 w, deps = [], set()
                 for vj_j, tc, since, ivb, by in fixed:
-                    if vj_j != gi.vj or not tc < a["t"] or not _overlap(ivb, iv):
+                    if vj_j != gi.vj or not tc < a["t"] or not matches(tc, ivb, a):
                         continue
                     hit = [tp for tp in clears.get((vj_j, since), ()) if tc < tp <= a["t"]]
                     if hit:                           # a re-test between the withdrawal and this assertion
@@ -2056,7 +2097,7 @@ def _guard(items, ids, cache=None):
                 gi.live_w[a["t"]] = fw
             w = list(fw[0])
             for vj_j, tc, since, ivb, by in dyn:
-                if vj_j == gi.vj and tc < a["t"] and _overlap(ivb, iv) \
+                if vj_j == gi.vj and tc < a["t"] and matches(tc, ivb, a) \
                         and not any(tc < tp <= a["t"] for tp in clears.get((vj_j, since), ())):
                     w.append((tc, by))
             if a.get("reassert_proof"):
@@ -2151,7 +2192,7 @@ def _retest_why(items, iid, t, memo):
     return f"its support was cut at journal entry {t}"
 
 
-def _resolve(items, comp, by_key, resolves, clock, flagged, max_iter=200, taints=None, state=None, guards=None):
+def _resolve(items, comp, by_key, resolves, clock, flagged, max_iter=200, taints=None, state=None, guards=None, revival_window=None, entry_clocks=None):
     """The state of the items in `comp` (closed under dependents and shared keys) from their raw entries → {id:
     record} for present items. Fixed point of: liveness of justifications ↔ per-key walk. Deterministic; premises
     outside `comp` are read from `state` (their resolved records), which nothing in `comp` can change. `guards`: the
@@ -2169,7 +2210,7 @@ def _resolve(items, comp, by_key, resolves, clock, flagged, max_iter=200, taints
         taints[i] = max((a["t"] for a in _live(items[i])), default=None)   # for the content — it waits for a re-test
     for i in order:
         t = taints.get(i)
-        if t is not None and not any(p > t for p in items[i].promoted):
+        if t is not None and not any(p > t for p in items[i].promoted) and not _window_vouched(items[i], t):
             retest.add(i)
             why[i] = ("its only support runs through a premise cycle: nothing outside it vouches for the content"
                       if i in deferred else _retest_why(items, i, t, taints))
@@ -2178,7 +2219,8 @@ def _resolve(items, comp, by_key, resolves, clock, flagged, max_iter=200, taints
         # recompute from scratch next time (rare: only with cycles)
     pclaims, hinfo = {}, {}                             # the revival guard: copies of withdrawn content
     for k in sorted({items[i].key for i in order if items[i].key is not None}):
-        p, h = _guard(items, sorted(by_key[k]), guards.get(k) if guards is not None else None)
+        p, h = _guard(items, sorted(by_key[k]), guards.get(k) if guards is not None else None,
+                      revival_window=revival_window, entry_clocks=entry_clocks)
         pclaims.update(p)
         hinfo.update(h)
     retest0 = set(retest)
