@@ -18,9 +18,10 @@ The ticket (what the agent sees). {"status": "needs_verdict", "ticket", "questio
 the time left. No model guess, no probabilities, no reason, no marker of kind: an audit of an answer System 1 gave
 alone and an escalation have the same payload fields (the kind is kept server-side only, in the record). This hides
 the kind in an isolated ticket; it does not make the whole interaction indistinguishable. An oracle with access to
-`decide` can submit the same state as a new decision: an input System 1 can answer may then return `decided`, revealing
-its answer, while an escalation can produce another ticket. The calibration coin is drawn per decision,
-not fixed per input. Reusing a `request_id` returns the original payload, but a new request is another decision.
+`decide` cannot re-probe an identical input while its ticket is open: by default the desk returns that ticket,
+without another draw or decision. This also applies across restart and different request ids. After completion or
+expiry a repeated input is a new decision. `deduplicate_open=False` restores the old per-call behavior and permits
+the same-input side channel. The calibration coin is still drawn per decision, not fixed per input.
 
 The certificate assumes that the oracle's label does not depend on whether the decision was sampled. Equal ticket
 fields alone do not enforce this assumption: the application must account for the oracle's access to repeated
@@ -138,11 +139,13 @@ class AgentOracle(SlowPath):
 class TicketDesk:
     """The tickets of one Dispatcher whose slow path is an AgentOracle (see the module docs). ttl: seconds a ticket
     waits for a verdict; clock: the time source (seconds; tests pass their own). One active desk per persistent
-    store; use close() or a context manager before restarting. Memory/custom stores guard only the same object."""
+    store; use close() or a context manager before restarting. Memory/custom stores guard only the same object.
+    deduplicate_open: an identical serialized input with an open ticket returns that ticket before System 1 runs;
+    False opts into independent decisions and forfeits this protection against same-input re-probing."""
 
     Error = TicketError                                  # what a server reports to the agent as its error
 
-    def __init__(self, dispatcher, *, ttl: float = TTL, clock=time.time):
+    def __init__(self, dispatcher, *, ttl: float = TTL, clock=time.time, deduplicate_open=True):
         if not isinstance(dispatcher, Dispatcher):
             raise TypeError("TicketDesk takes a solvi Dispatcher")
         if not isinstance(dispatcher.slow, AgentOracle):
@@ -152,10 +155,14 @@ class TicketDesk:
         ttl = float(ttl)
         if not ttl > 0 or math.isinf(ttl) or math.isnan(ttl):
             raise ValueError("ttl is a positive number of seconds (a ticket that never expires is never accounted)")
+        if not isinstance(deduplicate_open, bool):
+            raise TypeError("deduplicate_open is a boolean")
         self.dispatcher, self.ttl, self.clock = dispatcher, ttl, clock
+        self.deduplicate_open = deduplicate_open
         self.question = dispatcher.question
         self._lock = threading.RLock()
         self._open = {}                                  # ticket → {"started", "id", "created", "ttl", "kind"}
+        self._open_inputs = {}                           # serialized input digest → insertion-ordered tickets
         self._requests = {}
         self._request_results = {}
         self._closed = False
@@ -308,6 +315,26 @@ class TicketDesk:
             p = r["pending"]
             self._open[t] = {"started": Started.from_dict(r["issue"], d.system), "id": rid,
                              "created": float(p["created"]), "ttl": float(p["ttl"]), "kind": p.get("kind_hidden")}
+            self._index_input(t, r["issue"]["input"])
+
+    @staticmethod
+    def _input_digest(state):
+        from ...core.store import plain
+        return hashlib.sha256(json.dumps(plain(state), sort_keys=True, ensure_ascii=False,
+                                         separators=(",", ":"), allow_nan=False).encode()).hexdigest()
+
+    def _index_input(self, ticket, state):
+        digest = self._input_digest(state)
+        self._open[ticket]["input_digest"] = digest
+        self._open_inputs.setdefault(digest, {})[ticket] = None
+
+    def _forget_open(self, ticket):
+        entry = self._open.pop(ticket)
+        digest = entry["input_digest"]
+        tickets = self._open_inputs[digest]
+        del tickets[ticket]
+        if not tickets:
+            del self._open_inputs[digest]
 
     # --- the tools
     def decide(self, state, *, request_id=None) -> dict:
@@ -315,15 +342,14 @@ class TicketDesk:
         person gets it: by "human", answer None) or a blind ticket (see the module docs).
         request_id is an optional durable retry key, separate from state. Reusing it returns the original
         payload (even after resolution/expiry); another state is refused. An interrupted call requires replay
-        of a fresh dispatcher before retry. Storage must durably append, and all decisions must use this desk."""
-        from ...core.store import plain
+        of a fresh dispatcher before retry. Storage must durably append, and all decisions must use this desk.
+        By default an identical input reuses its open ticket even under a new request_id; it is not a new sample."""
         d, q = self.dispatcher, self.question
         with self._lock:
             self._ensure_open()
             if request_id is not None and (not isinstance(request_id, str) or not request_id.strip()):
                 raise TicketError("request_id must be a nonempty string")
-            digest = hashlib.sha256(json.dumps(plain(state), sort_keys=True, ensure_ascii=False,
-                                               separators=(",", ":"), allow_nan=False).encode()).hexdigest()
+            digest = self._input_digest(state)
             intent = self._requests.get(request_id)
             if intent is not None:
                 if intent["state_digest"] != digest:
@@ -334,18 +360,30 @@ class TicketDesk:
             if unresolved - {request_id}:
                 raise TicketError("an interrupted request must be retried with its original request_id first")
             self.sweep()
+            duplicate = None
+            if self.deduplicate_open and digest in self._open_inputs:
+                duplicate = next(iter(self._open_inputs[digest]))
             if intent is not None and d.n + 1 != intent["n"]:
                 raise TicketError("interrupted request decision number changed; cannot safely retry")
             if request_id is not None and intent is None:
                 from ...core.store import FORMAT
                 intent = {"v": FORMAT, "kind": "ticket_request", "question": q, "request_id": request_id,
-                          "state_digest": digest, "n": d.n + 1}
+                          "state_digest": digest,
+                          "n": self._open[duplicate]["started"].n if duplicate is not None else d.n + 1}
                 try:
                     d.storage._append({"v": FORMAT, "kind": "ticket_request", "ticket_request": intent})
                 except BaseException:
                     self.close()
                     raise
                 self._requests[request_id] = intent
+            if duplicate is not None:
+                entry = self._open[duplicate]
+                # Keep the payload stable: expiry is enforced by sweep, not exposed as a kind-dependent signal.
+                from ...core.store import plain
+                result = self.ticket_payload(duplicate, plain(entry["started"].state), entry["ttl"])
+                if request_id is not None:
+                    self._request_results[request_id] = copy.deepcopy(result)
+                return result
             try:
                 return self._decide_request(state, request_id)
             except BaseException:
@@ -358,7 +396,7 @@ class TicketDesk:
         from ...core.store import plain
         d, q = self.dispatcher, self.question
         with self._lock:
-            b = d.start(state)
+            b = d.start(copy.deepcopy(state))
             th = None
             if b.needs_slow:
                 th = d.slow.not_applicable(state, q, d.price)
@@ -386,6 +424,7 @@ class TicketDesk:
                                              "sampled": b.sampled},
                                  "issue": b.to_dict()})
         self._open[t] = {"started": b, "id": rec["id"], "created": now, "ttl": self.ttl, "kind": kind}
+        self._index_input(t, plain(b.state))
         return self.ticket_payload(t, plain(b.state))
 
     def ticket_payload(self, ticket, state, expires_in_s=None) -> dict:
@@ -419,7 +458,7 @@ class TicketDesk:
             b = t["started"]
             th = d.slow.verdict(b.state, q, label, source=source, ticket=ticket, of=t["id"], price=d.price)
             out = d.complete(b, th, pending=ticket)
-            del self._open[ticket]
+            self._forget_open(ticket)
             return {"status": "resolved", "answer": plain(out.answer), "stored_id": out.stored_id}
 
     def expire(self, ticket, why=None):
@@ -449,7 +488,7 @@ class TicketDesk:
                            "pending": {"ticket": ticket, "question": self.question, "n": b.n, "at": now,
                                        "why": why}})
         out = d.complete(b, d.slow.lost(why, ticket=ticket, price=d.price), pending=ticket)
-        del self._open[ticket]
+        self._forget_open(ticket)
         return out
 
     def open(self) -> list:

@@ -114,7 +114,7 @@ class Clock:
         return self.t
 
 
-def _desk(store, clock=None, probation=50, ttl=600, arl=200):
+def _desk(store, clock=None, probation=50, ttl=600, arl=200, deduplicate_open=True):
     s1 = _s1()
     sp = StreamPromise(max_risk=0.05, grid=GRID)
     s1.guarantee("intent", promise=sp)
@@ -123,7 +123,7 @@ def _desk(store, clock=None, probation=50, ttl=600, arl=200):
         warnings.simplefilter("ignore")
         d = Dispatcher(s1, AgentOracle(s1), audit="adaptive", promise=sp, detector=det, on_drift="recertify",
                        probation=probation, secret="k", storage=store)
-    return TicketDesk(d, ttl=ttl, clock=clock or Clock()), sp, det
+    return TicketDesk(d, ttl=ttl, clock=clock or Clock(), deduplicate_open=deduplicate_open), sp, det
 
 
 def _run(desk, cases, answer=_gold, keep_open=()):
@@ -694,7 +694,7 @@ def test_mcp_recovery_and_refusal_are_blind_and_durable(tmp_path):
 
 def test_mcp_open_tickets_sweeps_and_does_not_deduplicate(tmp_path):
     clock = Clock()
-    desk, _, _ = _desk(JSONLStorage(tmp_path / "recover.jsonl"), clock=clock, ttl=5)
+    desk, _, _ = _desk(JSONLStorage(tmp_path / "recover.jsonl"), clock=clock, ttl=5, deduplicate_open=False)
     one = desk.call_tool("decide", {"state": {"case": 7}})
     two = desk.call_tool("decide", {"state": {"case": 7}})
     assert one["ticket"] != two["ticket"]
@@ -760,7 +760,7 @@ def test_request_id_recovers_interrupted_save(tmp_path, monkeypatch, window):
 
 
 def test_request_id_mcp_and_legacy_calls(tmp_path):
-    desk, _, _ = _desk(JSONLStorage(tmp_path / "legacy.jsonl"))
+    desk, _, _ = _desk(JSONLStorage(tmp_path / "legacy.jsonl"), deduplicate_open=False)
     args = {"state": {"case": 2}, "request_id": "r"}
     result = desk.call_tool("decide", args)
     assert desk.call_tool("decide", args) == result

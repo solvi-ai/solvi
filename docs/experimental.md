@@ -569,8 +569,12 @@ desk.resolve(ticket, "billing")                         # source="human" when a 
 slow path would take — an escalation, an audit drawn by the coin, a supervision or drift check — becomes a ticket that
 shows the question, all its options, the input as given, the question's text and the time left: no model guess, no
 probabilities, no reason, and an audit ticket is byte for byte the shape of an escalation one (the kind is kept only
-in the record). That is the second half of the sampling assumption: the label does not depend on whether the
-decision was sampled. A ticket is a hash-chained record (kind `pending`) written at issue with the decision begun
+in the record). Since 1.5 an identical serialized input reuses its open ticket by default, even under a new
+request id and after restart: no second System 1 invocation, decision number or sampling coin. This blocks the
+same-input re-probe while the verdict is outstanding. Completed/expired inputs can be decided again; modified
+inputs, timing and other access to System 1 are not hidden. Sampling-independent labels remain an application
+assumption; use a separate oracle trust boundary where needed. `TicketDesk(..., deduplicate_open=False)` explicitly
+restores independent per-call decisions and forfeits the open-input protection. A ticket is a hash-chained record (kind `pending`) written at issue with the decision begun
 (its number, coin, rate, System 1's response); the dispatch record is written when the verdict comes (`"pending":
 ticket`), and the stream sample records `label_source` ("s2" for the agent, "human" for a person) and `label_of`
 (the ticket's record). A restart rebuilds it all from the store: a new desk over a freshly built dispatcher resumes

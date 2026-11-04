@@ -54,9 +54,13 @@ the existing override/role rules. This is not a calibrated classifier or proof t
 provenance restrictions still govern tool argument authority. The original wider detector research request,
 including an independent labelled corpus, is not declared complete by these bounded regressions.
 
-Blind tickets hide audit/escalation kind within one payload. An oracle with access to repeated `decide` calls can
-learn additional information; equal ticket fields do not enforce sampling-independent labels. Reusing a
-`request_id` handles retry idempotency, not whole-interaction blindness.
+TicketDesk now deduplicates identical serialized inputs while their ticket is open, including across restart
+and new request ids. A repeated request returns the original ticket without running System 1 or drawing another
+coin. Legacy duplicate tickets resume oldest first; resolving/expiring it reveals the next outstanding one.
+Completed or expired inputs are new decisions unless an original request id is reused. Set
+`deduplicate_open=False` only for independent per-call decisions; this restores the open-input re-probe side channel.
+This is a breaking change to repeated-input accounting, not a whole-interaction blindness guarantee: modified
+inputs and other access to System 1 can reveal information. Labels must remain sampling-independent.
 
 `Catalog.answer_fact(question, name=...)` declares a fact holding the accepted, normalized answer of another
 question in the same System. For a bool rule this is `"yes"` or `"no"`, not the raw bool. Sources run before consumers;
