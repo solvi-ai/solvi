@@ -1,0 +1,50 @@
+{
+  "rows": 2000,
+  "laws": 40,
+  "candidates": 200,
+  "pairs": [
+    {
+      "scalar": 0.014848556005745195,
+      "scalar_equal": true,
+      "batch": 0.0004695180105045438,
+      "batch_equal": true
+    },
+    {
+      "batch": 0.00047521899978164583,
+      "batch_equal": true,
+      "scalar": 0.01510881599097047,
+      "scalar_equal": true
+    },
+    {
+      "scalar": 0.015269836003426462,
+      "scalar_equal": true,
+      "batch": 0.00046594199375249445,
+      "batch_equal": true
+    },
+    {
+      "batch": 0.00048082599823828787,
+      "batch_equal": true,
+      "scalar": 0.014017166991834529,
+      "scalar_equal": true
+    },
+    {
+      "scalar": 0.014710037998156622,
+      "scalar_equal": true,
+      "batch": 0.0004467940016184002,
+      "batch_equal": true
+    },
+    {
+      "batch": 0.000445206998847425,
+      "batch_equal": true,
+      "scalar": 0.014771144007681869,
+      "scalar_equal": true
+    },
+    {
+      "scalar": 0.014789607012062334,
+      "scalar_equal": true,
+      "batch": 0.0004402639897307381,
+      "batch_equal": true
+    }
+  ],
+  "median_paired_ratio": 0.03051388329566472
+}
