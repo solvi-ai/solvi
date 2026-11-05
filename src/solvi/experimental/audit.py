@@ -32,9 +32,18 @@ warn_on_import(__name__)
 __all__ = ["AuditWatch"]
 
 
-def _scalar_nan(value):
-    """Only declared floating scalar NaNs are missing; never coerce arrays to bool."""
-    return isinstance(value, (float, np.floating)) and bool(np.isnan(value))
+def _outcome(value):
+    """Normalize only explicit scalar audit labels; never invoke arbitrary truthiness."""
+    if value is None:
+        return None
+    if isinstance(value, (bool, np.bool_)):
+        return bool(value)
+    if isinstance(value, (int, float, np.integer, np.floating)):
+        if isinstance(value, (float, np.floating)) and bool(np.isnan(value)):
+            return None
+        if value == 0 or value == 1:
+            return bool(value)
+    raise ValueError("audit outcome must be a boolean or numeric scalar 0/1; None/NaN is missing")
 
 
 class AuditWatch:
@@ -71,7 +80,7 @@ class AuditWatch:
 
     def set_reference(self, passed):
         """The check's outcomes (True / 1 = passed) on a random sample of decisions → self (h simulated here)."""
-        v = [bool(x) for x in passed if not _scalar_nan(x)]
+        v = [label for x in passed if (label := _outcome(x)) is not None]
         if len(v) < 20:
             raise ValueError(f"a reference of {len(v)} outcomes: at least 20 (a random sample of decisions)")
         n, k = len(v), sum(1 for x in v if not x)
@@ -146,11 +155,12 @@ class AuditWatch:
                 if self.check is None:
                     raise ValueError("an audited decision needs passed= or a check")
                 passed = self.check(decision)
-            if passed is None or _scalar_nan(passed):
+            label = _outcome(passed)
+            if label is None:
                 self.missing += 1
                 rep["missing"] = True
                 return rep
-            fail = not bool(passed)
+            fail = not label
         except Exception:
             self.audit_errors += 1
             raise

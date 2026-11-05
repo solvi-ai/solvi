@@ -96,6 +96,52 @@ def test_reference_uses_same_floating_nan_predicate_without_calibration(monkeypa
 def test_array_is_error_not_missing_or_observed():
     import numpy as np
     w = watch(lambda _: np.array([True, False]))
-    with pytest.raises(ValueError, match='truth value'):
+    with pytest.raises(ValueError, match='audit outcome'):
         w.observe(audited=True)
     assert w.missing == w.audited == 0 and w.audit_errors == 1
+
+
+@pytest.mark.parametrize('bad', ['yes', '', 2, -1, float('inf'), object()])
+def test_unsupported_scalar_labels_are_errors(bad):
+    w = watch(lambda _: bad)
+    with pytest.raises(ValueError, match='audit outcome'):
+        w.observe(audited=True)
+    assert w.audited == w.failed == w.missing == 0
+    assert w.audit_requests == w.audit_errors == w.seen == 1
+
+
+@pytest.mark.parametrize('shape', [(), (1,), (2,)])
+def test_all_array_labels_invalid_in_observation_and_atomic_reference(monkeypatch, shape):
+    import numpy as np
+    from solvi.core.guarantees.drift import Cusum
+    stub = CusumStub()
+    stub.h = 10
+    monkeypatch.setattr(Cusum, 'calibrate', lambda *args, **kwargs: stub)
+    w = AuditWatch().set_reference(np.array([True] * 20))
+    state = w.n_ref, w.k_ref, w.p0, w.p1, w.h, w.cusum
+    bad = np.full(shape, np.nan)
+    with pytest.raises(ValueError, match='audit outcome'):
+        w.set_reference([True] * 20 + [bad])
+    assert (w.n_ref, w.k_ref, w.p0, w.p1, w.h, w.cusum) == state
+    w.check = lambda _: bad
+    with pytest.raises(ValueError, match='audit outcome'):
+        w.observe(audited=True)
+    assert w.audited == w.missing == 0 and w.audit_errors == 1
+
+
+def test_explicit_numeric_scalar_domain():
+    import numpy as np
+    w = watch()
+    for value in (True, np.bool_(True), 1, np.int64(1), np.float32(1), 0.0, np.int32(0)):
+        w.observe(audited=True, passed=value)
+    assert w.audited == 7 and w.failed == 2 and w.audit_errors == 0
+
+
+@pytest.mark.parametrize('bad', ['yes', 2, float('inf')])
+def test_invalid_reference_scalar_preserves_fitted_state(bad):
+    w = watch()
+    w.n_ref, w.k_ref, w.p0, w.p1 = 25, 2, .1, .2
+    before = w.__dict__.copy()
+    with pytest.raises(ValueError, match='audit outcome'):
+        w.set_reference([True] * 20 + [bad])
+    assert w.__dict__ == before
