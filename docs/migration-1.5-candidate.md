@@ -604,3 +604,21 @@ remains accepted. A rejected reference preserves the previously fitted detector.
 Omitting `passed` or passing `passed=None` still invokes the declared check; without a check,
 an audited observation raises the existing configuration error. Use a check returning `None`
 or pass a scalar NaN when the requested label is unavailable.
+
+
+## Source registry reads and authorization reconstruction
+
+SourceTrust indexes assertions by source without changing the snapshot schema, time window,
+role selection or reliability calculation. Its native `fingerprint()` reuses the same snapshot
+hash between supported mutations. Changes to the public configuration are detected as well.
+A custom snapshot on an instance, subclass or the class bypasses this cache and retains full
+hash recomputation. This is an owner-managed cache, not an integrity attestation of arbitrary
+private Python state. Reconstruct through `snapshot()` / `restore()` to load changed data.
+
+Numbers too large to represent as finite floats now raise `ValueError` consistently before
+mutation. TrustGate records the registry identity after invoking the owner clock callback,
+so a registry refreshed by that callback matches the data used by the verdict.
+
+See [authorization reconstruction](authorization-reconstruction.md) for key rotation and
+writer-policy changes. A copied writer dictionary is not a live revocation service; retire
+old handlers, use current verifiers and recheck authorization when resuming pending actions.

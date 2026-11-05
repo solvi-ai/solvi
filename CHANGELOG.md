@@ -10,6 +10,15 @@ This release contains breaking changes. See [migration notes](docs/migration-1.5
 
 ### Performance and API follow-up
 
+- Source reliability queries index assertions by source. Repeated native-registry fingerprints reuse the exact
+  snapshot hash until a supported mutation or configuration change; custom snapshot implementations remain uncached.
+- Source trust numeric inputs reject values outside the representable finite range with consistent errors before
+  mutation. Trust verdict metadata reflects registry refreshes performed by the owner clock callback.
+- A native workflow profile and paired serialization candidate are retained as diagnostics. The mixed candidate
+  was not selected; production record bytes, hashing, redaction and serialization remain unchanged.
+- Authorization reconstruction examples cover current verifiers, writer-registry copies and native HMAC revocation,
+  including the host's responsibility to retire old handlers and recheck pending actions.
+
 - Explicit `LawSet.set_base` refreshes fallback masks even for the same callable after its meaning changes.
   Old owned masks are discarded without retaining evidence buffers or clearing another set's cache.
 - Indexed knowledge helpers `edges`, `accepted_at`, `skills` and `where` accept explicit `valid_at` time filters.

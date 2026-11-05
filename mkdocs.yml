@@ -77,6 +77,7 @@ nav:
       - Audit label availability: audit-availability.md
       - Preparing large process graphs: process-graph-preparation.md
       - Process journal backends: process-journal-backends.md
+      - Authorization reconstruction: authorization-reconstruction.md
       - Asynchronous regime memory: regime-memory.md
       - Guide: guide-part:Experimental
   - Evidence:

@@ -100,3 +100,30 @@ def test_class_snapshot_override_does_not_reuse_native_cache():
         external.label('b', loss=1, now=2)
         assert trust.fingerprint() == old_hash(external)
     assert trust.fingerprint() == previous
+
+
+def test_custom_registry_proxy_does_not_require_native_cache_configuration():
+    from solvi.core.knowledge.gates import TrustGate
+
+    external = SourceTrust(window=10)
+    external.assert_statement('a', statement='s', source='writer', asserted_at=0, now=0)
+    external.label('a', loss=0, now=0)
+
+    class Proxy(SourceTrust):
+        def __init__(self, registry):
+            self.registry = registry
+            self.snapshot_reads = 0
+
+        @property
+        def snapshot(self):
+            self.snapshot_reads += 1
+            return self.registry.snapshot
+
+        def opinion(self, *args, **kwargs):
+            return self.registry.opinion(*args, **kwargs)
+
+    proxy = Proxy(external)
+    assert proxy.fingerprint() == external.fingerprint()
+    assert proxy.snapshot_reads == 1
+    gate = TrustGate(proxy, clock=lambda: 0, min_reliability=.6)
+    assert gate.admit(None, {'by': 'writer'}).admit
