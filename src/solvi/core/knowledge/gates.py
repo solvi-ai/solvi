@@ -135,7 +135,10 @@ class TrustGate:
         if source is None:
             return Verdict(False, "writer has no explicit registry source mapping", measured, self.name)
         try:
-            opinion = self.registry.opinion(source, now=self.clock(), role=self.role)
+            now = self.clock()
+            # Owner clock callbacks may refresh the registry before this opinion.
+            measured["registry_fingerprint"] = self.registry.fingerprint()
+            opinion = self.registry.opinion(source, now=now, role=self.role)
         except (ValueError, TypeError, OverflowError) as exc:
             measured["status"] = "invalid_clock"
             return Verdict(False, f"invalid trust clock: {exc}", measured, self.name)
