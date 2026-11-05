@@ -52,6 +52,7 @@ class AuditWatch:
         self.p0 = self.p1 = self.h = self.cusum = None
         self.n_ref = self.k_ref = None
         self.seen, self.audited, self.failed = 0, 0, 0
+        self.audit_requests, self.missing, self.audit_errors = 0, 0, 0
         self._flagged, self._why, self.alarms = False, [], []
 
     @property
@@ -97,10 +98,23 @@ class AuditWatch:
         return self
 
     def reset(self):
-        """The stream starts again: the CUSUM and the flag cleared; the reference kept."""
+        """Clear the CUSUM and flag; keep the reference and lifetime counters/alarms.
+
+        report() counts span resets and reference replacements, not only this detector epoch.
+        """
         if self.cusum is not None:
             self.cusum.reset()
         self._flagged, self._why = False, []
+
+    def report(self):
+        """Lifetime label availability, descriptive only (not a risk or missingness bound).
+
+        Coverage is observed labels / selected audit requests; None before any request.
+        Errors propagate from observe and are counted separately, never as missing labels.
+        """
+        return {"seen": self.seen, "audit_requests": self.audit_requests, "audited": self.audited,
+                "missing": self.missing, "audit_errors": self.audit_errors, "failed": self.failed,
+                "observed_coverage": self.audited / self.audit_requests if self.audit_requests else None}
 
     def draw(self, key, n):
         """The watch's own audit draw of decision n (a number in [0, 1) from a hash)."""
@@ -118,16 +132,23 @@ class AuditWatch:
             audited = bool(decision.audit) if hasattr(decision, "audit") else \
                 self.draw(key, self.seen) < self.share
         rep = {"drift": self._flagged, "why": list(self._why), "audited": bool(audited), "failed": None,
-               "S": None, "h": self.h}
+               "S": None, "h": self.h, "missing": False}
         if not audited:
             return rep
-        if passed is None:
-            if self.check is None:
-                raise ValueError("an audited decision needs passed= or a check")
-            passed = self.check(decision)
-        if passed is None or (isinstance(passed, float) and math.isnan(passed)):
-            return rep
-        fail = not bool(passed)
+        self.audit_requests += 1
+        try:
+            if passed is None:
+                if self.check is None:
+                    raise ValueError("an audited decision needs passed= or a check")
+                passed = self.check(decision)
+            if passed is None or (isinstance(passed, float) and math.isnan(passed)):
+                self.missing += 1
+                rep["missing"] = True
+                return rep
+            fail = not bool(passed)
+        except Exception:
+            self.audit_errors += 1
+            raise
         self.audited += 1
         self.failed += fail
         rep["failed"] = fail
