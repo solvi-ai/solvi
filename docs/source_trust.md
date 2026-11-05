@@ -111,3 +111,11 @@ Opinions scan only the requested source’s retained history, including expired
 assertions. A derived index adds one assertion-ID reference per assertion plus
 per-source containers; it does not prune history or bound work to the active
 window. Snapshots keep their existing schema and restore rebuilds the index.
+
+The unchanged registry caches one fingerprint and a serialized small configuration
+key. Public assertion/label writes invalidate it; valid changes to `window`,
+`prior` or `min_labels` are detected, including edits within a list prior. Reads
+do not invalidate it. Direct mutation of underscore-prefixed internal state is
+unsupported. The fingerprint identifies owner-managed state, not an integrity
+attestation against arbitrary in-process memory edits. Detached snapshots and
+restores retain the existing JSON schema.

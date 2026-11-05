@@ -73,6 +73,7 @@ class SourceTrust:
         self._assertions = {}
         self._by_source = {}  # Derived assertion-ID index; never serialized.
         self._labels = {}
+        self._fingerprint_cache = None
 
     def _time(self, now):
         now = _number(now, "now")
@@ -97,6 +98,7 @@ class SourceTrust:
             if ancestor is None or ancestor['statement'] != statement or ancestor['asserted_at'] > asserted_at:
                 raise ValueError("repeat requires an earlier parent of the same statement")
         row = dict(statement=statement, source=source, asserted_at=asserted_at, known_at=now, parent=parent)
+        self._fingerprint_cache = None
         self._assertions[assertion_id] = row
         self._by_source.setdefault(source, []).append(assertion_id)
         self._clock = now
@@ -109,6 +111,7 @@ class SourceTrust:
             raise ValueError("loss must be in [0, 1]")
         if assertion_id not in self._assertions or assertion_id in self._labels:
             raise ValueError("unknown or already labeled assertion")
+        self._fingerprint_cache = None
         self._labels[assertion_id] = dict(loss=loss, known_at=now)
         self._clock = now
 
@@ -184,5 +187,11 @@ class SourceTrust:
         return obj
 
     def fingerprint(self) -> str:
+        config = json.dumps((self.window, self.prior, self.min_labels, self._clock),
+                            separators=(',', ':'), allow_nan=False)
+        if self._fingerprint_cache is not None and self._fingerprint_cache[0] == config:
+            return self._fingerprint_cache[1]
         payload = json.dumps(self.snapshot(), sort_keys=True, separators=(',', ':'), allow_nan=False)
-        return hashlib.sha256(payload.encode()).hexdigest()
+        digest = hashlib.sha256(payload.encode()).hexdigest()
+        self._fingerprint_cache = (config, digest)
+        return digest
