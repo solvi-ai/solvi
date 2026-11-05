@@ -111,7 +111,13 @@ def test_buffer_cache_is_not_pickled_and_answers_stay_right():
     ls2 = pickle.loads(pickle.dumps(ls))
     assert ls2.version == ls.version and ls2._memo == {} and ls2._memo_at is None
     assert ls2.score(Candidate("do", ("x1",), "on"), b2) == before
-    assert ls2._base_key == ("base", id(ls2.base))
+    assert ls2._base_key[0] == "base" and ls2._base_key != ls._base_key
+    assert ("do", ls2._base_key, None) in b2._cache
+    assert ("do", ls._base_key, None) not in b2._cache
+    ls3 = pickle.loads(pickle.dumps(ls))
+    assert ls3._base_key not in (ls._base_key, ls2._base_key)
+    assert ls3.score(Candidate("do", ("x1",), "on"), b2) == before
+    assert ("do", ls3._base_key, None) in b2._cache
 
 
 def test_a_pickled_pair_keeps_its_answers_and_its_cache_keys_point_at_live_objects():
