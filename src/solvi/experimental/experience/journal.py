@@ -204,3 +204,6 @@ class ExperienceJournal:
         """Return True after full validation; raise ValueError on corruption."""
         self._validate()
         return True
+
+
+__all__ = ["ExperienceJournal"]

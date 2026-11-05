@@ -140,3 +140,6 @@ def select_probe(
         return ProbeChoice(None, "unavailable", reason="no affordable probe distinguishes modeled states")
     except BudgetStop:
         return ProbeChoice(None, "budget", reason="planning exhausted work budget; no observation bought")
+
+
+__all__ = ["Probe", "ProbeChoice", "select_probe"]

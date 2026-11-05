@@ -235,3 +235,6 @@ class FiniteEnvironment:
         if canonical(s["state"]) != canonical(env._state):
             raise ValueError("environment state conflicts with history")
         return env
+
+
+__all__ = ["FiniteEnvironment"]

@@ -137,3 +137,6 @@ class Environment(Protocol):
     def execute(self, task_id: str, kind: str, payload: dict, attempt_id: str) -> Receipt | None: ...
 
     def reconcile(self, attempt_id: str) -> Receipt | None: ...
+
+
+__all__ = ["Environment", "ProbeSpec", "Receipt", "TaskSpec"]

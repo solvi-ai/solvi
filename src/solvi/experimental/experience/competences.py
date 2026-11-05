@@ -684,3 +684,6 @@ class CompetenceRegistry:
             ):
                 raise ValueError("invalid invalidation reference")
             identifier(value[1])
+
+
+__all__ = ["AdmissionRecord", "Application", "Candidate", "CompetenceRegistry", "ExternalExample"]

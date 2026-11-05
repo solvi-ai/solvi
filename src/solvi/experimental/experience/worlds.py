@@ -194,3 +194,6 @@ class WorldSet:
         sets = [set(c["allowed"]) for c in model._constraints]
         model._active = tuple(k for k in model._base if all(k in a for a in sets))
         return model
+
+
+__all__ = ["Decision", "WorldSet"]

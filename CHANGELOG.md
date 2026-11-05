@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.6.0 — Unreleased
 
 - Add experimental finite joint-state reasoning, bounded observation planning, a typed scalar-program learner and
   separate external admission, dependent revocation, and a recoverable host-owned experience loop. A finite

@@ -478,3 +478,6 @@ class ExperienceRunner:
         self.learning, self.phase = None, previous_phase
         self.status = "inprogress" if previous_phase == "ready" else self.results[-1]["status"]
         self._checkpoint()
+
+
+__all__ = ["ExperienceRunner"]

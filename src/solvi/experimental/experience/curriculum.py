@@ -305,3 +305,6 @@ class AutoCurriculum:
             if self.step() != "inprogress":
                 break
         return portable(self.runner.results)
+
+
+__all__ = ["AutoCurriculum"]

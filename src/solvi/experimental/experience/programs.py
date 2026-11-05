@@ -323,3 +323,6 @@ def synthesize(examples, grammar: Grammar, budget: WorkBudget) -> SearchResult:
         return SearchResult(None, tried, "exhausted")
     except BudgetStop:
         return SearchResult(None, tried, "budget_exhausted")
+
+
+__all__ = ["Grammar", "Program", "SearchResult", "synthesize"]

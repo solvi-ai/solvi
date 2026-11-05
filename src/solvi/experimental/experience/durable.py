@@ -131,3 +131,6 @@ class SQLiteEnvironment:
     def snapshot(self):
         with self._transaction() as conn:
             return self._load(conn).snapshot()
+
+
+__all__ = ["SQLiteEnvironment"]
