@@ -77,7 +77,9 @@ def test_curriculum_sigkill_learning_edges_resume_once(tmp_path, stage):
             env=os.environ.copy(),
         )
         try:
-            deadline = time.monotonic() + 30
+            # This guards a fault boundary, not a runtime target. Durable fsyncs
+            # can exceed 30 seconds on a busy shared host; never skip the marker.
+            deadline = time.monotonic() + 120
             while not (tmp_path / "marker").exists() and child.poll() is None and time.monotonic() < deadline:
                 time.sleep(0.02)
             assert (tmp_path / "marker").exists(), log.read_text()
