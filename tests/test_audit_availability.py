@@ -68,3 +68,34 @@ def test_missing_configuration_remains_error():
     with pytest.raises(ValueError, match='needs passed'):
         w.observe(audited=True)
     assert w.report()['audit_errors'] == 1 and w.missing == 0
+
+
+@pytest.mark.parametrize('kind', ['float', 'float16', 'float32', 'float64'])
+def test_floating_nan_missing_without_detector_update(kind):
+    import numpy as np
+    value = float('nan') if kind == 'float' else getattr(np, kind)('nan')
+    w = watch(lambda _: value)
+    def forbidden(_):
+        raise AssertionError('missing label reached detector')
+    w.cusum.step = forbidden
+    assert w.observe(audited=True)['missing'] is True
+    assert w.audited == 0 and w.missing == 1
+    assert w.report()['observed_coverage'] == 0
+
+
+def test_reference_uses_same_floating_nan_predicate_without_calibration(monkeypatch):
+    import numpy as np
+    from solvi.core.guarantees.drift import Cusum
+    stub = CusumStub()
+    stub.h = 10
+    monkeypatch.setattr(Cusum, 'calibrate', lambda *args, **kwargs: stub)
+    w = AuditWatch().set_reference([True] * 20 + [float('nan'), np.float16('nan'), np.float32('nan'), np.float64('nan')])
+    assert w.n_ref == 20 and w.k_ref == 0
+
+
+def test_array_is_error_not_missing_or_observed():
+    import numpy as np
+    w = watch(lambda _: np.array([True, False]))
+    with pytest.raises(ValueError, match='truth value'):
+        w.observe(audited=True)
+    assert w.missing == w.audited == 0 and w.audit_errors == 1

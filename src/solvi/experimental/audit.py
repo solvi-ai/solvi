@@ -32,6 +32,11 @@ warn_on_import(__name__)
 __all__ = ["AuditWatch"]
 
 
+def _scalar_nan(value):
+    """Only declared floating scalar NaNs are missing; never coerce arrays to bool."""
+    return isinstance(value, (float, np.floating)) and bool(np.isnan(value))
+
+
 class AuditWatch:
     """See the module docstring. check: decision → True when the check passes (False / 0: it fails); share: the audited
     share of decisions (the dispatcher's audit= when decisions carry `.audit`); alpha, horizon: an unchanged check is
@@ -66,7 +71,7 @@ class AuditWatch:
 
     def set_reference(self, passed):
         """The check's outcomes (True / 1 = passed) on a random sample of decisions → self (h simulated here)."""
-        v = [bool(x) for x in passed if not (isinstance(x, float) and math.isnan(x))]
+        v = [bool(x) for x in passed if not _scalar_nan(x)]
         if len(v) < 20:
             raise ValueError(f"a reference of {len(v)} outcomes: at least 20 (a random sample of decisions)")
         n, k = len(v), sum(1 for x in v if not x)
@@ -141,7 +146,7 @@ class AuditWatch:
                 if self.check is None:
                     raise ValueError("an audited decision needs passed= or a check")
                 passed = self.check(decision)
-            if passed is None or (isinstance(passed, float) and math.isnan(passed)):
+            if passed is None or _scalar_nan(passed):
                 self.missing += 1
                 rep["missing"] = True
                 return rep
