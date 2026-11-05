@@ -581,3 +581,26 @@ only if callbacks and evidence remain stable throughout that call; it does not
 implicitly enable long-lived memoization. See [batch scoring](laws-batch-scoring.md).
 `Knowledge.usable(iid, valid_at=...)` accepts the store's explicit time keyword.
 Omission retains the configured world clock or the existing status-only read.
+
+
+## Explicit fallback refresh and indexed time filters
+
+After changing data captured by an unchanged fallback callable, call `lawset.set_base(fallback)`.
+It refreshes that set's fallback masks and discards its obsolete entries in live buffers.
+Automatic detection of closure changes is not provided. Revision-bound sets still require a new
+revision token, and repeating the current token remains a no-op under its existing contract.
+`Knowledge.edges`, `accepted_at`, `skills`, and `where` now accept keyword-only `valid_at`.
+They filter the current helper index; they do not reconstruct historical index entries.
+
+## Audit labels and availability
+
+`AuditWatch.report()` returns lifetime counters, which span `reset()` and reference changes.
+Coverage describes how many requested audits obtained labels; it is not a risk certificate.
+An outcome must be a Python/NumPy boolean or integer/floating scalar 0/1. Scalar floating NaN and
+`None` returned by a check mean an unavailable label. Arrays of any shape, strings, infinity
+and other numeric values raise `ValueError` rather than being coerced to success. This also
+applies to individual reference outcomes; a NumPy vector of valid scalar reference labels
+remains accepted. A rejected reference preserves the previously fitted detector.
+Omitting `passed` or passing `passed=None` still invokes the declared check; without a check,
+an audited observation raises the existing configuration error. Use a check returning `None`
+or pass a scalar NaN when the requested label is unavailable.

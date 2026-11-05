@@ -20,3 +20,5 @@ samples skip them). Arrays of every shape, strings, arbitrary objects, infinitie
 and other numbers raise `ValueError`; arbitrary truthiness is not evaluated.
 A reference may be a vector of scalar labels, but array-valued elements are invalid.
 Invalid reference labels leave the fitted reference and detector unchanged.
+
+A failed reference calibration preserves the previously fitted detector and its reference.

@@ -84,8 +84,7 @@ class AuditWatch:
         if len(v) < 20:
             raise ValueError(f"a reference of {len(v)} outcomes: at least 20 (a random sample of decisions)")
         n, k = len(v), sum(1 for x in v if not x)
-        self.n_ref, self.k_ref = n, k
-        self.p0, self.p1 = self._rates(k, n)
+        p0, p1 = self._rates(k, n)
         from ..core.guarantees.drift import Cusum
         share, odds_fn = self.share, self._rates
 
@@ -104,10 +103,12 @@ class AuditWatch:
             return nxt
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
-            self.cusum = Cusum.calibrate(["failures up"], make_null, alpha=self.alpha, horizon=self.horizon,
-                                         sims=self.sims, seed=self.seed)
-        self.h = self.cusum.h
-        self._up, self._dn = math.log(self.p1 / self.p0), math.log((1 - self.p1) / (1 - self.p0))
+            cusum = Cusum.calibrate(["failures up"], make_null, alpha=self.alpha, horizon=self.horizon,
+                                    sims=self.sims, seed=self.seed)
+        up, dn = math.log(p1 / p0), math.log((1 - p1) / (1 - p0))
+        self.n_ref, self.k_ref = n, k
+        self.p0, self.p1, self.cusum, self.h = p0, p1, cusum, cusum.h
+        self._up, self._dn = up, dn
         self.reset()
         return self
 

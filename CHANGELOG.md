@@ -10,6 +10,16 @@ This release contains breaking changes. See [migration notes](docs/migration-1.5
 
 ### Performance and API follow-up
 
+- Explicit `LawSet.set_base` refreshes fallback masks even for the same callable after its meaning changes.
+  Old owned masks are discarded without retaining evidence buffers or clearing another set's cache.
+- Indexed knowledge helpers `edges`, `accepted_at`, `skills` and `where` accept explicit `valid_at` time filters.
+- Process graph preparation builds adjacency/count tables per pass and uses iterative traversal, preserving declared
+  edge ordering and cycle errors while supporting chains beyond Python's recursion depth.
+- `AuditWatch.report()` distinguishes requested audits, observed labels, missing outcomes and callback errors.
+  Audit outcomes accept boolean or integer/floating scalar 0/1; scalar NaN is missing, and arrays/strings are rejected.
+- A journal backend recipe and operation-count tests document the existing indexed SQLite path. JSONL prefix
+  integrity checks remain active; the two backends have different owner trust contracts.
+
 - `LawSet.score_many` scores candidate batches in input order. Explicit `stable=True` reuses one active-law view
   per action within the call; the default retains sequential callback/iterator behavior and does not enable memo.
   See [batch scoring](docs/laws-batch-scoring.md).

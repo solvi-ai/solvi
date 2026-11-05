@@ -145,3 +145,19 @@ def test_invalid_reference_scalar_preserves_fitted_state(bad):
     with pytest.raises(ValueError, match='audit outcome'):
         w.set_reference([True] * 20 + [bad])
     assert w.__dict__ == before
+
+
+def test_calibration_failure_preserves_previous_fitted_detector(monkeypatch):
+    from solvi.core.guarantees.drift import Cusum
+
+    w = watch(lambda _: True)
+    w.observe(audited=True)
+    before = dict(w.__dict__)
+
+    def fail(*_args, **_kwargs):
+        raise RuntimeError("calibration unavailable")
+
+    monkeypatch.setattr(Cusum, "calibrate", fail)
+    with pytest.raises(RuntimeError, match="calibration unavailable"):
+        w.set_reference([True] * 20)
+    assert w.__dict__ == before

@@ -74,6 +74,9 @@ nav:
       - Numeric Gaussian probes: laws_gaussian_probes.md
       - Frozen law nulls and diagnostics: laws_frozen_null.md
       - Batch scoring of laws: laws-batch-scoring.md
+      - Audit label availability: audit-availability.md
+      - Preparing large process graphs: process-graph-preparation.md
+      - Process journal backends: process-journal-backends.md
       - Asynchronous regime memory: regime-memory.md
       - Guide: guide-part:Experimental
   - Evidence:
