@@ -104,3 +104,10 @@ fingerprint identifies the serialized state; it is not a signature or a guarante
 of honest data. History is retained, so applications with long-lived registries
 must plan storage growth. No automatic regime detection or selective-label
 correction is performed.
+
+## Lookup cost
+
+Opinions scan only the requested source’s retained history, including expired
+assertions. A derived index adds one assertion-ID reference per assertion plus
+per-source containers; it does not prune history or bound work to the active
+window. Snapshots keep their existing schema and restore rebuilds the index.

@@ -71,6 +71,7 @@ class SourceTrust:
         self.window, self.prior, self.min_labels = window, prior, min_labels
         self._clock = None
         self._assertions = {}
+        self._by_source = {}  # Derived assertion-ID index; never serialized.
         self._labels = {}
 
     def _time(self, now):
@@ -97,6 +98,7 @@ class SourceTrust:
                 raise ValueError("repeat requires an earlier parent of the same statement")
         row = dict(statement=statement, source=source, asserted_at=asserted_at, known_at=now, parent=parent)
         self._assertions[assertion_id] = row
+        self._by_source.setdefault(source, []).append(assertion_id)
         self._clock = now
 
     def label(self, assertion_id: str, *, loss: float, now: float):
@@ -115,8 +117,9 @@ class SourceTrust:
         source, now = _key(source), self._time(now)
         if role not in ('all', 'origin', 'repeater'):
             raise ValueError("role must be all, origin or repeater")
-        rows = [(k, v) for k, v in self._assertions.items() if v['source'] == source
-                and (role == 'all' or (v['parent'] is None) == (role == 'origin'))]
+        source_rows = ((k, self._assertions[k]) for k in self._by_source.get(source, ()))
+        rows = [(k, v) for k, v in source_rows
+                if role == 'all' or (v['parent'] is None) == (role == 'origin')]
         recent = [(k, v) for k, v in rows if now - self.window < v['asserted_at'] <= now]
         losses = [self._labels[k]['loss'] for k, _ in recent if k in self._labels]
         n, total = len(losses), math.fsum(losses)
