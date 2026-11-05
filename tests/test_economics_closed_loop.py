@@ -1,8 +1,9 @@
 """Offline known-answer accounting, not a historical utility-quality evaluation."""
 import pytest
+
 from solvi.core.plan.answer_policy import AnswerPolicy, CheckModel
-from solvi.experimental.regime_memory import RegimeMemory
 from solvi.experimental.changes import Economics
+from solvi.experimental.regime_memory import RegimeMemory
 
 
 def model():
@@ -33,7 +34,8 @@ def test_explicit_economics_and_delayed_regime_do_not_fabricate_outcomes():
     m=RegimeMemory(epoch='closed-loop-known-answer',model_id='known-table-v1',
         regimes={'A':'laws-a','B':'laws-b'},prior=[.5,.5],transition=[[.9,.1],[.1,.9]],
         probes={'p':{'yes':[.8,.2],'no':[.2,.8]}},max_delay=3)
-    ticket=m.issue('one','p');m.advance()
+    ticket=m.issue('one','p')
+    m.advance()
     assert m.observe(ticket,'yes')==pytest.approx((.74,.26))
     restored=RegimeMemory.restore(m.snapshot())
     assert restored.weights==m.weights

@@ -69,6 +69,7 @@ nav:
       - experimental.md
       - Failed-world policies: failure_policies.md
       - Change economics and proposer history: change-economics-history.md
+      - Offline action-cost accounting: economics-closed-loop.md
       - Past-episode prior backoff: episode-priors.md
       - External agent wrap and priced proposals: external-agent-wrap.md
       - Numeric Gaussian probes: laws_gaussian_probes.md

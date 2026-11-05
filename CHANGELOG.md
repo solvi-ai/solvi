@@ -10,6 +10,8 @@ This release contains breaking changes. See [migration notes](docs/migration-1.5
 
 ### Performance and API follow-up
 
+- Offline action-cost accounting examples distinguish purchased checks, wrong actions and abstentions, with
+  explicit acquisition prices and independent outcomes; predicted utility is not measured improvement.
 - Source reliability queries index assertions by source. Repeated native-registry fingerprints reuse the exact
   snapshot hash until a supported mutation or configuration change; custom snapshot implementations remain uncached.
 - Source trust numeric inputs reject values outside the representable finite range with consistent errors before
