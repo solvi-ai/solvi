@@ -1750,6 +1750,27 @@ class LawSet:
             self._memo[k] = out
         return out
 
+    def score_many(self, candidates: Iterable[Candidate], buffer: Buffer, exclude=None, *,
+                   stable: bool = False) -> list[tuple[int, int, int]]:
+        """Score candidates in input order, including duplicates, without admitting or counting tests.
+
+        By default this is exactly sequential ``score`` calls, including iterator/callback interleaving.
+        ``stable=True`` explicitly promises that callbacks, candidates, active laws and buffer stay stable
+        throughout this call: reuse one view per action locally, as ``test`` does. No view survives the call.
+        This promise includes mutable closure state and side effects that version counters cannot detect.
+        Existing opt-in ``memo=True`` score semantics remain unchanged; this method does not enable memo.
+        """
+        if not stable:
+            return [self.score(c, buffer, exclude) for c in candidates]
+        views = {}
+        out = []
+        for candidate in candidates:
+            action = _key(candidate.action)
+            if action not in views:
+                views[action] = self._view(buffer, candidate.action, exclude)
+            out.append(self.score(candidate, buffer, exclude, _view=views[action]))
+        return out
+
     NULL_FLOOR = 0.05
 
     def base_rate(self, buffer: Buffer, action, effect, exclude=None) -> float:
