@@ -298,27 +298,30 @@ class Knowledge:
         """
         return iid is not None and self.store.usable(iid, valid_at=valid_at)
 
-    def edges(self, map_id, at):
-        """The usable map facts from key `at`: {action key: key reached}."""
+    def edges(self, map_id, at, *, valid_at=None):
+        """The usable map facts from key `at`: {action key: key reached}.
+
+        `valid_at` is the explicit world time, as in `usable`; `at` remains a map key.
+        """
         out = {}
         for a, (iid, to) in self._edges.get(str(map_id), {}).get(at, {}).items():
-            if self.store.usable(iid):
+            if self.store.usable(iid, valid_at=valid_at):
                 out[a] = to
         return out
 
-    def accepted_at(self, map_id, at, akey):
+    def accepted_at(self, map_id, at, akey, *, valid_at=None):
         """What the map says about taking `akey` at `at`: True / False (a usable fact), or None."""
         hit = self._accepts.get(str(map_id), {}).get(at, {}).get(akey)
-        return hit[1] if hit is not None and self.store.usable(hit[0]) else None
+        return hit[1] if hit is not None and self.store.usable(hit[0], valid_at=valid_at) else None
 
-    def skills(self, goal):
+    def skills(self, goal, *, valid_at=None):
         """The actions after which `goal`'s done check turned true (usable skill items)."""
-        return [a for a, iid in sorted(self._skills.get(goal, {}).items()) if self.store.usable(iid)]
+        return [a for a, iid in sorted(self._skills.get(goal, {}).items()) if self.store.usable(iid, valid_at=valid_at)]
 
-    def where(self, map_id, akey):
+    def where(self, map_id, akey, *, valid_at=None):
         """The keys on a map where `akey` was accepted (usable facts)."""
         return sorted(at for at, acts in self._accepts.get(str(map_id), {}).items()
-                      if (h := acts.get(akey)) is not None and h[1] is True and self.store.usable(h[0]))
+                      if (h := acts.get(akey)) is not None and h[1] is True and self.store.usable(h[0], valid_at=valid_at))
 
     def snapshot(self, **query):
         """What a decision is given: KnowledgeStore.snapshot(**query) (default: the facts and rules) — the active items

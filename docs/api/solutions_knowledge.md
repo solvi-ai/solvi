@@ -65,3 +65,20 @@ status and staleness without choosing a date. An omitted assertion validity reta
 its existing meaning; this facade keyword does not turn omission into a timeless
 assertion. Corrections of recorded decisions still use the separately declared
 `redecide(..., valid_at_key=...)` input field.
+
+The indexed map/skill helpers accept the same keyword:
+
+```python
+edges = knowledge.edges("level-1", "room-0", valid_at=5)
+accepted = knowledge.accepted_at("level-1", "room-0", "go-east", valid_at=5)
+skills = knowledge.skills("reach-exit", valid_at=5)
+locations = knowledge.where("level-1", "go-east", valid_at=5)
+```
+
+Here `room-0` is the map key (`at`), while `valid_at=5` is the world time. The
+helpers filter their existing indexed facts/skills using the store's effective
+periods, including derived support. They keep existing sorting, map filtering
+and missing-value behavior. This filters the current index; it does not rebuild
+historical indexes or search older map entries. Use a time-specific `snapshot`
+when inspecting the full version history. Omitting `valid_at` or passing `None`
+keeps the configured `now` clock, or the existing status-only behavior without one.
