@@ -49,7 +49,9 @@ not proof that another assertion will be correct.
 
 ## Time and delayed feedback
 
-Supply finite numeric times in consistent units. Registration and labeling use
+Supply finite numeric times representable as Python floats in consistent units.
+Unrepresentable numeric inputs are refused with `ValueError` before registry
+mutation; the same numeric domain applies to the window, prior and bounded loss. Registration and labeling use
 monotone `now` values denoting when information became known. `asserted_at` may
 be earlier than registration, but cannot be in the future. Opinions may be read
 at or after the most recent known time, without advancing the registry clock.
