@@ -20,3 +20,7 @@ view and score memo, preserving laws, admission counts and budgets. Changes to
 arbitrary mutable callbacks are not detected automatically. Bound exceptions
 still require a new declared `version=` and retire according to their existing
 contract; reusing the current bound version is not a refresh.
+Old fallback masks owned by that law set are removed from its known live buffers
+on refresh. Tracking uses weak buffer references and does not clear other owners'
+masks or effect caches. This bounds accumulation from repeated explicit fallback
+refreshes, not all memory used by a growing evidence buffer.

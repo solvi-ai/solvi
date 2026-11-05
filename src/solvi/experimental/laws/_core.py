@@ -1349,6 +1349,11 @@ class LawSet:
         self.set_base(value)
 
     def _refresh_base_key(self):
+        # Exact owned keys only: neither retain buffers nor scan unrelated masks.
+        for buffer, keys in getattr(self, "_base_cache_buffers", {}).items():
+            for key in keys:
+                buffer._cache.pop(key, None)
+        self._base_cache_buffers = weakref.WeakKeyDictionary()
         # A retained identity token cannot alias another owner, an earlier refresh, or a reused callable id.
         self._base_key = ("base", object()) if self._cmp is None else ("base", object(), self._cmp)
         if self.base_version is not None:
@@ -1410,6 +1415,7 @@ class LawSet:
         state = self.__dict__.copy()
         state["_memo"], state["_memo_at"], state["_memo_buffer"] = {}, None, None
         state["_base_operations"] = 0
+        state.pop("_base_cache_buffers", None)
         return state
 
     def __setstate__(self, state):
@@ -1421,6 +1427,7 @@ class LawSet:
         state.setdefault("_base_versions_seen", set())
         state["_base_operations"] = 0
         self.__dict__.update(state)
+        self._base_cache_buffers = weakref.WeakKeyDictionary()
         self._memo, self._memo_at, self._memo_buffer = {}, None, None
         cmp = self._cmp
         if cmp is not None and cmp[0] == "same":
@@ -1719,6 +1726,7 @@ class LawSet:
                 cov[s] |= m
         if self.base is not None:
             base = self.base
+            self._base_cache_buffers.setdefault(buffer, set()).add((_key(action), self._base_key, None))
             ok |= rem & buffer.where(action, self._base_key, None, lambda t: self.agrees(base(t.state, t.action), t.observed))
         return allowed, cov, ok, take
 
