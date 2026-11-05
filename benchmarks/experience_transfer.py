@@ -558,6 +558,13 @@ def verify_freeze(path):
     return frozen
 
 
+def shard_seeds(seeds, index=0, count=1):
+    """Partition independent seeds without changing any trial configuration."""
+    if type(index) is not int or type(count) is not int or not 1 <= count <= len(seeds) or not 0 <= index < count:
+        raise ValueError("invalid seed shard")
+    return tuple(seeds[index::count])
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(__doc__)
     parser.add_argument("--smoke", action="store_true")
@@ -567,7 +574,15 @@ def main(argv=None):
     parser.add_argument("--max-seeds", type=int)
     parser.add_argument("--tasks", type=int)
     parser.add_argument("--protocol-freeze", type=Path)
+    parser.add_argument("--shard-index", type=int, default=0)
+    parser.add_argument("--shard-count", type=int, default=1)
     args = parser.parse_args(argv)
+    try:
+        selected_seeds = shard_seeds(SEEDS, args.shard_index, args.shard_count)
+    except ValueError as exc:
+        parser.error(str(exc))
+    if args.smoke and (args.shard_index != 0 or args.shard_count != 1):
+        parser.error("smoke cannot be sharded")
     if args.smoke and args.split == "final":
         parser.error("smoke uses dev only; final generation forbidden")
     if not args.smoke:
@@ -597,7 +612,7 @@ def main(argv=None):
             print("heartbeat: experience_transfer running", flush=True)
 
     threading.Thread(target=heartbeat, daemon=True).start()
-    seeds = SEEDS[: args.max_seeds or 1] if args.smoke else SEEDS
+    seeds = SEEDS[: args.max_seeds or 1] if args.smoke else selected_seeds
     limits, prices = ((65536,), (8,)) if args.smoke else (BUDGETS, PRICES)
     strata = ("dev",) if args.split == "dev" else ("id", "encoding", "ood")
     tasks = args.tasks or 4 if args.smoke else None

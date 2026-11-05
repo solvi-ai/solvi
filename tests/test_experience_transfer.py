@@ -223,3 +223,15 @@ def test_ood_proposer_sees_only_fresh_proposal_prefix_and_suffix_is_frozen(monke
         for tid, _ in batch
     )
     assert result["rows"][-1]["phase"] == "suffix" and result["rows"][-1]["applied"]
+
+
+def test_seed_shards_are_disjoint_complete_and_keep_order():
+    from benchmarks.experience_transfer import SEEDS, shard_seeds
+
+    shards = [shard_seeds(SEEDS, i, 3) for i in range(3)]
+    assert sorted(seed for shard in shards for seed in shard) == list(SEEDS)
+    assert all(len(shard) == 4 for shard in shards)
+    assert shard_seeds(SEEDS) == SEEDS
+    for index, count in [(-1, 3), (3, 3), (0, 0), (0, 13), (True, 3)]:
+        with pytest.raises(ValueError, match="invalid seed shard"):
+            shard_seeds(SEEDS, index, count)

@@ -34,6 +34,8 @@ def _validate(records):
     seen = set()
     records = list(records)
     for row in records:
+        if not isinstance(row, dict):
+            raise ValueError("trial must be an object")
         if any(type(row.get(name)) is not int for name in ("seed", "limit", "observation_price")):
             raise ValueError("grid coordinates must be strict integers")
         key = _key(row)
@@ -92,6 +94,8 @@ def _validate(records):
             raise ValueError("invalid hard violations")
         if "rows" in row:
             episodes = row["rows"]
+            if not isinstance(episodes, list) or any(not isinstance(r, dict) for r in episodes):
+                raise ValueError("episode rows must be a list of objects")
             task_ids = [r.get("task_id") for r in episodes]
             if any(not isinstance(task_id, str) or not task_id for task_id in task_ids) or len(set(task_ids)) != len(
                 task_ids
@@ -115,9 +119,50 @@ def _validate(records):
     return records
 
 
+def _compact_trial(row):
+    """Retain analysis statistics after full validation; raw evidence remains on disk."""
+    fields = (
+        *KEY_FIELDS,
+        "spec",
+        "denominator",
+        "success",
+        "applications",
+        "weighted_total",
+        "accounting_scale",
+        "exact_accounting_total",
+        "raw_vector",
+        "weighted_vector",
+        "hard_violations",
+        "false_applications",
+        "phases",
+        "training_cost",
+        "wall_seconds",
+        "peak_rss_kib",
+    )
+    compact = {name: row[name] for name in fields if name in row}
+    for name in ("learning", "adaptation_learning"):
+        if name in row:
+            learning = row[name]
+            compact[name] = {key: learning[key] for key in ("status", "reason", "record", "cost") if key in learning}
+            if "candidate" in learning:
+                candidate = learning["candidate"]
+                compact[name]["candidate"] = {
+                    key: candidate[key]
+                    for key in ("program", "scope", "mechanism", "schema", "grammar_fingerprint")
+                    if key in candidate
+                }
+    compact["source_result_sha256"] = _hash(row)
+    return compact
+
+
 def collect(rawpaths):
-    """Read append-only JSONL trial records; reject duplicate semantic keys."""
-    records, wire_keys = [], set()
+    """Validate one full JSONL trial at a time, then retain only compact statistics.
+
+    source_result_sha256 binds each compact row to its complete canonical result.
+    dev_raw_hash/final_raw_hash bind the sorted analysis records, not file bytes;
+    the CLI's *_raw_files_sha256 separately bind the original physical JSONL files.
+    """
+    records, wire_keys, semantic_keys = [], set(), set()
     for path in rawpaths:
         with Path(path).open() as stream:
             for line in stream:
@@ -128,10 +173,17 @@ def collect(rawpaths):
                     if item["key"] in wire_keys:
                         raise ValueError("duplicate raw trial key")
                     wire_keys.add(item["key"])
-                    records.append(item["result"])
+                    result = item["result"]
                 else:
-                    records.append(item)
-    return _validate(records)
+                    result = item
+                _validate([result])
+                key = _key(result)
+                if key in semantic_keys:
+                    raise ValueError(f"duplicate trial: {key}")
+                semantic_keys.add(key)
+                records.append(_compact_trial(result))
+                del result, item
+    return records
 
 
 def paired_interval(values):
@@ -194,6 +246,7 @@ def choose_comparators(dev_trials):
         primary_limit=65536,
         primary_price=8,
         dev_raw_hash=_hash(sorted(records, key=_key)),
+        dev_raw_hash_scope="canonical_sorted_analysis_records; physical files bound separately",
         source_code_hashes={source.name: hashlib.sha256(source.read_bytes()).hexdigest()},
         comparators=selections,
         selection_table=table,
@@ -323,6 +376,7 @@ def finalaggregate(final_trials, lock):
         tables=tables,
         comparator_lock=lock,
         final_raw_hash=_hash(sorted(records, key=_key)),
+        final_raw_hash_scope="canonical_sorted_analysis_records; physical files bound separately",
     )
 
 
@@ -330,7 +384,11 @@ aggregate = finalaggregate
 
 
 def _file_hash(path):
-    return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+    digest = hashlib.sha256()
+    with Path(path).open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def _file_hashes(paths):

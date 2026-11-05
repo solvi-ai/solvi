@@ -235,3 +235,53 @@ def test_episode_identity_flags_and_counts():
     row["rows"][0]["task_id"] = "1"
     with pytest.raises(ValueError, match="duplicate"):
         _validate([row])
+
+
+def test_collect_validates_before_compacting_and_preserves_raw(tmp_path):
+    from benchmarks._experience_aggregate import _hash, _validate
+
+    row = trial(1101, "resource", "SOLVER")
+    row["rows"] = [dict(task_id=str(i), success=True, applied=False, hard_violation=False) for i in range(128)]
+    row["registry"] = {"large_history": ["evidence"] * 100}
+    row["manifest"] = {"partitions": {"large": [1] * 100}}
+    row["learning"]["candidate"]["proposal_examples"] = [{"large": "provenance"}] * 16
+    path = tmp_path / "raw.jsonl"
+    payload = json.dumps({"kind": "trial", "key": "a", "result": row}) + "\n"
+    path.write_text(payload)
+    compact = collect([path])[0]
+    assert not {"rows", "registry", "manifest"} & compact.keys()
+    assert "proposal_examples" not in compact["learning"]["candidate"]
+    assert compact["learning"]["candidate"]["program"] == row["learning"]["candidate"]["program"]
+    assert compact["source_result_sha256"] == _hash(row)
+    assert _validate([compact]) == [compact]
+    assert path.read_text() == payload
+    row["rows"].pop()
+    path.write_text(json.dumps({"kind": "trial", "key": "a", "result": row}))
+    with pytest.raises(ValueError, match="counts"):
+        collect([path])
+
+
+def test_collect_semantic_duplicates_across_shards(tmp_path):
+    paths = []
+    for index in range(2):
+        path = tmp_path / f"shard{index}.jsonl"
+        path.write_text(json.dumps({"kind": "trial", "key": str(index), "result": trial(1101, "resource", "SOLVER")}))
+        paths.append(path)
+    with pytest.raises(ValueError, match="duplicate trial"):
+        collect(paths)
+
+
+def test_physical_hash_streams_without_read_bytes(tmp_path, monkeypatch):
+    import hashlib
+    from pathlib import Path
+    from benchmarks._experience_aggregate import _file_hash
+
+    payload = b"evidence" * 200000
+    path = tmp_path / "raw.jsonl"
+    path.write_bytes(payload)
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("whole-file read is forbidden")
+
+    monkeypatch.setattr(Path, "read_bytes", forbidden)
+    assert _file_hash(path) == hashlib.sha256(payload).hexdigest()
