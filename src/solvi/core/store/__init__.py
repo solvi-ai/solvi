@@ -192,8 +192,9 @@ def record_body(rec):
     mark = rec.get("redacted") if isinstance(rec.get("redacted"), dict) else {}
     body = {k: rec[k] for k in KEPT if k in rec}
     body["#answers"] = mark["answers"] if "answers" in mark else _digest(rec.get("answers"))
+    excluded = set(KEPT) | {"answers", "id", "hash", "redacted"}
     body["#content"] = mark["content"] if "content" in mark else _digest(
-        {k: v for k, v in rec.items() if k not in KEPT and k not in ("answers", "id", "hash", "redacted")})
+        {k: v for k, v in rec.items() if k not in excluded})
     return body
 
 

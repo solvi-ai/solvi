@@ -1,0 +1,49 @@
+...............................................................          [100%]
+=============================== warnings summary ===============================
+tests/test_experimental_process_run.py::test_node_decisions_are_the_ones_glued_by_hand
+tests/test_experimental_process_run.py::test_node_decisions_are_the_ones_glued_by_hand
+tests/test_experimental_process_run.py::test_chronology_of_a_run_is_the_recorded_path
+tests/test_experimental_process_run.py::test_the_process_record_is_an_index_of_hashes
+tests/test_experimental_process_run.py::test_a_reader_of_provenance_gets_the_labels_others_get_plain_values
+tests/test_experimental_process_run.py::test_a_human_node_and_a_handoff_need_a_channel
+  /home/exactor/Projects/Prototypes/new_kelly/lanes/next_runtime_20261105/src/solvi/core/system.py:2005: GuaranteeWarning: calibrating on 96 examples: the threshold rests on them and can move with a few more (100 or more recommended)
+    return guard_question(self, question, examples, **kw)
+
+tests/test_experimental_process_run.py::test_e2_ten_units_exchanging_facts_run_end_to_end_with_no_record_lost
+  /home/exactor/Projects/Prototypes/new_kelly/lanes/next_runtime_20261105/src/solvi/core/system.py:2005: GuaranteeWarning: calibrating on 85 examples: the threshold rests on them and can move with a few more (100 or more recommended)
+    return guard_question(self, question, examples, **kw)
+
+tests/test_experimental_process_run.py::test_e2_ten_units_exchanging_facts_run_end_to_end_with_no_record_lost
+  /home/exactor/Projects/Prototypes/new_kelly/lanes/next_runtime_20261105/src/solvi/core/system.py:2005: GuaranteeWarning: calibrating on 88 examples: the threshold rests on them and can move with a few more (100 or more recommended)
+    return guard_question(self, question, examples, **kw)
+
+tests/test_experimental_process_run.py::test_e2_ten_units_exchanging_facts_run_end_to_end_with_no_record_lost
+  /home/exactor/Projects/Prototypes/new_kelly/lanes/next_runtime_20261105/src/solvi/core/system.py:2005: GuaranteeWarning: calibrating on 76 examples: the threshold rests on them and can move with a few more (100 or more recommended)
+    return guard_question(self, question, examples, **kw)
+
+tests/test_experimental_process_run.py::test_e2_ten_units_exchanging_facts_run_end_to_end_with_no_record_lost
+  /home/exactor/Projects/Prototypes/new_kelly/lanes/next_runtime_20261105/src/solvi/core/system.py:2005: GuaranteeWarning: calibrating on 92 examples: the threshold rests on them and can move with a few more (100 or more recommended)
+    return guard_question(self, question, examples, **kw)
+
+tests/test_experimental_process_run.py::test_e2_ten_units_exchanging_facts_run_end_to_end_with_no_record_lost
+  /home/exactor/Projects/Prototypes/new_kelly/lanes/next_runtime_20261105/src/solvi/core/system.py:2005: GuaranteeWarning: calibrating on 84 examples: the threshold rests on them and can move with a few more (100 or more recommended)
+    return guard_question(self, question, examples, **kw)
+
+tests/test_experimental_process_run.py::test_e2_ten_units_exchanging_facts_run_end_to_end_with_no_record_lost
+  /home/exactor/Projects/Prototypes/new_kelly/lanes/next_runtime_20261105/src/solvi/core/system.py:2005: GuaranteeWarning: calibrating on 73 examples: the threshold rests on them and can move with a few more (100 or more recommended)
+    return guard_question(self, question, examples, **kw)
+
+tests/test_experimental_process_run.py::test_e2_ten_units_exchanging_facts_run_end_to_end_with_no_record_lost
+  /home/exactor/Projects/Prototypes/new_kelly/lanes/next_runtime_20261105/src/solvi/core/system.py:2005: GuaranteeWarning: calibrating on 95 examples: the threshold rests on them and can move with a few more (100 or more recommended)
+    return guard_question(self, question, examples, **kw)
+
+tests/test_experimental_process_run.py::test_e2_ten_units_exchanging_facts_run_end_to_end_with_no_record_lost
+  /home/exactor/Projects/Prototypes/new_kelly/lanes/next_runtime_20261105/src/solvi/core/system.py:2005: GuaranteeWarning: calibrating on 89 examples: the threshold rests on them and can move with a few more (100 or more recommended)
+    return guard_question(self, question, examples, **kw)
+
+tests/test_experimental_process_run.py::test_e2_ten_units_exchanging_facts_run_end_to_end_with_no_record_lost
+  /home/exactor/Projects/Prototypes/new_kelly/lanes/next_runtime_20261105/src/solvi/core/system.py:2005: GuaranteeWarning: calibrating on 72 examples: the threshold rests on them and can move with a few more (100 or more recommended)
+    return guard_question(self, question, examples, **kw)
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+63 passed, 15 warnings in 1.47s
