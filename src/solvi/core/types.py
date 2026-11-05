@@ -878,7 +878,7 @@ def _load_structured_type(data):
     if kind == 'union':
         return Union[args]
     if kind == 'dict':
-        return dict[args[0], args[1]]
+        return types.GenericAlias(dict, args)
     if kind == 'list':
         return list[args[0]]
     if kind == 'tuple':

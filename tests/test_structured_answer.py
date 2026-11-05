@@ -1,5 +1,5 @@
 import json
-from typing import Literal
+from typing import Dict, Literal, get_args, get_origin
 
 import pytest
 from pydantic import BaseModel
@@ -238,3 +238,19 @@ def test_explicit_field_evidence_confidence_bounds_its_field():
     }})).ask({'doc': '12'})['quote']
     assert result.status == 'ok' and result.confidence == .3
     assert result.extra['fields']['/price']['confidence'] == .3
+
+
+@pytest.mark.parametrize('annotation', [Dict, dict[str, int], Dict[str, list[Dict]], list[Dict]])
+def test_public_dictionary_alias_roundtrip_preserves_empty_and_nested_arguments(annotation):
+    original = Answer.structured(annotation).to_json()
+    restored = AnswerType.from_json(original)
+    assert restored.to_json() == original
+
+
+@pytest.mark.parametrize('arguments', [(), (str,), (str, int)])
+def test_dictionary_loader_keeps_legacy_alias_arities(arguments):
+    from solvi.core.types import _load_structured_type, _structured_type_data
+    restored = _load_structured_type({'kind': 'dict', 'args': [
+        _structured_type_data(argument) for argument in arguments]})
+    assert get_origin(restored) is dict
+    assert get_args(restored) == arguments
