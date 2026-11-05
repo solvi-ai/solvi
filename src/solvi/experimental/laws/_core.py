@@ -1349,7 +1349,8 @@ class LawSet:
         self.set_base(value)
 
     def _refresh_base_key(self):
-        self._base_key = ("base", id(self.base)) if self._cmp is None else ("base", id(self.base), self._cmp)
+        # A retained identity token cannot alias another owner, an earlier refresh, or a reused callable id.
+        self._base_key = ("base", object()) if self._cmp is None else ("base", object(), self._cmp)
         if self.base_version is not None:
             self._base_key += ("base_version", self.base_version)
 
@@ -1357,6 +1358,8 @@ class LawSet:
         """Replace the fallback; opt-in exceptions lapse on a new declared revision.
 
         Default sets contain absolute laws: changing their base preserves laws.
+        Every explicit unbound call refreshes cached fallback scores, including
+        the same callable after owner-declared closure/table changes.
         With lapse_on_base_change=True every active/suspended law belongs to
         base_version; a new, never-reused version retires it before the new base
         can serve. The old laws and evidence remain in retired. Re-admit a new
@@ -1402,8 +1405,8 @@ class LawSet:
         return self._laws_version
 
     def __getstate__(self):
-        """Pickled without the score memo or its weak buffer identity reference; `id()`-based cache keys are rebuilt
-        on unpickle from the objects the set holds then."""
+        """Pickled without the score memo or its weak buffer identity reference; fallback cache identity
+        is refreshed on unpickle, independently of other owners sharing a buffer."""
         state = self.__dict__.copy()
         state["_memo"], state["_memo_at"], state["_memo_buffer"] = {}, None, None
         state["_base_operations"] = 0

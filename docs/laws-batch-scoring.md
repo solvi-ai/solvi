@@ -13,3 +13,10 @@ one call; mutable callbacks need the default sequential path. Existing optional
 
 `stable` must be the boolean `True` or `False`; strings and numeric flags are
 rejected before consuming the candidate iterator.
+
+For an unbound law set, after changing a fallback callable's closure or table,
+call `lawset.set_base(the_same_callable)` explicitly. This refreshes its fallback
+view and score memo, preserving laws, admission counts and budgets. Changes to
+arbitrary mutable callbacks are not detected automatically. Bound exceptions
+still require a new declared `version=` and retire according to their existing
+contract; reusing the current bound version is not a refresh.
