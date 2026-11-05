@@ -67,6 +67,7 @@ nav:
       - Code strategist: strategist.md
   - Experimental:
       - experimental.md
+      - Executable experience: experience.md
       - Failed-world policies: failure_policies.md
       - Change economics and proposer history: change-economics-history.md
       - Offline action-cost accounting: economics-closed-loop.md
@@ -201,6 +202,7 @@ nav:
           - solvi.experimental.charts: api/charts.md
           - solvi.experimental.changes: api/changes.md
           - solvi.experimental.regime_memory: api/regime_memory.md
+          - solvi.experimental.experience: api/experience.md
           - solvi.experimental.laws: api/laws.md
           - solvi.experimental.skills: api/skills.md
           - solvi.experimental.relations: api/relations.md

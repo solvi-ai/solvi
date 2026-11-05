@@ -327,6 +327,12 @@ STATUS["regime_memory"] = {
     "missing": "independent evidence of predictive or utility gains; unknown-regime discovery, calibrated recognition and automatic LawSet activation are not provided",
     "script": None,
 }
+STATUS["experience"] = {
+    "since": "unreleased",
+    "what": "finite joint-state reasoning, paid observation planning and externally admitted scalar operations in a recoverable experience loop",
+    "missing": "independent evidence of gains over strong full-cost baselines; applicability outside the declared finite models and scalar grammar is not established",
+    "script": "benchmarks/experience_transfer.py",
+}
 
 for _s in STATUS.values():
     _s["deadline"] = DEADLINE

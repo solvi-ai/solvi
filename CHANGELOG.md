@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- Add experimental finite joint-state reasoning, bounded observation planning, a typed scalar-program learner and
+  separate external admission, dependent revocation, and a recoverable host-owned experience loop. The supported
+  models and grammar are explicit; admission on finite examples is not a universal correctness guarantee. See
+  [executable experience](docs/experience.md) for the protocol, costs, recovery boundaries and examples.
+
 ## 1.5.0 — 2026-11-05
 
 This release contains breaking changes. See [release notes](docs/release-1.5.md) and
