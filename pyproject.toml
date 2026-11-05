@@ -58,6 +58,8 @@ lora = ["torch", "transformers", "peft>=0.19"]   # part.adapt_lora: tests/test_l
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# Console pytest also needs the repository-only benchmark helpers.
+pythonpath = ["."]
 markers = [
     "model: needs a real model checkpoint and its runtime (skipped when they are missing)",
     "stand: the task stand's scorers on tiny fixtures (benchmarks/tasks; run with -m stand)",
