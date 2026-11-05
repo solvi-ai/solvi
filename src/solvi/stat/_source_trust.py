@@ -189,9 +189,18 @@ class SourceTrust:
     def fingerprint(self) -> str:
         config = json.dumps((self.window, self.prior, self.min_labels, self._clock),
                             separators=(',', ':'), allow_nan=False)
-        if self._fingerprint_cache is not None and self._fingerprint_cache[0] == config:
+        snapshot = self.snapshot
+        cacheable = (type(self) is SourceTrust and 'snapshot' not in self.__dict__
+                     and getattr(snapshot, '__func__', None) is _NATIVE_SNAPSHOT
+                     and getattr(snapshot, '__self__', None) is self)
+        if cacheable and self._fingerprint_cache is not None and self._fingerprint_cache[0] == config:
             return self._fingerprint_cache[1]
         payload = json.dumps(self.snapshot(), sort_keys=True, separators=(',', ':'), allow_nan=False)
         digest = hashlib.sha256(payload.encode()).hexdigest()
-        self._fingerprint_cache = (config, digest)
+        if cacheable:
+            self._fingerprint_cache = (config, digest)
         return digest
+
+
+# Capture implementation identity before any public class-level override.
+_NATIVE_SNAPSHOT = SourceTrust.snapshot

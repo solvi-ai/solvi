@@ -22,12 +22,13 @@ def test_twenty_native_admissions_serialize_history_once():
     trust = registry()
     gate = TrustGate(trust, clock=lambda: 2, min_reliability=.6)
     expected = old_hash(trust)
-    with patch.object(trust, 'snapshot', wraps=trust.snapshot) as snapshot:
+    with patch('solvi.stat._source_trust.json.dumps', wraps=json.dumps) as dumps:
         for _ in range(20):
             verdict = gate.admit(None, {'by': 'lab'})
             assert verdict.admit
             assert verdict.measured['registry_fingerprint'] == expected
-        assert snapshot.call_count == 1
+        assert sum(isinstance(c.args[0], dict) and 'assertions' in c.args[0]
+                   and c.kwargs.get('sort_keys') is True for c in dumps.call_args_list) == 1
 
 
 def test_mutations_config_restore_and_detached_snapshots_keep_old_hash():
@@ -56,7 +57,7 @@ def test_mutations_config_restore_and_detached_snapshots_keep_old_hash():
 def test_invalid_writes_and_reads_preserve_cached_hash():
     trust = registry()
     expected = trust.fingerprint()
-    with patch.object(trust, 'snapshot', wraps=trust.snapshot) as snapshot:
+    with patch('solvi.stat._source_trust.json.dumps', wraps=json.dumps) as dumps:
         with pytest.raises(ValueError):
             trust.assert_statement('a', statement='s', source='other', asserted_at=2, now=2)
         with pytest.raises(ValueError):
@@ -65,4 +66,37 @@ def test_invalid_writes_and_reads_preserve_cached_hash():
             trust.label('missing', loss=float('nan'), now=2)
         trust.opinion('lab', now=100)
         assert trust.fingerprint() == expected
-        assert snapshot.call_count == 0
+        assert not any(isinstance(c.args[0], dict) and 'assertions' in c.args[0]
+                       for c in dumps.call_args_list)
+
+
+@pytest.mark.parametrize('subclass', [True, False])
+def test_custom_public_snapshot_reflects_external_state_every_time(subclass):
+    external = registry()
+    if subclass:
+        class CustomTrust(SourceTrust):
+            def snapshot(self):
+                return external.snapshot()
+        trust = CustomTrust(window=10)
+    else:
+        trust = SourceTrust(window=10)
+        trust.snapshot = external.snapshot
+    gate = TrustGate(trust, clock=lambda: 2, min_reliability=.6)
+    previous = trust.fingerprint()
+    external.assert_statement('b', statement='s', source='lab', asserted_at=2, now=2)
+    external.label('b', loss=1, now=2)
+    expected = old_hash(external)
+    assert trust.fingerprint() == expected != previous
+    assert gate.admit(None, {'by': 'lab'}).measured['registry_fingerprint'] == expected
+
+
+def test_class_snapshot_override_does_not_reuse_native_cache():
+    trust, external = registry(), registry()
+    previous = trust.fingerprint()
+    external_snapshot = external.snapshot
+    with patch.object(SourceTrust, 'snapshot', lambda self: external_snapshot()):
+        external.assert_statement('b', statement='s', source='lab', asserted_at=2, now=2)
+        assert trust.fingerprint() == old_hash(external) != previous
+        external.label('b', loss=1, now=2)
+        assert trust.fingerprint() == old_hash(external)
+    assert trust.fingerprint() == previous

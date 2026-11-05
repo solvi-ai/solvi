@@ -119,3 +119,7 @@ do not invalidate it. Direct mutation of underscore-prefixed internal state is
 unsupported. The fingerprint identifies owner-managed state, not an integrity
 attestation against arbitrary in-process memory edits. Detached snapshots and
 restores retain the existing JSON schema.
+
+Fingerprint caching applies only to exact native `SourceTrust` instances using
+the native snapshot method. Subclasses and instance snapshot overrides recompute
+the full hash on every call, preserving externally supplied snapshot behavior.
