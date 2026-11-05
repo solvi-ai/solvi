@@ -63,3 +63,17 @@ def test_default_preserves_iterator_mutation_boundary():
         expected.append(laws.score(c, buffer))
     laws, buffer, candidates = fixture()
     assert laws.score_many(stream(), buffer) == expected
+
+
+@pytest.mark.parametrize("stable", [None, 0, 1, "false", "true", []])
+def test_stability_promise_must_be_explicit_boolean_before_consuming_input(stable):
+    laws, buffer, _ = fixture()
+    touched = []
+
+    def stream():
+        touched.append(True)
+        yield Candidate("a", (), 1)
+
+    with pytest.raises(ValueError, match="stable must be True or False"):
+        laws.score_many(stream(), buffer, stable=stable)
+    assert touched == []

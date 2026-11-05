@@ -8,6 +8,16 @@ This release contains breaking changes. See [migration notes](docs/migration-1.5
   rather than serving an obsolete fallback. Other writers' pending claims cannot suppress clean support; actual
   withdrawal reopens the older version. See [pending version continuity](docs/knowledge_pending_continuity.md).
 
+### Performance and API follow-up
+
+- `LawSet.score_many` scores candidate batches in input order. Explicit `stable=True` reuses one active-law view
+  per action within the call; the default retains sequential callback/iterator behavior and does not enable memo.
+  See [batch scoring](docs/laws-batch-scoring.md).
+- `Knowledge.usable(..., valid_at=...)` forwards an explicit world time to its store, including derived support.
+  Existing configured clocks and status-only defaults remain available.
+- Remote LLM clients reject invalid timeout, retry-count and backoff configuration before sending a request,
+  instead of truncating retry counts or deferring invalid-delay failures until an outage.
+
 ### Decision systems and checks
 
 - Parameter views bind privately copied input defaults to a shared System runtime. Bounded `ask_many` executes

@@ -10,3 +10,6 @@ once per action. This is an explicit owner promise: callbacks must not mutate
 closure state, laws, candidates or evidence during the call. Views are local to
 one call; mutable callbacks need the default sequential path. Existing optional
 `memo=True` semantics are unchanged. No speed or quality gain is guaranteed.
+
+`stable` must be the boolean `True` or `False`; strings and numeric flags are
+rejected before consuming the candidate iterator.

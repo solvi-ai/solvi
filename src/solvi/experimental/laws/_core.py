@@ -1760,6 +1760,8 @@ class LawSet:
         This promise includes mutable closure state and side effects that version counters cannot detect.
         Existing opt-in ``memo=True`` score semantics remain unchanged; this method does not enable memo.
         """
+        if not isinstance(stable, bool):
+            raise ValueError("stable must be True or False")
         if not stable:
             return [self.score(c, buffer, exclude) for c in candidates]
         views = {}

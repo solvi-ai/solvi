@@ -562,3 +562,22 @@ conditional independence and issue-time measurements. Bounds cover lifetime, del
 expired tickets remain burned. Snapshot restore validates and recomputes the model. No probe callback runs and
 no native LawSet is automatically installed/reactivated. This point model is not a change alarm, unknown-regime
 discovery, calibrated recognition guarantee or demonstrated loss improvement.
+
+
+## Explicit transport configuration
+
+Remote LLM clients now validate `timeout`, `retries`, and `backoff` when constructed.
+`timeout` must be finite and positive; `backoff` finite and nonnegative. Both accept
+numeric strings, but reject boolean values. `retries` must be a nonnegative integer
+(including NumPy integer scalars), excluding booleans. Negative retries are no longer
+silently clamped, and fractional or floating-point retry counts are no longer truncated.
+For example, change `retries=2.0` to `retries=2`; defaults remain unchanged. Invalid
+configuration raises a field-specific `ValueError` before any transport request.
+
+## Batch scoring and explicit knowledge dates
+
+`LawSet.score_many` preserves sequential scoring by default. Enable `stable=True`
+only if callbacks and evidence remain stable throughout that call; it does not
+implicitly enable long-lived memoization. See [batch scoring](laws-batch-scoring.md).
+`Knowledge.usable(iid, valid_at=...)` accepts the store's explicit time keyword.
+Omission retains the configured world clock or the existing status-only read.

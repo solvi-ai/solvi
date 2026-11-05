@@ -73,6 +73,7 @@ nav:
       - External agent wrap and priced proposals: external-agent-wrap.md
       - Numeric Gaussian probes: laws_gaussian_probes.md
       - Frozen law nulls and diagnostics: laws_frozen_null.md
+      - Batch scoring of laws: laws-batch-scoring.md
       - Asynchronous regime memory: regime-memory.md
       - Guide: guide-part:Experimental
   - Evidence:
