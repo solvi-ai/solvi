@@ -2830,24 +2830,29 @@ def _check_acyclic(nodes, edges):
     for e in edges:
         if not e.get("loop"):
             succ[e["from"]].append(e["to"])
-    state, stack = {}, []
-
-    def visit(n):
-        state[n] = 1
-        stack.append(n)
-        for m in succ[n]:
+    state = {}
+    for root in nodes:
+        if root in state:
+            continue
+        state[root] = 1
+        path, frames = [root], [(root, iter(succ[root]))]
+        while frames:
+            n, children = frames[-1]
+            try:
+                m = next(children)
+            except StopIteration:
+                state[n] = 2
+                frames.pop()
+                path.pop()
+                continue
             if state.get(m) == 1:
-                cyc = stack[stack.index(m):] + [m]
+                cyc = path[path.index(m):] + [m]
                 raise ProcessSpecError(f"cycle without max_iter: {' -> '.join(cyc)} (mark the edge that goes back "
                                        "loop=True, max_iter=N)")
             if m not in state:
-                visit(m)
-        stack.pop()
-        state[n] = 2
-
-    for n in nodes:
-        if n not in state:
-            visit(n)
+                state[m] = 1
+                path.append(m)
+                frames.append((m, iter(succ[m])))
 
 
 def _start_of(nodes, edges, start):
@@ -2861,19 +2866,28 @@ def _start_of(nodes, edges, start):
 
 
 def _topological(nodes, edges, keep):
+    keep = set(keep)
     order, seen = [], set()
-    succ = {n: [e["to"] for e in edges if e["from"] == n and not e.get("loop")] for n in nodes}
-
-    def visit(n):
-        seen.add(n)
-        for m in succ[n]:
+    succ = {n: [] for n in nodes}
+    for edge in edges:
+        if not edge.get("loop"):
+            succ[edge["from"]].append(edge["to"])
+    for root in nodes:
+        if root in seen:
+            continue
+        seen.add(root)
+        frames = [(root, iter(succ[root]))]
+        while frames:
+            n, children = frames[-1]
+            try:
+                m = next(children)
+            except StopIteration:
+                order.append(n)
+                frames.pop()
+                continue
             if m not in seen:
-                visit(m)
-        order.append(n)
-
-    for n in nodes:
-        if n not in seen:
-            visit(n)
+                seen.add(m)
+                frames.append((m, iter(succ[m])))
     return [n for n in reversed(order) if n in keep]
 
 
@@ -2882,8 +2896,13 @@ def _check_merges(nodes, edges, merges):
     one path, so run() would raise NotImplementedError — a spec that could be written but never run. spec() refuses
     it where it is written, naming the node (S272); a spec of an earlier release that records one still loads
     (from_spec checks the format, not the runnability) and refuses at run time, as before."""
+    incoming = {n: 0 for n, how in merges.items() if how == "all"}
+    if incoming:
+        for edge in edges:
+            if edge["to"] in incoming and not edge.get("loop"):
+                incoming[edge["to"]] += 1
     for n, how in merges.items():
-        if how == "all" and sum(1 for e in edges if e["to"] == n and not e.get("loop")) > 1:
+        if how == "all" and incoming[n] > 1:
             raise ProcessSpecError(f"node {n!r} merges 'all' of several inputs: waiting for several branches is not "
                                    "implemented at this stage (the walk follows one path, so run() would raise "
                                    'NotImplementedError) — merge="any" takes the first input that arrives, or wait '
@@ -2899,13 +2918,16 @@ def _check_graph(nodes, edges, merges, start):
         raise ProcessSpecError(f"start: no node {s!r}")
     if not any(v.get("end") for v in nodes.values()):
         raise ProcessSpecError("no end node (node(..., end=True))")
+    succ = {n: [] for n in nodes}
+    for edge in edges:
+        succ[edge["from"]].append(edge["to"])
     seen, todo = {s}, [s]
     while todo:
         n = todo.pop()
-        for e in edges:
-            if e["from"] == n and e["to"] not in seen:
-                seen.add(e["to"])
-                todo.append(e["to"])
+        for m in succ[n]:
+            if m not in seen:
+                seen.add(m)
+                todo.append(m)
     lost = [n for n in nodes if n not in seen]
     if lost:
         raise ProcessSpecError(f"nodes not reachable from the start {s!r}: {lost}")
