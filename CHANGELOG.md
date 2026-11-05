@@ -2,7 +2,11 @@
 
 ## 1.5.0 — prepared 2026-11-05 (not published)
 
-This release contains breaking changes. See [migration notes](docs/migration-1.5-candidate.md).
+This release contains breaking changes. See [release notes](docs/release-1.5.md) and
+[migration notes](docs/migration-1.5-candidate.md).
+
+- Static checks now recognize structured dictionary key/value types and constructor-validated fresh-world
+  identity callbacks explicitly; valid runtime behavior is unchanged.
 
 - A writer's standing later pending value now leaves a temporal gap in that same writer's older different value,
   rather than serving an obsolete fallback. Other writers' pending claims cannot suppress clean support; actual

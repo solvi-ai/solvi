@@ -7,7 +7,7 @@ character offsets in the source) and a hash-chained trace that can be re-execute
 pinpoint the step that was altered. When something cannot be computed or checked, solvi abstains or hands the case to
 a person instead of guessing; a failed hard check always overrides any model's confidence.
 
-solvi 1.0 has two levels. **Ready systems** you configure: `solvi.document` (a decision over a document, the recipe),
+solvi has two levels. **Ready systems** you configure: `solvi.document` (a decision over a document, the recipe),
 `solvi.build` (decisions from labelled examples, with a promise on the errors), `solvi.Agent` (acting in an
 environment), `solvi.Guard` (an agent's tool calls) and `solvi.Knowledge` (what they know, and from whom).
 **Building blocks** in `solvi.core`, which the ready systems are made of, each replaceable by a part of your own.

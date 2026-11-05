@@ -228,6 +228,7 @@ nav:
   - Explicit mutation sites: mutation-sites.md
   - Learned rule conditions: rule_list_conditions.md
   - Fixed-cohort staged traffic: staged-traffic.md
+  - Release 1.5: release-1.5.md
   - Changelog: changelog.md
   - Roadmap: roadmap.md
   - Development plan: development-1.4.1.md
