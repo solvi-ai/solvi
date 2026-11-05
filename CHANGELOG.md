@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.5.0 — prepared 2026-11-05 (not published)
+## 1.5.0 — 2026-11-05
 
 This release contains breaking changes. See [release notes](docs/release-1.5.md) and
 [migration notes](docs/migration-1.5-candidate.md).

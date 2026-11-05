@@ -1,6 +1,6 @@
 # Solvi 1.5.0
 
-Prepared for review; not published.
+Released on 2026-11-05. This version contains breaking changes.
 
 This release expands explicit decision, knowledge and checking APIs while preserving abstention when required evidence is missing. It includes priced answer checks, owner-declared evidence identities, clearer diagnostics, bounded asynchronous regime memory and tools for inspecting recorded decisions.
 
