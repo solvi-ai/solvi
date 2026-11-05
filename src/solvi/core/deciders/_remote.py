@@ -15,6 +15,8 @@ from __future__ import annotations
 
 import http.client
 import json
+import math
+import operator
 import threading
 import time
 import urllib.error
@@ -118,8 +120,29 @@ class RemoteClient:
         self.endpoint = endpoint(self.url)            # what the trace, repr and fingerprint show: no credentials
         self.model = model
         self._key = api_key
-        self.timeout = float(timeout)
-        self.retries, self.backoff = max(0, int(retries)), float(backoff)
+        from numpy import bool_  # required dependency; keep the module import itself lightweight
+
+        boolean_types = (bool, bool_)
+        for name, value in (("timeout", timeout), ("backoff", backoff)):
+            domain = "positive" if name == "timeout" else "nonnegative"
+            if isinstance(value, boolean_types):
+                raise ValueError(f"{name} must be finite and {domain}")
+            try:
+                number = float(value)
+            except (TypeError, ValueError, OverflowError):
+                raise ValueError(f"{name} must be finite and {domain}") from None
+            if not math.isfinite(number) or number < 0 or (name == "timeout" and number == 0):
+                raise ValueError(f"{name} must be finite and {domain}")
+            setattr(self, name, number)
+        if isinstance(retries, boolean_types):
+            raise ValueError("retries must be a nonnegative integer")
+        try:
+            count = operator.index(retries)
+        except TypeError:
+            raise ValueError("retries must be a nonnegative integer") from None
+        if count < 0:
+            raise ValueError("retries must be a nonnegative integer")
+        self.retries = count
         self._headers = dict(headers or {})
         self.opener = opener or urllib.request.urlopen
         self.sleep = sleep or time.sleep
