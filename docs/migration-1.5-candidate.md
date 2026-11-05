@@ -487,7 +487,7 @@ history audits-and-continues by default; optional hold needs external evidence o
 reservation is atomic on native backends, caller-owned batches refuse, identical legacy duplicates count once and
 conflicting labels fail closed. A good history never authorizes a bad fresh candidate.
 
-`StagedTraffic(pipe, promoted_version, rollout_id=..., phases=...)` is a separate single-coordinator opt-in router.
+`StagedTraffic(pipe, promoted_version, rollout_id=..., phases=...)` is a separate single-owner opt-in router.
 Each phase predeclares `share`, the complete finite `units` cohort and `max_excess_loss`. `route(unit)` records a
 stable assignment before the owner executes the chosen version. `observe(unit, bounded_loss, by=...)` uses
 `Pipeline.observe`; checkpoints require every cohort label and validate prior assignment/change/version/sequence.

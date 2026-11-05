@@ -14,7 +14,7 @@ class StagedTraffic:
 
     Predeclare phases: {share, units:[stable IDs], max_excess_loss}. Each unit
     must receive a [0,1] independent actual outcome. Missing labels HOLD.
-    A single coordinator owns calls; restart reads the durable change journal.
+    A single owner owns calls; restart reads the durable change journal.
     """
 
     def __init__(self, pipeline, version, *, rollout_id, phases):
