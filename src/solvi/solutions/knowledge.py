@@ -290,8 +290,13 @@ class Knowledge:
             self.actions.commit()
 
     # ------------------------------------------------------------------------------------------------ reading
-    def usable(self, iid):
-        return iid is not None and self.store.usable(iid)
+    def usable(self, iid, *, valid_at=None):
+        """Whether this item may be used, optionally at an explicit world time.
+
+        `valid_at` follows KnowledgeStore.usable: use the same units as `valid=`.
+        None preserves the configured `now` clock, or status-only reads without one.
+        """
+        return iid is not None and self.store.usable(iid, valid_at=valid_at)
 
     def edges(self, map_id, at):
         """The usable map facts from key `at`: {action key: key reached}."""

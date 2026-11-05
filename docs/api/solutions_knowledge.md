@@ -36,3 +36,32 @@ policy/configuration export. Use the low-level store prefix API for historical b
 branches only its current runtime state.
 
 ::: solvi.solutions.knowledge
+
+## Reading an item at an explicit time
+
+`Knowledge.usable` accepts the same explicit `valid_at` keyword as its store and
+as `Knowledge.snapshot`. Use a time expressed in the same units as `valid=`:
+
+```python
+from solvi import Knowledge
+
+knowledge = Knowledge()
+old = knowledge.tell(("pump", "rate", 1), source="outcome", by="meter", valid=(0, None))
+new = knowledge.tell(("pump", "rate", 2), source="outcome", by="meter", valid=(10, None))
+assert knowledge.usable(old, valid_at=5)
+assert not knowledge.usable(old, valid_at=15)
+assert knowledge.usable(new, valid_at=15)
+```
+
+Numeric times above are owner-defined world-time units. They are independent of
+`store.tick`, the logical clock used for expiry and withdrawal windows. For dates,
+use consistent ISO date strings or `datetime.date` values; incompatible numeric/date
+comparisons raise the store's explicit `ValueError`, rather than guessing a unit or
+converting to today's date.
+
+Omitting `valid_at` (or passing `None`) keeps existing behavior: the explicit
+`Knowledge(now=...)` world clock applies if configured, otherwise `usable` reads
+status and staleness without choosing a date. An omitted assertion validity retains
+its existing meaning; this facade keyword does not turn omission into a timeless
+assertion. Corrections of recorded decisions still use the separately declared
+`redecide(..., valid_at_key=...)` input field.
