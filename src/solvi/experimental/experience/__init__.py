@@ -13,12 +13,14 @@ from .environments import FiniteEnvironment  # noqa: E402
 from .interfaces import Environment, ProbeSpec, Receipt, TaskSpec  # noqa: E402
 from .journal import ExperienceJournal  # noqa: E402
 from .loop import ExperienceRunner  # noqa: E402
+from .curriculum import AutoCurriculum  # noqa: E402
 from .programs import Grammar, Program, SearchResult, synthesize  # noqa: E402
 from .worlds import Decision, WorldSet  # noqa: E402
 
 __all__ = [
     "AdmissionRecord",
     "Application",
+    "AutoCurriculum",
     "BudgetStop",
     "Candidate",
     "CompetenceRegistry",

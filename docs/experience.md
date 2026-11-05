@@ -50,6 +50,39 @@ revokes it and dependent operations. Changing the owner-declared mechanism/schem
 switching back to an old version token does not revive a revoked operation. The optional `KnowledgeStore` bridge
 preserves outcome provenance and dependent retraction. Sources and IDs are host assertions, not authentication.
 
+## Automatic learning within a finite task stream
+
+`AutoCurriculum(runner, task_ids, proposal_quota=4, admission_quota=4, max_attempts=4)` drives the task stream and
+starts learning itself. Assignments are journaled **before** a task runs. It collects action receipts into separate
+proposal/admission packets for the declared scope, mechanism and schema; once both quotas are met it calls
+`runner.learn`, then continues to unseen tasks. Results from evaluation or already applied operations are never
+relabeled as admission data. An external counterexample or a lost/retracted competence opens a fresh packet from
+future tasks. Version changes conservatively discard incompatible packets; frequent switches can prevent a packet
+from filling. Attempts are bounded, and controller selection, collection and recovery work use the same ledger.
+
+```python
+from solvi.experimental.experience import AutoCurriculum
+
+controller = AutoCurriculum(runner, task_ids, max_attempts=2)
+results = controller.run()
+snapshot = controller.snapshot()
+# After reopening the environment and journal, with a registry of the same grammar:
+restored = AutoCurriculum.restore(snapshot, environment=env, journal=journal, registry=runner.registry)
+restored.run()
+```
+
+Use a fresh idle runner to create a curriculum; use `restore` to resume an existing one. `run(max_steps=...)` can
+yield before completion. Budget exhaustion and ambiguous effects stop explicitly. Roles and pending learning share
+the existing journal without replacing runner checkpoints. A completed learning transaction is not rerun after a
+controller crash; an interrupted packet is discarded with its spent work and consumed identities preserved, and
+only future tasks can supply a new attempt. Remaining finite tasks may be insufficient to learn again.
+
+The host still supplies the finite task stream, observation model, grammar and trustworthy outcomes. This controller
+does not invent open-ended goals or deploy itself as a production daemon. See
+[`29_autonomous_curriculum.py`](https://github.com/solvi-ai/solvi/blob/dev/examples/29_autonomous_curriculum.py)
+for automatic collection, acquisition of a composite arithmetic operation, unseen application and completed replay.
+The example covers a declared branch of a resource mechanism; it is not a benchmark result.
+
 ## External loop and recovery
 
 `TaskSpec` contains public inputs, finite alternatives and named `ProbeSpec` observations. `Environment.task` exposes

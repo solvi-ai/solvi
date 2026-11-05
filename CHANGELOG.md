@@ -3,7 +3,9 @@
 ## Unreleased
 
 - Add experimental finite joint-state reasoning, bounded observation planning, a typed scalar-program learner and
-  separate external admission, dependent revocation, and a recoverable host-owned experience loop. The supported
+  separate external admission, dependent revocation, and a recoverable host-owned experience loop. A finite
+  `AutoCurriculum` controller collects disjoint external learning packets, starts admission itself and continues
+  with acquired operations; its learning boundaries are tested with process kills. The supported
   models and grammar are explicit; admission on finite examples is not a universal correctness guarantee. See
   [executable experience](docs/experience.md) for the protocol, costs, recovery boundaries and examples.
 
