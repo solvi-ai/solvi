@@ -34,7 +34,7 @@ import threading
 import math
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Protocol, runtime_checkable
+from typing import Any, Callable, Protocol, cast, runtime_checkable
 
 # ───────────────────────────────────────────────────────────── what counts as a refusal (stage 10 reads it)
 from ._refusal import REFUSAL_WORDS, is_refusal
@@ -731,14 +731,17 @@ class FreshEnvironments:
 
     def _reserve_worlds(self, change, ctx, select, confirm):
         from ...core.provenance import code_fingerprint
+        # The constructor validates these callbacks when world_registry is enabled.
+        candidate_id = cast(Callable, self.candidate_id)
+        world_id = cast(Callable, self.world_id)
         storage = self._registry_storage(ctx)
         allocation, interval_level = _world_allocation(self.alpha, len(self.candidate_ids))
         identity_code = {"world_id": code_fingerprint(self.world_id),
                          "candidate_id": code_fingerprint(self.candidate_id)}
-        cid = self.candidate_id(change, ctx)
+        cid = candidate_id(change, ctx)
         if cid not in self.candidate_ids:
             return None, "candidate is outside the registered finite family"
-        worlds = [self.world_id(seed) for seed in [*select, *confirm]]
+        worlds = [world_id(seed) for seed in [*select, *confirm]]
         if any(not isinstance(w, str) or not w for w in worlds) or len(set(worlds)) != len(worlds):
             return None, "world IDs must be nonempty distinct strings across both sets"
         family = list(self.candidate_ids)
