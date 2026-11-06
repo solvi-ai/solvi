@@ -118,6 +118,9 @@ with retained history; no general memory or runtime bound for the complete journ
 ## Evaluation scope
 
 The accompanying benchmark compares finite resource and workflow mechanisms, separate proposal/admission/test data,
-mechanism change and encoding controls, full work budgets, explicit hand-written formulas/caches and no-learning
-ablations. Its authored finite generators are not an external benchmark. Cost improvements, scientific verdicts and
-failures must be reported from the frozen experiment; successful replay alone establishes none of them.
+mechanism changes, full work budgets, explicit hand-written formulas/caches, observation-only controls and a no-call
+ablation that still pays for learning. Its encoding control renames probe identifiers only; it does not establish
+invariance to action identifiers or serialization order. The component benchmark does not measure the scheduling
+policy of `AutoCurriculum`. Its authored finite generators are not an external benchmark. Cost improvements,
+scientific verdicts and failures must be reported from the frozen experiment; successful replay alone establishes
+none of them.
