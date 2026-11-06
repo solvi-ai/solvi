@@ -1,6 +1,8 @@
 """Authored finite refinement experiment; host references never enter learner rows.
 
 Run --prepare before evaluation, --split dev, freeze approval, then --split final.
+Supply --protocol with the frozen host protocol and, for final, --final-claim
+with one stable host path shared across all output directories for this study.
 An interrupted claimed trial blocks rather than silently spending a new budget.
 """
 from __future__ import annotations
@@ -36,7 +38,7 @@ def write(path, body):
     os.replace(temporary, path)
 
 
-def source_manifest():
+def source_manifest(protocol_path=None):
     root = Path(__file__).resolve().parents[1]
     files = [*sorted((root / "src/solvi/experimental/experience").glob("*.py")),
              Path(__file__).resolve(), Path(__file__).with_name("refinement_tasks.py"), Path(__file__).with_name("refinement_score.py")]
@@ -47,9 +49,8 @@ def source_manifest():
             raise ValueError("foreign actor import origin: " + name)
     files.extend([root / "pyproject.toml", root / "uv.lock"])
     result = {str(p.relative_to(root)): hashlib.sha256(p.read_bytes()).hexdigest() for p in files}
-    project = root.parent.parent if root.parent.name == "lanes" else root.parent
-    protocol = project / "research_growth/solvi_refinement_20261106/PREREGISTRATION.md"
-    result["host/PREREGISTRATION.md"] = hashlib.sha256(protocol.read_bytes()).hexdigest()
+    if protocol_path is not None:
+        result["host/protocol"] = hashlib.sha256(Path(protocol_path).read_bytes()).hexdigest()
     return result
 
 
@@ -183,11 +184,13 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--split", choices=SEEDS, default="smoke")
+    parser.add_argument("--protocol", type=Path, required=True, help="host-owned frozen experiment protocol")
+    parser.add_argument("--final-claim", type=Path, help="one stable host-owned claim path shared across outputs")
     parser.add_argument("--prepare", action="store_true")
     parser.add_argument("--summarize", action="store_true")
     args = parser.parse_args()
     args.output.mkdir(parents=True, exist_ok=True)
-    manifest = dict(v=1, sources=source_manifest(), seeds=SEEDS, arms=ARMS, limit=LIMIT,
+    manifest = dict(v=1, sources=source_manifest(args.protocol), seeds=SEEDS, arms=ARMS, limit=LIMIT,
                     tasks=[dict(task=p.task_id, family=p.family, grammar=p.grammar.to_dict(),
                                 description=p.description, points=p.points,
                                 formula=p.formula.to_dict()) for p in tasks()],
@@ -215,9 +218,13 @@ def main():
                 or approval.get("comparator") != selected
                 or approval.get("dev_raw_sha256") != dev["raw_sha256"]):
             raise ValueError("missing exact final approval")
-        library = Path(__file__).resolve().parents[1]
-        root = library.parent.parent if library.parent.name == "lanes" else library.parent
-        global_claim = root / "research_growth/solvi_refinement_20261106/FINAL_EXECUTION_CLAIM.json"
+        if args.final_claim is None:
+            raise ValueError("final requires a stable host-owned --final-claim path")
+        global_claim = args.final_claim.resolve()
+        if (approval.get("final_claim") != str(global_claim)
+                or approval.get("output") != str(args.output.resolve())):
+            raise ValueError("approved final binding changed")
+        global_claim.parent.mkdir(parents=True, exist_ok=True)
         binding = dict(manifest=digest(manifest), output=str(args.output.resolve()))
         if global_claim.exists():
             if json.loads(global_claim.read_text()) != binding:

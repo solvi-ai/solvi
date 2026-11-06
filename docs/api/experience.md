@@ -52,3 +52,11 @@ Read [executable experience](../experience.md) before using the environment and 
 ## `worlds`
 
 ::: solvi.experimental.experience.worlds
+
+## `observations`
+
+::: solvi.experimental.experience.observations
+
+## `refinement`
+
+::: solvi.experimental.experience.refinement

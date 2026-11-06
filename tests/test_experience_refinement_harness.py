@@ -31,13 +31,16 @@ def gate(tmp_path, monkeypatch):
         monkeypatch.setattr(module, "ARMS", ("FORMULA",))
         monkeypatch.setattr(module, "SEEDS", {"smoke": [0], "dev": [1], "final": [2]})
     fake_root = tmp_path / "work"
-    (fake_root / "research_growth/solvi_refinement_20261106").mkdir(parents=True)
+    fake_root.mkdir(parents=True)
+    protocol = fake_root / "protocol.md"
+    protocol.write_text("Engineering-only identity fixture, not an experiment.")
+    final_claim = fake_root / "study-final.json"
     monkeypatch.setattr(bench, "__file__", str(fake_root / "lanes/fixture/benchmarks/refinement_bench.py"))
-    monkeypatch.setattr(bench, "source_manifest", lambda: {"synthetic": "engineering"})
+    monkeypatch.setattr(bench, "source_manifest", lambda *_: {"synthetic": "engineering"})
     folder = tmp_path / "output"
 
     def run(*args, output=folder):
-        monkeypatch.setattr(sys, "argv", ["bench", "--output", str(output), *args])
+        monkeypatch.setattr(sys, "argv", ["bench", "--output", str(output), "--protocol", str(protocol), "--final-claim", str(final_claim), *args])
         bench.main()
 
     run("--prepare")
@@ -89,15 +92,22 @@ def test_final_claim_forbids_copying_approval_to_second_output(gate, tmp_path, m
     dev = dict(arms={"FIXED": {"correct": 7}, "RANDOM": {"correct": 7}}, raw_sha256="abc")
     monkeypatch.setattr(bench, "summarize", lambda path, *, split: dev if split == "dev" else real(path, split=split))
     manifest = digest(json.loads((folder / "manifest.json").read_text()))
-    approval = dict(approved=True, manifest=manifest, comparator="FIXED", dev_raw_sha256="abc", dev_sha256="abc")
+    approval = dict(approved=True, manifest=manifest, comparator="FIXED", dev_raw_sha256="abc", dev_sha256="abc",
+                    output=str(folder.resolve()), final_claim=str((folder.parent / "work/study-final.json").resolve()))
     (folder / "FINAL_APPROVAL.json").write_text(json.dumps(approval))
     second = tmp_path / "other"
     shutil.copytree(folder, second)
     run("--split", "final")
     monkeypatch.setattr(bench, "trial", lambda *_: pytest.fail("reran final actor"))
     run("--split", "final")
-    with pytest.raises(ValueError, match="claimed"):
+    with pytest.raises(ValueError, match="binding|claimed"):
         run("--split", "final", output=second)
+    changed_claim = tmp_path / "different-claim.json"
+    with pytest.raises(ValueError, match="binding"):
+        run("--split", "final", "--final-claim", str(changed_claim))
+    with pytest.raises(ValueError, match="binding"):
+        run("--split", "final", "--final-claim", str(changed_claim), output=second)
+    assert not changed_claim.exists()
 
 
 def test_pertrial_audit_fails_before_append_and_blocks_retry(gate, monkeypatch):
@@ -135,17 +145,17 @@ def test_resume_rejects_unplanned_but_well_sealed_trial_before_next_actor(gate, 
         run()
 
 
-def test_real_lane_manifest_pins_protocol_and_modules():
-    library = Path(bench.__file__).resolve().parents[1]
-    project = library.parent.parent if library.parent.name == "lanes" else library.parent
-    if not (project / "research_growth/solvi_refinement_20261106/PREREGISTRATION.md").exists():
-        pytest.skip("source-manifest integration requires the host research protocol")
-    hashes = bench.source_manifest()
+def test_real_lane_manifest_pins_protocol_and_modules(tmp_path):
+    protocol = tmp_path / "protocol.md"
+    protocol.write_text("Known fixture protocol")
+    hashes = bench.source_manifest(protocol)
     for source in (
-        "host/PREREGISTRATION.md",
+        "host/protocol",
         "pyproject.toml",
         "uv.lock",
         "benchmarks/refinement_score.py",
         "src/solvi/experimental/experience/refinement.py",
     ):
         assert len(hashes[source]) == 64
+    protocol.write_text("A changed protocol")
+    assert hashes["host/protocol"] != bench.source_manifest(protocol)["host/protocol"]

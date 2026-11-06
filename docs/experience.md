@@ -229,3 +229,12 @@ policies and multistep numeric dependencies. Its independent scorer checks held-
 budgets. It does not measure arbitrary strings, external real-world tasks, distribution shift or general
 scientific superiority; the known-formula and direct-measurement controls have privileged access disclosed
 by the benchmark protocol.
+
+
+The benchmark is configured by a host-owned protocol file, supplied with `--protocol PATH`.
+Final execution also requires `--final-claim PATH` naming one stable claim shared across output directories.
+A host-authored `FINAL_APPROVAL.json` must bind the manifest digest, frozen dev raw digest, selected comparator,
+absolute `output` path and absolute `final_claim` path. Copying an approval to a different output or supplying
+another claim path is rejected before starting an actor. An interrupted claimed trial blocks for investigation;
+completed trials can be reopened without replay. The source manifest pins actual module origins, benchmark/scorer,
+project metadata, dependency lock and protocol contents. No private workspace layout is required.
