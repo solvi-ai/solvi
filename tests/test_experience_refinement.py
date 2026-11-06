@@ -210,17 +210,29 @@ def test_budget_and_post_debit_sink_failure(tmp_path):
     assert session.run()["reason"] == "budget"
     other = tmp_path / "sink"
     other.mkdir()
+    session, _, journal = fixture(other)
+    original = journal.debit
 
-    def sink(snapshot):
+    def durable_then_fail(snapshot):
+        result = original(snapshot)
         if snapshot["counts"].get("program_node"):
-            raise BudgetStop("durable sink lost")
+            raise BudgetStop("durable sink lost after append")
+        return result
 
-    session, _, _ = fixture(other, budget=WorkBudget(10000, on_charge=sink))
-    with pytest.raises(BudgetStop, match="durable sink lost"):
+    journal.debit = durable_then_fail
+    with pytest.raises(BudgetStop, match="durable sink lost after append"):
         session.run()
-    assert session.budget.counts["program_node"] > 0
+    spent = session.budget.spent
+    counts = session.budget.counts.copy()
+    assert counts["program_node"] > 0
     with pytest.raises(RuntimeError, match="failed writer"):
         session.step()
+    restored, oracle, _ = fixture(other, reopen=True)
+    assert restored.budget.spent >= spent
+    for category, value in counts.items():
+        assert restored.budget.counts.get(category, 0) >= value
+    assert restored.run()["status"] == "verified"
+    assert "review:observation:initial" not in oracle.calls
 
 
 def test_excluded_first_match_changes_committee_without_claiming_all_programs():
@@ -298,17 +310,45 @@ def test_exclusion_refuses_unbounded_iterable_without_consuming_and_pays_cap():
     assert budget.spent == 1 and budget.counts == {"search_exclusion": 1}
 
 
-def test_setup_first_step_debit_sink_failure_poisoned_before_oracle(tmp_path):
+def test_durable_constructor_rejects_external_sink_before_any_state_write(tmp_path):
+    invoked = []
+
+    def sink(snapshot):
+        invoked.append(snapshot)
+        raise RuntimeError("must not execute")
+
+    budget = WorkBudget(1000, on_charge=sink)
+    with pytest.raises(ValueError, match="durable refinement owns"):
+        fixture(tmp_path, budget=budget)
+    store = KnowledgeStore(str(tmp_path / "knowledge.db"))
+    journal = ExperienceJournal(store, "refinement-review", {})
+    assert journal.records() == []
+    assert not (tmp_path / "oracle.json").exists()
+    assert budget.spent == 0 and invoked == []
+
+
+@pytest.mark.parametrize("exception", [ValueError, BudgetStop])
+def test_volatile_setup_sink_failure_preserves_debit_and_poisons(tmp_path, exception):
+    reference, oracle, _ = fixture(tmp_path)
+
     def sink(snapshot):
         if snapshot["counts"].get("refinement_setup"):
-            raise RuntimeError("setup persistence failed")
+            raise exception("volatile setup sink failed")
 
-    session, oracle, _ = fixture(tmp_path, budget=WorkBudget(1000, on_charge=sink))
-    assert session.budget.spent == 0 and not session.state["setup_paid"]
-    with pytest.raises(RuntimeError, match="setup persistence failed"):
+    session = RefinementSession(
+        reference.grammar,
+        reference.domain,
+        oracle,
+        reference.options,
+        WorkBudget(1000, on_charge=sink),
+        session_id="volatile",
+        initial=["initial"],
+        journal=None,
+    )
+    assert session.budget.spent == 0
+    with pytest.raises(exception, match="volatile setup sink failed"):
         session.step()
-    assert session.budget.counts["refinement_setup"] == 7
-    assert not oracle.calls and session.state["setup_paid"] is False
+    assert session.budget.counts["refinement_setup"] == 7 and not oracle.calls
     with pytest.raises(RuntimeError, match="failed writer"):
         session.step()
 
@@ -366,3 +406,73 @@ def test_sigkill_after_fsynced_external_receipt_reconciles_fresh_without_replay(
     again, fresh_oracle, _ = fixture(tmp_path, reopen=True)
     assert again.run()["status"] == "verified" and fresh_oracle.calls == []
     assert again.budget.counts == terminal_counts
+
+
+def test_restore_rejects_option_bool_int_alias_without_reading_oracle(tmp_path):
+    session, oracle, journal = fixture(tmp_path)
+    changed = [
+        ObservationOption(option.name, {"x": True} if option.name == "cheap" else option.inputs, option.cost)
+        for option in session.options
+    ]
+    # Python dict equality would accept True as the saved integer 1.
+    assert changed[1].inputs == session.options[1].inputs
+    before = session.budget.counts.copy()
+    with pytest.raises(ValueError, match="recovery contract changed"):
+        RefinementSession.restore(
+            journal=journal, grammar=session.grammar, domain=session.domain, oracle=oracle, options=changed
+        )
+    assert oracle.calls == [] and session.budget.counts == before
+
+
+def test_restore_consumes_option_generator_once_and_retains_live_options(tmp_path):
+    session, _, _ = fixture(tmp_path)
+    options = tuple(session.options)
+    store = KnowledgeStore(str(tmp_path / "knowledge.db"))
+    journal = ExperienceJournal(store, "refinement-review", {})
+    oracle = CachedOracle(tmp_path / "oracle.json")
+    visited = []
+
+    def supplied():
+        for option in options:
+            visited.append(option.name)
+            yield option
+
+    restored = RefinementSession.restore(
+        journal=journal, grammar=session.grammar, domain=session.domain, oracle=oracle, options=supplied()
+    )
+    assert visited == [option.name for option in options]
+    assert restored.options == options and len(restored.options) == 3
+    assert restored.run()["status"] == "verified"
+    assert visited == [option.name for option in options]
+    assert "review:observation:cheap" in oracle.calls
+
+
+@pytest.mark.parametrize("boundary", ["constructor_options", "constructor_initial", "restore_options"])
+def test_host_iterables_are_consumed_at_most_257_items(tmp_path, boundary):
+    reference, oracle, journal = fixture(tmp_path)
+    visited = []
+
+    def unbounded():
+        index = 0
+        while True:
+            visited.append(index)
+            yield "initial" if boundary == "constructor_initial" else ObservationOption(str(index), {"x": 0}, 1)
+            index += 1
+
+    with pytest.raises(ValueError):
+        if boundary == "restore_options":
+            RefinementSession.restore(
+                journal=journal, grammar=reference.grammar, domain=reference.domain, oracle=oracle, options=unbounded()
+            )
+        else:
+            RefinementSession(
+                reference.grammar,
+                reference.domain,
+                oracle,
+                unbounded() if boundary == "constructor_options" else reference.options,
+                WorkBudget(1000),
+                session_id="bounded-host",
+                journal=None,
+                initial=unbounded() if boundary == "constructor_initial" else (),
+            )
+    assert len(visited) == 257 and not oracle.calls

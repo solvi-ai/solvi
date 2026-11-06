@@ -5,7 +5,7 @@
 - Add experimental `RefinementSession` for bounded counterexample-guided learning with paid observation selection,
   source-bound receipts, durable read reconciliation and explicit volatile mode. Expose immutable observation options
   and a bounded disagreement-per-price selector; synthesis can exclude up to 32 paid program fingerprints.
-- Add a runnable counterexample/observation/recovery example and an independently audited component benchmark of
+- Add a runnable counterexample/observation/recovery example and a component benchmark with a separate scorer of
   twelve authored finite mechanisms. Verification is limited to declared domains; no general learning advantage is claimed.
 
 

@@ -182,19 +182,19 @@ and the cost of the complete strategy must be reported separately.
 ## Counterexample-guided learning and useful observations
 
 `RefinementSession` adds a bounded iterative learner on top of the same grammar, program evaluator,
-finite-domain checker and shared work ledger. Each round proposes a program, optionally buys an observation,
-and checks the candidate. Only the first counterexample is added to training before the next proposal.
+finite-domain checker and shared work ledger. Each round proposes a program, then either buys an observation and starts a new proposal round,
+or checks the candidate. Only the first counterexample is added to training before the next proposal.
 Other verifier receipts remain audit evidence rather than extra training labels. The grammar remains fixed;
 search can fail even when a solution exists. `max_rounds`, `max_observations`, committee size and the total
 budget bound the work. A result with `status="verified"` covers only the declared verification domain.
 It is not a registry entry, a promise about new inputs, or authorization for external effects.
-Use the existing `CompetenceRegistry.admit_checked` with independent admission examples to authorize a
-checked operation; that path performs its own check rather than trusting a session result DTO.
+Use the existing `CompetenceRegistry.admit_checked` with a candidate proposed or derived by that registry
+and independent admission examples to authorize a checked operation; that path performs its own check rather than trusting a session result DTO.
 
 `ObservationOption(name, inputs, cost)` declares one allowed input and its read price. The immutable option
 contains no label. `select_observation(programs, options, grammar, budget)` pays to execute candidate
 predictions and count typed pair disagreements, then selects the greatest disagreements/read-price ratio.
-Ties follow host order. Invalid execution is a separate marker; bool and int outputs remain distinct.
+Ties follow host order; the selector requires the read to remain affordable after planning. Invalid execution is a separate marker; bool and int outputs remain distinct.
 No disagreement means no purchase. The host pays for the actual read separately. This is a heuristic over
 at most 32 supplied programs and 256 options, not an optimal information-gain guarantee.
 
@@ -210,8 +210,11 @@ host oracle. `RefinementSession.restore(journal=..., grammar=..., domain=..., or
 reopens the original bound state and preserves subsequent debits. An uncertain read is never automatically
 reissued: `oracle.reconcile(request_id)` must return its original `DomainReceipt`, otherwise the session
 stays blocked. Reconciliation itself must be a side-effect-free host lookup. Source changes stop the session.
-Pure interrupted computations may be repeated and paid again; a recovered receipt is not repurchased.
-A debit/persistence sink failure poisons the current writer. `journal=None` is explicitly volatile and
+A durable session owns its debit sink and rejects a preexisting `WorkBudget.on_charge` callback before
+writing state. Arbitrary callback recovery is unsupported. Pure interrupted computations may be repeated and paid again; a recovered receipt is not repurchased.
+A debit/persistence sink failure poisons the current writer. Malformed reconciliation receipts raise an error
+without training. A completed result is historical: replay does not revalidate a changed live source and grants
+no current execution authority. `journal=None` is explicitly volatile and
 provides no crash-durability guarantee. Journaling overhead and retained history need separate resource budgets.
 
 Keep initial observation inputs, selectable observation inputs, verification inputs and closed transfer

@@ -7,6 +7,7 @@ sessions require ExperienceJournal; journal=None is explicitly volatile.
 from __future__ import annotations
 
 import random
+from itertools import islice
 from typing import Any
 
 from ._common import BudgetStop, WorkBudget, canonical, digest, identifier, natural, portable
@@ -30,6 +31,8 @@ class RefinementSession:
     def __init__(self, grammar, domain, oracle, options, budget, *, session_id,
                  initial=(), mode="active", seed=0, max_rounds=6, committee_size=3,
                  max_observations=3, journal=None):
+        if journal is not None and budget.on_charge is not None:
+            raise ValueError("durable refinement owns the debit sink; external sinks are unsupported")
         identifier(session_id, "session_id")
         if mode not in ("none", "fixed", "random", "active"):
             raise ValueError("invalid refinement mode")
@@ -40,7 +43,7 @@ class RefinementSession:
         if committee_size > 32 or max_rounds > 64:
             raise ValueError("refinement exceeds bounded caps")
         self.grammar, self.domain, self.oracle, self.journal = grammar, domain, oracle, journal
-        self.options = tuple(options)
+        self.options = tuple(islice(options, 257))
         if len(self.options) > 256 or len({o.name for o in self.options}) != len(self.options):
             raise ValueError("invalid observation option count or duplicate name")
         points = set()
@@ -56,7 +59,7 @@ class RefinementSession:
             if key in points:
                 raise ValueError("duplicate observation input")
             points.add(key)
-        initial = list(initial)
+        initial = list(islice(initial, 257))
         if len(set(initial)) != len(initial) or not set(initial) <= {o.name for o in self.options}:
             raise ValueError("invalid initial observation names")
         if grammar.fingerprint != domain.grammar_fingerprint:
@@ -118,9 +121,10 @@ class RefinementSession:
         if state is None or state.get("v") != 1:
             raise ValueError("missing refinement checkpoint")
         config = state["config"]
+        options = tuple(islice(options, 257))
         supplied = [dict(name=o.name, inputs=o.inputs, cost=o.cost) for o in options]
         if (config["grammar"] != grammar.fingerprint or config["domain"] != domain.fingerprint
-                or supplied != config["options"]):
+                or canonical(supplied) != canonical(config["options"])):
             raise ValueError("refinement recovery contract changed")
         obj = object.__new__(cls)
         obj.grammar, obj.domain, obj.oracle, obj.journal = grammar, domain, oracle, journal
