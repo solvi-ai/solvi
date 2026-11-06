@@ -349,3 +349,60 @@ replays choices and supplied observations. Restore debits the current budget
 again without refunds. Snapshots are host assertions and can be forged; they
 are not authenticated evidence. All work groups are prepaid and debit/sink
 exceptions propagate. See example `34_packed_observations.py`.
+
+## Verified computation, selective updates and acquired operations
+
+`ComputationPlan` describes a bounded, topologically ordered DAG: up to 32 input names,
+128 scalar nodes and eight alternative producers per node. `ComputeNode` names ordered
+source/dependency ports and producer alternatives. `ComputeOperator` binds a producer,
+a separate verifier, their joint revision and their declared work prices. Values are
+strict integers or booleans. `VerifiedComputation` executes only ancestors of requested
+outputs. `fifo`, `cheap` and `critical` select ready, affordable attempts; the latter is
+a fixed goal-contribution/cost heuristic, not learned or optimal metareasoning.
+
+Every attempt prepays both execution and verification, including failed attempts. Only
+strict `True` accepts a scalar proposal. An ordinary callback exception rejects that
+alternative; another may be attempted from the remaining budget. An unknown interrupted
+callback or failed persistence closes the session. `observe(name, reader, cost, revision)`
+prepays an explicitly requested source read; an untrusted observed value does not bypass
+the downstream output verifier. Use `step()` and its `missing` ports to drive a host read
+loop. There is no implicit network access, external action commit or automatic oracle.
+
+`update_inputs(values, revision)` invalidates the affected reverse dependency closure,
+including a change from `1` to `True`. Disjoint accepted values survive. Producer or
+verifier changes require a new operator revision via `update_operators()`. Optional
+operator validity hooks are checked on live cached values; revocation removes their
+results and descendants before another answer. These inspections and invalidations
+consume the same ledger. Reading outputs can therefore exhaust the budget.
+
+For durable execution give the session an `ExperienceJournal` over a persistent
+`KnowledgeStore`. Reopen the same journal/configuration and construct
+`VerifiedComputation` with the same operator versions and budget limit. Recovery checks
+monotonic ledger history and independently re-verifies cached values for a paid fee.
+Spent work is retained. A pending callback without a confirmed result blocks recovery;
+this API deliberately does not repeat an unknown side effect. Writers must be serialized.
+Snapshots describe state; they are not standalone authority to resume or authenticate
+rewritten history. Callbacks, version labels and the journal writer are host trusted.
+
+`OperationCatalog` acquires whole parameterized `Program` templates from accepted node
+traces. `record_session()` extracts accepted bindings using host-supplied node/Program
+metadata. At least two distinct bindings are needed. `acquire()` uses the existing
+`CompetenceRegistry.propose_program` and `admit_checked` path: separate admission
+examples and an independent oracle must check the declared finite domain. The callback
+is then compiled to a bounded postfix interpreter, without Python `eval` or `exec`.
+`operation()` returns a normal versioned `ComputeOperator`, usable as a node in a new
+composition; each call still pays its input/AST work, guards and independent live check.
+A counterexample revokes the operation. Finite admission does not certify other inputs.
+
+This catalog does not invent a semantic specification or perform unrestricted subtree
+search. The host asserts that Program metadata describes its accepted computation;
+independent admission tests that assertion. Store-bound registries are not supported.
+Callable serialization is unavailable: rebuild a catalog with paid acquisition in a new
+registry after recovery. A growing registry requires rebuilding existing operation
+wrappers. This is a limited executable vocabulary, not automatic general algorithm
+invention. See `examples/35_verified_computation.py` for the complete connected path.
+
+Declared units constrain prepaid work, not arbitrary Python runtime, memory or truth.
+A separate function is not intrinsically an independent or reliable check. Supply an
+independent specification/reference and use an external final scorer when evaluating
+quality. The component does not modify the calibrated fast/slow `core.Dispatcher`.

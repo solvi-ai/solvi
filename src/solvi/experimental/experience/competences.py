@@ -202,6 +202,26 @@ class CompetenceRegistry:
         self._candidates[candidate.fingerprint] = candidate.to_dict()
         return candidate
 
+    def propose_program(self, program: Program, proposal_examples, budget):
+        """Register a host-proposed AST after paid proposal validation, without dependencies."""
+        self._guard()
+        budget.charge("competence_propose_program")
+        if not isinstance(program, Program):
+            raise ValueError("Program required")
+        rows = self._batch(proposal_examples, budget, "proposal")
+        if not rows:
+            raise ValueError("proposal examples required")
+        for example in rows:
+            value = program.evaluate(example.inputs, budget, self.grammar)
+            budget.charge("competence_compare")
+            if type(value) is not type(example.expected) or value != example.expected:
+                raise ValueError("program fails proposal")
+        self._remember(rows)
+        e = rows[0]
+        candidate = Candidate(program, rows, e.scope, e.mechanism, e.schema, self.grammar.fingerprint)
+        self._candidates[candidate.fingerprint] = candidate.to_dict()
+        return candidate
+
     def derive(self, program: Program, proposal_examples, dependencies, budget):
         """Host-proposed immutable AST composition; not autonomous discovery.
 

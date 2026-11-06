@@ -21,9 +21,17 @@ from .programs import CommitteeSearchResult, Grammar, Program, SearchResult, syn
 from .tabular import TabularEnvironment, TabularOracle  # noqa: E402
 from .stratified import StratifiedObservationPlan, plan_stratified_observations  # noqa: E402
 from .packed import PackedObservationFrame, PackedStratifiedSampler  # noqa: E402
+from .computation import ComputeOperator, ComputeNode, ComputationPlan, ComputationReport, VerifiedComputation  # noqa: E402
+from .operation_learning import OperationCatalog  # noqa: E402
 from .worlds import Decision, WorldSet  # noqa: E402
 
 __all__ = [
+    "ComputeOperator",
+    "ComputeNode",
+    "ComputationPlan",
+    "ComputationReport",
+    "VerifiedComputation",
+    "OperationCatalog",
     "PackedObservationFrame",
     "PackedStratifiedSampler",
     "StratifiedObservationPlan",

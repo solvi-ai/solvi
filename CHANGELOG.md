@@ -1,6 +1,10 @@
 # Changelog
 
 ## 1.6.0 — Unreleased
+- Add experimental verified dependency computation with paid scheduling, independent host checks,
+  selective invalidation, versioned operators and journal recovery. Add paid acquisition of recurring
+  parameterized Programs from accepted traces, independent finite-domain admission, postfix execution
+  and live revocation. These interfaces do not establish a general cost or learning advantage.
 - Add experimental packed observation frames and feedback-driven stratified sampling with explicit work debits and snapshot replay.
 
 - Add experimental one-pass `synthesize_committee` with a preserved candidate prefix and an optional paid

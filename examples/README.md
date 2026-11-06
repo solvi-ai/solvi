@@ -41,3 +41,4 @@ it is set, and a keyword stand-in otherwise.
 
 - `33_stratified_observations.py`: paid bounded label-aware planning over an unread host pool; no authority or oracle reads.
 - `34_packed_observations.py`: immutable packed bins, fixed pilot cuts, adaptive feedback and paid snapshot replay; explicit host labels, no oracle or network.
+- `35_verified_computation.py`: verified scheduling, selective updates and acquisition of a parameterized operation from accepted traces; independent finite-domain admission and actual reuse in a new composition. No network or model required.

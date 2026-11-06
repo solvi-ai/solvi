@@ -68,3 +68,11 @@ Read [executable experience](../experience.md) before using the environment and 
 ## `packed`
 
 ::: solvi.experimental.experience.packed
+
+## `computation`
+
+::: solvi.experimental.experience.computation
+
+## `operation_learning`
+
+::: solvi.experimental.experience.operation_learning
