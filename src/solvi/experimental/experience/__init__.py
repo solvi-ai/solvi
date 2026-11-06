@@ -19,9 +19,12 @@ from .refinement import RefinementSession  # noqa: E402
 from .observations import ObservationOption, ObservationChoice, select_observation, select_observation_bounded  # noqa: E402
 from .programs import CommitteeSearchResult, Grammar, Program, SearchResult, synthesize, synthesize_committee  # noqa: E402
 from .tabular import TabularEnvironment, TabularOracle  # noqa: E402
+from .stratified import StratifiedObservationPlan, plan_stratified_observations  # noqa: E402
 from .worlds import Decision, WorldSet  # noqa: E402
 
 __all__ = [
+    "StratifiedObservationPlan",
+    "plan_stratified_observations",
     "AdmissionRecord",
     "Application",
     "AutoCurriculum",

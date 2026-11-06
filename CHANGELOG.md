@@ -5398,3 +5398,5 @@ First public version.
 - Learning: answer heads from labeled examples (`fit`), readable rule lists (`learn_rule`), Platt calibration (`calibrate`).
 - ModernBERT extractors: one-pass multi-field (`MultiSpanExtractor`), per-field QA (`SpanExtractor`), long documents by field
   description with "no answer" (`LongSpanExtractor`), save/load and Hugging Face loading.
+
+- Experimental experience: paid, bounded proposal-label stratified observation plans with exact rational feature ranking and ordered cell sampling.

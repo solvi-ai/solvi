@@ -296,3 +296,25 @@ labels; wall time and resource use must be reported separately. The CLI requires
 `--baseline`, `--baseline-revision`, `--data`, `--output`, `--claim` and `--audit-wrapper` paths/identity;
 `--python` selects the interpreter. Preparation, smoke/dev, freeze and final execution are separate stages.
 These APIs and the runnable example establish no accuracy gain, general cost advantage or external deployment result.
+
+### Paid label-aware observation plans
+
+`plan_stratified_observations(examples, options, budget, limit=8,
+candidate_limit=64)` accepts a bounded tuple/list of 1–64 boolean proposal
+examples in one host context and an independently shuffled ordered pool of at
+most 256 unique `ObservationOption` rows. Inputs use contiguous `f0`…`fp-1`
+integer bins 0–7, with at most 128 features. Only the first bounded candidate
+prefix is decoded; its shape must match the pilot even for fallback selection.
+
+The planner computes each upper median using eight-bin histograms. Features
+with at least four pilot rows on each side are ranked by the exact absolute
+difference of Laplace-smoothed positive fractions, with numerical feature ties.
+Up to two nonzero features define cells; round-robin selection preserves the
+host order inside each cell. One-class or uninformative pilots return the host
+prefix with `reason="random_prefix"`. Planning phases debit the shared budget
+before their work; exhaustion and debit-sink errors propagate without a partial
+success. No environment reads or oracle calls occur.
+
+Observed labels remain host assertions. A plan neither authenticates evidence
+nor admits a competence, grants read authority, or supplies a certificate. See
+`examples/33_stratified_observations.py` for the separately paid planning step.
