@@ -315,6 +315,11 @@ def synthesize(examples, grammar: Grammar, budget: WorkBudget) -> SearchResult:
                         return None
                 charge("search_compare")
                 matches = matches and type(value) is type(expected) and value == expected
+                # No permitted parent can consume a child of maximum size.
+                # A mismatching terminal-size candidate needs no output vector;
+                # matching candidates must still visit every proposal row.
+                if p.nodes == grammar.max_nodes and not matches:
+                    return None
                 outputs.append((type(value).__name__, value))
             if matches:
                 return SearchResult(p, tried, "found")

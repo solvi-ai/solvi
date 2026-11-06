@@ -158,6 +158,9 @@ for a learned boolean rule, full-domain check, actual SQL effects and completed 
 Search now reuses paid output vectors; planning caches partitions and prunes losing branches. Cache operations
 are themselves paid. Runtime program evaluation prices remain unchanged. These changes can reduce search work,
 but small problems may cost more; there is no general performance claim from component tests.
+Expressions at the maximum permitted node count are rejected on their first mismatching example; they cannot
+serve as children of any later valid expression. Smaller expressions keep complete vectors for reuse, and a
+matching candidate still requires all examples. This changes search work, not runtime eager evaluation.
 
 The accompanying benchmark compares finite resource and workflow mechanisms, separate proposal/admission/test data,
 mechanism changes, full work budgets, explicit hand-written formulas/caches, observation-only controls and a no-call

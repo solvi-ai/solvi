@@ -5,10 +5,17 @@ from __future__ import annotations
 import argparse
 from collections import Counter, defaultdict
 import json
+import hashlib
 from pathlib import Path
+import sys
 
-from experience_v2 import FAMILIES, canonical, digest, roles
-from experience_v2_run import portable_measurements, trial_id, trial_plan
+# Standalone CLI must select this lane before importing either solvi or a
+# benchmark which imports it; an editable baseline install must not win.
+_LANE = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(_LANE / "src"))
+
+from experience_v2 import FAMILIES, canonical, digest, roles  # noqa: E402 - local lane must precede editable installs
+from experience_v2_run import portable_measurements, trial_id, trial_plan  # noqa: E402 - same source pin
 
 
 def tenth_reduction(old, new):
@@ -146,7 +153,8 @@ def summarize(out, phase, manifest):
                 continue
             key = (spec["seed"], spec["family"], spec["wire"], spec["arm"])
             operational[key] = result
-            audit = audit_trial(out / identity / "operational", result)
+            audit = audit_trial(out / identity / "operational", result,
+                                expected_engine_sha256=manifest["source"]["src/solvi/experimental/experience/programs.py"])
             audits[identity] = audit
             errors.extend(f"{identity}: {error}" for error in audit["errors"])
             if not spec["wire"]:
@@ -252,6 +260,15 @@ def summarize(out, phase, manifest):
     return dict(
         phase=phase,
         manifest_hash=digest(manifest),
+        scorer_provenance=dict(
+            lane=str(_LANE), python_executable=sys.executable,
+            solvi_origin=str(Path(sys.modules["solvi"].__file__).resolve()),
+            source_hashes={str(path.relative_to(_LANE)): hashlib.sha256(path.read_bytes()).hexdigest()
+                           for path in [Path(__file__).resolve(), _LANE / "benchmarks/experience_v2_audit.py",
+                                        _LANE / "benchmarks/experience_v2.py", _LANE / "benchmarks/experience_v2_run.py",
+                                        _LANE / "src/solvi/experimental/experience/programs.py"]},
+            actor_engine_sha256=manifest.get("source", {}).get("src/solvi/experimental/experience/programs.py"),
+        ),
         expected=len(expected),
         observed=len(records),
         census=dict(census),

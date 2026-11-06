@@ -111,3 +111,22 @@ def test_real_paid_new_search_trace_audits_even_when_admission_rejects(tmp_path)
     assert result["search"]["reason"] == "found"
     audit = audit_trial(tmp_path / "trial", result)
     assert not audit["errors"], audit["errors"]
+
+
+def test_explicit_actor_source_pin_is_independent_of_scorer_import_version(tmp_path, monkeypatch):
+    import hashlib
+    import experience_v2_audit as auditor
+    from solvi.experimental.experience import programs
+
+    result = run_trial(tmp_path / 'trial', 123, 'eligibility', 'NEW_CHECKED')
+    expected_actor = hashlib.sha256(Path(programs.__file__).read_bytes()).hexdigest()
+    older = tmp_path / 'different-import'
+    older.mkdir()
+    (older / 'programs.py').write_text('different historical interpreter source')
+    monkeypatch.setattr(auditor._common, '__file__', str(older / '_common.py'))
+    explicit = audit_trial(tmp_path / 'trial', result, expected_engine_sha256=expected_actor)
+    assert not explicit['errors'], explicit['errors']
+    wrong = audit_trial(tmp_path / 'trial', result, expected_engine_sha256='0' * 64)
+    assert 'unpinned synthesis engine' in wrong['errors']
+    fallback = audit_trial(tmp_path / 'trial', result)
+    assert 'unpinned synthesis engine' in fallback['errors']

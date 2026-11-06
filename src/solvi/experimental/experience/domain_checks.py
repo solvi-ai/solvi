@@ -256,3 +256,6 @@ def check_program(domain, program, grammar, oracle, budget, *, request_prefix, o
         raise failure.error from failure
     except BudgetStop:
         return result('unknown', 'budget')
+
+
+__all__ = ['DomainCheckResult', 'DomainOracle', 'DomainReceipt', 'FiniteDomain', 'check_program']

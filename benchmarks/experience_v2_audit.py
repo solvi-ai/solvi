@@ -123,7 +123,7 @@ def evaluate(ast, inputs, grammar, work):
     return visit(ast, 1)
 
 
-def audit_trial(directory, result):
+def audit_trial(directory, result, *, expected_engine_sha256=None):
     """Return discrepancies without altering raw artifacts or trusting flags."""
     errors, work = [], [0]
     output = dict(errors=errors, correct_R=0, correct_H=0, useful_R=0, useful_H=0, verification_work=0)
@@ -205,9 +205,14 @@ def audit_trial(directory, result):
             require(type(search.get("tried")) is int and search["tried"] > 0, "missing positive synthesis tried count")
             if valid_shape:
                 begin, paid_result, terminal = [e["payload"] for e in trace_events]
-                expected_engine = hashlib.sha256(
-                    Path(_common.__file__).with_name("programs.py").read_bytes()
-                ).hexdigest()
+                # Analysis may intentionally use a newer scorer against an
+                # older frozen actor. Production callers pass that actor's
+                # manifest pin; local-source fallback is for engineering tests.
+                expected_engine = expected_engine_sha256
+                if expected_engine is None:
+                    expected_engine = hashlib.sha256(
+                        Path(_common.__file__).with_name("programs.py").read_bytes()
+                    ).hexdigest()
                 require(
                     begin["engine_sha256"]
                     == paid_result["engine_sha256"]

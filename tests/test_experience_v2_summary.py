@@ -52,3 +52,27 @@ def test_exact_tenth_bar_and_invalid_work_profile():
     assert not summary.validate_s1(profile)
     profile["cells"][0]["pair"]["new"]["spent"] = -1
     assert summary.validate_s1(profile)
+
+
+def test_standalone_summary_pins_local_lane_before_editable_install_without_pythonpath(tmp_path):
+    import hashlib
+    import os
+    import subprocess
+
+    lane = Path(__file__).resolve().parents[1]
+    manifest = {'source': {'src/solvi/experimental/experience/programs.py': 'a' * 64}}
+    manifest_path = tmp_path / 'manifest.json'
+    manifest_path.write_text(json.dumps(manifest))
+    (tmp_path / 'trials.jsonl').write_text('')
+    environment = os.environ.copy()
+    environment.pop('PYTHONPATH', None)
+    completed = subprocess.run([sys.executable, str(lane / 'benchmarks/experience_v2_summary.py'),
+                                '--out', str(tmp_path), '--phase', 'smoke', '--manifest', str(manifest_path)],
+                               env=environment, cwd=tmp_path, capture_output=True, text=True, timeout=30)
+    assert completed.returncode == 0, completed.stderr
+    report = json.loads((tmp_path / 'summary.json').read_text())
+    provenance = report['scorer_provenance']
+    assert Path(provenance['solvi_origin']) == lane / 'src/solvi/__init__.py'
+    assert provenance['actor_engine_sha256'] == 'a' * 64
+    for relative, checksum in provenance['source_hashes'].items():
+        assert checksum == hashlib.sha256((lane / relative).read_bytes()).hexdigest()

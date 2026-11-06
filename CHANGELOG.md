@@ -4,6 +4,8 @@
 
 - Reuse paid expression vectors during experimental synthesis; cache finite probe partitions and prune losing
   branches while preserving bounded minimax choices. Cache reads remain paid and tiny cases may cost more.
+- Stop evaluating a rejected expression at the grammar's maximum node count after its first mismatching example;
+  smaller expressions retain complete vectors, and admitted programs still require every check.
 - Add optional paid complete finite-domain checks with source/version bindings, explicit empirical versus checked
   admission, domain-limited calls, revocation and journaled admission recovery. Checked store evidence uses an
   explicitly enabled registry-local execution policy rather than generic skill publication.
