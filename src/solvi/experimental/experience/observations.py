@@ -212,10 +212,9 @@ def select_observation_bounded(models, options, budget, *, predict, max_work=102
         # fallback selection among rows completed before that cap.
         paid.charge("observation_compare", len(pool))
         paid.charge("observation_cache", len(pool))
-        suffix_cost = [None] * (len(pool) + 1)
+        suffix_cost = [pool[-1].cost] * (len(pool) + 1)
         for index in range(len(pool) - 1, -1, -1):
-            tail = suffix_cost[index + 1]
-            suffix_cost[index] = pool[index].cost if tail is None else min(pool[index].cost, tail)
+            suffix_cost[index] = min(pool[index].cost, suffix_cost[index + 1])
         size = len(committee)
         max_pairs = size * size // 4 if result_type is bool else size * (size - 1) // 2
         best, best_pairs = None, 0
