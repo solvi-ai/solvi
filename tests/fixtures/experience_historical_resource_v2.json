@@ -1,0 +1,498 @@
+{
+  "admission": [
+    {
+      "event_id": "event:c603668c4090bf0ffb017a27f0b5100245e66b63478549fe1c2e4e6a8f72ee9a",
+      "expected": 10,
+      "inputs": {
+        "x": 30,
+        "y": 18
+      },
+      "mechanism": "v2",
+      "schema": "xy-int-v1",
+      "scope": "composite:resource",
+      "source": "environment",
+      "split": "admission",
+      "task_id": "1101:resource:ood:16"
+    },
+    {
+      "event_id": "event:591241b66705b9f0594e4e9af33081f6a9aaf5f8bba8264a9922cab1a1b0cfa6",
+      "expected": 6,
+      "inputs": {
+        "x": 17,
+        "y": 9
+      },
+      "mechanism": "v2",
+      "schema": "xy-int-v1",
+      "scope": "composite:resource",
+      "source": "environment",
+      "split": "admission",
+      "task_id": "1101:resource:ood:17"
+    },
+    {
+      "event_id": "event:3c1fc3936b8987a6c2c6a1e4188c6c7c761a321aa9ed5bb8fc33154ecb431dd0",
+      "expected": 10,
+      "inputs": {
+        "x": 16,
+        "y": 4
+      },
+      "mechanism": "v2",
+      "schema": "xy-int-v1",
+      "scope": "composite:resource",
+      "source": "environment",
+      "split": "admission",
+      "task_id": "1101:resource:ood:18"
+    },
+    {
+      "event_id": "event:de954062a6f52ab9dac6444a459fdab20c36690449dc6c1c6985d90a0a057ed9",
+      "expected": 3,
+      "inputs": {
+        "x": 9,
+        "y": 4
+      },
+      "mechanism": "v2",
+      "schema": "xy-int-v1",
+      "scope": "composite:resource",
+      "source": "environment",
+      "split": "admission",
+      "task_id": "1101:resource:ood:19"
+    },
+    {
+      "event_id": "event:9a67525661455e890dabccc007e6ed63cdc32cb05d9323e7de36ca14713f497c",
+      "expected": 22,
+      "inputs": {
+        "x": 29,
+        "y": 5
+      },
+      "mechanism": "v2",
+      "schema": "xy-int-v1",
+      "scope": "composite:resource",
+      "source": "environment",
+      "split": "admission",
+      "task_id": "1101:resource:ood:20"
+    },
+    {
+      "event_id": "event:1b0fa5a7843b80f75f0acd264450b6b65a4ccabbb3bc4e0c1784debaf3d2cfe8",
+      "expected": 6,
+      "inputs": {
+        "x": 8,
+        "y": 0
+      },
+      "mechanism": "v2",
+      "schema": "xy-int-v1",
+      "scope": "composite:resource",
+      "source": "environment",
+      "split": "admission",
+      "task_id": "1101:resource:ood:21"
+    },
+    {
+      "event_id": "event:b7520459fdda4afec5984f1bdb6fd941c4a85a6dc689374233435be1980d1933",
+      "expected": 6,
+      "inputs": {
+        "x": 22,
+        "y": 14
+      },
+      "mechanism": "v2",
+      "schema": "xy-int-v1",
+      "scope": "composite:resource",
+      "source": "environment",
+      "split": "admission",
+      "task_id": "1101:resource:ood:22"
+    },
+    {
+      "event_id": "event:8f64bc89976c333ba45574bd5351bf74872076443bae6e388c2180a3c7ff621e",
+      "expected": 3,
+      "inputs": {
+        "x": 30,
+        "y": 25
+      },
+      "mechanism": "v2",
+      "schema": "xy-int-v1",
+      "scope": "composite:resource",
+      "source": "environment",
+      "split": "admission",
+      "task_id": "1101:resource:ood:23"
+    },
+    {
+      "event_id": "event:668f7dcdfa0bdea6f62f60a1c3928b06d51fb2a8fe693c5d4128fc1b7045bf3e",
+      "expected": 18,
+      "inputs": {
+        "x": 26,
+        "y": 6
+      },
+      "mechanism": "v2",
+      "schema": "xy-int-v1",
+      "scope": "composite:resource",
+      "source": "environment",
+      "split": "admission",
+      "task_id": "1101:resource:ood:24"
+    },
+    {
+      "event_id": "event:520828ef5a009c6bb6be2ae4e456f8a97b90b7512ef25594bf121c0378d5c14c",
+      "expected": 19,
+      "inputs": {
+        "x": 26,
+        "y": 5
+      },
+      "mechanism": "v2",
+      "schema": "xy-int-v1",
+      "scope": "composite:resource",
+      "source": "environment",
+      "split": "admission",
+      "task_id": "1101:resource:ood:25"
+    },
+    {
+      "event_id": "event:4d141917a09e20d98f18f4eced354cdcd2b55d1581f6bd29111d8d0dae45f489",
+      "expected": 12,
+      "inputs": {
+        "x": 26,
+        "y": 12
+      },
+      "mechanism": "v2",
+      "schema": "xy-int-v1",
+      "scope": "composite:resource",
+      "source": "environment",
+      "split": "admission",
+      "task_id": "1101:resource:ood:26"
+    },
+    {
+      "event_id": "event:d638d84316f7ba11918d374a46787fe43ed428113ce7f0883ae37f18e37f91d7",
+      "expected": 20,
+      "inputs": {
+        "x": 25,
+        "y": 3
+      },
+      "mechanism": "v2",
+      "schema": "xy-int-v1",
+      "scope": "composite:resource",
+      "source": "environment",
+      "split": "admission",
+      "task_id": "1101:resource:ood:27"
+    },
+    {
+      "event_id": "event:553a4def3aa2e19a476a115b0724024d3172693598f55b3580b78f64a71a703b",
+      "expected": 2,
+      "inputs": {
+        "x": 31,
+        "y": 27
+      },
+      "mechanism": "v2",
+      "schema": "xy-int-v1",
+      "scope": "composite:resource",
+      "source": "environment",
+      "split": "admission",
+      "task_id": "1101:resource:ood:28"
+    },
+    {
+      "event_id": "event:a135dc57f13bfcd87dc1180e0a8583350261734dbc558044ab22b9e574e2984f",
+      "expected": 25,
+      "inputs": {
+        "x": 30,
+        "y": 3
+      },
+      "mechanism": "v2",
+      "schema": "xy-int-v1",
+      "scope": "composite:resource",
+      "source": "environment",
+      "split": "admission",
+      "task_id": "1101:resource:ood:29"
+    },
+    {
+      "event_id": "event:8485048e9d8be8255dfcfb2c677d370943c1b347829fcebcb252b20993d7c8b0",
+      "expected": 5,
+      "inputs": {
+        "x": 13,
+        "y": 6
+      },
+      "mechanism": "v2",
+      "schema": "xy-int-v1",
+      "scope": "composite:resource",
+      "source": "environment",
+      "split": "admission",
+      "task_id": "1101:resource:ood:30"
+    },
+    {
+      "event_id": "event:2d972218cbed5e2408dbb8a10df22599e38707877e5624fd747199df1e77eec2",
+      "expected": 6,
+      "inputs": {
+        "x": 10,
+        "y": 2
+      },
+      "mechanism": "v2",
+      "schema": "xy-int-v1",
+      "scope": "composite:resource",
+      "source": "environment",
+      "split": "admission",
+      "task_id": "1101:resource:ood:31"
+    }
+  ],
+  "candidate": {
+    "dependencies": [],
+    "grammar_fingerprint": "80895f74b4ebf91ad5b44c44b9acb8754c21085bc54154a25ceeabc9a9483087",
+    "mechanism": "v2",
+    "program": {
+      "ast": [
+        "sub",
+        [
+          "sub",
+          [
+            "input",
+            "x"
+          ],
+          [
+            "input",
+            "y"
+          ]
+        ],
+        [
+          "add",
+          [
+            "const",
+            1
+          ],
+          [
+            "const",
+            1
+          ]
+        ]
+      ],
+      "fingerprint": "f5ec21e6b252502935155b36c66c2aa57ccddc3e037bb7770f4509143f558a8a",
+      "v": 1
+    },
+    "proposal_examples": [
+      {
+        "event_id": "event:baf6bc91c5585c13ecaaf189275b9b5198dfc82ae9bde197146fb232145df434",
+        "expected": 15,
+        "inputs": {
+          "x": 21,
+          "y": 4
+        },
+        "mechanism": "v2",
+        "schema": "xy-int-v1",
+        "scope": "composite:resource",
+        "source": "environment",
+        "split": "proposal",
+        "task_id": "1101:resource:ood:0"
+      },
+      {
+        "event_id": "event:4745e055748f0e00b9602e8c34e25907884d9dacd8ee97ca0311ac077158840a",
+        "expected": 1,
+        "inputs": {
+          "x": 23,
+          "y": 20
+        },
+        "mechanism": "v2",
+        "schema": "xy-int-v1",
+        "scope": "composite:resource",
+        "source": "environment",
+        "split": "proposal",
+        "task_id": "1101:resource:ood:1"
+      },
+      {
+        "event_id": "event:61bda42400eda98be5a2997e018565c23abea97d6b1662a449156cabc82c6415",
+        "expected": 14,
+        "inputs": {
+          "x": 28,
+          "y": 12
+        },
+        "mechanism": "v2",
+        "schema": "xy-int-v1",
+        "scope": "composite:resource",
+        "source": "environment",
+        "split": "proposal",
+        "task_id": "1101:resource:ood:2"
+      },
+      {
+        "event_id": "event:155186c0aad84504a7476a37e891f2fa913e1d9c8c2c48bb08c51cd5f2cf10bc",
+        "expected": 12,
+        "inputs": {
+          "x": 21,
+          "y": 7
+        },
+        "mechanism": "v2",
+        "schema": "xy-int-v1",
+        "scope": "composite:resource",
+        "source": "environment",
+        "split": "proposal",
+        "task_id": "1101:resource:ood:3"
+      },
+      {
+        "event_id": "event:f462e8c650cec42c113e33e1de30e8cfc16e8d165ac06c8fd03e7a577899e608",
+        "expected": 2,
+        "inputs": {
+          "x": 17,
+          "y": 13
+        },
+        "mechanism": "v2",
+        "schema": "xy-int-v1",
+        "scope": "composite:resource",
+        "source": "environment",
+        "split": "proposal",
+        "task_id": "1101:resource:ood:4"
+      },
+      {
+        "event_id": "event:bfb7750f371393b2748a1c6d6bcecf9ec691803956259b809e2b7dd41e45c1b7",
+        "expected": 17,
+        "inputs": {
+          "x": 31,
+          "y": 12
+        },
+        "mechanism": "v2",
+        "schema": "xy-int-v1",
+        "scope": "composite:resource",
+        "source": "environment",
+        "split": "proposal",
+        "task_id": "1101:resource:ood:5"
+      },
+      {
+        "event_id": "event:2d4d2c2e7007f67dbc03c3bf733d92d8d10ce66eb08b9f2810d45b12fea1d25a",
+        "expected": 2,
+        "inputs": {
+          "x": 22,
+          "y": 18
+        },
+        "mechanism": "v2",
+        "schema": "xy-int-v1",
+        "scope": "composite:resource",
+        "source": "environment",
+        "split": "proposal",
+        "task_id": "1101:resource:ood:6"
+      },
+      {
+        "event_id": "event:9f4f99e246e63ee9385fc6d166d837dc15661d34e75aea410bd9df2193a8745e",
+        "expected": 9,
+        "inputs": {
+          "x": 22,
+          "y": 11
+        },
+        "mechanism": "v2",
+        "schema": "xy-int-v1",
+        "scope": "composite:resource",
+        "source": "environment",
+        "split": "proposal",
+        "task_id": "1101:resource:ood:7"
+      },
+      {
+        "event_id": "event:d6469dbf417194622c6727030a0466f46bd1763f1477bbcbaec40f990d8fc6f4",
+        "expected": 8,
+        "inputs": {
+          "x": 21,
+          "y": 11
+        },
+        "mechanism": "v2",
+        "schema": "xy-int-v1",
+        "scope": "composite:resource",
+        "source": "environment",
+        "split": "proposal",
+        "task_id": "1101:resource:ood:8"
+      },
+      {
+        "event_id": "event:b6b4c3ee7b7d128ec0391aaf6f98d0a9dd61b9d9ef57a351eced4729a16cfe21",
+        "expected": 7,
+        "inputs": {
+          "x": 14,
+          "y": 5
+        },
+        "mechanism": "v2",
+        "schema": "xy-int-v1",
+        "scope": "composite:resource",
+        "source": "environment",
+        "split": "proposal",
+        "task_id": "1101:resource:ood:9"
+      },
+      {
+        "event_id": "event:9ecf100ce4195031e5b35c2db2a687a58527e2904c2a2b8e5f65470b0a13e2a9",
+        "expected": 22,
+        "inputs": {
+          "x": 26,
+          "y": 2
+        },
+        "mechanism": "v2",
+        "schema": "xy-int-v1",
+        "scope": "composite:resource",
+        "source": "environment",
+        "split": "proposal",
+        "task_id": "1101:resource:ood:10"
+      },
+      {
+        "event_id": "event:e0925ae16e2df608297ce6b302b3daad4d048b5ab96dabc11a111ba50b02108f",
+        "expected": 7,
+        "inputs": {
+          "x": 9,
+          "y": 0
+        },
+        "mechanism": "v2",
+        "schema": "xy-int-v1",
+        "scope": "composite:resource",
+        "source": "environment",
+        "split": "proposal",
+        "task_id": "1101:resource:ood:11"
+      },
+      {
+        "event_id": "event:4d182b4220697b9feb40a2c6ba8762392ac1af75b8d0f1d3fe7930698bb250a7",
+        "expected": 12,
+        "inputs": {
+          "x": 22,
+          "y": 8
+        },
+        "mechanism": "v2",
+        "schema": "xy-int-v1",
+        "scope": "composite:resource",
+        "source": "environment",
+        "split": "proposal",
+        "task_id": "1101:resource:ood:12"
+      },
+      {
+        "event_id": "event:48959a1505cb6aa7d58067053668ea8840af8fbf9523ea7d638c2b9db8aa9405",
+        "expected": 12,
+        "inputs": {
+          "x": 18,
+          "y": 4
+        },
+        "mechanism": "v2",
+        "schema": "xy-int-v1",
+        "scope": "composite:resource",
+        "source": "environment",
+        "split": "proposal",
+        "task_id": "1101:resource:ood:13"
+      },
+      {
+        "event_id": "event:43aa033df43f94eefba32f0753069060059eeaead33078703bc04760808e35ce",
+        "expected": 14,
+        "inputs": {
+          "x": 17,
+          "y": 1
+        },
+        "mechanism": "v2",
+        "schema": "xy-int-v1",
+        "scope": "composite:resource",
+        "source": "environment",
+        "split": "proposal",
+        "task_id": "1101:resource:ood:14"
+      },
+      {
+        "event_id": "event:729d1841eafa4ca79a26cc5c92358b41ab0f259bf3fb7e4c41596735bbd5cf16",
+        "expected": 8,
+        "inputs": {
+          "x": 25,
+          "y": 15
+        },
+        "mechanism": "v2",
+        "schema": "xy-int-v1",
+        "scope": "composite:resource",
+        "source": "environment",
+        "split": "proposal",
+        "task_id": "1101:resource:ood:15"
+      }
+    ],
+    "schema": "xy-int-v1",
+    "scope": "composite:resource"
+  },
+  "provenance": {
+    "competence_id": "a04eafbb81802ecf4bf7cf4cadf571867dc48a7fa4f0d6c87c50eb9971c92fad",
+    "line": 20511,
+    "line_sha256": "67e69f74ce07d0d207bd4eacd522ebc70217ba25c1d288647b83579499021f06",
+    "raw_path": "/home/exactor/Projects/Prototypes/new_kelly/stuff/audit/solvi_experience_20261106/eval/final/shard0/raw.jsonl",
+    "seed": 1101,
+    "trial_key": "cf3b6bffe02feda9eb4f809ac8560dbfa85620f3dcb4ca2f2947b0ff54d66a64"
+  }
+}
