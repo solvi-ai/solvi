@@ -206,7 +206,7 @@ def solve_task(env, task_id, arm, budget, registry, cache, rng, encoding=False):
             proposed = x - y - 1 if task.scope == "composite:resource" else max(x, y) + 1
             if task.mechanism == "v2":
                 budget.charge("formula_primitive", 2)
-                proposed = x - y - 1 - int(x >= 4) if task.scope == "composite:resource" else x + y + 1
+                proposed = proposed - int(x >= 4) if task.scope == "composite:resource" else x + y + 1
             budget.charge("cache_fill")
             cache[key] = proposed
     if proposed is None:

@@ -235,3 +235,51 @@ def test_seed_shards_are_disjoint_complete_and_keep_order():
     for index, count in [(-1, 3), (3, 3), (0, 0), (0, 13), (True, 3)]:
         with pytest.raises(ValueError, match="invalid seed shard"):
             shard_seeds(SEEDS, index, count)
+
+
+@pytest.mark.parametrize("family,mechanism,primitives", [
+    ("resource", "v1", 2), ("resource", "v2", 4),
+    ("workflow", "v1", 2), ("workflow", "v2", 4),
+])
+def test_formula_debits_every_executed_primitive_before_work(family, mechanism, primitives):
+    """Count Python arithmetic independently; cache hits must execute no formula."""
+    from types import SimpleNamespace
+    from benchmarks.experience_transfer import Ledger, solve_task
+
+    budget = Ledger(65536, 8)
+    operations = []
+
+    def operation(name):
+        operations.append(name)
+        assert len(operations) <= budget.raw.get("formula_primitive", 0), "unpaid formula operation"
+
+    class CountedInt(int):
+        def __sub__(self, other):
+            operation("sub")
+            return CountedInt(int(self) - int(other))
+
+        def __add__(self, other):
+            operation("add")
+            return CountedInt(int(self) + int(other))
+
+        def __ge__(self, other):
+            operation("ge")
+            return int(self) >= int(other)
+
+        def __gt__(self, other):
+            operation("gt")
+            return int(self) > int(other)
+
+    task = SimpleNamespace(scope="composite:" + family, mechanism=mechanism,
+                           inputs={"x": CountedInt(8), "y": CountedInt(1)})
+    receipt = SimpleNamespace(value={"ok": True}, to_dict=lambda: {"kind": "act"})
+    environment = SimpleNamespace(task=lambda task_id: task, execute=lambda *args: receipt)
+    cache = {}
+    first = solve_task(environment, "first", "FORMULA_CACHE", budget, None, cache, None)
+    assert len(operations) == budget.raw["formula_primitive"] == primitives
+    assert int(first["proposed"]) == (5 if family == "resource" and mechanism == "v2"
+                                     else 6 if family == "resource" else 10 if mechanism == "v2" else 9)
+    solve_task(environment, "second", "FORMULA_CACHE", budget, None, cache, None)
+    assert len(operations) == budget.raw["formula_primitive"] == primitives
+    assert budget.raw["cache_lookup"] == 2
+    assert budget.raw["cache_fill"] == 1

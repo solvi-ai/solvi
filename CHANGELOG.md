@@ -8,6 +8,8 @@
   with acquired operations; its learning boundaries are tested with process kills. The supported
   models and grammar are explicit; admission on finite examples is not a universal correctness guarantee. See
   [executable experience](docs/experience.md) for the protocol, costs, recovery boundaries and examples.
+- Make the experience benchmark's resource formula reuse its paid intermediate result. Independent arithmetic
+  instrumentation checks that every executed primitive is charged before work, including cache misses and hits.
 
 ## 1.5.0 — 2026-11-05
 
