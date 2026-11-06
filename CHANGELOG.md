@@ -2,6 +2,13 @@
 
 ## 1.6.0 — Unreleased
 
+- Add experimental `RefinementSession` for bounded counterexample-guided learning with paid observation selection,
+  source-bound receipts, durable read reconciliation and explicit volatile mode. Expose immutable observation options
+  and a bounded disagreement-per-price selector; synthesis can exclude up to 32 paid program fingerprints.
+- Add a runnable counterexample/observation/recovery example and an independently audited component benchmark of
+  twelve authored finite mechanisms. Verification is limited to declared domains; no general learning advantage is claimed.
+
+
 - Reuse paid expression vectors during experimental synthesis; cache finite probe partitions and prune losing
   branches while preserving bounded minimax choices. Cache reads remain paid and tiny cases may cost more.
 - Stop evaluating a rejected expression at the grammar's maximum node count after its first mismatching example;

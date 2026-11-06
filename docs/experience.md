@@ -177,3 +177,52 @@ This evaluates component contracts rather than `AutoCurriculum` scheduling. The 
 finite rules, not an external benchmark. Full-domain oracle checks include the transfer inputs: later correct
 application is not evidence of prediction on unseen oracle labels. Search-cost savings, checked success rates
 and the cost of the complete strategy must be reported separately.
+
+
+## Counterexample-guided learning and useful observations
+
+`RefinementSession` adds a bounded iterative learner on top of the same grammar, program evaluator,
+finite-domain checker and shared work ledger. Each round proposes a program, optionally buys an observation,
+and checks the candidate. Only the first counterexample is added to training before the next proposal.
+Other verifier receipts remain audit evidence rather than extra training labels. The grammar remains fixed;
+search can fail even when a solution exists. `max_rounds`, `max_observations`, committee size and the total
+budget bound the work. A result with `status="verified"` covers only the declared verification domain.
+It is not a registry entry, a promise about new inputs, or authorization for external effects.
+Use the existing `CompetenceRegistry.admit_checked` with independent admission examples to authorize a
+checked operation; that path performs its own check rather than trusting a session result DTO.
+
+`ObservationOption(name, inputs, cost)` declares one allowed input and its read price. The immutable option
+contains no label. `select_observation(programs, options, grammar, budget)` pays to execute candidate
+predictions and count typed pair disagreements, then selects the greatest disagreements/read-price ratio.
+Ties follow host order. Invalid execution is a separate marker; bool and int outputs remain distinct.
+No disagreement means no purchase. The host pays for the actual read separately. This is a heuristic over
+at most 32 supplied programs and 256 options, not an optimal information-gain guarantee.
+
+Session modes are `none` (counterexamples only), `fixed`, `random` and `active`. Active constructs a small
+committee by repeated paid synthesis with excluded fingerprints. `synthesize(..., exclude=...)` accepts
+at most 32 fingerprints; omitted exclusion retains the previous first-match behavior. Committee search is
+incomplete and may cost more than the saved observations. Fixed/random purchase up to the same observation
+quota; active can stop buying sooner. Comparing these policies does not isolate point choice from stopping.
+
+Pass `journal=ExperienceJournal(...)` for durable operation. The session binds its grammar, finite domain,
+source revision, options, caps and mode. It records each debit and saves a read intent before calling the
+host oracle. `RefinementSession.restore(journal=..., grammar=..., domain=..., oracle=..., options=...)`
+reopens the original bound state and preserves subsequent debits. An uncertain read is never automatically
+reissued: `oracle.reconcile(request_id)` must return its original `DomainReceipt`, otherwise the session
+stays blocked. Reconciliation itself must be a side-effect-free host lookup. Source changes stop the session.
+Pure interrupted computations may be repeated and paid again; a recovered receipt is not repurchased.
+A debit/persistence sink failure poisons the current writer. `journal=None` is explicitly volatile and
+provides no crash-durability guarantee. Journaling overhead and retained history need separate resource budgets.
+
+Keep initial observation inputs, selectable observation inputs, verification inputs and closed transfer
+inputs under host control. The API does not sandbox a malicious host. Do not expose transfer inputs or labels
+to training or observation selection. Applying a frozen program outside its verification domain is empirical
+prediction; it must not be presented as certified execution.
+
+See `examples/31_counterexample_learning.py` for real SQLite receipts and knowledge journal, a counterexample
+that causes a new proposal, an active paid observation, and completed-state recovery. The separate
+`benchmarks/refinement_bench.py` evaluates twelve authored finite mechanisms across numeric tables, boolean
+policies and multistep numeric dependencies. Its independent scorer checks held-out predictions and complete
+budgets. It does not measure arbitrary strings, external real-world tasks, distribution shift or general
+scientific superiority; the known-formula and direct-measurement controls have privileged access disclosed
+by the benchmark protocol.

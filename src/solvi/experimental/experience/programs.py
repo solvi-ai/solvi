@@ -229,7 +229,7 @@ def _partitions(total, arity):
             yield (first, *tail)
 
 
-def synthesize(examples, grammar: Grammar, budget: WorkBudget) -> SearchResult:
+def synthesize(examples, grammar: Grammar, budget: WorkBudget, *, exclude=()) -> SearchResult:
     """Find first exact proposal match; never certifies generalization.
 
     Inputs have a fixed name schema and consistent per-name types across rows.
@@ -255,6 +255,14 @@ def synthesize(examples, grammar: Grammar, budget: WorkBudget) -> SearchResult:
             raise
 
     try:
+        if type(exclude) not in (tuple, list, set, frozenset) or len(exclude) > 32:
+            raise ValueError("exclude requires at most 32 fingerprints")
+        excluded = set()
+        for fingerprint in exclude:
+            charge("search_exclusion")
+            if type(fingerprint) is not str:
+                raise ValueError("excluded program fingerprints must be strings")
+            excluded.add(fingerprint)
         rows = []
         schema = None
         target_type = None
@@ -322,7 +330,10 @@ def synthesize(examples, grammar: Grammar, budget: WorkBudget) -> SearchResult:
                     return None
                 outputs.append((type(value).__name__, value))
             if matches:
-                return SearchResult(p, tried, "found")
+                if excluded:
+                    charge("search_exclusion")
+                if p.fingerprint not in excluded:
+                    return SearchResult(p, tried, "found")
             charge("search_compare", len(outputs))
             signature = tuple(outputs)
             if signature not in seen:

@@ -15,6 +15,8 @@ from .interfaces import Environment, ProbeSpec, Receipt, TaskSpec  # noqa: E402
 from .journal import ExperienceJournal  # noqa: E402
 from .loop import ExperienceRunner  # noqa: E402
 from .curriculum import AutoCurriculum  # noqa: E402
+from .refinement import RefinementSession  # noqa: E402
+from .observations import ObservationOption, ObservationChoice, select_observation  # noqa: E402
 from .programs import Grammar, Program, SearchResult, synthesize  # noqa: E402
 from .tabular import TabularEnvironment, TabularOracle  # noqa: E402
 from .worlds import Decision, WorldSet  # noqa: E402
@@ -36,6 +38,10 @@ __all__ = [
     "FiniteEnvironment",
     "FiniteDomain",
     "Grammar",
+    "ObservationOption",
+    "ObservationChoice",
+    "RefinementSession",
+    "select_observation",
     "Probe",
     "ProbeChoice",
     "ProbeSpec",

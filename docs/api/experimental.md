@@ -6,3 +6,11 @@ decisions it takes part in. Importing this package warns about nothing; each pie
 [Experimental](../experimental.md).
 
 ::: solvi.experimental
+
+
+### Counterexample refinement (experience)
+
+`RefinementSession` implements bounded paid counterexample-guided iteration and optional observations.
+`ObservationOption`, `ObservationChoice` and `select_observation` expose finite committee disagreement selection.
+These APIs do not activate registry operations or authorize side effects. See [experience](../experience.md)
+for verified-domain scope, source contracts, budget accounting and durable read reconciliation.

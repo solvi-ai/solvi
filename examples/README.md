@@ -35,3 +35,5 @@ Each file is a self-contained script. Run from the repository root with `uv run 
 Models for 07 and 08 load from Hugging Face (`solvi-ai/extract-receipts`, `solvi-ai/extract-base`) or from a local directory
 given in `SOLVI_MODEL`. Examples 13, 15, 16 and 18 use the decider from `SOLVI_DECIDE_MODEL` (a checkpoint folder or a Hugging Face id) when
 it is set, and a keyword stand-in otherwise.
+
+- `31_counterexample_learning.py`: bounded counterexample refinement, useful paid observations and durable SQLite/journal recovery; no model or network required.
