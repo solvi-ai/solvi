@@ -60,3 +60,7 @@ Read [executable experience](../experience.md) before using the environment and 
 ## `refinement`
 
 ::: solvi.experimental.experience.refinement
+
+## `stratified`
+
+::: solvi.experimental.experience.stratified

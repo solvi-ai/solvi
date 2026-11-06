@@ -115,3 +115,6 @@ def plan_stratified_observations(examples, options, budget, *, limit=8, candidat
     return StratifiedObservationPlan(
         tuple(result), tuple(features[s[0]] for s in selected), tuple(s[1] for s in selected), "stratified"
     )
+
+
+__all__ = ["StratifiedObservationPlan", "plan_stratified_observations"]
