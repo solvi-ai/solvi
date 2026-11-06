@@ -286,3 +286,55 @@ def test_budgetstop_raised_by_sink_is_fatal():
         session.step()
     with pytest.raises(RuntimeError):
         session.step()
+
+
+def test_reopen_preserves_paid_catalog_reconstruction_extension():
+    journal = ExperienceJournal(KnowledgeStore(), "compute", {})
+    session = VerifiedComputation(plan(), [add()], WorkBudget(300), journal=journal,
+                                  inputs={"x": 2, "y": 3})
+    session.step()
+    cold_budget = WorkBudget.restore(session.budget.snapshot())
+    cold_budget.charge("catalog_compile", 9)
+    before = cold_budget.spent
+    restored = VerifiedComputation(plan(), [add()], cold_budget, journal=journal)
+    assert restored.budget is cold_budget
+    assert cold_budget.spent == before + 16 + 5
+    assert cold_budget.counts["catalog_compile"] == 9
+    restored.run()
+    assert restored.outputs["out"] == 5
+
+
+def test_reopen_rejects_incomparable_supplied_category_vectors_without_reset():
+    journal = ExperienceJournal(KnowledgeStore(), "compute", {})
+    session = VerifiedComputation(plan(), [add()], WorkBudget(300), journal=journal,
+                                  inputs={"x": 2, "y": 3})
+    session.step()
+    supplied = WorkBudget(300)
+    supplied.charge("unrelated_work", session.budget.spent + 5)
+    before = supplied.snapshot()
+    with pytest.raises(ValueError, match="category vectors"):
+        VerifiedComputation(plan(), [add()], supplied, journal=journal)
+    assert supplied.snapshot() == before
+
+
+@pytest.mark.parametrize("action", ["inputs", "operators", "observe"])
+def test_failed_invalidation_reservation_keeps_state_but_pays_scan(action):
+    from solvi.experimental.experience._common import BudgetStop
+    session = VerifiedComputation(plan(), [add()], WorkBudget(90), inputs={"x": 2, "y": 3})
+    assert session.run().status == "complete"
+    before = session.snapshot()
+    calls = []
+    with pytest.raises(BudgetStop):
+        if action == "inputs":
+            session.update_inputs({"x": 10}, "next")
+        elif action == "operators":
+            session.update_operators([add(revision="next")])
+        else:
+            session.observe("x", lambda: calls.append(10) or 10, 4, "next")
+    after = session.snapshot()
+    for key in ("inputs", "cache", "config", "pending", "failed"):
+        assert after[key] == before[key]
+    assert session.budget.spent == before["ledger"]["spent"] + 7
+    assert session.budget.counts["compute_invalidation_scan"] == 7
+    assert session.outputs["out"] == 5
+    assert not calls

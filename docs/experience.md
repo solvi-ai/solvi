@@ -397,9 +397,16 @@ A counterexample revokes the operation. Finite admission does not certify other 
 This catalog does not invent a semantic specification or perform unrestricted subtree
 search. The host asserts that Program metadata describes its accepted computation;
 independent admission tests that assertion. Store-bound registries are not supported.
-Callable serialization is unavailable: rebuild a catalog with paid acquisition in a new
-registry after recovery. A growing registry requires rebuilding existing operation
-wrappers. This is a limited executable vocabulary, not automatic general algorithm
+Callable serialization is unavailable. Save `catalog.snapshot(budget=budget)` alongside
+the existing registry snapshot and the current ledger. After restoring the registry,
+`OperationCatalog.restore(snapshot, registry=registry, budget=budget)` checks the saved
+candidate/admission/domain bindings and recompiles the callable for a paid fee, without
+another oracle purchase. Supply the same independent verifier and `verify_revision`
+to `operation()` before reopening the graph journal. The budget must retain its saved
+categories and all additional reconstruction work; a monotonic extension is accepted,
+incompatible ledgers are rejected. The host must persist these coordinated snapshots
+and durably record reconstruction debits. A growing registry requires rebuilding
+existing operation wrappers. This is a limited executable vocabulary, not automatic general algorithm
 invention. See `examples/35_verified_computation.py` for the complete connected path.
 
 Declared units constrain prepaid work, not arbitrary Python runtime, memory or truth.

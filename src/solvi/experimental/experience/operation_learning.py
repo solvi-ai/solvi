@@ -6,16 +6,16 @@ finite-domain admission remains mandatory. This does not invent an algorithm.
 The DAG prepays the returned operator's static costs before its callbacks.
 Compilation removes recursive AST dispatch, never charges fewer primitives.
 
-No callable serialization is supported. Rebuild a library in a fresh registry
-with paid record/acquire calls; restored registries retain their frozen batches.
+Snapshots bind registry evidence; restore recompiles paid pure instructions.
+Callables are never serialized; hosts supply versioned live verifiers again.
 """
 from __future__ import annotations
 
 from collections.abc import Mapping
 from weakref import WeakKeyDictionary
 
-from ._common import canonical, digest, identifier, natural
-from .competences import CompetenceRegistry, ExternalExample
+from ._common import canonical, digest, identifier, natural, portable
+from .competences import AdmissionRecord, Candidate, CompetenceRegistry, ExternalExample
 from .domain_checks import FiniteDomain
 from .programs import Program, _primitive, _scalar
 
@@ -31,6 +31,109 @@ class OperationCatalog:
         self._templates = {}
         self._session_numbers = WeakKeyDictionary()
         self._next_session_number = 0
+
+    @staticmethod
+    def _compile(program, budget):
+        instructions = []
+
+        def visit(node):
+            budget.charge("operation_compile")
+            if node[0] in ("input", "const"):
+                instructions.append(node)
+            else:
+                for child in node[1:]:
+                    visit(child)
+                instructions.append((node[0], len(node) - 1))
+
+        visit(program.ast)
+        return tuple(instructions)
+
+    def snapshot(self, *, budget):
+        budget.charge("operation_snapshot", 1 + len(self._templates))
+        entries = []
+        for key, template in self._templates.items():
+            candidate = template["candidate"]
+            budget.charge("operation_snapshot", candidate.program.nodes + len(candidate.proposal_examples))
+            admission = template.get("admission")
+            entries.append(dict(key=key, candidate_id=candidate.candidate_id,
+                                admission=None if admission is None else dict(admission.__dict__),
+                                domain=None if admission is None else template["domain"].to_dict(budget=budget)))
+        body = dict(v=1, grammar_fingerprint=self.registry.grammar.fingerprint,
+                    max_templates=self.max_templates, max_samples=self.max_samples,
+                    next_session_number=self._next_session_number, templates=entries)
+        return {**body, "digest": digest(body)}
+
+    @classmethod
+    def restore(cls, snapshot, *, registry, budget):
+        """Recompile existing checked evidence; never perform or grant admission.
+
+        Registry restoration validates its proof transcript first. This method
+        checks catalog bindings against that registry's public snapshot. No
+        registry writes or oracle calls occur. Persist the shared ledger after
+        rebuilding, before reopening graph execution.
+        """
+        budget.charge("operation_restore")
+        fields = {"v", "grammar_fingerprint", "max_templates", "max_samples",
+                  "next_session_number", "templates", "digest"}
+        if type(snapshot) is not dict or set(snapshot) != fields:
+            raise ValueError("invalid catalog snapshot schema")
+        if (type(snapshot["v"]) is not int or snapshot["v"] != 1 or
+                type(snapshot["templates"]) is not list or len(snapshot["templates"]) > 16):
+            raise ValueError("invalid catalog snapshot version or bounds")
+        budget.charge("operation_restore", len(snapshot["templates"]) + 1)
+        data = portable(snapshot)
+        checksum = data.pop("digest")
+        if checksum != digest(data) or data["grammar_fingerprint"] != registry.grammar.fingerprint:
+            raise ValueError("catalog snapshot integrity or grammar mismatch")
+        catalog = cls(registry, max_templates=data["max_templates"], max_samples=data["max_samples"])
+        natural(data["next_session_number"], "session counter")
+        catalog._next_session_number = data["next_session_number"]
+        if len(data["templates"]) > catalog.max_templates:
+            raise ValueError("template limit")
+        budget.charge("operation_restore_registry", 1 + catalog.max_templates * catalog.max_samples)
+        evidence = registry.snapshot()
+        for entry in data["templates"]:
+            budget.charge("operation_restore")
+            if type(entry) is not dict or set(entry) != {"key", "candidate_id", "admission", "domain"}:
+                raise ValueError("invalid catalog template schema")
+            cid, key = entry["candidate_id"], entry["key"]
+            if type(cid) is not str or type(key) is not str or cid not in evidence["candidates"]:
+                raise ValueError("missing catalog candidate")
+            raw = evidence["candidates"][cid]
+            budget.charge("operation_restore_candidate", registry.grammar.max_nodes + catalog.max_samples)
+            candidate = Candidate.from_dict(raw)
+            if (candidate.candidate_id != cid or candidate.program.fingerprint != key or
+                    candidate.grammar_fingerprint != registry.grammar.fingerprint or candidate.dependencies or
+                    not 1 <= len(candidate.proposal_examples) <= catalog.max_samples or key in catalog._templates):
+                raise ValueError("catalog candidate mismatch or sample bound")
+            template: dict = {"candidate": candidate}
+            admission = entry["admission"]
+            if admission is None:
+                if entry["domain"] is not None or cid in evidence["admissions"]:
+                    raise ValueError("missing catalog admission")
+            else:
+                if type(admission) is not dict or set(admission) != {"accepted", "reason", "competence_id"}:
+                    raise ValueError("invalid catalog admission")
+                saved = evidence["admissions"].get(cid)
+                proof = evidence["checked"].get(cid)
+                if (saved is None or saved["mode"] != "checked" or saved["result"] != admission or
+                        proof is None or proof["binding"]["candidate_id"] != cid or
+                        len(saved["event_ids"]) + len(candidate.proposal_examples) > catalog.max_samples):
+                    raise ValueError("catalog checked admission mismatch")
+                domain = FiniteDomain.from_dict(entry["domain"], registry.grammar, budget=budget)
+                if proof["binding"]["domain"] != entry["domain"]:
+                    raise ValueError("catalog domain binding mismatch")
+                if admission["accepted"]:
+                    competence = evidence["competences"].get(cid)
+                    if (admission["competence_id"] != cid or competence is None or
+                            competence["status"] != "active" or proof["result"] is None or
+                            proof["result"]["status"] != "verified" or
+                            proof["registry_proof_id"] is None or len(candidate.proposal_examples) < 2):
+                        raise ValueError("catalog competence not active and verified")
+                template.update(admission=AdmissionRecord(**admission), domain=domain,
+                                instructions=catalog._compile(candidate.program, budget))
+            catalog._templates[key] = template
+        return catalog
 
     def record_session(self, session, node_programs: Mapping[str, Program], budget, *,
                        scope, mechanism, schema, task_prefix):
@@ -155,18 +258,7 @@ class OperationCatalog:
             if len(rows) + len(candidate.proposal_examples) >= self.max_samples:
                 raise ValueError("sample limit")
             rows.append(example)
-        instructions = []
-
-        def compile_node(node):
-            budget.charge("operation_compile")
-            if node[0] in ("input", "const"):
-                instructions.append(node)
-            else:
-                for child in node[1:]:
-                    compile_node(child)
-                instructions.append((node[0], len(node) - 1))
-
-        compile_node(candidate.program.ast)
+        instructions = self._compile(candidate.program, budget)
         admission = self.registry.admit_checked(candidate, rows, budget,
                                                 domain=domain, oracle=oracle,
                                                 min_examples=min_examples)

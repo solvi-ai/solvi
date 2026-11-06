@@ -95,3 +95,16 @@ def test_learning_uses_actual_two_trace_sessions_and_full_global_budget(family,a
     assert [e["outputs"] for e in result["epochs"]]==_truth(result)
     # A learned callable may cost more; acquisition never forces it into the policy.
     assert not [e for e in result["callbackevents"] if e["opname"].startswith("learned:")]
+
+
+def test_dirty_hot_outputs_have_no_redundant_topological_pass():
+    row = trial(17, "invoice", 100000, "DIRTY")
+    assert row["epochs"][4]["spent"] == row["epochs"][3]["spent"]
+    assert row["epochs"][9]["spent"] == row["epochs"][8]["spent"]
+
+
+def test_no_cache_keeps_one_preprocessed_session():
+    enabled = trial(17, "invoice", 100000, "DISPATCH")
+    disabled = trial(17, "invoice", 100000, "NO_CACHE")
+    assert enabled["ledger"]["counts"]["compute_setup"] == disabled["ledger"]["counts"]["compute_setup"]
+    assert len([e for e in disabled["callbackevents"] if e["phase"] == "epoch:4"]) == 5

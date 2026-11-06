@@ -39,3 +39,21 @@ def test_strict_types_and_tamper():
     row["spec"]["nodes"][0]["kind"] = "add"
     with pytest.raises(ValueError, match="fixture"):
         audit(row)
+
+
+@pytest.mark.parametrize("accepted,proposal,expected", [(False, 1, 0), (True, 2, 0), (True, 1, 1)])
+def test_learned_count_requires_independently_correct_accepted_call(accepted, proposal, expected):
+    from benchmarks.compute_score import fixture
+    from solvi.experimental.experience import WorkBudget
+    charges = []
+    def sink(s):
+        charges.append({"kind": "compute_attempt", "amount": 82, **s})
+    budget = WorkBudget(1000, on_charge=sink)
+    budget.charge("compute_attempt", 82)
+    row = {"seed": 7, "family": "invoice", "limit": 1000, "arm": "DISPATCH", **fixture(7, "invoice"),
+           "ledger": budget.snapshot(), "charges": charges,
+           "callbackevents": [{"kind": "blend", "args": [0, 1], "proposal": proposal, "accepted": accepted,
+                               "opname": "learned:known", "cost": 28, "verify_cost": 52, "phase": "epoch:0"}],
+           "epochs": [{"epoch": i, "spent": 82, "outputs": {}, "status": "budget"} for i in range(12)],
+           "acquisition": {"spent": 0, "status": "disabled"}}
+    assert audit(row)["learned_calls"] == expected

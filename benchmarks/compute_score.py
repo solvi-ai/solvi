@@ -135,7 +135,7 @@ def audit(row):
         attempt_sum += event["cost"] + event["verify_cost"] + 2
         if event["phase"].startswith("epoch:"):
             epoch_calls += 1
-            learned_calls += learned
+            learned_calls += learned and event["accepted"] and _same(truth, event["proposal"])
     if attempt_sum != counts["compute_attempt"] + counts["baseline_attempt"]:
         raise ValueError("attempt debit does not match executed/verified callbacks")
     if len(row["epochs"]) != 12:

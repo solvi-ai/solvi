@@ -1,3 +1,6 @@
+import copy
+import json
+
 import pytest
 
 from solvi.experimental.experience._common import BudgetStop, WorkBudget, digest
@@ -6,8 +9,10 @@ from solvi.experimental.experience.computation import (
     ComputationPlan, ComputeNode, ComputeOperator, VerifiedComputation,
 )
 from solvi.experimental.experience.domain_checks import DomainReceipt, FiniteDomain
+from solvi.experimental.experience.journal import ExperienceJournal
 from solvi.experimental.experience.operation_learning import OperationCatalog
 from solvi.experimental.experience.programs import Grammar, Program
+from solvi.core.knowledge import KnowledgeStore
 
 
 def example(n, x, split="proposal", expected=None):
@@ -212,3 +217,47 @@ def test_session_extraction_skips_unverified_output_and_prepays():
     with pytest.raises(BudgetStop):
         catalog.record_session(session, {"rejected": program}, WorkBudget(0), scope="s",
                                mechanism="m", schema="schema", task_prefix="bad")
+
+
+def test_catalog_json_cold_restore_reopens_same_graph_with_paid_compilation(tmp_path):
+    budget, registry, catalog, _, key, _, op = acquired()
+    portable_catalog = json.loads(json.dumps(catalog.snapshot(budget=budget)))
+    portable_registry = json.loads(json.dumps(registry.snapshot()))
+    plan = ComputationPlan(("source",), (ComputeNode("out", ("source",), (op.name,)),), ("out",))
+    path = str(tmp_path / "cold.db")
+    journal = ExperienceJournal(KnowledgeStore(path), "cold", {})
+    session = VerifiedComputation(plan, [op], budget, journal=journal, inputs={"source": 4})
+    session.run()
+    assert session.outputs["out"] == 5
+    before = budget.spent
+    cold_registry = CompetenceRegistry.restore(portable_registry, grammar=registry.grammar)
+    cold_budget = WorkBudget.restore(budget.snapshot())
+    cold_journal = ExperienceJournal(KnowledgeStore(path), "cold", {})
+    cold_budget.on_charge = cold_journal.debit
+    restored = OperationCatalog.restore(portable_catalog, registry=cold_registry, budget=cold_budget)
+    restored_op = restored.operation(key, verify=lambda v, p: p - v[0] == 1,
+                                     verify_revision="independent-v1", budget=cold_budget)
+    assert restored_op.revision == op.revision
+    assert restored_op.cost == op.cost and restored_op.verify_cost == op.verify_cost
+    assert cold_budget.spent > before
+    assert cold_budget.counts["operation_compile"] > budget.counts["operation_compile"]
+    cold_budget.on_charge = None
+    reopened = VerifiedComputation(plan, [restored_op], cold_budget, journal=cold_journal)
+    assert reopened.outputs["out"] == 5 and reopened.budget.spent > before
+
+
+@pytest.mark.parametrize("mutation", ["domain", "candidate", "missing", "status"])
+def test_catalog_restore_rejects_tampered_bindings(mutation):
+    budget, registry, catalog, _, key, _, _ = acquired()
+    state = copy.deepcopy(catalog.snapshot(budget=budget))
+    if mutation == "domain":
+        state["templates"][0]["domain"]["source_revision"] = "forged"
+    elif mutation == "candidate":
+        state["templates"][0]["candidate_id"] = "missing"
+    elif mutation == "missing":
+        del state["templates"][0]["admission"]
+    else:
+        state["templates"][0]["admission"]["accepted"] = False
+    state["digest"] = digest({k: v for k, v in state.items() if k != "digest"})
+    with pytest.raises(ValueError):
+        OperationCatalog.restore(state, registry=registry, budget=WorkBudget(100000))

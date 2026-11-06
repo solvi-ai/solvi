@@ -249,9 +249,15 @@ class VerifiedComputation:
 
     def _restore_ledger(self, snapshot):
         restored = WorkBudget.restore(snapshot)
-        if (restored.limit != self._budget.limit or self._budget.spent > restored.spent
-                or any(restored.counts.get(k, 0) < v for k, v in self._budget.counts.items())):
+        current = WorkBudget.restore(self._budget.snapshot())
+        if restored.limit != current.limit:
             raise ValueError("incompatible work ledger")
+        # Catalog reconstruction may already have extended this same ledger.
+        # Preserve that paid work; merge only comparable category vectors.
+        if all(current.counts.get(k, 0) >= v for k, v in restored.counts.items()):
+            return
+        if any(restored.counts.get(k, 0) < v for k, v in current.counts.items()):
+            raise ValueError("incompatible work ledger category vectors")
         self._budget._spent = restored.spent
         self._budget._counts = restored.counts
 
@@ -379,8 +385,9 @@ class VerifiedComputation:
     def update_inputs(self, values, revision):
         self._check_running()
         updates = self._checked_inputs(values, revision)
+        self._charge("compute_invalidation_scan", self._scan_cost)
         dirty = self._invalidate(k for k, v in updates.items() if canonical(self._inputs.get(k)) != canonical(v))
-        self._charge("compute_invalidation", self._scan_cost + len(dirty) + 2)
+        self._charge("compute_invalidation", len(dirty) + 2)
         self._inputs.update(updates)
         self._drop(dirty)
         self._save()
@@ -398,8 +405,9 @@ class VerifiedComputation:
         for name in changed & self._operators.keys() & updated.keys():
             if updated[name].revision == self._operators[name].revision:
                 raise ValueError("changed callbacks or prices require a new revision")
+        self._charge("compute_invalidation_scan", self._scan_cost)
         dirty = self._invalidate(n.name for n in self._plan.nodes if changed.intersection(n.operators))
-        self._charge("compute_invalidation", self._scan_cost + len(dirty) + 2)
+        self._charge("compute_invalidation", len(dirty) + 2)
         self._operators = updated
         self._drop(dirty)
         self._save()
@@ -411,8 +419,9 @@ class VerifiedComputation:
             raise ValueError("unknown input or noncallable reader")
         natural(cost, "observation cost", positive=True)
         identifier(revision, "source revision")
+        self._charge("compute_invalidation_scan", self._scan_cost)
         dirty = self._invalidate((name,))
-        self._charge("compute_observation", cost + self._scan_cost + len(dirty) + 2)
+        self._charge("compute_observation", cost + len(dirty) + 2)
         self._pending = {"kind": "observation", "name": name, "revision": revision}
         self._save()
         try:

@@ -171,14 +171,15 @@ def trial(seed, family, limit, arm):
                     if arm=="DIRECT":
                         cache={}
                     elif epoch and (changes or update["revision"]):
+                        budget.charge("dirty_scan",len(nodes)+sum(len(n["deps"]) for n in nodes))
                         dirty=set(changes)
                         for n in nodes:
                             if set(n["deps"]) & dirty or (update["revision"] and n["kind"]=="add"):
                                 dirty.add(n["name"])
-                        budget.charge("dirty_invalidation",len(nodes)+sum(len(n["deps"]) for n in nodes)+len(dirty)+2)
+                        budget.charge("dirty_invalidation",len(dirty)+2)
                         cache={k:v for k,v in cache.items() if k not in dirty}
                     epoch_cache_valid=True
-                    for n in active_nodes:
+                    for n in (() if all(k in cache for k in fixture["spec"]["outputs"]) else active_nodes):
                         budget.charge("baseline_lookup",1+len(n["deps"]))
                         if n["name"] not in cache:
                             operator=operators[n["kind"]]
@@ -190,10 +191,12 @@ def trial(seed, family, limit, arm):
                     status="complete"
                     output={k:cache[k] for k in fixture["spec"]["outputs"] if k in cache}
                 else:
-                    if session is None or arm=="NO_CACHE":
+                    if session is None:
                         session=VerifiedComputation(plan,list(operators.values()),budget,inputs=current)
                     else:
-                        if changes:
+                        if arm=="NO_CACHE":
+                            session.update_inputs(current,"cache-reset:"+str(epoch))
+                        elif changes:
                             session.update_inputs(changes,"epoch:"+str(epoch))
                         if update["revision"]:
                             session.update_operators(list(operators.values()))
