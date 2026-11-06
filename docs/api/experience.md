@@ -64,3 +64,7 @@ Read [executable experience](../experience.md) before using the environment and 
 ## `stratified`
 
 ::: solvi.experimental.experience.stratified
+
+## `packed`
+
+::: solvi.experimental.experience.packed

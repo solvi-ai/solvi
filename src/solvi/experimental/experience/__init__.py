@@ -20,9 +20,12 @@ from .observations import ObservationOption, ObservationChoice, select_observati
 from .programs import CommitteeSearchResult, Grammar, Program, SearchResult, synthesize, synthesize_committee  # noqa: E402
 from .tabular import TabularEnvironment, TabularOracle  # noqa: E402
 from .stratified import StratifiedObservationPlan, plan_stratified_observations  # noqa: E402
+from .packed import PackedObservationFrame, PackedStratifiedSampler  # noqa: E402
 from .worlds import Decision, WorldSet  # noqa: E402
 
 __all__ = [
+    "PackedObservationFrame",
+    "PackedStratifiedSampler",
     "StratifiedObservationPlan",
     "plan_stratified_observations",
     "AdmissionRecord",

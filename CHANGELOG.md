@@ -1,6 +1,7 @@
 # Changelog
 
 ## 1.6.0 — Unreleased
+- Add experimental packed observation frames and feedback-driven stratified sampling with explicit work debits and snapshot replay.
 
 - Add experimental one-pass `synthesize_committee` with a preserved candidate prefix and an optional paid
   continuation window/reserve. Add backend-independent `select_observation_bounded` for pure paid predictions,

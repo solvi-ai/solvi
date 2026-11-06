@@ -318,3 +318,34 @@ success. No environment reads or oracle calls occur.
 Observed labels remain host assertions. A plan neither authenticates evidence
 nor admits a competence, grants read authority, or supplies a certificate. See
 `examples/33_stratified_observations.py` for the separately paid planning step.
+
+## Packed host observations
+
+`PackedObservationFrame(records, budget, source="host")` snapshots 1..128 named
+rows with 1..128 contiguous `f0`..`fp-1` integer bins (0..7). Boolean bins are
+rejected. Its `names`, `features`, and `values` are immutable tuples; `index` is
+read-only. Input dictionaries can subsequently change without changing the frame.
+
+`PackedStratifiedSampler(frame, pilot, budget, strategy="round_robin",
+cut_mode="all", max_steps=8)` accepts 1..64 unique `(name, bool)` pilot labels
+and 1..64 remaining candidates. A call to `choose(budget)` creates one pending
+ID; `observe(name, label, budget)` must supply matching strict boolean feedback
+before another choice. Selection stops after `max_steps` (1..16). No oracle,
+registry, authentication, or implicit label read is involved.
+
+Pilot histograms choose up to two different features using absolute differences
+of Laplace-smoothed positive rates, requiring at least four pilot rows on each
+side. `all` examines thresholds 1..7; `median` uses the upper pilot median.
+Equal scores prefer lower feature indices and lower thresholds. The first
+feature is the least significant cell bit. One-class or ineligible pilots use
+candidate order. Cuts stay fixed; observed labels update cell counts.
+Round robin advances its cursor only on observation. Adaptive selection uses
+exact rational `r*(a+1)*(n-a+1)/((n+2)^2*(n+1))`, preferring lower cell codes
+on ties (`r`: remaining candidates, `n`: labels, `a`: positive labels).
+
+`to_dict()` returns a native snapshot with tuples. `restore(frame, saved, budget)`
+also accepts lists after a JSON IO boundary, checks the frame directly and
+replays choices and supplied observations. Restore debits the current budget
+again without refunds. Snapshots are host assertions and can be forged; they
+are not authenticated evidence. All work groups are prepaid and debit/sink
+exceptions propagate. See example `34_packed_observations.py`.

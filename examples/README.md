@@ -40,3 +40,4 @@ it is set, and a keyword stand-in otherwise.
 - `32_bounded_observations.py`: ordered one-pass committee synthesis and bounded paid observation selection against the original algorithms on known scalar programs; prints actual work debits without a general performance claim. No model, dataset, oracle or network required.
 
 - `33_stratified_observations.py`: paid bounded label-aware planning over an unread host pool; no authority or oracle reads.
+- `34_packed_observations.py`: immutable packed bins, fixed pilot cuts, adaptive feedback and paid snapshot replay; explicit host labels, no oracle or network.
