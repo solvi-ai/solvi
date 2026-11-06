@@ -4,6 +4,7 @@ Each file is a self-contained script. Run from the repository root with `uv run 
 
 | file | domain | what it shows | needs |
 |---|---|---|---|
+| [30_checked_csv_operations.py](30_checked_csv_operations.py) | CSV/SQLite | learns a boolean operation, checks its complete finite domain, applies it to new rows and restores without repeating effects | core, experimental |
 | [01_leave_request.py](01_leave_request.py) | HR | rules and hard checks over a plain dict; the strategist skips catalog parts the questions do not need | core |
 | [02_shop_order.py](02_shop_order.py) | e-commerce | two answers by rules, one ("suspicious?") learned from labeled history with `fit` | core |
 | [03_invoices.py](03_invoices.py) | accounts payable | fields extracted from invoice text with quotes, checks on computed facts, a learned risk level | core |

@@ -117,6 +117,48 @@ with retained history; no general memory or runtime bound for the complete journ
 
 ## Evaluation scope
 
+### Full finite-domain admission and tabular actions
+
+The optional `FiniteDomain` contract pins the complete supported input set, strict input/result types,
+mechanism/schema, grammar, oracle source and revision. `check_program` pays for manifest processing, program
+execution, oracle reads, receipt checks and comparisons. A counterexample rejects; interrupted coverage or an
+unavailable oracle returns `unknown`. A successful check is evidence only for that finite contract. It is not
+a proof about arbitrary inputs, an untrusted oracle, or an updated source.
+
+`CompetenceRegistry.admit_checked` performs this check itself after separate proposal and admission data.
+Public result objects cannot activate an operation. Checked calls require the matching domain and paid membership
+checking; missing contracts and inputs outside the domain produce `unknown`. `require_checked=True` excludes
+empirical operations. Snapshot v2 explicitly records admission mode; restored v1 records remain empirical.
+The registry's `allowed_sources` must include both external example sources and the independent oracle source.
+`retract_source(source_id, source_revision, event_id=...)` revokes matching operations and their dependants.
+
+With a `KnowledgeStore`, checked admission requires explicit `checked_store_policy="evidence_only"`.
+It stores an `episode` whose writer is the oracle source, rather than publishing an executable generic `skill`.
+The registry remains the execution authority. Custom knowledge policies that approve `skill` records are **not**
+thereby approving these operations; hosts requiring that approval should retain the default `"deny"` policy.
+Withdrawing the evidence writer in the store makes the operation unusable. A commit callback failure poisons
+the current registry writer; only trusted durable recovery can continue.
+
+Bind contracts to the complete loop with
+`ExperienceRunner(..., checked_domains={scope: (domain, oracle)}, checked_store_policy="evidence_only")`.
+The same bindings are required by `ExperienceRunner.restore` and `AutoCurriculum.restore`.
+The runner records each read intent before the oracle call and a committed admission before returning it.
+Curriculum recovery completes an already committed matching packet without paying for its oracle again;
+an interrupted uncommitted packet remains burned. Source changes and durable debit failures fail closed.
+
+`TabularEnvironment(path, csv_path, identity="tabular")` imports bounded CSV tasks and commits each effect and
+receipt in one SQLite transaction. It supports stock/reservation/damage arithmetic (`inventory`), a boolean
+eligibility rule (`eligibility`), and dependent completion times (`schedule`). `TabularOracle(family)` evaluates
+independent fixed SQL rules and constructs the paid complete domain with `.domain(grammar, budget=budget)`.
+CSV bytes and SQL task inputs remain pinned on reopening. This is a small local adapter, not an arbitrary SQL
+agent. The host must keep the source CSV available. See
+`examples/30_checked_csv_operations.py`
+for a learned boolean rule, full-domain check, actual SQL effects and completed replay.
+
+Search now reuses paid output vectors; planning caches partitions and prunes losing branches. Cache operations
+are themselves paid. Runtime program evaluation prices remain unchanged. These changes can reduce search work,
+but small problems may cost more; there is no general performance claim from component tests.
+
 The accompanying benchmark compares finite resource and workflow mechanisms, separate proposal/admission/test data,
 mechanism changes, full work budgets, explicit hand-written formulas/caches, observation-only controls and a no-call
 ablation that still pays for learning. Its encoding control renames probe identifiers only; it does not establish

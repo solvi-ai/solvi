@@ -41,6 +41,7 @@ class _Assignment(TypedDict):
 class _Learning(TypedDict):
     context: str
     boundary: int
+    generation: NotRequired[int]
 
 
 class _State(TypedDict):
@@ -107,7 +108,8 @@ class AutoCurriculum:
         return dict(runner=self.runner.snapshot(), controller=portable(self.state))
 
     @classmethod
-    def restore(cls, snapshot, *, environment, journal, registry):
+    def restore(cls, snapshot, *, environment, journal, registry, checked_domains=None,
+                checked_store_policy="deny"):
         snapshot = portable(snapshot)
         records = journal.records()
         states = [e["payload"]["controller_state"] for e in records if e["kind"] == "curriculum"]
@@ -122,7 +124,8 @@ class AutoCurriculum:
             raise ValueError("controller config or queue mismatch")
         obj = object.__new__(cls)
         obj.runner = ExperienceRunner.restore(
-            snapshot["runner"], environment=environment, journal=journal, registry=registry
+            snapshot["runner"], environment=environment, journal=journal, registry=registry,
+            checked_domains=checked_domains, checked_store_policy=checked_store_policy,
         )
         obj.state, obj.config = portable(state), portable(state["config"])
         return obj
@@ -214,7 +217,7 @@ class AutoCurriculum:
             self.runner.budget.charge("curriculum_learning")
             self.state["attempts"] += 1
             boundary = len(self.runner.journal.records())
-            self.state["learning"] = _Learning(context=context, boundary=boundary)
+            self.state["learning"] = _Learning(context=context, boundary=boundary, generation=packet["generation"])
             self._save()
         result = self.runner.learn(
             [ExternalExample.from_dict(e) for e in packet["proposal"]],
@@ -234,9 +237,30 @@ class AutoCurriculum:
             return
         records = self.runner.journal.records()
         started = False
+        committed = None
         for event in records[pending["boundary"] :]:
             self.runner.budget.charge("curriculum_scan")
             started = started or event["kind"] == "learning_intent"
+            if event["kind"] == "learning_committed":
+                committed = event["payload"]["state"]["learning"]
+        if committed is not None:
+            from .competences import Candidate
+
+            packet = self._packet(pending["context"])
+            if (pending.get("generation") != packet["generation"]
+                    or committed["proposal"] != packet["proposal"]
+                    or committed["admission"] != packet["admission"]):
+                raise ValueError("committed learning belongs to another curriculum packet")
+            cid = Candidate.from_dict(committed["candidate"]).fingerprint
+            result = self.runner.registry.snapshot()["admissions"][cid]["result"]
+            if result["accepted"] is not True or result["competence_id"] != cid:
+                raise ValueError("durable checked admission is missing")
+            if self.runner.learning is not None:
+                self.runner.finish_committed_learning()
+            packet["transfer"] = True
+            self.state["learning"] = None
+            self._save()
+            return
         if not started:
             # The controller intent preceded all paid Runner.learn operations.
             self._learn(pending["context"])
@@ -251,6 +275,8 @@ class AutoCurriculum:
         self._save()
 
     def step(self) -> str:
+        if self.runner._debit_failed:
+            raise ValueError("durable debit failed; restore before continuing")
         if self.state["status"] != "inprogress":
             return self.state["status"]
         try:
@@ -295,6 +321,8 @@ class AutoCurriculum:
                 return self.runner.status
             return self.state["status"]
         except BudgetStop:
+            if self.runner._debit_failed:
+                raise
             self.state["status"] = "budget"
             self._save()
             return "budget"

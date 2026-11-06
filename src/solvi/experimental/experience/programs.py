@@ -23,6 +23,40 @@ def _scalar(value, maximum):
     return value
 
 
+def _primitive(op, args, maximum):
+    if op in _NUMERIC and any(type(v) is not int for v in args):
+        raise ValueError("numeric operator requires strict integers")
+    if op in ("and", "or", "not") and any(type(v) is not bool for v in args):
+        raise ValueError("boolean operator requires booleans")
+    if op == "eq" and type(args[0]) is not type(args[1]):
+        raise ValueError("equality requires matching types")
+    if op == "if" and (type(args[0]) is not bool or type(args[1]) is not type(args[2])):
+        raise ValueError("if requires bool condition and matching branches")
+    if op == "add":
+        value = args[0] + args[1]
+    elif op == "sub":
+        value = args[0] - args[1]
+    elif op == "mul":
+        value = args[0] * args[1]
+    elif op == "min":
+        value = min(args)
+    elif op == "max":
+        value = max(args)
+    elif op == "lt":
+        value = args[0] < args[1]
+    elif op == "eq":
+        value = args[0] == args[1]
+    elif op == "and":
+        value = args[0] and args[1]
+    elif op == "or":
+        value = args[0] or args[1]
+    elif op == "not":
+        value = not args[0]
+    else:
+        value = args[1] if args[0] else args[2]
+    return _scalar(value, maximum)
+
+
 @dataclass(frozen=True)
 class Grammar:
     inputs: tuple[str, ...]
@@ -173,37 +207,7 @@ class Program:
             if op not in grammar.operators:
                 raise ValueError("operator outside grammar")
             args = [visit(c) for c in node[1:]]
-            if op in _NUMERIC and any(type(v) is not int for v in args):
-                raise ValueError("numeric operator requires strict integers")
-            if op in ("and", "or", "not") and any(type(v) is not bool for v in args):
-                raise ValueError("boolean operator requires booleans")
-            if op == "eq" and type(args[0]) is not type(args[1]):
-                raise ValueError("equality requires matching types")
-            if op == "if" and (type(args[0]) is not bool or type(args[1]) is not type(args[2])):
-                raise ValueError("if requires bool condition and matching branches")
-            if op == "add":
-                value = args[0] + args[1]
-            elif op == "sub":
-                value = args[0] - args[1]
-            elif op == "mul":
-                value = args[0] * args[1]
-            elif op == "min":
-                value = min(args)
-            elif op == "max":
-                value = max(args)
-            elif op == "lt":
-                value = args[0] < args[1]
-            elif op == "eq":
-                value = args[0] == args[1]
-            elif op == "and":
-                value = args[0] and args[1]
-            elif op == "or":
-                value = args[0] or args[1]
-            elif op == "not":
-                value = not args[0]
-            else:
-                value = args[1] if args[0] else args[2]
-            return _scalar(value, grammar.max_abs)
+            return _primitive(op, args, grammar.max_abs)
 
         return visit(self.ast, root=True)
 
@@ -230,17 +234,32 @@ def synthesize(examples, grammar: Grammar, budget: WorkBudget) -> SearchResult:
 
     Inputs have a fixed name schema and consistent per-name types across rows.
     Generated candidates (including rejected ones), comparison work, and every
-    AST evaluation are debited before work. Search is bounded and incomplete.
+    primitive/terminal evaluation and cached child read are debited before work.
+    Paid child output vectors are reused; public Program evaluation is unchanged.
+    Search is bounded and incomplete.
     Reasons: found, no_examples, exhausted, candidate_limit, budget_exhausted.
     Invalid proposal data raises ValueError after its validation debit.
     """
     tried = 0
+    persistence_failure = False
+
+    def charge(kind, units=1):
+        # A BudgetStop from a durable sink follows a successful debit. It is
+        # a persistence failure, not an ordinary refusal for insufficient work.
+        nonlocal persistence_failure
+        before = budget.spent
+        try:
+            budget.charge(kind, units)
+        except BudgetStop:
+            persistence_failure = budget.spent != before
+            raise
+
     try:
         rows = []
         schema = None
         target_type = None
         for example in examples:
-            budget.charge("search_example")
+            charge("search_example")
             if type(example) not in (tuple, list) or len(example) != 2:
                 raise ValueError("expected input/label pair")
             inputs, expected = example
@@ -248,7 +267,7 @@ def synthesize(examples, grammar: Grammar, budget: WorkBudget) -> SearchResult:
                 raise ValueError("proposal input schema mismatch")
             copied = {}
             for name in grammar.inputs:
-                budget.charge("search_input")
+                charge("search_input")
                 copied[name] = _scalar(inputs[name], grammar.max_abs)
             _scalar(expected, grammar.max_abs)
             types = tuple(type(copied[n]) for n in grammar.inputs)
@@ -261,33 +280,49 @@ def synthesize(examples, grammar: Grammar, budget: WorkBudget) -> SearchResult:
         pools = {}
         seen = set()
 
-        def consider(ast, *, charged=False):
+        def consider(ast, *, charged=False, children=None):
             nonlocal tried
             if not charged:
                 if tried >= grammar.max_candidates:
                     return SearchResult(None, tried, "candidate_limit")
-                budget.charge("search_generate")
+                charge("search_generate")
                 tried += 1
             p = Program(ast)
             if p.depth > grammar.max_depth or p.nodes > grammar.max_nodes:
                 return None
             outputs = []
             matches = True
-            try:
-                for inputs, expected in rows:
-                    value = p.evaluate(inputs, budget, grammar)
-                    budget.charge("search_compare")
-                    matches = matches and type(value) is type(expected) and value == expected
-                    outputs.append((type(value).__name__, value))
-            except ValueError:
-                return None
+            for row_index, (inputs, expected) in enumerate(rows):
+                # The proposals were validated once above. Each new root
+                # does exactly one primitive/terminal operation per row.
+                charge("program_node")
+                if children is None:
+                    if ast[0] == "input":
+                        value = inputs[ast[1]]
+                    else:
+                        try:
+                            value = _scalar(ast[1], grammar.max_abs)
+                        except ValueError:
+                            return None
+                else:
+                    args = []
+                    for child in children:
+                        charge("search_cache_lookup")
+                        args.append(child[2][row_index][1])
+                    try:
+                        value = _primitive(ast[0], args, grammar.max_abs)
+                    except ValueError:
+                        return None
+                charge("search_compare")
+                matches = matches and type(value) is type(expected) and value == expected
+                outputs.append((type(value).__name__, value))
             if matches:
                 return SearchResult(p, tried, "found")
-            budget.charge("search_compare", len(outputs))
+            charge("search_compare", len(outputs))
             signature = tuple(outputs)
             if signature not in seen:
                 seen.add(signature)
-                pools.setdefault(p.nodes, []).append((p, type(outputs[0][1])))
+                pools.setdefault(p.nodes, []).append((p, type(outputs[0][1]), signature))
             return None
 
         terminals = chain(
@@ -302,11 +337,11 @@ def synthesize(examples, grammar: Grammar, budget: WorkBudget) -> SearchResult:
         for size in range(2, grammar.max_nodes + 1):
             for op in grammar.operators:
                 for sizes in _partitions(size - 1, _ARITY[op]):
-                    budget.charge("search_partition")
+                    charge("search_partition")
                     for entries in product(*(pools.get(n, ()) for n in sizes)):
                         if tried >= grammar.max_candidates:
                             return SearchResult(None, tried, "candidate_limit")
-                        budget.charge("search_generate")
+                        charge("search_generate")
                         tried += 1
                         types = tuple(entry[1] for entry in entries)
                         invalid = (
@@ -317,11 +352,13 @@ def synthesize(examples, grammar: Grammar, budget: WorkBudget) -> SearchResult:
                         )
                         if invalid:
                             continue
-                        result = consider((op, *(entry[0].ast for entry in entries)), charged=True)
+                        result = consider((op, *(entry[0].ast for entry in entries)), charged=True, children=entries)
                         if result is not None:
                             return result
         return SearchResult(None, tried, "exhausted")
     except BudgetStop:
+        if persistence_failure:
+            raise
         return SearchResult(None, tried, "budget_exhausted")
 
 

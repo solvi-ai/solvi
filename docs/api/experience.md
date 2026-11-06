@@ -1,6 +1,6 @@
 # `solvi.experimental.experience`
 
-Finite joint alternatives, bounded acquisition, external outcomes and empirically admitted scalar programs.
+Finite joint alternatives, bounded acquisition, external outcomes and scalar programs with empirical or finite-domain admission.
 Read [executable experience](../experience.md) before using the environment and recovery interfaces.
 
 ::: solvi.experimental.experience
@@ -20,6 +20,14 @@ Read [executable experience](../experience.md) before using the environment and 
 ## `durable`
 
 ::: solvi.experimental.experience.durable
+
+## `domain_checks`
+
+::: solvi.experimental.experience.domain_checks
+
+## `tabular`
+
+::: solvi.experimental.experience.tabular
 
 ## `environments`
 

@@ -8,7 +8,7 @@ no exactly-once claim for a host without reconciliation.
 
 from __future__ import annotations
 
-from typing import TypedDict
+from typing import NotRequired, TypedDict
 
 from ...core.costs import BudgetStop
 from ._common import WorkBudget, digest, identifier, natural, portable
@@ -22,6 +22,8 @@ class _Configuration(TypedDict):
     mode: str
     seed: int
     horizon: int
+    checked_domains: NotRequired[dict]
+    checked_store_policy: NotRequired[str]
 
 
 class _Pending(TypedDict):
@@ -34,7 +36,8 @@ class _Pending(TypedDict):
 class ExperienceRunner:
     MODES = ("fixed", "random", "active", "full", "no_call")
 
-    def __init__(self, environment, journal, budget, registry=None, *, mode="active", seed=0, horizon=2):
+    def __init__(self, environment, journal, budget, registry=None, *, mode="active", seed=0, horizon=2,
+                 checked_domains=None, checked_store_policy="deny"):
         if mode not in self.MODES:
             raise ValueError("unsupported experience mode")
         natural(seed, "seed")
@@ -50,6 +53,10 @@ class ExperienceRunner:
             "seed": seed,
             "horizon": horizon,
         }
+        self._set_checked_domains(checked_domains, checked_store_policy)
+        if self.checked_domains:
+            self.config["checked_domains"] = self._domain_bindings()
+            self.config["checked_store_policy"] = checked_store_policy
         self.task: TaskSpec | None = None
         self.worlds: WorldSet | None = None
         self.pending: _Pending | None = None
@@ -62,7 +69,51 @@ class ExperienceRunner:
         self._checkpoint()
 
     def _bind_budget(self):
-        self.budget.on_charge = self.journal.debit
+        self._debit_failed = False
+
+        def debit(snapshot):
+            try:
+                self.journal.debit(snapshot)
+            except BaseException:
+                self._debit_failed = True
+                raise
+
+        self.budget.on_charge = debit
+
+    def _set_checked_domains(self, domains, policy):
+        from .domain_checks import FiniteDomain
+
+        if policy not in ("deny", "evidence_only"):
+            raise ValueError("invalid checked store policy")
+        self.checked_domains = dict(domains or {})
+        self.checked_store_policy = policy
+        for scope, pair in self.checked_domains.items():
+            if (type(pair) is not tuple or len(pair) != 2 or not isinstance(pair[0], FiniteDomain)
+                    or scope != pair[0].scope or self.registry is None
+                    or pair[0].grammar_fingerprint != self.registry.grammar.fingerprint
+                    or (getattr(pair[1], "source_id", None), getattr(pair[1], "source_revision", None))
+                    != (pair[0].source_id, pair[0].source_revision)):
+                raise ValueError("invalid checked domain/oracle binding")
+
+    def _domain_bindings(self):
+        return {scope: pair[0].fingerprint for scope, pair in self.checked_domains.items()}
+
+    def _checked_contract(self, scope):
+        if self._domain_bindings() != self.config.get("checked_domains", {}):
+            raise ValueError("host domain contract changed; a new bound runner is required")
+        pair = self.checked_domains.get(scope)
+        if pair is None:
+            return None
+        self.budget.charge("domain_source")
+        domain, oracle = pair
+        if ((getattr(oracle, "source_id", None), getattr(oracle, "source_revision", None))
+                != (domain.source_id, domain.source_revision)
+                or getattr(oracle, "available", True) is not True):
+            self.registry.retract_source(domain.source_id, domain.source_revision,
+                                         event_id="host-source:" + domain.fingerprint)
+            self._record("domain_source_changed")
+            return None
+        return pair
 
     def _state(self):
         return dict(
@@ -110,7 +161,8 @@ class ExperienceRunner:
         return state
 
     @classmethod
-    def restore(cls, snapshot, *, environment, journal, registry=None):
+    def restore(cls, snapshot, *, environment, journal, registry=None, checked_domains=None,
+                checked_store_policy="deny"):
         snap = portable(snapshot)
         records = journal.records()
         if not any(e["kind"] == "checkpoint" and e["payload"] == snap for e in records):
@@ -123,6 +175,10 @@ class ExperienceRunner:
         if state["config"]["environment"] != environment.identity:
             raise ValueError("foreign environment identity")
         obj.config = state["config"]
+        obj._set_checked_domains(checked_domains, checked_store_policy)
+        if (obj._domain_bindings() != obj.config.get("checked_domains", {})
+                or checked_store_policy != obj.config.get("checked_store_policy", "deny")):
+            raise ValueError("checked recovery requires the original host contracts")
         obj.budget = WorkBudget.restore(state["ledger"])
         obj.task = TaskSpec.from_dict(state["task"]) if state["task"] else None
         obj.worlds = WorldSet.restore(state["worlds"]) if state["worlds"] is not None else None
@@ -310,6 +366,8 @@ class ExperienceRunner:
         self._record("revision")
 
     def step(self):
+        if self._debit_failed:
+            raise ValueError("durable debit failed; restore before continuing")
         if self.learning is not None:
             return "unresolved"
         task, worlds = self.task, self.worlds
@@ -337,6 +395,7 @@ class ExperienceRunner:
                 return self.status
             question = lambda world: world[task.target]
             if self.registry is not None and self.config["mode"] != "no_call":
+                checked = self._checked_contract(self.task.scope) if "checked_domains" in self.config else None
                 app = self.registry.predict(
                     self.task.inputs,
                     task_id=self.task.task_id,
@@ -344,6 +403,8 @@ class ExperienceRunner:
                     mechanism=self.task.mechanism,
                     schema=self.task.schema,
                     budget=self.budget,
+                    **({"domain": checked[0] if checked is not None else None,
+                        "require_checked": True} if "checked_domains" in self.config else {}),
                 )
                 if app.status == "applied":
                     self.application_id, self.competence_id = app.application_id, app.competence_id
@@ -375,6 +436,8 @@ class ExperienceRunner:
                 probe = probes[0]
             return self._issue("observe", {"probe": probe.name, "field": probe.field}, probe.cost)
         except BudgetStop:
+            if self._debit_failed:
+                raise
             # A durable receipt remains recoverable even if revision is unaffordable.
             self.status = "budget"
             self._checkpoint()
@@ -436,6 +499,9 @@ class ExperienceRunner:
             raise ValueError("learning requires an idle runner with a registry")
         natural(min_examples, "min_examples", positive=True)
         proposal, admission = tuple(proposal), tuple(admission)
+        checked = self._checked_contract(proposal[0].scope) if proposal and "checked_domains" in self.config else None
+        if "checked_domains" in self.config and checked is None:
+            raise ValueError("no checked contract for this learning context")
         previous_phase = self.phase
         self.learning = dict(
             proposal=[e.to_dict() for e in proposal],
@@ -459,10 +525,41 @@ class ExperienceRunner:
             self.phase = "admission_pending"
             self._record("learning_reserved")
 
-        result = self.registry.admit(candidate, admission, self.budget, min_examples=min_examples, on_reserved=reserved)
+        if checked is None:
+            result = self.registry.admit(candidate, admission, self.budget,
+                                         min_examples=min_examples, on_reserved=reserved)
+        else:
+            def event(kind, payload):
+                self.journal.append(kind, {"domain_event": payload})
+
+            def committed():
+                self.learning["committed"] = True
+                self._record("learning_committed")
+
+            result = self.registry.admit_checked(
+                candidate, admission, self.budget, domain=checked[0], oracle=checked[1],
+                min_examples=min_examples, on_reserved=reserved, on_event=event,
+                on_committed=committed, checked_store_policy=self.checked_store_policy,
+            )
         self.learning, self.phase = None, previous_phase
         self._checkpoint()
         return result
+
+    def finish_committed_learning(self):
+        """Settle a durably committed admission without repeating its oracle reads."""
+        from .competences import AdmissionRecord, Candidate
+
+        if self.learning is None or self.learning.get("committed") is not True:
+            raise ValueError("no durably committed learning transaction")
+        cid = Candidate.from_dict(self.learning["candidate"]).fingerprint
+        record = self.registry.snapshot()["admissions"][cid]["result"]
+        if record["accepted"] is not True or record["competence_id"] != cid:
+            raise ValueError("committed admission binding is missing")
+        previous_phase = self.learning["previous_phase"]
+        self.learning, self.phase = None, previous_phase
+        self.status = "inprogress" if previous_phase == "ready" else self.results[-1]["status"]
+        self._checkpoint()
+        return AdmissionRecord(**record)
 
     def discard_interrupted_learning(self):
         """Discard interrupted learning, retaining spent work and durable data.

@@ -2,6 +2,14 @@
 
 ## 1.6.0 — Unreleased
 
+- Reuse paid expression vectors during experimental synthesis; cache finite probe partitions and prune losing
+  branches while preserving bounded minimax choices. Cache reads remain paid and tiny cases may cost more.
+- Add optional paid complete finite-domain checks with source/version bindings, explicit empirical versus checked
+  admission, domain-limited calls, revocation and journaled admission recovery. Checked store evidence uses an
+  explicitly enabled registry-local execution policy rather than generic skill publication.
+- Add CSV-backed SQLite examples for inventory, eligibility and dependent schedules, with strict scalar types,
+  transactional idempotent effects and pinned input data. These bounded mechanisms make no general learning claim.
+
 - Add experimental finite joint-state reasoning, bounded observation planning, a typed scalar-program learner and
   separate external admission, dependent revocation, and a recoverable host-owned experience loop. A finite
   `AutoCurriculum` controller collects disjoint external learning packets, starts admission itself and continues
