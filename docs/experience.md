@@ -169,3 +169,11 @@ invariance to action identifiers or serialization order. The component benchmark
 policy of `AutoCurriculum`. Its authored finite generators are not an external benchmark. Cost improvements,
 scientific verdicts and failures must be reported from the frozen experiment; successful replay alone establishes
 none of them.
+
+A separate CSV/SQLite component stand covers inventory, boolean eligibility and dependent schedules. It compares
+pinned previous and current search, full measurements and known formulas with the complete declared work budget.
+Its wire audit changes input/result/model fields, task/event/attempt/probe identifiers and serialization order.
+This evaluates component contracts rather than `AutoCurriculum` scheduling. The mechanisms are authored small
+finite rules, not an external benchmark. Full-domain oracle checks include the transfer inputs: later correct
+application is not evidence of prediction on unseen oracle labels. Search-cost savings, checked success rates
+and the cost of the complete strategy must be reported separately.
