@@ -269,7 +269,7 @@ class OperationCatalog:
         """Return a domain/revision-bound live operator with an independent verifier.
 
         The caller declares verifier cost. Direct invocation of callbacks is an
-        internal prepaid interface: use ComputeSession to debit execution work.
+        internal prepaid interface: use VerifiedComputation to debit execution work.
         Rebuild the operator if unrelated registry admissions increase its size.
         """
         from .computation import ComputeOperator
@@ -348,3 +348,6 @@ class OperationCatalog:
                                verify=checked, cost=candidate.program.nodes + len(grammar.inputs) + guard_cost,
                                verify_cost=verify_cost + 2 * guard_cost + registry_size * registry_size + 1,
                                is_valid=is_valid)
+
+
+__all__ = ["OperationCatalog"]

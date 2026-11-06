@@ -21,7 +21,7 @@ SEEDS = {"smoke": (11,), "dev": (101, 102, 103), "final": tuple(range(21001, 210
 FAMILIES = ("reconcile", "invoice", "inventory")
 LIMITS = (400, 1200, 4000)
 ARMS = ("DIRECT", "DIRTY", "FIFO", "CHEAP", "DISPATCH", "NO_CACHE", "NO_LEARN")
-PROTOCOL = ("PLAN.md", "PREREGISTRATION.md", "COST_CONTRACT.md")
+PROTOCOL = ("PLAN.md", "METHOD.md", "COST_CONTRACT.md")
 ZERO = "0" * 64
 
 
@@ -272,7 +272,8 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--phase", required=True, choices=tuple(SEEDS))
     parser.add_argument("--out", required=True, type=Path)
-    parser.add_argument("--protocol-dir", required=True, type=Path)
+    parser.add_argument("--protocol-dir", required=True, type=Path,
+                        help="directory containing PLAN.md, METHOD.md and COST_CONTRACT.md")
     parser.add_argument("--approval", type=Path)
     parser.add_argument("--summarize", action="store_true")
     args = parser.parse_args(argv)
