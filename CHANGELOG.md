@@ -2,6 +2,13 @@
 
 ## 1.6.0 — Unreleased
 
+- Add experimental one-pass `synthesize_committee` with a preserved candidate prefix and an optional paid
+  continuation window/reserve. Add backend-independent `select_observation_bounded` for pure paid predictions,
+  typed disagreements, early stopping and completed-row fallback; original search and full selector remain available.
+- New active refinement sessions pin a versioned policy and default 1024-unit extra-planning window; legacy
+  checkpoints retain their original policy. Recovery preserves spent planning work and read reconciliation.
+  Add a known-answer example and a host-pinned external-data classification protocol, without claiming a general
+  cost or accuracy advantage. Planning results grant no competence authority.
 - Add experimental `RefinementSession` for bounded counterexample-guided learning with paid observation selection,
   source-bound receipts, durable read reconciliation and explicit volatile mode. Expose immutable observation options
   and a bounded disagreement-per-price selector; synthesis can exclude up to 32 paid program fingerprints.

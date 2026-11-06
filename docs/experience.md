@@ -198,16 +198,53 @@ Ties follow host order; the selector requires the read to remain affordable afte
 No disagreement means no purchase. The host pays for the actual read separately. This is a heuristic over
 at most 32 supplied programs and 256 options, not an optimal information-gain guarantee.
 
-Session modes are `none` (counterexamples only), `fixed`, `random` and `active`. Active constructs a small
-committee by repeated paid synthesis with excluded fingerprints. `synthesize(..., exclude=...)` accepts
-at most 32 fingerprints; omitted exclusion retains the previous first-match behavior. Committee search is
-incomplete and may cost more than the saved observations. Fixed/random purchase up to the same observation
-quota; active can stop buying sooner. Comparing these policies does not isolate point choice from stopping.
+`synthesize_committee(examples, grammar, budget, size=3, max_additional_work=None, reserve=0)` collects
+distinct matching programs in one enumeration, reusing paid intermediate vectors. It returns
+`CommitteeSearchResult(candidates, tried, reason, continuation_spent)`. Candidates retain enumeration order;
+a budget, candidate or continuation limit preserves the completed prefix. The first match uses the ordinary
+parent search budget. Only work after that match counts toward `max_additional_work` and must preserve
+`reserve`. There is no promise that the first search leaves that reserve. `synthesize` keeps its original
+first-match semantics; `exclude` still accepts at most 32 fingerprints. Neither search grants competence authority.
+
+`select_observation_bounded(models, options, budget, predict=..., max_work=1024, reserve=0, result_type=None)`
+is a separate backend-independent selector. The host supplies a pure
+`predict(model, inputs, paid_budget)` callback, which charges its own prediction work before execution.
+It receives no oracle or labels. A Program adapter can call `program.evaluate(inputs, paid_budget, grammar)`;
+the host wrapper also owns input schema and bounds validation. External pure models need no library backend.
+The same parent ledger pays selector metadata, comparisons, cache operations and predictions. Their total debit
+is limited by `max_work`, while retaining `reserve`; observation prices are compared but never purchased here.
+At most 32 models and 256 options are accepted. A one-model committee makes no predictions.
+
+Typed bool and int outputs differ. Without `result_type`, invalid predictions share a separate marker.
+An explicit `result_type=bool` or `int` is a strict host promise: a prediction `ValueError` or type violation raises
+`ValueError`. This promise is not authentication of arbitrary host code. The selector can stop when the best
+completed score/price cannot be improved by any unvisited row: the separated-pair bound is
+`floor(k*k/4)` for the bool contract and `k*(k-1)/2` otherwise. Equal scores retain the first host option.
+An interrupted row is discarded; fully scored rows remain eligible. A work cap can return
+`reason="selected_partial"` with the best still-affordable completed row. Without an eligible row the reason
+is `budget` or `no_disagreement`. A post-debit persistence failure propagates and is not a cheap budget refusal.
+The original `select_observation` remains available with its previous full-scan behavior and prices.
+
+Session modes are `none` (counterexamples only), `fixed`, `random` and `active`. New active sessions pin
+`active_policy="onepass-bounded-v1"` and `active_work_limit=1024` in their configuration. The constructor accepts
+a strict integer limit from 0 through 100000. Additional committee search and bounded selection share this
+window; the essential first search, host filtering/validation and actual label purchases are outside that window
+and still consume the parent ledger where charged. This is a core-planner work limit, not a total-session or
+host-runtime bound. Planning reserves a conservative complete-domain check plus the largest unused read fee.
+If extra candidates or selection do not fit, the completed candidate proceeds to checking. Buying a label does
+not promise enough budget for the next essential search. Fixed/random purchase up to the same observation quota;
+active can stop buying sooner. Comparing these policies does not isolate point choice from stopping.
 
 Pass `journal=ExperienceJournal(...)` for durable operation. The session binds its grammar, finite domain,
 source revision, options, caps and mode. It records each debit and saves a read intent before calling the
 host oracle. `RefinementSession.restore(journal=..., grammar=..., domain=..., oracle=..., options=...)`
-reopens the original bound state and preserves subsequent debits. An uncertain read is never automatically
+reopens the original bound state and preserves subsequent debits. It pins the recorded policy and work limit;
+restore has no cap override. A legacy checkpoint without `active_policy` retains repeated synthesis with excluded
+fingerprints and the original full selector, rather than silently migrating algorithms. Unknown policy versions
+are rejected before oracle use. An observe-phase checkpoint retains the remaining planning window; later durable
+debits reduce it on recovery. A first candidate is checkpointed before any optional committee continuation work; after a crash,
+recovery keeps that candidate and deducts later durable continuation debits instead of replaying synthesis
+with a fresh planning window. An uncertain read is never automatically
 reissued: `oracle.reconcile(request_id)` must return its original `DomainReceipt`, otherwise the session
 stays blocked. Reconciliation itself must be a side-effect-free host lookup. Source changes stop the session.
 A durable session owns its debit sink and rejects a preexisting `WorkBudget.on_charge` callback before
@@ -238,3 +275,24 @@ absolute `output` path and absolute `final_claim` path. Copying an approval to a
 another claim path is rejected before starting an actor. An interrupted claimed trial blocks for investigation;
 completed trials can be reopened without replay. The source manifest pins actual module origins, benchmark/scorer,
 project metadata, dependency lock and protocol contents. No private workspace layout is required.
+
+See `examples/32_bounded_observations.py` for a tiny known-answer comparison of ordered committee fingerprints
+and observation choices. It prints actual work-unit debits, not an asserted general speedup.
+
+### External-data acquisition protocol
+
+The separate [`active_real_bench.py`](https://github.com/solvi-ai/solvi/blob/dev/benchmarks/active_real_bench.py)
+entry point supports a host-pinned paired component comparison and an external-data classification protocol.
+Its source names are `banknote`, `spambase` and `wine_red`, referring to UCI Banknote Authentication,
+Spambase and red Wine Quality. These are empirical classification tasks; noisy labels and finite held-out
+accuracy do not provide a finite-domain certificate or competence authorization. The benchmark uses a small
+host-owned learner rather than adding a training dependency to the library core. Source files, licenses,
+checksums, preprocessing, splits and protocol are pinned by the host before comparison. Acquisition receives
+only permitted pool features and paid training labels, never held-out labels.
+
+All arms use declared work budgets and simulated label prices. Work units are neither currency nor measured
+human annotation cost. Full accounting includes preprocessing, training, predictions, selection and purchased
+labels; wall time and resource use must be reported separately. The CLI requires explicit `--protocol`,
+`--baseline`, `--baseline-revision`, `--data`, `--output`, `--claim` and `--audit-wrapper` paths/identity;
+`--python` selects the interpreter. Preparation, smoke/dev, freeze and final execution are separate stages.
+These APIs and the runnable example establish no accuracy gain, general cost advantage or external deployment result.

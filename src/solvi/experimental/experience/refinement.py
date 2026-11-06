@@ -12,7 +12,37 @@ from typing import Any
 
 from ._common import BudgetStop, WorkBudget, canonical, digest, identifier, natural, portable
 from .domain_checks import DomainReceipt, check_program
-from .programs import Program, synthesize
+from .programs import Program, synthesize, synthesize_committee
+
+
+_ACTIVE_POLICY = "onepass-bounded-v1"
+
+
+def _validate_config(config):
+    """Validate pinned algorithm controls before recovery can reach the oracle."""
+    required = {"session_id", "mode", "seed", "max_observations", "max_rounds", "committee_size",
+                "initial", "options", "grammar", "domain"}
+    if type(config) is not dict or not required <= set(config):
+        raise ValueError("invalid refinement config")
+    identifier(config["session_id"], "session_id")
+    if type(config["mode"]) is not str or config["mode"] not in ("none", "fixed", "random", "active"):
+        raise ValueError("invalid refinement mode")
+    for name in ("seed", "max_observations"):
+        natural(config[name], name)
+    for name in ("max_rounds", "committee_size"):
+        natural(config[name], name, positive=True)
+    if config["committee_size"] > 32 or config["max_rounds"] > 64:
+        raise ValueError("refinement exceeds bounded caps")
+    if "active_policy" in config:
+        if config["mode"] != "active" or config["active_policy"] != _ACTIVE_POLICY:
+            raise ValueError("unsupported active policy")
+        if "active_work_limit" not in config:
+            raise ValueError("active policy requires active_work_limit")
+        natural(config["active_work_limit"], "active_work_limit")
+        if config["active_work_limit"] > 100000:
+            raise ValueError("active_work_limit exceeds 100000")
+    elif "active_work_limit" in config:
+        raise ValueError("active_work_limit requires active_policy")
 
 
 class _InterruptedRead(Exception):
@@ -30,7 +60,7 @@ class RefinementSession:
 
     def __init__(self, grammar, domain, oracle, options, budget, *, session_id,
                  initial=(), mode="active", seed=0, max_rounds=6, committee_size=3,
-                 max_observations=3, journal=None):
+                 max_observations=3, journal=None, active_work_limit=1024):
         if journal is not None and budget.on_charge is not None:
             raise ValueError("durable refinement owns the debit sink; external sinks are unsupported")
         identifier(session_id, "session_id")
@@ -40,6 +70,9 @@ class RefinementSession:
             natural(value, name)
         natural(max_rounds, "max_rounds", positive=True)
         natural(committee_size, "committee_size", positive=True)
+        natural(active_work_limit, "active_work_limit")
+        if active_work_limit > 100000:
+            raise ValueError("active_work_limit exceeds 100000")
         if committee_size > 32 or max_rounds > 64:
             raise ValueError("refinement exceeds bounded caps")
         self.grammar, self.domain, self.oracle, self.journal = grammar, domain, oracle, journal
@@ -70,6 +103,8 @@ class RefinementSession:
                            options=[dict(name=o.name, inputs=o.inputs, cost=o.cost) for o in self.options],
                            initial=initial, mode=mode, seed=seed, max_rounds=max_rounds,
                            committee_size=committee_size, max_observations=max_observations)
+        if mode == "active":
+            self.config.update(active_policy=_ACTIVE_POLICY, active_work_limit=active_work_limit)
         self.budget = budget
         self.state: dict[str, Any] = dict(setup_paid=False, v=1, config=self.config, phase="initial", status="running", reason="",
                           examples=[], used=[], rounds=0, observations=0, candidate=None,
@@ -118,9 +153,23 @@ class RefinementSession:
                 state = portable(event["payload"]["state"])
             elif event["kind"] == "debit" and state is not None:
                 state["ledger"] = portable(event["payload"]["ledger"])
-        if state is None or state.get("v") != 1:
+        if state is None or type(state.get("v")) is not int or state["v"] != 1:
             raise ValueError("missing refinement checkpoint")
         config = state["config"]
+        _validate_config(config)
+        if config.get("active_policy") == _ACTIVE_POLICY and state["phase"] == "observe":
+            natural(state["planning_remaining"], "planning_remaining")
+            natural(state["planning_ledger_spent"], "planning_ledger_spent")
+            if (state["planning_remaining"] > config["active_work_limit"] or
+                    state["planning_ledger_spent"] > state["ledger"]["spent"]):
+                raise ValueError("invalid active planning checkpoint")
+        if config.get("active_policy") == _ACTIVE_POLICY and state.get("search_first") is not None:
+            Program.from_dict(state["search_first"])
+            natural(state["search_plan_remaining"], "search_plan_remaining")
+            natural(state["search_plan_mark"], "search_plan_mark")
+            if (state["search_plan_remaining"] > config["active_work_limit"] or
+                    state["search_plan_mark"] > state["ledger"]["spent"]):
+                raise ValueError("invalid first-match planning checkpoint")
         options = tuple(islice(options, 257))
         supplied = [dict(name=o.name, inputs=o.inputs, cost=o.cost) for o in options]
         if (config["grammar"] != grammar.fingerprint or config["domain"] != domain.fingerprint
@@ -138,6 +187,13 @@ class RefinementSession:
         return (self.oracle.source_id == self.domain.source_id and
                 self.oracle.source_revision == self.domain.source_revision and
                 getattr(self.oracle, "available", True) is True)
+
+    def _active_reserve(self):
+        check = len(self.domain.points) * (
+            self.grammar.max_nodes + 2 * len(self.grammar.inputs) + self.domain.oracle_cost + 5
+        ) + 2
+        read = max((option.cost for option in self.options if option.name not in self.state["used"]), default=0)
+        return check + read
 
     def _receipt(self, value, pending):
         if (type(value) is not DomainReceipt or value.request_id != pending["request_id"] or
@@ -277,22 +333,53 @@ class RefinementSession:
             rows = [(row["inputs"], row["expected"]) for row in s["examples"]]
             committee = []
             size = c["committee_size"] if c["mode"] == "active" else 1
-            for _ in range(size):
-                search = synthesize(rows, self.grammar, self.budget,
-                                    exclude=[p.fingerprint for p in committee])
-                if search.candidate is None:
-                    if search.reason == "budget_exhausted":
-                        self._finish("unknown", "budget")
-                        return
-                    break
-                committee.append(search.candidate)
+            bounded = c.get("active_policy") == _ACTIVE_POLICY
+            if bounded:
+                if s.get("search_first") is not None:
+                    # An earlier process durably found this candidate before
+                    # spending continuation work. Resume from its prefix, never
+                    # replay that search with a replenished planning window.
+                    committee = [Program.from_dict(s["search_first"])]
+                    s["planning_remaining"] = max(0, s["search_plan_remaining"] - (
+                        self.budget.spent - s["search_plan_mark"]
+                    ))
+                else:
+                    def first_match(program):
+                        s["search_first"] = program.to_dict()
+                        s["search_plan_remaining"] = c["active_work_limit"]
+                        s["search_plan_mark"] = self.budget.spent
+                        self._save()  # precedes every optional continuation debit
+
+                    search = synthesize_committee(
+                        rows, self.grammar, self.budget, size=size,
+                        max_additional_work=c["active_work_limit"], reserve=self._active_reserve(),
+                        on_first_match=first_match,
+                    )
+                    committee = list(search.candidates)
+                    s["planning_remaining"] = max(0, c["active_work_limit"] - search.continuation_spent)
+                s["planning_ledger_spent"] = self.budget.spent
+            else:
+                for _ in range(size):
+                    search = synthesize(rows, self.grammar, self.budget,
+                                        exclude=[p.fingerprint for p in committee])
+                    if search.candidate is None:
+                        if search.reason == "budget_exhausted":
+                            self._finish("unknown", "budget")
+                            return
+                        break
+                    committee.append(search.candidate)
             if not committee:
-                self._finish("unknown", search.reason)
+                self._finish("unknown", "budget" if search.reason == "budget_exhausted" else search.reason)
                 return
             s["rounds"] += 1
             s["candidate"] = committee[0].to_dict()
             s["committee"] = [p.to_dict() for p in committee]
             s["phase"] = "observe"
+            # The same committed observe checkpoint replaces the first-match
+            # checkpoint; failure before this commit still leaves its prefix.
+            s.pop("search_first", None)
+            s.pop("search_plan_remaining", None)
+            s.pop("search_plan_mark", None)
             self._save()
         elif s["phase"] == "observe":
             used_points = {canonical(row["inputs"]) for row in s["examples"]}
@@ -306,12 +393,25 @@ class RefinementSession:
                     self.budget.charge("refinement_selection", len(available))
                     option = random.Random(c["seed"] + s["observations"]).choice(available)
                 elif c["mode"] == "active":
-                    from .observations import select_observation
-                    choice = select_observation([Program.from_dict(p) for p in s["committee"]],
-                                                available, self.grammar, self.budget)
-                    if choice.reason == "budget":
-                        self._finish("unknown", "budget")
-                        return
+                    from .observations import select_observation, select_observation_bounded
+                    programs = [Program.from_dict(p) for p in s["committee"]]
+                    if c.get("active_policy") == _ACTIVE_POLICY:
+                        remaining = max(0, s["planning_remaining"] - (
+                            self.budget.spent - s["planning_ledger_spent"]
+                        ))
+                        before = self.budget.spent
+                        choice = select_observation_bounded(
+                            programs, available, self.budget,
+                            predict=lambda program, point, paid: program.evaluate(point, paid, self.grammar),
+                            max_work=remaining, reserve=self._active_reserve(), result_type=None,
+                        )
+                        s["planning_remaining"] = max(0, remaining - (self.budget.spent - before))
+                        s["planning_ledger_spent"] = self.budget.spent
+                    else:
+                        choice = select_observation(programs, available, self.grammar, self.budget)
+                        if choice.reason == "budget":
+                            self._finish("unknown", "budget")
+                            return
                     option = next((o for o in available if o.name == choice.name), None)
             if option is not None:
                 self._observe(option, "observation")

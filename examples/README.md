@@ -37,3 +37,4 @@ given in `SOLVI_MODEL`. Examples 13, 15, 16 and 18 use the decider from `SOLVI_D
 it is set, and a keyword stand-in otherwise.
 
 - `31_counterexample_learning.py`: bounded counterexample refinement, useful paid observations and durable SQLite/journal recovery; no model or network required.
+- `32_bounded_observations.py`: ordered one-pass committee synthesis and bounded paid observation selection against the original algorithms on known scalar programs; prints actual work debits without a general performance claim. No model, dataset, oracle or network required.

@@ -219,6 +219,28 @@ class SearchResult:
     reason: str
 
 
+@dataclass(frozen=True)
+class CommitteeSearchResult:
+    """Distinct proposal matches in enumeration order, including partial results."""
+
+    candidates: tuple[Program, ...]
+    tried: int
+    reason: str
+    continuation_spent: int
+
+
+class _ContinuationLimit(Exception):
+    """The optional work window closed before the next debit."""
+
+
+class _FirstMatchFailure(Exception):
+    """Transport checkpoint exceptions past ordinary budget handling."""
+
+    def __init__(self, error):
+        super().__init__(error)
+        self.error = error
+
+
 def _partitions(total, arity):
     if arity == 1:
         if total >= 1:
@@ -240,6 +262,45 @@ def synthesize(examples, grammar: Grammar, budget: WorkBudget, *, exclude=()) ->
     Reasons: found, no_examples, exhausted, candidate_limit, budget_exhausted.
     Invalid proposal data raises ValueError after its validation debit.
     """
+    result = _search(examples, grammar, budget, exclude=exclude, count=1, max_additional_work=None, reserve=0)
+    return SearchResult(result.candidates[0] if result.candidates else None, result.tried, result.reason)
+
+
+def synthesize_committee(
+    examples, grammar: Grammar, budget: WorkBudget, *, size=3, max_additional_work=None, reserve=0, on_first_match=None
+) -> CommitteeSearchResult:
+    """Find up to size distinct exact matches in one paid enumeration.
+
+    The first match uses the full parent budget. After it, additional work
+    debits the same ledger and must leave reserve units available. The optional
+    continuation limit counts only those later debits. A stopped search
+    retains all previously found matches. None of them is a domain proof.
+    When supplied, on_first_match(program) runs once after the first match,
+    before any continuation debit or single-candidate return. It may persist
+    that program and the current ledger. It must not spend the parent budget.
+    A checkpoint exception propagates to the caller.
+    """
+    if on_first_match is not None and not callable(on_first_match):
+        raise ValueError("on_first_match must be callable or None")
+    natural(size, "size", positive=True)
+    if size > 32:
+        raise ValueError("committee size exceeds 32")
+    natural(reserve, "reserve")
+    if max_additional_work is not None:
+        natural(max_additional_work, "max_additional_work")
+    return _search(examples, grammar, budget, exclude=(), count=size,
+                   max_additional_work=max_additional_work, reserve=reserve, on_first_match=on_first_match)
+
+
+def _search(examples, grammar, budget, *, exclude, count, max_additional_work, reserve, on_first_match=None):
+    candidates = []
+    first_match_spent = None
+    window_closed = _ContinuationLimit()
+
+    def finish(reason):
+        continuation = 0 if first_match_spent is None else budget.spent - first_match_spent
+        return CommitteeSearchResult(tuple(candidates), tried, reason, continuation)
+
     tried = 0
     persistence_failure = False
 
@@ -248,6 +309,11 @@ def synthesize(examples, grammar: Grammar, budget: WorkBudget, *, exclude=()) ->
         # a persistence failure, not an ordinary refusal for insufficient work.
         nonlocal persistence_failure
         before = budget.spent
+        if first_match_spent is not None:
+            if max_additional_work is not None and before - first_match_spent + units > max_additional_work:
+                raise window_closed
+            if reserve and units + reserve > budget.remaining:
+                raise window_closed
         try:
             budget.charge(kind, units)
         except BudgetStop:
@@ -284,15 +350,15 @@ def synthesize(examples, grammar: Grammar, budget: WorkBudget, *, exclude=()) ->
             schema, target_type = types, type(expected)
             rows.append((copied, expected))
         if not rows:
-            return SearchResult(None, tried, "no_examples")
+            return finish("no_examples")
         pools = {}
         seen = set()
 
         def consider(ast, *, charged=False, children=None):
-            nonlocal tried
+            nonlocal tried, first_match_spent
             if not charged:
                 if tried >= grammar.max_candidates:
-                    return SearchResult(None, tried, "candidate_limit")
+                    return finish("candidate_limit")
                 charge("search_generate")
                 tried += 1
             p = Program(ast)
@@ -333,7 +399,23 @@ def synthesize(examples, grammar: Grammar, budget: WorkBudget, *, exclude=()) ->
                 if excluded:
                     charge("search_exclusion")
                 if p.fingerprint not in excluded:
-                    return SearchResult(p, tried, "found")
+                    candidates.append(p)
+                    if first_match_spent is None:
+                        first_match_spent = budget.spent
+                        if on_first_match is not None:
+                            try:
+                                on_first_match(p)
+                            except Exception as error:
+                                raise _FirstMatchFailure(error) from error
+                            if budget.spent != first_match_spent:
+                                raise ValueError("on_first_match spent the parent budget")
+                    if len(candidates) == count:
+                        return finish("found")
+                    # A repeated excluded search would still insert the first
+                    # matching output signature into its child pool. Continue
+                    # through the same insertion so later candidates agree.
+                    charge("search_exclusion")
+                    excluded.add(p.fingerprint)
             charge("search_compare", len(outputs))
             signature = tuple(outputs)
             if signature not in seen:
@@ -356,7 +438,7 @@ def synthesize(examples, grammar: Grammar, budget: WorkBudget, *, exclude=()) ->
                     charge("search_partition")
                     for entries in product(*(pools.get(n, ()) for n in sizes)):
                         if tried >= grammar.max_candidates:
-                            return SearchResult(None, tried, "candidate_limit")
+                            return finish("candidate_limit")
                         charge("search_generate")
                         tried += 1
                         types = tuple(entry[1] for entry in entries)
@@ -371,11 +453,17 @@ def synthesize(examples, grammar: Grammar, budget: WorkBudget, *, exclude=()) ->
                         result = consider((op, *(entry[0].ast for entry in entries)), charged=True, children=entries)
                         if result is not None:
                             return result
-        return SearchResult(None, tried, "exhausted")
+        return finish("exhausted")
+    except _FirstMatchFailure as failure:
+        raise failure.error from None
+    except _ContinuationLimit as error:
+        if error is not window_closed:
+            raise
+        return finish("continuation_limit")
     except BudgetStop:
         if persistence_failure:
             raise
-        return SearchResult(None, tried, "budget_exhausted")
+        return finish("budget_exhausted")
 
 
-__all__ = ["Grammar", "Program", "SearchResult", "synthesize"]
+__all__ = ["CommitteeSearchResult", "Grammar", "Program", "SearchResult", "synthesize", "synthesize_committee"]
