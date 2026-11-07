@@ -2,7 +2,7 @@
 import copy
 import pytest
 
-from solvi.experimental.experience._common import WorkBudget, BudgetStop, digest
+from solvi.experimental.experience._common import WorkBudget, digest
 from solvi.experimental.experience.cooperation import FiniteProblem, CooperativeSearch, Evidence
 
 

@@ -148,7 +148,7 @@ def test_bounded_infinite_iterator_and_prepaid_next():
 
 def test_exhaustion_during_teach_invalidates_old_admission():
     s = session()
-    ref = accepted(s)
+    accepted(s)
     # Enough to record the evidence/revision, insufficient to complete search.
     s.budget.charge('test_consume', s.budget.remaining - 5)
     with pytest.raises(BudgetStop):

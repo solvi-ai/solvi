@@ -19,6 +19,10 @@ def main():
     candidate = learner.train(feedback('train'), loss='decision')
     receipt = learner.admit(candidate, feedback('validation'), DecisionPolicy((0, 0)))
     print('Finite empirical validation:', receipt['accepted'])
+    print('Candidate / baseline regret:', receipt['regret'], receipt['baseline_regret'])
+    if not receipt['accepted']:
+        print('Validation rejected the proposal; no policy was activated.')
+        return
     learner.activate(receipt['receipt'])
     context = DecisionContext('new', '1', (DecisionAction('left', (-3, 1)), DecisionAction('right', (3, 1))))
     print('Activated small linear ranker selects:', learner.choose(context))

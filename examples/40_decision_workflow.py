@@ -25,19 +25,29 @@ def main():
         preferences.answer('answer1', a, b, source='simulated-author')
     certificate = preferences.choose()
     assert check_regret_certificate(preferences, certificate, budget=budget)
+    # These preference requirements do not yet include the independently taught
+    # capacity rule below. Only the cooperative certificate checks that final set.
 
     assert certificate.regret == 0 and len(certificate.surviving_weights) == 1
     cost_weight, reward_weight, _ = preferences.weights[certificate.surviving_weights[0]]
     objective = DecisionObjective(reward_weight=reward_weight, cost_weight=cost_weight)
 
+    # Host setup: define the finite DSL library, query points and reference oracle.
     grammar = Grammar(('capacity',), constants=(0, 1, 3, 5), max_depth=4)
     hypotheses = [Program(('lt', ('const', threshold), ('input', 'capacity'))) for threshold in (3, 5)]
     teacher = TeachingSession(grammar, hypotheses, [{'capacity': 4}], budget=budget)
     q = teacher.question()
-    teacher.answer(q, False)  # User says capacity4 does not suffice.
+    teacher.answer(q, False)  # User label: capacity 4 does not suffice.
     requirement = teacher.admit('adequate-capacity', '1', [{'capacity': v['capacity']} for v in configurations.values()],
                                 lambda p: p['capacity'] > 5, source_id='independent-capacity-reference', source_revision='1')
-    allowed = {k: teacher.apply(requirement, {'capacity': v['capacity']}).value is True for k, v in configurations.items()}
+    if requirement is None:
+        raise RuntimeError('Capacity rule failed independent admission; obtain a corrected host reference.')
+    allowed = {}
+    for name, values in configurations.items():
+        checked = teacher.apply(requirement, {'capacity': values['capacity']})
+        if checked.status != 'verified':
+            raise RuntimeError(f'{name}: capacity rule is unknown ({checked.reason}); independently check this point first.')
+        allowed[name] = checked.value is True
     assignments = {k: {**v, 'admitted': allowed[k]} for k, v in configurations.items()}
     problem = FiniteProblem(assignments, {'learned-capacity': lambda p: p['admitted']},
                             lambda p: cost_weight*p['cost']-reward_weight*p['capacity'],
@@ -78,13 +88,21 @@ def main():
                                          for name in configurations), 'train'))
     candidate = learner.train(training, objective=objective)
     admission = learner.admit(candidate, outcomes('validation'), DecisionPolicy((0, 0), objective))
+    print('Candidate / baseline validation regret:', admission['regret'], admission['baseline_regret'])
+    if not admission['accepted']:
+        print('Validation rejected the proposal; no policy was activated.')
+        return {'status': 'validation_rejected', 'verified_solution': decision, 'admission': admission}
     learner.activate(admission['receipt'])
     next_context = DecisionContext('next-task', 'outcomes-v1', tuple(
         DecisionAction(name, (v['capacity']-12, 1), cost=v['cost'], allowed=allowed[name])
         for name, v in configurations.items()))
     result = {'preference': certificate.choice, 'taught_feasibility': allowed, 'verified_solution': decision,
               'observed_external_outcome': observed, 'next_learned_proposal': learner.choose(next_context), 'work': budget.snapshot()}
-    print(result)
+    print('Preference choice:', certificate.choice, 'surviving utilities:', certificate.surviving_weights)
+    print('Independently checked capacity rule:', allowed)
+    print('Checked feasible optimum:', decision)
+    print('Activated policy proposal for next task:', result['next_learned_proposal'])
+    print('Total paid work:', budget.spent)
     return result
 
 

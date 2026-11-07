@@ -68,6 +68,7 @@ nav:
   - Experimental:
       - experimental.md
       - Executable experience: experience.md
+      - Decision workflow quickstart: decision_workflows.md
       - Decision value learning: decision_learning.md
       - Cooperating solvers: cooperation.md
       - Teaching concepts: teaching.md

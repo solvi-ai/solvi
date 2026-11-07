@@ -6,6 +6,62 @@ A `DecisionContext` contains named actions with immutable integer features, expl
 
 `fit_decision_policy` performs deterministic bounded integer coordinate descent. `loss='decision'` minimizes empirical downstream regret; `loss='prediction'` minimizes squared reward error using the same model class. This is a simple decision-focused backend, not SPO+. Both candidate evaluation and training are paid through the caller's `WorkBudget`; local minima, ties and model misspecification remain possible. A context with no permitted action returns `None`. A high reward never overrides feasibility.
 
+## First policy: public forms
+
+Import these names from `solvi.experimental.experience.decision_learning` and
+`WorkBudget` from `solvi.experimental.experience`:
+
+```python
+DecisionAction(name, features, cost=0, allowed=True)
+DecisionContext(context_id, revision, actions)
+OutcomeFeedback(event_id, source, context, outcomes, split='train')
+DecisionObjective(reward_weight=1, cost_weight=1)
+DecisionPolicy(weights, objective=DecisionObjective())
+DecisionLearner(budget)
+```
+
+Use nonempty string IDs, revisions and sources; `source` identifies the host's
+evidence origin, not an authenticated identity. Actions and features are tuples;
+features, outcomes, weights and costs use strict integers rather than booleans.
+Every context uses the same feature dimension as the policy. `outcomes` is a
+tuple such as `(('standard', 4), ('express', 7))`, covering **all** actions,
+including those marked `allowed=False`. `allowed` is a host-owned hard boolean
+constraint. An action's explicit `cost` is subtracted by the objective, so do
+not subtract it again from the outcome unless that is your intended objective.
+
+`learner.train(feedback, objective=DecisionObjective(), loss='decision',
+epochs=4, steps=(2, 1))` returns a registered candidate identifier. Training
+uses a finite integer search that may retain ties or
+reach a local minimum. `loss='prediction'` is the alternative squared-error
+training objective. `fit_decision_policy(feedback, budget, ...)` uses those same
+keyword options and returns a policy directly, without registration/admission.
+
+`learner.admit(candidate, validation, baseline)` returns a dictionary containing
+`accepted` (boolean), `receipt` (activation identifier when accepted), `candidate`, `regret`,
+`baseline_regret`, the baseline policy and retained validation evidence. Lower
+regret is better; equality passes this finite gate. A receipt does not itself
+activate anything:
+
+```python
+# training and validation are independently obtained full-feedback rows.
+candidate = learner.train(training)
+admission = learner.admit(candidate, validation, DecisionPolicy((0, 0)))
+if admission['accepted']:
+    learner.activate(admission['receipt'])
+    action_name = learner.choose(next_context)
+else:
+    # Retain the baseline / seek better evidence; do not activate this receipt.
+    print('Rejected:', admission['regret'], admission['baseline_regret'])
+```
+
+The two-weight baseline above requires two-feature actions. `choose(context)`
+returns an action name or `None` when no action is permitted; it requires an
+explicitly activated live policy. `activate(receipt)` rejects failed admissions.
+Budget exhaustion raises `BudgetStop`; retain the paid ledger instead of
+silently retrying with a fresh allowance. For a complete runnable example use
+`examples/39_decision_learning.py`; for host setup and all four APIs together,
+see [the decision workflow guide](decision_workflows.md).
+
 `DecisionLearner.train` registers a proposal. `admit(candidate, validation, baseline)` requires a separate `validation` split with disjoint event/context IDs, evaluates exact downstream regret and accepts only empirical non-inferiority to the explicit baseline with the same objective. It does **not** activate. `activate(receipt)` is an explicit host decision; `revoke(candidate_id)` prevents reuse. Admission on finite data is not a population guarantee or permission for external effects. Context IDs alone cannot detect a host relabelling duplicate data.
 
 `snapshot` creates a checkpoint bound to a host-owned `DecisionAuthority`. `restore(snapshot, budget, authority=...)` validates exact current checkpoint identity and independently recomputes admission scores, without rereading an external oracle. It transfers sole ownership: the previous live learner becomes stale. Old checkpoints, forged hashes and changed revocations are rejected. Use the restored original ledger: refunding work or changing the budget limit is rejected. Host-side `export_trusted_state` / `from_trusted_state` support restart when the anchor and ledger are persisted in a **trusted channel separate from the untrusted payload**. An untrusted caller supplying both payload and its supposed authority is not authenticated. Coordinate persistence atomically at the host, e.g. in a KnowledgeStore transaction; these objects do not provide a distributed lock.

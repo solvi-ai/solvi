@@ -1,5 +1,5 @@
 """Single-author exact elicitation; no model checkpoint or external service."""
-from solvi.experimental.experience._common import WorkBudget
+from solvi.experimental.experience import WorkBudget
 from solvi.experimental.experience.preferences import (
     Alternative, PreferenceSession, Requirement, check_regret_certificate,
 )

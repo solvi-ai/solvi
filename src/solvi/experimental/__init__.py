@@ -328,8 +328,8 @@ STATUS["regime_memory"] = {
     "script": None,
 }
 STATUS["experience"] = {
-    "since": "unreleased",
-    "what": "finite joint-state reasoning, paid observation planning and externally admitted scalar operations in a recoverable experience loop",
+    "since": "1.6",
+    "what": "finite joint-state reasoning, paid observation planning, externally admitted scalar operations, decision-loss learning, checked solver cooperation, interactive scalar teaching and finite preference elicitation in a recoverable experience loop",
     "missing": "independent evidence of gains over strong full-cost baselines; applicability outside the declared finite models and scalar grammar is not established",
     "script": "benchmarks/experience_transfer.py",
 }

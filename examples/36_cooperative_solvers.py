@@ -1,5 +1,5 @@
 """A checked exclusion changes the next objective solver's residual."""
-from solvi.experimental.experience._common import WorkBudget
+from solvi.experimental.experience import WorkBudget
 from solvi.experimental.experience.cooperation import (
     ConstraintSolver, CooperativeSearch, FiniteProblem, ObjectiveSolver,
 )

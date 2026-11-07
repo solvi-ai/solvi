@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.6.0 — Unreleased
+## 1.6.0 — 2026-11-07
 
 - Add experimental decision-loss training, explicit policy admission/activation and exact rational IPS/SNIPS/DR with support/ESS refusals.
 - Add checked cooperation between finite constraint/objective solvers, residual evidence and paid replay.

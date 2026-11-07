@@ -1158,7 +1158,7 @@ No LawSet is automatically installed or reactivated, and no probe callback runs.
 
 ## `experience`
 
-Since unreleased. Finite joint-state reasoning, paid observation planning and externally admitted scalar operations
+Since 1.6. Finite joint-state reasoning, paid observation planning and externally admitted scalar operations
 in a host-owned recoverable cycle. See [executable experience](experience.md) and the API reference.
 
 **Missing:** independent evidence of gains over strong full-cost baselines; applicability outside the declared finite models and scalar grammar is not established

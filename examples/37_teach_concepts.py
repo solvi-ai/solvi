@@ -1,5 +1,5 @@
 """Teach an exception-bearing finite rule, then compose and retract it."""
-from solvi.experimental.experience._common import WorkBudget
+from solvi.experimental.experience import WorkBudget
 from solvi.experimental.experience.programs import Grammar, Program
 from solvi.experimental.experience.teaching import TeachingSession
 
