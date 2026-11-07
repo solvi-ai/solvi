@@ -6,8 +6,7 @@ supplies a finite library of typed `Program` trees, a `Grammar`, a finite questi
 domain, scalar input/output types, and a shared `WorkBudget`.
 
 ```python
-from solvi.experimental.experience import Grammar, Program, WorkBudget
-from solvi.experimental.experience.teaching import TeachingSession
+from solvi.experimental.experience import Grammar, Program, WorkBudget, TeachingSession
 
 s = TeachingSession(
     Grammar(('x',), constants=(1, 2)),
