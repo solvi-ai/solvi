@@ -76,3 +76,19 @@ Read [executable experience](../experience.md) before using the environment and 
 ## `operation_learning`
 
 ::: solvi.experimental.experience.operation_learning
+
+## `cooperation`
+
+::: solvi.experimental.experience.cooperation
+
+## `teaching`
+
+::: solvi.experimental.experience.teaching
+
+## `preferences`
+
+::: solvi.experimental.experience.preferences
+
+## `decision_learning`
+
+::: solvi.experimental.experience.decision_learning

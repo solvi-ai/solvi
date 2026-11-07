@@ -42,3 +42,8 @@ it is set, and a keyword stand-in otherwise.
 - `33_stratified_observations.py`: paid bounded label-aware planning over an unread host pool; no authority or oracle reads.
 - `34_packed_observations.py`: immutable packed bins, fixed pilot cuts, adaptive feedback and paid snapshot replay; explicit host labels, no oracle or network.
 - `35_verified_computation.py`: verified scheduling, selective updates and acquisition of a parameterized operation from accepted traces; independent finite-domain admission and actual reuse in a new composition. No network or model required.
+
+
+Decision workflow examples: `36_cooperative_solvers.py`, `37_teach_concepts.py`,
+`38_preference_elicitation.py`, `39_decision_learning.py`, and the composed
+`40_decision_workflow.py`. All are finite, CPU-only and require no external model service.

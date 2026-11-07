@@ -413,3 +413,15 @@ Declared units constrain prepaid work, not arbitrary Python runtime, memory or t
 A separate function is not intrinsically an independent or reliable check. Supply an
 independent specification/reference and use an external final scorer when evaluating
 quality. The component does not modify the calibrated fast/slow `core.Dispatcher`.
+
+
+## Decision value, cooperating solvers and interactive authorship
+
+Four bounded experimental directions extend the finite runtime:
+
+- [Decision-loss learning](decision_learning.md): train a small ranker from full outcomes, separately validate and explicitly activate; evaluate known-propensity one-step logs with IPS/SNIPS/DR.
+- [Cooperating partial solvers](cooperation.md): share independently checked exclusions, incumbents and bounds over an immutable finite problem.
+- [Teaching executable concepts](teaching.md): examples/exceptions, distinguishing questions, finite-domain admission and version-pinned composition.
+- [Preference elicitation](preferences.md): exact minimax regret, costed questions, explicit conflicts and proposed soft relaxations without weakening hard requirements.
+
+These modules share WorkBudget and keep proposals distinct from accepted evidence and external permissions. No foundation model is required or implicitly trained. A running integrated example is `examples/40_decision_workflow.py`. Bounded correctness and engineering readiness are separate from empirical superiority; consult each module's limits.

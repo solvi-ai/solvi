@@ -1,6 +1,13 @@
 # Changelog
 
 ## 1.6.0 — Unreleased
+
+- Add experimental decision-loss training, explicit policy admission/activation and exact rational IPS/SNIPS/DR with support/ESS refusals.
+- Add checked cooperation between finite constraint/objective solvers, residual evidence and paid replay.
+- Add interactive teaching of scalar concepts with exceptions, distinguishing questions, independent finite admission and revocable composition.
+- Add finite utility elicitation with regret certificates, explicit preference conflicts and hard-preserving relaxation proposals.
+- Add four focused examples plus an integrated workflow, API documentation and tests. These bounded APIs are experimental; no general scientific advantage is implied.
+
 - Add experimental verified dependency computation with paid scheduling, independent host checks,
   selective invalidation, versioned operators and journal recovery. Add paid acquisition of recurring
   parameterized Programs from accepted traces, independent finite-domain admission, postfix execution

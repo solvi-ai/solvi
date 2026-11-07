@@ -68,6 +68,10 @@ nav:
   - Experimental:
       - experimental.md
       - Executable experience: experience.md
+      - Decision value learning: decision_learning.md
+      - Cooperating solvers: cooperation.md
+      - Teaching concepts: teaching.md
+      - Preference elicitation: preferences.md
       - Failed-world policies: failure_policies.md
       - Change economics and proposer history: change-economics-history.md
       - Offline action-cost accounting: economics-closed-loop.md

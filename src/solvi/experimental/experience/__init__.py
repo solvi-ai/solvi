@@ -25,7 +25,53 @@ from .computation import ComputeOperator, ComputeNode, ComputationPlan, Computat
 from .operation_learning import OperationCatalog  # noqa: E402
 from .worlds import Decision, WorldSet  # noqa: E402
 
+from .cooperation import (CooperativeAuthority, FiniteProblem, Evidence, Residual, ConstraintSolver, ObjectiveSolver, CooperativeSearch, finite_reference)  # noqa: E402
+
+from .teaching import (TeachingSession, TeachingAuthority, ConceptRef, TeachingQuestion, TeachingResult)  # noqa: E402
+
+from .preferences import (PreferenceAuthority, Alternative, Requirement, PreferenceAnswer, RegretCertificate, PreferenceQuestion, PreferenceSession, check_regret_certificate)  # noqa: E402
+
+from .decision_learning import (DecisionObjective, DecisionAction, DecisionContext, OutcomeFeedback, DecisionPolicy, DecisionCandidate, DecisionLearner, DecisionAuthority, fit_decision_policy, decision_regret, LoggedFeedback, PolicyValueEstimate, evaluate_logged_policy)  # noqa: E402
+
 __all__ = [
+    "CooperativeAuthority",
+    "PreferenceAuthority",
+    "DecisionObjective",
+    "DecisionAction",
+    "DecisionContext",
+    "OutcomeFeedback",
+    "DecisionPolicy",
+    "DecisionCandidate",
+    "DecisionLearner",
+    "DecisionAuthority",
+    "fit_decision_policy",
+    "decision_regret",
+    "LoggedFeedback",
+    "PolicyValueEstimate",
+    "evaluate_logged_policy",
+
+    "Alternative",
+    "Requirement",
+    "PreferenceAnswer",
+    "RegretCertificate",
+    "PreferenceQuestion",
+    "PreferenceSession",
+    "check_regret_certificate",
+
+    "TeachingSession",
+    "TeachingAuthority",
+    "ConceptRef",
+    "TeachingQuestion",
+    "TeachingResult",
+
+    "FiniteProblem",
+    "Evidence",
+    "Residual",
+    "ConstraintSolver",
+    "ObjectiveSolver",
+    "CooperativeSearch",
+    "finite_reference",
+
     "ComputeOperator",
     "ComputeNode",
     "ComputationPlan",
