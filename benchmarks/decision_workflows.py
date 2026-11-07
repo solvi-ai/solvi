@@ -25,6 +25,31 @@ def manifest(seeds,limits,protocol):
             'arms':{k:list(m.ARMS) for k,m in MODULES.items()},'units':'declared work; includes fixed independent scoring; not time'}
 
 
+def _completed_trials(raw):
+    """A newline terminates a committed record; never replay a partial append."""
+    seen = set()
+    if not raw.exists():
+        return seen
+    valid_bytes = 0
+    # Binary file iteration uses LF only; bytes.splitlines also treats CR as a
+    # separator and could mistake a corrupt committed row for a partial tail.
+    with raw.open('r+b') as stream:
+        for line in stream:
+            if not line.endswith(b'\n'):
+                stream.truncate(valid_bytes)
+                break
+            try:
+                record = json.loads(line)
+            except (ValueError, UnicodeError):
+                raise ValueError('corrupt completed log record') from None
+            key = tuple(record[k] for k in ('direction', 'seed', 'arm', 'limit'))
+            if key in seen:
+                raise ValueError('duplicate trial in raw')
+            seen.add(key)
+            valid_bytes += len(line)
+    return seen
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--output',type=Path,required=True)
@@ -44,25 +69,7 @@ def main():
     else:
         path.write_text(json.dumps(config,indent=2,sort_keys=True)+'\n')
     raw = args.output/'raw.jsonl'
-    seen = set()
-    if raw.exists():
-        lines = raw.read_bytes().splitlines(keepends=True)
-        valid_bytes = 0
-        for index,line in enumerate(lines):
-            try:
-                record = json.loads(line)
-            except (ValueError,UnicodeError):
-                if index != len(lines)-1:
-                    raise ValueError('corrupt interior log record') from None
-                # A partial final append is a crash artifact, never a trial.
-                with raw.open('r+b') as stream:
-                    stream.truncate(valid_bytes)
-                break
-            key = tuple(record[k] for k in ('direction','seed','arm','limit'))
-            if key in seen:
-                raise ValueError('duplicate trial in raw')
-            seen.add(key)
-            valid_bytes += len(line)
+    seen = _completed_trials(raw)
     total = sum(len(m.ARMS) for m in MODULES.values())*len(args.seeds)*len(args.limits)
     done = len(seen)
     start = time.monotonic()
